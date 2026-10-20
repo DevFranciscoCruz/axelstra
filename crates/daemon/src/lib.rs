@@ -4,6 +4,7 @@ pub mod changes;
 pub mod client;
 pub mod fsops;
 pub mod gh;
+pub mod janitor;
 pub mod kanban;
 pub mod msgbus;
 pub mod ports;

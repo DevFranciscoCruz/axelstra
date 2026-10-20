@@ -296,6 +296,15 @@ enum WtCmd {
     Create { project: String, name: String },
     /// Remove a worktree
     Rm { path: PathBuf },
+    /// Remove the ax/* worktrees whose work is merged (branch in the default branch, or its PR merged on GitHub)
+    Sweep {
+        /// only list what would be removed
+        #[arg(long)]
+        dry_run: bool,
+        /// keep doing it in the background every 10 minutes: on or off (no value: show)
+        #[arg(long)]
+        auto: Option<String>,
+    },
 }
 
 mod computer;
