@@ -139,6 +139,8 @@ export const [ports, setPorts] = createSignal<number[]>([]);
 export const [showAutomations, setShowAutomations] = createSignal(false);
 export const [showAgentSearch, setShowAgentSearch] = createSignal(false);
 export const [showOrchestra, setShowOrchestra] = createSignal(false);
+/** agents may look at the screen and drive the mouse and keyboard (held by the daemon, off at every start) */
+export const [computerOn, setComputerOn] = createSignal(false);
 
 /** worktrees pinned to the top of their project (remembered in the browser storage) */
 const loadPins = (): string[] => {

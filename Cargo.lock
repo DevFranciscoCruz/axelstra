@@ -300,9 +300,11 @@ dependencies = [
  "axelstra-core",
  "axelstra-daemon",
  "clap",
+ "png 0.17.16",
  "serde",
  "serde_json",
  "tokio",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

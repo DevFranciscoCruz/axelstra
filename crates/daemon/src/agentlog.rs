@@ -163,6 +163,8 @@ pub struct Usage {
     pub cache_read: u64,
     pub cache_write: u64,
     pub messages: u64,
+    /// size of the conversation as of the last reply (what the model read): the "context" Claude's own status line shows
+    pub context: u64,
 }
 
 pub fn sum_usage(lines: impl Iterator<Item = String>) -> Usage {
@@ -190,6 +192,7 @@ pub fn sum_usage(lines: impl Iterator<Item = String>) -> Usage {
         u.cache_read += n("cache_read_input_tokens");
         u.cache_write += n("cache_creation_input_tokens");
         u.messages += 1;
+        u.context = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
     }
     u
 }
@@ -238,7 +241,7 @@ mod tests {
         let b = r#"{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":100,"cache_creation_input_tokens":7}}}"#;
         let c = r#"{"type":"assistant","message":{"id":"m2","usage":{"input_tokens":1,"output_tokens":2}}}"#;
         let u = sum_usage([a, b, c, "not json", r#"{"type":"user"}"#].into_iter().map(String::from));
-        assert_eq!(u, Usage { input: 11, output: 7, cache_read: 100, cache_write: 7, messages: 2 });
+        assert_eq!(u, Usage { input: 11, output: 7, cache_read: 100, cache_write: 7, messages: 2, context: 1 });
     }
 
     #[test]
