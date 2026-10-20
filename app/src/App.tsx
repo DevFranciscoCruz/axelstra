@@ -41,12 +41,21 @@ export function App() {
     void refreshSessions();
     // The daemon has no push events yet: poll only while the window is visible.
     const fast = setInterval(() => !document.hidden && void refreshSessions(), 2000);
-    const mid = setInterval(() => !document.hidden && void refreshChanges(), 5000);
-    const slow = setInterval(() => !document.hidden && void refreshProjects(), 15000);
+    // git is the costly part: the change list only matters for the selected worktree, and the project
+    // list (worktrees, remote) changes rarely. Both also refresh when the window regains focus
+    // and after every action the user takes in the sidebar.
+    const mid = setInterval(() => !document.hidden && void refreshChanges(), 10000);
+    const slow = setInterval(() => !document.hidden && void refreshProjects(), 60000);
+    const onFocus = () => {
+      void refreshChanges();
+      void refreshProjects();
+    };
+    window.addEventListener("focus", onFocus);
     onCleanup(() => {
       clearInterval(fast);
       clearInterval(mid);
       clearInterval(slow);
+      window.removeEventListener("focus", onFocus);
     });
   });
 
