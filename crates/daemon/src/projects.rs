@@ -92,6 +92,18 @@ pub fn find(store: &Path, id: &str) -> Result<Project> {
 /// New worktree on a new branch `ax/<name>` from the repo's current HEAD.
 /// Lives next to the repo in `.axelstra-wt/` so paths stay short.
 pub fn worktree_create(p: &Project, name: &str) -> Result<git::Worktree> {
+    create_at(p, name, "HEAD")
+}
+
+/// Worktree on branch `ax/pr-<n>` holding the head of GitHub pull request `<n>`.
+pub fn worktree_from_pr(p: &Project, number: u64) -> Result<git::Worktree> {
+    let repo = Path::new(&p.path);
+    git::must(repo, &["fetch", "origin", &format!("pull/{number}/head")])
+        .with_context(|| format!("could not fetch pull request {number} from origin"))?;
+    create_at(p, &format!("pr-{number}"), "FETCH_HEAD")
+}
+
+fn create_at(p: &Project, name: &str, base: &str) -> Result<git::Worktree> {
     let n = slug(name);
     if n.is_empty() {
         bail!("worktree name is empty");
@@ -106,7 +118,7 @@ pub fn worktree_create(p: &Project, name: &str) -> Result<git::Worktree> {
         bail!("{} already exists", dir.display());
     }
     std::fs::create_dir_all(dir.parent().unwrap())?;
-    git::worktree_add(repo, &dir, &format!("ax/{n}"), "HEAD")?;
+    git::worktree_add(repo, &dir, &format!("ax/{n}"), base)?;
     git::worktree_list(repo)?
         .into_iter()
         .find(|w| Path::new(&w.path).file_name() == dir.file_name())

@@ -198,6 +198,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(Arc::new(State::default()))
         .invoke_handler(tauri::generate_handler![daemon_call, session_write, session_attach, session_detach, watch_start, watch_set, default_shell])
         .run(tauri::generate_context!())

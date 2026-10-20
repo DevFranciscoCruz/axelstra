@@ -9,6 +9,7 @@ import { ReviewPanel } from "./ReviewPanel";
 import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
 import { Palette } from "./Palette";
+import { PullsPanel } from "./PullsPanel";
 import { TerminalView } from "./TerminalView";
 import {
   activeSession,
@@ -312,7 +313,7 @@ export function App() {
         </Show>
       </main>
       <Show when={current()}>
-        <Show when={rightTab() === "files"} fallback={rightTab() === "review" ? <ReviewPanel /> : <ChangesPanel />}>
+        <Show when={rightTab() === "files"} fallback={rightTab() === "review" ? <ReviewPanel /> : rightTab() === "pulls" ? <PullsPanel /> : <ChangesPanel />}>
           <FilesPanel />
         </Show>
       </Show>

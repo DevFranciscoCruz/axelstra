@@ -490,6 +490,17 @@ fn dispatch(
             let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
             Ok(serde_json::to_value(tokio::task::block_in_place(|| crate::projects::worktree_create(&pr, name))?)?)
         }
+        "gh.list" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let kind = p["kind"].as_str().unwrap_or("pr").to_string();
+            let items = tokio::task::block_in_place(|| crate::gh::list(std::path::Path::new(&pr.path), &kind))?;
+            Ok(json!({"items": items}))
+        }
+        "worktree.from_pr" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let n = p["number"].as_u64().ok_or_else(|| anyhow::anyhow!("missing number"))?;
+            Ok(serde_json::to_value(tokio::task::block_in_place(|| crate::projects::worktree_from_pr(&pr, n))?)?)
+        }
         "worktree.remove" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;

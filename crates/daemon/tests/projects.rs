@@ -105,3 +105,49 @@ fn projects_worktrees_and_session_meta() {
     c.call("project.remove", json!({"id": id})).unwrap();
     assert_eq!(c.call("project.list", json!({})).unwrap(), json!([]));
 }
+
+#[test]
+fn worktree_from_pull_request_head() {
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_secs(90));
+        eprintln!("watchdog: test stuck");
+        std::process::exit(1);
+    });
+    let root = std::env::temp_dir().join(format!("axelstra-prwt-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let remote = root.join("remote.git");
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&remote).unwrap();
+    std::fs::create_dir_all(&repo).unwrap();
+    sh(&remote, &["init", "-q", "--bare", "-b", "main"]);
+    sh(&repo, &["init", "-q", "-b", "main"]);
+    sh(&repo, &["config", "user.email", "t@t"]);
+    sh(&repo, &["config", "user.name", "t"]);
+    std::fs::write(repo.join("a.txt"), "base").unwrap();
+    sh(&repo, &["add", "-A"]);
+    sh(&repo, &["commit", "-qm", "init"]);
+    sh(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]);
+    // a PR head lives under refs/pull/<n>/head on the host
+    sh(&repo, &["checkout", "-q", "-b", "feature"]);
+    std::fs::write(repo.join("pr.txt"), "from the pr").unwrap();
+    sh(&repo, &["add", "-A"]);
+    sh(&repo, &["commit", "-qm", "pr work"]);
+    sh(&repo, &["push", "-q", "origin", "main", "HEAD:refs/pull/1/head"]);
+    sh(&repo, &["checkout", "-q", "main"]);
+    sh(&repo, &["branch", "-D", "feature"]);
+
+    let pipe = format!("{}-prwt-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let token = "p".repeat(32);
+    let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
+    std::thread::spawn(move || {
+        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()
+            .block_on(server::serve_with_store(p, t, s)).unwrap();
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let mut c = Client::connect(&pipe, &token).unwrap();
+    let id = c.call("project.add", json!({"path": &repo})).unwrap()["id"].as_str().unwrap().to_string();
+    let wt = c.call("worktree.from_pr", json!({"project": id, "number": 1})).unwrap();
+    assert_eq!(wt["branch"], "ax/pr-1");
+    assert_eq!(std::fs::read_to_string(Path::new(wt["path"].as_str().unwrap()).join("pr.txt")).unwrap(), "from the pr");
+    assert!(c.call("worktree.from_pr", json!({"project": id, "number": 99})).is_err(), "unknown PR");
+}

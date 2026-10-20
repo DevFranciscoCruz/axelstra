@@ -1,3 +1,4 @@
+import { RightTabs } from "./RightTabs";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { For, Show, createSignal } from "solid-js";
 import { FileChange, gitCommit, gitPr, gitPush } from "./api";
@@ -59,13 +60,7 @@ export function ChangesPanel() {
 
   return (
     <aside class="rightbar">
-      <div class="rtabs">
-        <span class="rtab" onClick={() => setRightTab("files")}>Ficheiros</span>
-        <span class="rtab active">
-          Alterações<Show when={files().length}> {files().length}</Show>
-        </span>
-        <span class="rtab" onClick={() => setRightTab("review")}>Revisão</span>
-      </div>
+      <RightTabs />
       <div class="rtools">
         <select
           value={changesMode()}

@@ -608,3 +608,14 @@ tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: v
 .split-pane { position: relative; flex: 1; min-width: 0; display: flex; }
 .split-x { position: absolute; top: 4px; right: 8px; z-index: 5; background: rgba(20, 22, 28, .8); color: var(--muted); border: 1px solid var(--line); border-radius: 5px; width: 20px; height: 20px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .15s; }
 .split-pane:hover .split-x { opacity: 1; }
+
+.pr { padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.pr-title { display: flex; align-items: baseline; gap: 6px; font-size: 13px; }
+.pr-num { color: var(--muted); font-size: 11px; flex: none; }
+.pr-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.chk { flex: none; font-weight: 700; }
+.chk.pass { color: var(--ok); }
+.chk.fail { color: #ef7676; }
+.chk.pending { color: #e5c07b; }
+.rtools .icon.on { color: var(--accent); }
