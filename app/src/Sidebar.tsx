@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { ask } from "./Confirm";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { addProject, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
+import { Modal } from "./Modal";
 import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
 import { invoke } from "@tauri-apps/api/core";
 import { press } from "./a11y";
@@ -53,7 +54,26 @@ export function Sidebar() {
   // project id currently showing the "new worktree" input
   const [creating, setCreating] = createSignal<string | null>(null);
   const [newName, setNewName] = createSignal("");
-  const [agentMenu, setAgentMenu] = createSignal(false);
+  // agent started in a new worktree: "none" or an AGENTS key, remembered between runs
+  const NEWWT_KEY = "axelstra.newwt.agent";
+  const [newAgent, setNewAgent] = createSignal<string>(
+    (() => {
+      try {
+        const v = localStorage.getItem(NEWWT_KEY);
+        return v === "none" || (v && AGENTS[v]) ? v! : "claude";
+      } catch {
+        return "claude";
+      }
+    })(),
+  );
+  const setNewAgentSig = (v: string) => {
+    setNewAgent(v);
+    try {
+      localStorage.setItem(NEWWT_KEY, v);
+    } catch {
+      /* preference only */
+    }
+  };
   // project id whose setup command is being edited
   const [editSetup, setEditSetup] = createSignal<string | null>(null);
   const [setupText, setSetupText] = createSignal("");
@@ -103,6 +123,7 @@ export function Sidebar() {
         setPendingWt(null);
       }
       selectWorktree(w.path);
+      if (newAgent() !== "none") await launchDefaultAgent(projectId, w.path, newAgent(), AGENTS[newAgent()]);
       const setup = projects().find((p) => p.id === projectId)?.setup;
       if (setup) {
         const [program, args] = await defaultShell();
@@ -251,19 +272,6 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 ref={(el) => queueMicrotask(() => el.focus())}
               />
             </Show>
-            <Show when={creating() === p.id}>
-              <input
-                class="wt-input"
-                placeholder="nome do worktree"
-                value={newName()}
-                onInput={(e) => setNewName(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void submitWorktree(p.id);
-                  if (e.key === "Escape") setCreating(null);
-                }}
-                ref={(el) => queueMicrotask(() => el.focus())}
-              />
-            </Show>
             <Show when={pendingWt()?.project === p.id}>
               <div class="item wt pending">
                 <span class="dot work" />
@@ -359,37 +367,43 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
       <button class="side-link" onClick={() => setShowAutomations(true)}>
         ⏱ Automatizações
       </button>
-      <div class="agent-pick" title="Agente aberto ao criar projetos e worktrees">
-        <span>Agente</span>
-        <div class="menu-wrap">
-          <button class="menu-btn" aria-haspopup="menu" aria-expanded={agentMenu()} onClick={() => setAgentMenu(!agentMenu())} onKeyDown={(e) => e.key === "Escape" && setAgentMenu(false)}>
-            {defaultAgent()}
-            <span class="chev">▾</span>
-          </button>
-          <Show when={agentMenu()}>
-            <div class="menu-back" onClick={() => setAgentMenu(false)} />
-            <div class="menu up">
-              <For each={Object.keys(AGENTS)}>
-                {(a) => (
-                  <button
-                    class="menu-item"
-                    classList={{ on: a === defaultAgent() }}
-                    onClick={() => {
-                      setDefaultAgent(a);
-                      setAgentMenu(false);
-                    }}
-                  >
-                    {a}
-                    <Show when={a === defaultAgent()}>
-                      <span class="tick">✓</span>
-                    </Show>
-                  </button>
-                )}
-              </For>
-            </div>
-          </Show>
-        </div>
-      </div>
+      <Show when={creating()}>
+        {(pid) => {
+          const proj = () => projects().find((x) => x.id === pid());
+          return (
+            <Modal label="Novo worktree" onClose={() => setCreating(null)}>
+              <div class="m-title" style={{ "font-weight": "600" }}>Novo worktree</div>
+              <label class="m-full">
+                Projeto
+                <input value={proj()?.name ?? ""} disabled />
+              </label>
+              <label class="m-full">
+                Nome
+                <input
+                  placeholder="nome do worktree (também o nome do branch)"
+                  value={newName()}
+                  onInput={(e) => setNewName(e.currentTarget.value)}
+                  onKeyDown={(e) => e.key === "Enter" && newName().trim() && void submitWorktree(pid())}
+                  ref={(el) => queueMicrotask(() => el.focus())}
+                />
+              </label>
+              <label class="m-full">
+                Agente
+                <select value={newAgent()} onChange={(e) => setNewAgentSig(e.currentTarget.value)}>
+                  <option value="none">Nenhum (só o worktree)</option>
+                  <For each={Object.keys(AGENTS)}>{(a) => <option value={a}>{a}</option>}</For>
+                </select>
+              </label>
+              <div class="m-actions" style={{ "justify-content": "flex-end" }}>
+                <button onClick={() => setCreating(null)}>Cancelar</button>
+                <button class="primary" disabled={!newName().trim()} onClick={() => void submitWorktree(pid())}>
+                  Criar worktree
+                </button>
+              </div>
+            </Modal>
+          );
+        }}
+      </Show>
     </aside>
   );
 }
