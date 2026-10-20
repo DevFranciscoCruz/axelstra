@@ -9,6 +9,7 @@ import { ReviewPanel } from "./ReviewPanel";
 import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
 import { Palette } from "./Palette";
+import { ContextMenu } from "./ContextMenu";
 import { Automations } from "./Automations";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { PullsPanel } from "./PullsPanel";
@@ -222,6 +223,7 @@ export function App() {
       <Show when={showAutomations()}>
         <Automations />
       </Show>
+      <ContextMenu />
       <Sidebar />
       <main class="main">
         <Show when={current()} fallback={<div class="placeholder">Adicione um projeto e escolha um worktree</div>}>

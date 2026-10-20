@@ -80,6 +80,23 @@ export const [ports, setPorts] = createSignal<number[]>([]);
 /** the automations dialog */
 export const [showAutomations, setShowAutomations] = createSignal(false);
 
+/** worktrees pinned to the top of their project (remembered in the browser storage) */
+const loadPins = (): string[] => {
+  try {
+    return JSON.parse(load("axelstra.pins") ?? "[]");
+  } catch {
+    return [];
+  }
+};
+const [pins, setPins] = createSignal<string[]>(loadPins());
+export const isPinned = (path: string) => pins().includes(norm(path));
+export const togglePin = (path: string) => {
+  const n = norm(path);
+  const next = pins().includes(n) ? pins().filter((x) => x !== n) : [...pins(), n];
+  setPins(next);
+  save("axelstra.pins", JSON.stringify(next));
+};
+
 export const [activeSession, setActiveSession] = createSignal<number | null>(null);
 
 /** "working": produced output in the last few seconds; "idle": quiet; "done": the process ended */
