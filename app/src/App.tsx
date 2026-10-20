@@ -1,5 +1,5 @@
 import { For, Show, createEffect, on, onCleanup, onMount } from "solid-js";
-import { SessionInfo, defaultShell, launchClaude, killSession, removeSession, spawnSession } from "./api";
+import { SessionInfo, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
 import { CommitView } from "./CommitView";
 import { Editor } from "./Editor";
@@ -11,6 +11,10 @@ import { Sidebar } from "./Sidebar";
 import { TerminalView } from "./TerminalView";
 import {
   activeSession,
+  AGENTS,
+  agentPrompt,
+  defaultAgent,
+  setDefaultAgent,
   changesMode,
   findWorktree,
   openDiff,
@@ -78,11 +82,11 @@ export function App() {
     }
   };
 
-  const newClaude = async () => {
+  const newAgent = async () => {
     const c = current();
     if (!c) return;
     try {
-      const id = await launchClaude(c.project.id, c.wt.path);
+      const id = await launchDefaultAgent(c.project.id, c.wt.path, defaultAgent(), AGENTS[defaultAgent()]);
       await refreshSessions();
       setOpenDiff(null);
       setActiveSession(id);
@@ -101,6 +105,31 @@ export function App() {
 
   return (
     <div class="app" classList={{ "with-right": current() !== null }}>
+      <Show when={agentPrompt()}>
+        {(done) => (
+          <div class="modal-back" onClick={() => done()(null)}>
+            <div class="modal" onClick={(e) => e.stopPropagation()}>
+              <h3>Abrir com qual agente?</h3>
+              <For each={Object.keys(AGENTS)}>
+                {(a) => (
+                  <button
+                    class="primary"
+                    classList={{ pref: a === defaultAgent() }}
+                    onClick={() => {
+                      setDefaultAgent(a);
+                      done()(a);
+                    }}
+                    ref={(el) => a === defaultAgent() && queueMicrotask(() => el.focus())}
+                  >
+                    {a}
+                  </button>
+                )}
+              </For>
+              <button onClick={() => done()("shell")}>Só terminal</button>
+            </div>
+          </div>
+        )}
+      </Show>
       <Sidebar />
       <main class="main">
         <Show when={current()} fallback={<div class="placeholder">Adicione um projeto e escolha um worktree</div>}>
@@ -170,7 +199,7 @@ export function App() {
                 </div>
               )}
             </Show>
-            <button class="icon add" title="Novo Claude" onClick={newClaude}>
+            <button class="icon add" title={`Novo agente (${defaultAgent()})`} onClick={newAgent}>
               ✦
             </button>
             <button class="icon add" title="Novo terminal" onClick={newTerminal}>

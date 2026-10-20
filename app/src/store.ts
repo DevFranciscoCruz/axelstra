@@ -20,6 +20,26 @@ const save = (k: string, v: string | null) => {
   }
 };
 
+/** CLI agents that can be launched; the key is what the UI shows and stores */
+export const AGENTS: Record<string, string> = { claude: "claude", chatgpt: "codex" };
+const [agent, setAgentSig] = createSignal<string>(load("axelstra.agent") && AGENTS[load("axelstra.agent")!] ? load("axelstra.agent")! : "claude");
+export const defaultAgent = agent;
+export const setDefaultAgent = (a: string) => {
+  if (!AGENTS[a]) return;
+  setAgentSig(a);
+  save("axelstra.agent", a);
+};
+
+/** Modal asking which agent to open. Resolves with the agent key, "shell" for a plain terminal, or null if dismissed. */
+export const [agentPrompt, setAgentPrompt] = createSignal<((a: string | null) => void) | null>(null);
+export const pickAgent = () =>
+  new Promise<string | null>((resolve) => {
+    setAgentPrompt(() => (a: string | null) => {
+      setAgentPrompt(null);
+      resolve(a);
+    });
+  });
+
 export const [projects, setProjects] = createSignal<Project[]>([]);
 export const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
 export const [error, setError] = createSignal("");
