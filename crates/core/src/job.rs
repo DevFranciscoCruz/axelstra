@@ -50,6 +50,23 @@ mod imp {
             Ok(child)
         }
 
+        /// For processes spawned elsewhere (portable-pty), assign by pid.
+        pub fn assign_pid(&self, pid: u32) -> Result<()> {
+            use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+            unsafe {
+                let h = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+                if h.is_null() {
+                    bail!("OpenProcess({pid}) failed");
+                }
+                let ok = AssignProcessToJobObject(self.0, h);
+                CloseHandle(h);
+                if ok == 0 {
+                    bail!("AssignProcessToJobObject({pid}) failed");
+                }
+            }
+            Ok(())
+        }
+
         pub fn kill(&self) {
             unsafe { TerminateJobObject(self.0, 1) };
         }
@@ -100,6 +117,10 @@ mod imp {
             let c = cmd.spawn()?;
             *self.0.lock().unwrap() = Some(c.id());
             Ok(c)
+        }
+        pub fn assign_pid(&self, pid: u32) -> Result<()> {
+            *self.0.lock().unwrap() = Some(pid);
+            Ok(())
         }
         pub fn kill(&self) {
             if let Some(pid) = *self.0.lock().unwrap() {
