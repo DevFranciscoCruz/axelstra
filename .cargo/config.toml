@@ -1,0 +1,3 @@
+# sherpa-onnx is linked statically; its ONNX Runtime needs the registry and ETW APIs from advapi32.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=advapi32.lib"]

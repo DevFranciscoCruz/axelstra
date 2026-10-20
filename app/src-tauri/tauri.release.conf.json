@@ -11,7 +11,8 @@
       "nsis": {
         "installerIcon": "icons/icon.ico",
         "installMode": "currentUser",
-        "installerHooks": "./nsis/hooks.nsh"
+        "installerHooks": "./nsis/hooks.nsh",
+        "template": "./nsis/installer.nsi"
       }
     }
   }
