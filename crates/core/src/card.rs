@@ -17,7 +17,7 @@ pub struct Meta {
     #[serde(default)]
     pub priority: i32,
     #[serde(default = "default_timeout")]
-    pub timeout_min: u64,
+    pub timeout_min: f64,
     #[serde(default)]
     pub max_retries: u32,
     #[serde(default)]
@@ -30,8 +30,8 @@ fn default_status() -> String {
 fn default_agent() -> String {
     "claude".into()
 }
-fn default_timeout() -> u64 {
-    45
+fn default_timeout() -> f64 {
+    45.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
