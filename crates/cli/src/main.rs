@@ -158,6 +158,7 @@ fn main() -> Result<()> {
             use axelstra_daemon::{proto, server};
             #[cfg(target_os = "macos")]
             adopt_login_path();
+            let _ = axelstra_daemon::skill::install();
             let token = proto::load_or_create_token()?;
             // two workers is plenty: the heavy lifting is blocking PTY threads
             tokio::runtime::Builder::new_multi_thread()
@@ -187,11 +188,8 @@ fn main() -> Result<()> {
             ctl::run(cmd, c)?;
         }
         Cmd::InstallSkill => {
-            let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-            let dir = PathBuf::from(home).join(".claude").join("skills").join("axelstration");
-            std::fs::create_dir_all(&dir)?;
-            std::fs::write(dir.join("SKILL.md"), include_str!("../../../skills/axelstration/SKILL.md"))?;
-            println!("installed {} (use it as /axelstration in Claude Code)", dir.display());
+            let file = axelstra_daemon::skill::install_forced()?;
+            println!("installed {} (use it as /axelstration in Claude Code)", file.display());
         }
         Cmd::Plan { repo } => {
             let cards: Vec<_> = card::load_dir(&repo.join(".kanban"))?

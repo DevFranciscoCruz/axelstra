@@ -10,6 +10,7 @@ pub mod projects;
 pub mod publish;
 pub mod proto;
 pub mod server;
+pub mod skill;
 pub mod watcher;
 pub mod wtstatus;
 pub mod runner;
