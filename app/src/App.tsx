@@ -17,6 +17,8 @@ import {
   defaultAgent,
   setDefaultAgent,
   changesMode,
+  splitSession,
+  setSplitSession,
   setFsTick,
   norm,
   findWorktree,
@@ -106,6 +108,29 @@ export function App() {
     }
   };
 
+  // split view: show the next terminal beside the active one, opening a fresh shell if there is only one
+  const toggleSplit = async () => {
+    if (splitSession() !== null) {
+      setSplitSession(null);
+      return;
+    }
+    const other = tabs().find((s) => s.id !== activeSession());
+    if (other) {
+      setSplitSession(other.id);
+      return;
+    }
+    const c = current();
+    if (!c) return;
+    try {
+      const [program, args] = await defaultShell();
+      const { id } = await spawnSession(program, args, "shell", c.wt.path, { project: c.project.id, worktree: c.wt.path, kind: "shell" });
+      await refreshSessions();
+      setSplitSession(id);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const newAgent = async () => {
     const c = current();
     if (!c) return;
@@ -160,6 +185,7 @@ export function App() {
             ? [
                 { label: `Novo agente (${defaultAgent()})`, run: () => void newAgent() },
                 { label: "Novo terminal", run: () => void newTerminal() },
+                { label: "Dividir terminal", run: () => void toggleSplit() },
               ]
             : []
         }
@@ -233,6 +259,9 @@ export function App() {
                 </div>
               )}
             </Show>
+            <button class="icon add" title="Dividir: ver dois terminais lado a lado" onClick={() => void toggleSplit()}>
+              ⫼
+            </button>
             <button class="icon add" title={`Novo agente (${defaultAgent()})`} onClick={newAgent}>
               ✦
             </button>
@@ -262,6 +291,17 @@ export function App() {
                 {/* keyed: switching tab remounts the terminal and replays its history */}
                 <Show when={activeSession()} keyed>
                   {(id) => <TerminalView id={id} onExit={() => void refreshSessions()} />}
+                </Show>
+                <Show when={splitSession() !== null && splitSession() !== activeSession() && tabs().some((s) => s.id === splitSession())}>
+                  <div class="split-sep" />
+                  <div class="split-pane">
+                    <button class="split-x" title="Fechar divisão" onClick={() => setSplitSession(null)}>
+                      ×
+                    </button>
+                    <Show when={splitSession()} keyed>
+                      {(id) => <TerminalView id={id} onExit={() => void refreshSessions()} />}
+                    </Show>
+                  </div>
                 </Show>
               </Show>
             </Show>

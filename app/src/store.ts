@@ -54,6 +54,7 @@ export const selectWorktree = (path: string | null) => {
   if (path) setAttention((cur) => { const n = new Set(cur); n.delete(norm(path)); return n; });
   save("axelstra.worktree", path);
   setActiveSession(null);
+  setSplitSession(null);
   setOpenDiff(null);
   setOpenFile(null);
   setOpenCommit(null);
@@ -69,6 +70,9 @@ export const [openFile, setOpenFile] = createSignal<string | null>(null);
 
 /** the project's kanban board replaces the terminal area when true */
 export const [showKanban, setShowKanban] = createSignal(false);
+
+/** a second terminal shown beside the active one (split view); null = no split */
+export const [splitSession, setSplitSession] = createSignal<number | null>(null);
 
 export const [activeSession, setActiveSession] = createSignal<number | null>(null);
 

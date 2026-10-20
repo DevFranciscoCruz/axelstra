@@ -603,3 +603,8 @@ tr.cmt td { background: #171821; padding: 8px 12px; border-top: 1px solid var(--
 tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 6px 8px; font: inherit; }
 .cmt-actions { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 .cmt-msg { color: #e5c07b; font-size: 12px; }
+
+.split-sep { width: 1px; background: var(--line); flex: none; }
+.split-pane { position: relative; flex: 1; min-width: 0; display: flex; }
+.split-x { position: absolute; top: 4px; right: 8px; z-index: 5; background: rgba(20, 22, 28, .8); color: var(--muted); border: 1px solid var(--line); border-radius: 5px; width: 20px; height: 20px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.split-pane:hover .split-x { opacity: 1; }
