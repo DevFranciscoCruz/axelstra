@@ -1,3 +1,4 @@
+import { RightTabs } from "./RightTabs";
 import { For, Show, createSignal } from "solid-js";
 import { FsEntry, fsList } from "./api";
 import { changes, openFile, selectedWorktree, setOpenDiff, setOpenFile, setRightTab, setShowKanban, setOpenCommit } from "./store";
@@ -53,13 +54,7 @@ export function FilesPanel() {
   const nChanges = () => changes()?.files.length ?? 0;
   return (
     <aside class="rightbar">
-      <div class="rtabs">
-        <span class="rtab active">Ficheiros</span>
-        <span class="rtab" onClick={() => setRightTab("changes")}>
-          Alterações<Show when={nChanges()}> {nChanges()}</Show>
-        </span>
-        <span class="rtab" onClick={() => setRightTab("review")}>Revisão</span>
-      </div>
+      <RightTabs />
       <div class="rtools">
         <span class="grow" />
         <button class="icon" title="Atualizar" onClick={() => setGen(gen() + 1)}>

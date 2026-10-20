@@ -67,6 +67,9 @@ export const projectLogo = (id: string) => call<{ data_url: string | null }>("pr
 export const setProjectSetup = (id: string, setup: string) => call("project.setup", { id, setup });
 export const removeProject = (id: string) => call("project.remove", { id });
 export const createWorktree = (project: string, name: string) => call<Worktree>("worktree.create", { project, name });
+export type GhItem = { number: number; title: string; author: string; url: string; state: string; draft: boolean; branch: string; checks: string; review: string };
+export const ghList = (project: string, kind: "pr" | "issue") => call<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
+export const worktreeFromPr = (project: string, number: number) => call<Worktree>("worktree.from_pr", { project, number });
 export const removeWorktree = (project: string, path: string) => call("worktree.remove", { project, path });
 
 export type FileChange = {

@@ -63,7 +63,7 @@ export const selectWorktree = (path: string | null) => {
 };
 
 /** right panel tab and the file open in the editor (relative to the worktree); null = terminal/diff */
-export const [rightTab, setRightTab] = createSignal<"files" | "changes" | "review">("files");
+export const [rightTab, setRightTab] = createSignal<"files" | "changes" | "review" | "pulls">("files");
 /** the commit whose patch replaces the terminal area; null = none */
 export const [openCommit, setOpenCommit] = createSignal<Commit | null>(null);
 export const [openFile, setOpenFile] = createSignal<string | null>(null);

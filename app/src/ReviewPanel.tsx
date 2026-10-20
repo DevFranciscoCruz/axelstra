@@ -1,3 +1,4 @@
+import { RightTabs } from "./RightTabs";
 import { For, Show, createResource } from "solid-js";
 import { Commit, gitLog } from "./api";
 import { changes, findWorktree, openCommit, selectedWorktree, setOpenCommit, setOpenDiff, setOpenFile, setRightTab, setShowKanban } from "./store";
@@ -6,7 +7,7 @@ import { changes, findWorktree, openCommit, selectedWorktree, setOpenCommit, set
 export const reviewBase = (): string | undefined => {
   const c = findWorktree(selectedWorktree());
   if (!c || c.wt.is_main) return undefined;
-  return c.project.worktrees.find((w) => w.is_main)?.branch ?? undefined;
+  return c.project.default_branch ?? c.project.worktrees.find((w) => w.is_main)?.branch ?? undefined;
 };
 
 export function ReviewPanel() {
@@ -23,15 +24,7 @@ export function ReviewPanel() {
 
   return (
     <aside class="rightbar">
-      <div class="rtabs">
-        <span class="rtab" onClick={() => setRightTab("files")}>
-          Ficheiros
-        </span>
-        <span class="rtab" onClick={() => setRightTab("changes")}>
-          Alterações<Show when={nChanges()}> {nChanges()}</Show>
-        </span>
-        <span class="rtab active">Revisão</span>
-      </div>
+      <RightTabs />
       <div class="rtools">
         <span class="rsummary">{reviewBase() ? `Commits à frente de ${reviewBase()}` : "Últimos commits"}</span>
         <span class="grow" />

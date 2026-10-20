@@ -1,6 +1,7 @@
 pub mod changes;
 pub mod client;
 pub mod fsops;
+pub mod gh;
 pub mod kanban;
 pub mod projects;
 pub mod publish;
