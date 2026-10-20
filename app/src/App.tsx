@@ -1,3 +1,4 @@
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { SessionInfo, restoreSessions, listPorts, watchWorktree, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
@@ -96,6 +97,17 @@ export function App() {
       setError(String(e));
     }
   };
+  onMount(() => {
+    // typing lag diagnosis: stalls of the webview's main thread go to lag.log (see lag_log in the host)
+    try {
+      new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) if (e.duration >= 80) void tauriInvoke("lag_log", { what: "main thread stalled", ms: Math.round(e.duration) }).catch(() => 0);
+      }).observe({ entryTypes: ["longtask"] });
+    } catch {
+      /* longtask not supported */
+    }
+  });
+
   onMount(() => void computerStatus().then(setComputerOn).catch(() => 0));
 
   onMount(() => {

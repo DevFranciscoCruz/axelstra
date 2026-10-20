@@ -121,11 +121,39 @@ async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, par
     .map_err(|e| e.to_string())?
 }
 
+/// Typing lag diagnosis: anything slower than this is written to `<data dir>/lag.log` (kept small).
+const LAG_MS: u128 = 40;
+
+fn lag_note(what: &str, took: std::time::Duration) {
+    if took.as_millis() < LAG_MS {
+        return;
+    }
+    let path = axelstra_daemon::proto::data_dir().join("lag.log");
+    // start over when it grows past 256 KB
+    if std::fs::metadata(&path).map(|m| m.len() > 256 * 1024).unwrap_or(false) {
+        let _ = std::fs::remove_file(&path);
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        use std::io::Write;
+        let _ = writeln!(f, "{now} {what}: {} ms", took.as_millis());
+    }
+}
+
+/// The webview reports its own stalls (main thread blocked) here.
+#[tauri::command]
+fn lag_log(what: String, ms: u64) {
+    lag_note(&format!("webview {what}"), std::time::Duration::from_millis(ms));
+}
+
 #[tauri::command]
 async fn session_write(state: tauri::State<'_, Arc<State>>, id: u32, data: String) -> Result<(), String> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        with_client(&st.input, |c| c.send_input(id, data.as_bytes())).map_err(|e| format!("{e:#}"))
+        let t = std::time::Instant::now();
+        let r = with_client(&st.input, |c| c.send_input(id, data.as_bytes())).map_err(|e| format!("{e:#}"));
+        lag_note("keystroke to daemon", t.elapsed());
+        r
     })
     .await
     .map_err(|e| e.to_string())?
@@ -386,7 +414,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![daemon_call, daemon_call_bg, session_write, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write, notify_session, app_quit, stats::keep_awake, stats::mem_usage, voice::voice_status, voice::voice_download, voice::voice_transcribe])
+        .invoke_handler(tauri::generate_handler![daemon_call, daemon_call_bg, session_write, lag_log, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write, notify_session, app_quit, stats::keep_awake, stats::mem_usage, voice::voice_status, voice::voice_download, voice::voice_transcribe])
         .build(tauri::generate_context!())
         .expect("error while building axelstra")
         .run(|app, event| {

@@ -77,6 +77,17 @@ axelstra flow plan.json [--timeout 3600]
 
 A task starts when everything in its `after` list succeeded, never exceeding the worker limit. `flow` prints one line per event plus the last lines of each finished task, and exits 1 if any task failed (its dependents are reported as blocked). Agent tasks end when they call `axelstra done`, go quiet (`idle_secs`, default 20) or exit. Run it in the background of your shell if you want to keep working meanwhile.
 
+## Parallel workers, heavy commands in turns
+
+Prefer running workers **at the same time**: tasks in a `flow` file without `after` start together (up to the worker limit). Do not chain them just because a command at the end is heavy. Let the workers run side by side and make only the heavy command take turns:
+
+```
+axelstra lock verify -- bun run verify          # one verify at a time, across every session
+axelstra lock build --slots 2 -- cargo build    # two at a time
+```
+
+`lock` waits for a free slot, runs the command, passes its exit code through, and frees the slot when the command ends (or the process dies). Tell every worker to run its full verify, build or test suite through `axelstra lock`.
+
 ## Seeing and driving the desktop
 
 For desktop apps that have no CLI or API (Windows and macOS). The user must turn it on first (command palette, "Controlo do ecrã"); until then every command fails and you cannot enable it yourself. Ask the user if you need it.

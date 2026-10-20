@@ -166,6 +166,18 @@ enum Cmd {
         #[arg(long)]
         lines: Option<u32>,
     },
+    /// Run a command when a slot of a named lock is free: agents work in parallel, the heavy command takes turns
+    Lock {
+        name: String,
+        /// how many may hold the lock at once
+        #[arg(long, default_value_t = 1)]
+        slots: usize,
+        /// seconds to wait for a slot
+        #[arg(long, default_value_t = 3600)]
+        timeout: u64,
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
     /// One-shot worker: run a command in a worktree, report its output to a session when it exits
     Run {
         worktree: PathBuf,
@@ -284,6 +296,7 @@ enum WtCmd {
 }
 
 mod computer;
+mod lock;
 mod statusline;
 mod ctl;
 mod orchcmd;
@@ -334,6 +347,7 @@ fn main() -> Result<()> {
             let c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
             ctl::run(cmd, c)?;
         }
+        Cmd::Lock { name, slots, timeout, command } => std::process::exit(lock::run(&name, slots, timeout, &command)?),
         Cmd::StatuslineTee => statusline::tee()?,
         Cmd::Skills { .. } => print!("{}", axelstra_daemon::skill::guide()),
         Cmd::InstallSkill => {
