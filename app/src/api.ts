@@ -30,6 +30,7 @@ export const writeSession = (id: number, data: string) => invoke("session_write"
 
 export const listProjects = () => call<Project[]>("project.list");
 export const addProject = (path: string) => call<Project>("project.add", { path });
+export const projectLogo = (id: string) => call<{ data_url: string | null }>("project.logo", { id }).then((r) => r.data_url);
 export const removeProject = (id: string) => call("project.remove", { id });
 export const createWorktree = (project: string, name: string) => call<Worktree>("worktree.create", { project, name });
 export const removeWorktree = (project: string, path: string) => call("worktree.remove", { project, path });

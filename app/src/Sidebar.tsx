@@ -1,6 +1,6 @@
 import { open, ask } from "@tauri-apps/plugin-dialog";
-import { For, Show, createSignal } from "solid-js";
-import { addProject, createWorktree, removeProject, removeWorktree, killSession, removeSession } from "./api";
+import { For, Show, createResource, createSignal } from "solid-js";
+import { addProject, projectLogo, createWorktree, removeProject, removeWorktree, killSession, removeSession } from "./api";
 import logo from "./assets/logo.png";
 import {
   error,
@@ -14,14 +14,17 @@ import {
   setError,
 } from "./store";
 
-function ProjectIcon(props: { name: string; url?: string | null }) {
+function ProjectIcon(props: { id: string; name: string; url?: string | null }) {
   const [broken, setBroken] = createSignal(false);
+  // a logo file inside the repo wins over the host avatar
+  const [repoLogo] = createResource(() => props.id, projectLogo);
+  const src = () => repoLogo() ?? props.url;
   return (
     <Show
-      when={props.url && !broken()}
+      when={src() && !broken()}
       fallback={<span class="picon letter">{props.name.slice(0, 1).toUpperCase()}</span>}
     >
-      <img class="picon" src={props.url!} alt="" onError={() => setBroken(true)} />
+      <img class="picon" src={src()!} alt="" onError={() => setBroken(true)} />
     </Show>
   );
 }
@@ -89,7 +92,7 @@ export function Sidebar() {
         {(p) => (
           <div class="project">
             <div class="project-head" title={p.path}>
-              <ProjectIcon name={p.name} url={p.icon_url} />
+              <ProjectIcon id={p.id} name={p.name} url={p.icon_url} />
               <span class="pname" title={p.slug ?? p.path}>{p.name}</span>
               <button class="icon" title="Novo worktree" onClick={() => setCreating(creating() === p.id ? null : p.id)}>
                 +

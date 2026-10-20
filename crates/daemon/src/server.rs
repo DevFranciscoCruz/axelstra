@@ -310,6 +310,11 @@ fn dispatch(
             let text = tokio::task::block_in_place(|| crate::changes::diff(&wt, path, base))?;
             Ok(json!({"diff": text}))
         }
+        "project.logo" => {
+            let pr = crate::projects::find(&reg.store, p["id"].as_str().unwrap_or_default())?;
+            let logo = tokio::task::block_in_place(|| crate::projects::logo_data_url(std::path::Path::new(&pr.path)));
+            Ok(json!({"data_url": logo}))
+        }
         "orch.start" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             if reg.runs.lock().unwrap().get(&pr.id).is_some_and(|r| r["state"] == "running") {

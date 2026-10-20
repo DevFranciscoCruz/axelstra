@@ -118,3 +118,24 @@ pub fn worktree_remove(p: &Project, path: &str) -> Result<()> {
     }
     Ok(())
 }
+
+const LOGO_CANDIDATES: [&str; 8] = [
+    "logo.png", "logo.svg", "assets/logo.png", "assets/logo.svg", "docs/logo.png", ".github/logo.png", "icon.png", "assets/icon.png",
+];
+
+/// A logo shipped in the repo itself, as a data URL. None when there is none
+/// (the UI then falls back to the git host's avatar).
+pub fn logo_data_url(repo: &Path) -> Option<String> {
+    use base64::Engine;
+    for rel in LOGO_CANDIDATES {
+        let p = repo.join(rel);
+        let Ok(md) = std::fs::metadata(&p) else { continue };
+        if !md.is_file() || md.len() > 512 * 1024 {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&p) else { continue };
+        let mime = if rel.ends_with(".svg") { "image/svg+xml" } else { "image/png" };
+        return Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)));
+    }
+    None
+}
