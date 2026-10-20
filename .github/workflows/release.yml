@@ -29,6 +29,7 @@ jobs:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
     steps:
       - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
       - uses: actions/setup-node@v5
         with: { node-version: 22 }
       - uses: dtolnay/rust-toolchain@stable
@@ -43,6 +44,18 @@ jobs:
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0"; fi
           if [[ "$GITHUB_REF_TYPE" == "tag" && ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "bad tag $GITHUB_REF_NAME"; exit 1; fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: Changelog
+        shell: bash
+        run: |
+          # the commit subjects since the previous release tag
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME:-HEAD}^" 2>/dev/null || true)
+          {
+            echo "## What's changed"
+            echo
+            if [[ -n "$PREV" ]]; then git log --no-merges --pretty='- %s' "$PREV..HEAD"; else git log --no-merges -n 20 --pretty='- %s'; fi
+            if [[ -n "$PREV" ]]; then echo; echo "**Full changelog**: https://github.com/${{ github.repository }}/compare/$PREV...${GITHUB_REF_NAME:-HEAD}"; fi
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
       - name: Daemon sidecar (Windows)
         if: runner.os == 'Windows'
         run: powershell -NoProfile -File scripts/prepare-sidecar.ps1
@@ -68,7 +81,7 @@ jobs:
             cp target/release/bundle/nsis/*-setup.exe out/
             EXE=$(basename out/*-setup.exe)
             cp "target/release/bundle/nsis/$EXE.sig" "out/$EXE.sig"
-            node scripts/write-latest-json.mjs --version "${{ steps.v.outputs.version }}" --sig-file "out/$EXE.sig"               --url "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME:-v0.0.0}/$EXE"               --notes "Axelstra ${{ steps.v.outputs.version }}" --out out/latest.json
+            node scripts/write-latest-json.mjs --version "${{ steps.v.outputs.version }}" --sig-file "out/$EXE.sig"               --url "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME:-v0.0.0}/$EXE"               --notes "$(cat "$RUNNER_TEMP/notes.md")" --out out/latest.json
           else
             cp target/release/bundle/dmg/*.dmg out/
           fi
@@ -81,7 +94,7 @@ jobs:
         run: |
           V="${{ steps.v.outputs.version }}"
           # both matrix jobs get here: whoever is first creates the release, the other uploads into it
-          gh release create "$GITHUB_REF_NAME" --title "Axelstra $V" --notes "Axelstra $V" 2>/dev/null || true
+          gh release create "$GITHUB_REF_NAME" --title "Axelstra $V" --notes-file "$RUNNER_TEMP/notes.md" 2>/dev/null || true
           # latest.json goes last: clients only see a version once its installer is already there
           gh release upload "$GITHUB_REF_NAME" $(ls out/* | grep -v latest.json) --clobber
           if [[ -f out/latest.json ]]; then gh release upload "$GITHUB_REF_NAME" out/latest.json --clobber; fi
