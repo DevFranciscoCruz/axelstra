@@ -8,7 +8,7 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -32,6 +32,14 @@ struct Ring {
 struct Shared {
     ring: Mutex<Ring>,
     eof: AtomicBool,
+    /// unix ms of the last program output that was not just the echo of our own input
+    last_out: AtomicU64,
+    /// unix ms of the last input written
+    last_in: AtomicU64,
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 pub struct Session {
@@ -67,6 +75,8 @@ impl Session {
         let shared = Arc::new(Shared {
             ring: Mutex::new(Ring { buf: VecDeque::new(), subs: Vec::new() }),
             eof: AtomicBool::new(false),
+            last_out: AtomicU64::new(now_ms()),
+            last_in: AtomicU64::new(0),
         });
 
         // Dedicated drain thread: ConPTY can block on close if output is not read.
@@ -94,6 +104,10 @@ impl Session {
                         }
                         if data.is_empty() {
                             continue;
+                        }
+                        // typing echoes back as output: that is the user, not the program working
+                        if now_ms().saturating_sub(sh.last_in.load(Ordering::Relaxed)) > 700 {
+                            sh.last_out.store(now_ms(), Ordering::Relaxed);
                         }
                         let mut r = sh.ring.lock().unwrap();
                         r.buf.extend(&data);
@@ -129,7 +143,13 @@ impl Session {
         (snap, rx)
     }
 
+    /// Milliseconds since the program last produced output of its own.
+    pub fn idle_ms(&self) -> u64 {
+        now_ms().saturating_sub(self.shared.last_out.load(Ordering::Relaxed))
+    }
+
     pub fn write(&self, data: &[u8]) -> Result<()> {
+        self.shared.last_in.store(now_ms(), Ordering::Relaxed);
         let mut w = self.writer.lock().unwrap();
         w.write_all(data)?;
         w.flush()?;
@@ -225,5 +245,17 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         assert!(s.try_wait().is_some(), "process survived kill");
+    }
+
+    #[test]
+    fn idle_ms_tracks_program_output_not_typing_echo() {
+        let s = spawn_shell();
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(s.idle_ms() >= 1000, "a quiet shell is idle: {}", s.idle_ms());
+        // the shell echoing what we type is not the program working
+        s.write(b"x").unwrap();
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(s.idle_ms() >= 1500, "echo must not count as activity: {}", s.idle_ms());
+        s.kill();
     }
 }

@@ -51,6 +51,7 @@ const [wt, setWt] = createSignal<string | null>(load("axelstra.worktree"));
 export const selectedWorktree = wt;
 export const selectWorktree = (path: string | null) => {
   setWt(path);
+  if (path) setAttention((cur) => { const n = new Set(cur); n.delete(norm(path)); return n; });
   save("axelstra.worktree", path);
   setActiveSession(null);
   setOpenDiff(null);
@@ -71,9 +72,47 @@ export const [showKanban, setShowKanban] = createSignal(false);
 
 export const [activeSession, setActiveSession] = createSignal<number | null>(null);
 
+/** "working": produced output in the last few seconds; "idle": quiet; "done": the process ended */
+export const WORKING_MS = 3000;
+export const sessionState = (s: SessionInfo): "working" | "idle" | "done" =>
+  !s.running ? "done" : (s.idle_ms ?? Infinity) < WORKING_MS ? "working" : "idle";
+
+/** worktrees whose agent finished while the user was looking elsewhere; cleared when selected */
+export const [attention, setAttention] = createSignal<ReadonlySet<string>>(new Set());
+const lastState = new Map<number, string>();
+
+const notify = async (title: string, body: string) => {
+  try {
+    const n = await import("@tauri-apps/plugin-notification");
+    let ok = await n.isPermissionGranted();
+    if (!ok) ok = (await n.requestPermission()) === "granted";
+    if (ok) n.sendNotification({ title, body });
+  } catch {
+    /* notifications are a nicety; never break the UI over them */
+  }
+};
+
+/** an agent that was working and went quiet needs a look: flag it and notify if the user is elsewhere */
+const trackAgents = (list: SessionInfo[]) => {
+  for (const s of list) {
+    const state = sessionState(s);
+    const prev = lastState.get(s.id);
+    lastState.set(s.id, state);
+    const wtPath = s.meta?.worktree;
+    if (s.meta?.kind !== "agent" || !wtPath || prev !== "working" || state === "working") continue;
+    const watching = !document.hidden && document.hasFocus() && norm(selectedWorktree()) === norm(wtPath);
+    if (watching) continue;
+    setAttention((cur) => new Set(cur).add(norm(wtPath)));
+    const name = wtPath.split(/[\/]/).pop() ?? wtPath;
+    void notify("Axelstra", state === "done" ? `${s.label ?? "agente"} terminou em ${name}` : `${s.label ?? "agente"} parou em ${name}`);
+  }
+};
+
 export const refreshSessions = async () => {
   try {
-    setSessions(await listSessions());
+    const list = await listSessions();
+    trackAgents(list);
+    setSessions(list);
     setError("");
   } catch (e) {
     setError(String(e));
