@@ -45,6 +45,33 @@ export const launchDefaultAgent = async (project: string, worktree: string, agen
   return id;
 };
 
+/** Types a note into a resumed agent once its screen has settled after booting. Fire and forget. */
+const nudge = async (id: number, text: string) => {
+  const start = Date.now();
+  await new Promise((r) => setTimeout(r, 4000));
+  while (Date.now() - start < 90000) {
+    const s = (await listSessions()).find((x) => x.id === id);
+    if (!s || !s.running) return;
+    if ((s.idle_ms ?? 0) >= 2500) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  await writeSession(id, text);
+  await new Promise((r) => setTimeout(r, 400));
+  await writeSession(id, "\r");
+};
+
+/** What an agent should be told about the restart: it was mid-task, and/or workers it started were stopped. */
+export const restartNote = (interrupted: boolean, lost: string[]) => {
+  const parts: string[] = [];
+  if (interrupted) parts.push("Axelstra was restarted and this conversation was resumed. You were in the middle of a task: continue where you left off.");
+  if (lost.length) {
+    parts.push(
+      `Workers you started were stopped by the restart and are gone: ${lost.join(", ")}. Their worktrees keep what they had already done. Run \`axelstra ls\` and relaunch what is unfinished (a running \`axelstra flow\` is gone too).`,
+    );
+  }
+  return parts.length ? `[axelstra] ${parts.join(" ")}` : "";
+};
+
 /** Brings back the sessions of a previous daemon run (reboot, installer): shells reopen, agents resume their conversation. */
 export const restoreSessions = async (): Promise<number> => {
   const pending = await call<{ program: string; args?: string[]; cwd?: string; label?: string; meta?: SessionMeta }[]>("session.pending");
@@ -57,7 +84,10 @@ export const restoreSessions = async (): Promise<number> => {
       if (m?.kind === "agent" && m.agent && m.project && m.worktree) {
         // a cleared / never used conversation has nothing to bring back: no tab, no process
         if ((m as { blank?: boolean }).blank) continue;
-        await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume });
+        const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume });
+        const x = m as { interrupted?: boolean; lost_workers?: string[] };
+        const note = restartNote(!!x.interrupted, x.lost_workers ?? []);
+        if (note) void nudge(id, note).catch(() => 0);
       } else {
         await spawnSession(r.program, r.args ?? [], r.label ?? undefined, r.cwd, m ?? undefined, (r as { env?: Record<string, string> }).env);
       }
