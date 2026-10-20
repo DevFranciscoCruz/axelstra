@@ -43,6 +43,8 @@ impl Runner for DaemonRunner {
             json!({
                 "program": s.program, "args": s.args, "cwd": s.cwd,
                 "env": env, "label": s.label, "cols": 120, "rows": 32,
+                // lets the UI show the agent terminal under its worktree
+                "meta": {"worktree": s.cwd, "kind": "agent"},
             }),
         )?;
         let id = r["id"].as_u64().ok_or_else(|| anyhow::anyhow!("daemon returned no id"))? as u32;
