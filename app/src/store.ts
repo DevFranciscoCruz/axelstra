@@ -1,6 +1,6 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import { createSignal } from "solid-js";
-import { Changes, Commit, Project, SessionInfo, Worktree, gitChanges, listProjects, listSessions } from "./api";
+import { Changes, Commit, GhItem, Project, SessionInfo, Worktree, WtStatus, ghList, gitChanges, listProjects, listSessions, worktreeStatus } from "./api";
 
 /** Paths come back with either slash style; compare them in one normal form. */
 export const norm = (p?: string | null) => (p ?? "").replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
@@ -137,6 +137,7 @@ export const [ports, setPorts] = createSignal<number[]>([]);
 
 /** the automations dialog */
 export const [showAutomations, setShowAutomations] = createSignal(false);
+export const [showAgentSearch, setShowAgentSearch] = createSignal(false);
 
 /** worktrees pinned to the top of their project (remembered in the browser storage) */
 const loadPins = (): string[] => {
@@ -159,15 +160,24 @@ export const [activeSession, setActiveSession] = createSignal<number | null>(nul
 
 /** "working": produced output in the last few seconds; "idle": quiet; "done": the process ended */
 export const WORKING_MS = 3000;
-export const sessionState = (s: SessionInfo): "working" | "idle" | "done" =>
-  !s.running ? "done" : (s.idle_ms ?? Infinity) < WORKING_MS ? "working" : "idle";
+export const sessionState = (s: SessionInfo): "working" | "waiting" | "idle" | "done" =>
+  !s.running ? "done" : s.waiting ? "waiting" : (s.idle_ms ?? Infinity) < WORKING_MS ? "working" : "idle";
 
 /** worktrees whose agent finished while the user was looking elsewhere; cleared when selected */
 export const [attention, setAttention] = createSignal<ReadonlySet<string>>(new Set());
 const lastState = new Map<number, string>();
 
-const notify = async (title: string, body: string) => {
+/** opens a session from a clicked notification */
+export const openSession = (path: string, id: number) =>
+  guarded(() => {
+    doSelect(path);
+    setActiveSession(id);
+  });
+
+const notify = async (title: string, body: string, worktree: string, session: number) => {
   try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    if (await invoke<boolean>("notify_session", { title, body, worktree, session })) return;
     const n = await import("@tauri-apps/plugin-notification");
     let ok = await n.isPermissionGranted();
     if (!ok) ok = (await n.requestPermission()) === "granted";
@@ -189,7 +199,8 @@ const trackAgents = (list: SessionInfo[]) => {
     if (watching) continue;
     setAttention((cur) => new Set(cur).add(norm(wtPath)));
     const name = wtPath.split(/[\/]/).pop() ?? wtPath;
-    void notify("Axelstra", state === "done" ? `${s.label ?? "agente"} terminou em ${name}` : `${s.label ?? "agente"} parou em ${name}`);
+    const what = state === "done" ? "terminou" : state === "waiting" ? "precisa da tua resposta" : "parou";
+    void notify("Axelstra", `${s.label ?? "agente"} ${what} em ${name}`, wtPath, s.id);
   }
 };
 
@@ -205,9 +216,46 @@ export const refreshSessions = async () => {
   }
 };
 
+/** git state per worktree (keyed by normalized path) and the open PR per branch, for the sidebar badges */
+export const [wtStatus, setWtStatus] = createSignal<Record<string, WtStatus>>({});
+export const [prByBranch, setPrByBranch] = createSignal<Record<string, GhItem>>({});
+export const prKey = (project: string, branch: string | null | undefined) => `${project}:${branch ?? ""}`;
+let lastPrs = 0;
+
+const refreshWtStatus = async (list: Project[]) => {
+  const paths = list.flatMap((p) => p.worktrees.map((w) => w.path));
+  if (!paths.length) return;
+  try {
+    const out: Record<string, WtStatus> = {};
+    for (const st of await worktreeStatus(paths)) out[norm(st.path)] = st;
+    setWtStatus(out);
+  } catch {
+    /* badges are a nicety; an old daemon without worktree.status just shows none */
+  }
+};
+
+/** gh is slow and rate limited: at most every 3 minutes, and only for projects that have a remote */
+const refreshPrs = async (list: Project[]) => {
+  if (Date.now() - lastPrs < 180_000) return;
+  lastPrs = Date.now();
+  const out: Record<string, GhItem> = {};
+  for (const p of list) {
+    if (!p.remote) continue;
+    try {
+      for (const it of await ghList(p.id, "pr")) if (it.branch) out[prKey(p.id, it.branch)] = it;
+    } catch {
+      /* gh missing or not logged in: no PR badges */
+    }
+  }
+  setPrByBranch(out);
+};
+
 export const refreshProjects = async () => {
   try {
-    setProjects(await listProjects());
+    const list = await listProjects();
+    setProjects(list);
+    void refreshWtStatus(list);
+    void refreshPrs(list);
   } catch (e) {
     setError(String(e));
   }

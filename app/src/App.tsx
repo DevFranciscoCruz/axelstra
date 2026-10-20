@@ -13,6 +13,10 @@ import { Automations } from "./Automations";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
 import { PanelIcon } from "./PanelIcon";
+import { CloseConfirm } from "./CloseConfirm";
+import { AgentSearch } from "./AgentSearch";
+import { UsageChip } from "./Usage";
+import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
 import { ErrorToast } from "./ErrorToast";
 import { Modal } from "./Modal";
 import { labelIcons, press } from "./a11y";
@@ -27,6 +31,8 @@ import {
   setDefaultAgent,
   changesMode,
   showAutomations,
+  showAgentSearch,
+  setShowAgentSearch,
   ports,
   setPorts,
   splitSession,
@@ -45,6 +51,7 @@ import {
   refreshChanges,
   refreshProjects,
   refreshSessions,
+  openSession,
   selectedWorktree,
   sessionsOf,
   setActiveSession,
@@ -81,9 +88,30 @@ export function App() {
       void refreshProjects();
     };
     window.addEventListener("focus", onFocus);
+    // clicking a desktop notification lands on the session that raised it
+    let unlistenClick: (() => void) | undefined;
+    void import("@tauri-apps/api/event").then(({ listen }) =>
+      listen<{ worktree: string; session: number }>("notification-click", (e) => {
+        void refreshSessions().then(() => openSession(e.payload.worktree, e.payload.session));
+      }).then((u) => (unlistenClick = u)),
+    );
     // Ctrl+B hides the project list, Ctrl+Shift+B the right panel; captured so the terminal never sees them
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "b") return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === "f" && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowAgentSearch(true);
+        return;
+      }
+      if (k === "m" && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        void toggleVoice();
+        return;
+      }
+      if (k !== "b") return;
       e.preventDefault();
       e.stopPropagation();
       if (e.shiftKey) toggleRightPanel();
@@ -96,6 +124,7 @@ export function App() {
       clearInterval(mid);
       clearInterval(slow);
       window.removeEventListener("focus", onFocus);
+      unlistenClick?.();
     });
   });
 
@@ -270,16 +299,21 @@ export function App() {
                 { label: `Novo agente (${defaultAgent()})`, run: () => void newAgent() },
                 { label: "Novo terminal", run: () => void newTerminal() },
                 { label: "Dividir terminal", run: () => void toggleSplit() },
+                { label: "Pesquisar conversas", hint: "Ctrl+Shift+F", run: () => setShowAgentSearch(true) },
               ]
             : []
         }
       />
+      <Show when={showAgentSearch()}>
+        <AgentSearch />
+      </Show>
       <Show when={showAutomations()}>
         <Automations />
       </Show>
       <ContextMenu />
       <ErrorToast />
       <UpdateToast />
+      <CloseConfirm />
       <Show when={showSidebar()}>
         <Sidebar />
       </Show>
@@ -373,6 +407,7 @@ export function App() {
             </Show>
             </div>
             <span class="grow" />
+            <UsageChip />
             <For each={ports()}>
               {(port) => (
                 <button class="port" title={`Abrir http://localhost:${port} no navegador`} onClick={() => void openUrl(`http://localhost:${port}`)}>
@@ -380,6 +415,9 @@ export function App() {
                 </button>
               )}
             </For>
+            <button class="icon add" title="Ditado por voz (Ctrl+Shift+M)" classList={{ on: listening(), rec: listening() }} onClick={() => void toggleVoice()} hidden={!voiceSupported}>
+              <MicIcon />
+            </button>
             <button class="icon add" title="Dividir: ver dois terminais lado a lado" classList={{ on: splitSession() !== null }} onClick={() => void toggleSplit()}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
                 <path d="M5.5 3v10M10.5 3v10" />
@@ -401,6 +439,7 @@ export function App() {
               </button>
             </Show>
           </div>
+          <VoiceDraft target={activeSession()} />
           <div class="term-area">
             <Show when={!showKanban()} fallback={<Kanban project={current()!.project.id} />}>
             <Show when={openCommit() === null} fallback={<CommitView />}>

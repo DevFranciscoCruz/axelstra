@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type SessionMeta = { project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string };
-export type SessionInfo = { id: number; running: boolean; idle_ms?: number; label: string | null; meta: SessionMeta | null };
+export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   slug?: string;
@@ -198,3 +198,12 @@ export const gitLog = (worktree: string, base?: string) =>
   call<{ commits: Commit[] }>("git.log", { worktree, base }).then((r) => r.commits);
 export const gitShow = (worktree: string, sha: string) =>
   call<{ diff: string }>("git.show", { worktree, sha }).then((r) => r.diff);
+
+export type WtStatus = { path: string; dirty: number; ahead: number; behind: number; upstream: boolean };
+export const worktreeStatus = (paths: string[]) => call<{ status: WtStatus[] }>("worktree.status", { paths }).then((r) => r.status);
+
+export type AgentHit = { agent: "claude" | "codex"; session: string; cwd: string; ts: number; snippet: string };
+export const agentSearch = (query: string, max = 30) => call<{ hits: AgentHit[] }>("agent.search", { query, max }).then((r) => r.hits);
+
+export type TokenUsage = { input: number; output: number; cache_read: number; cache_write: number; messages: number };
+export const agentUsage = (cwd: string, session?: string) => call<{ usage: TokenUsage | null }>("agent.usage", { cwd, session }).then((r) => r.usage);

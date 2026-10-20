@@ -14,6 +14,9 @@ import {
   setShowAutomations,
   attention,
   sessionState,
+  wtStatus,
+  prByBranch,
+  prKey,
   defaultAgent,
   pickAgent,
   setDefaultAgent,
@@ -288,7 +291,10 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 const label = () => w.branch ?? "(detached)";
                 const live = () => sessionsOf(w.path).filter((s) => s.running).length;
                 const working = () => sessionsOf(w.path).some((s) => sessionState(s) === "working");
+                const waiting = () => sessionsOf(w.path).some((s) => sessionState(s) === "waiting");
                 const needs = () => attention().has(norm(w.path));
+                const st = () => wtStatus()[norm(w.path)];
+                const pr = () => prByBranch()[prKey(p.id, w.branch)];
                 return (
                   <div
                     class="item wt"
@@ -300,13 +306,32 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                   >
                     <span
                       class="dot"
-                      classList={{ on: live() > 0, work: working(), attn: needs() }}
-                      title={needs() ? "O agente parou: precisa de atenção" : working() ? "A trabalhar" : live() > 0 ? "Parado" : ""}
+                      classList={{ on: live() > 0, work: working() && !waiting(), attn: needs() && !waiting(), wait: waiting() }}
+                      title={waiting() ? "O agente espera pela tua resposta" : needs() ? "O agente parou: precisa de atenção" : working() ? "A trabalhar" : live() > 0 ? "Parado" : ""}
                     />
                     <span class="name">{w.is_main ? (p.default_branch ?? "main") : label()}</span>
                     <Show when={w.is_main && w.branch !== (p.default_branch ?? "main")}>
                       <span class="off-main" title={`O worktree principal está em "${label()}", não em ${p.default_branch ?? "main"}`}>
                         ⚠
+                      </span>
+                    </Show>
+                    <Show when={st()?.dirty}>
+                      <span class="wt-badge" title={`${st()!.dirty} ficheiro(s) com alterações por guardar`}>●{st()!.dirty}</span>
+                    </Show>
+                    <Show when={st()?.ahead || st()?.behind}>
+                      <span class="wt-badge" title={`${st()!.ahead} commit(s) à frente e ${st()!.behind} atrás do remoto`}>
+                        {st()!.ahead ? `↑${st()!.ahead}` : ""}
+                        {st()!.behind ? `↓${st()!.behind}` : ""}
+                      </span>
+                    </Show>
+                    <Show when={pr()}>
+                      <span
+                        class="wt-badge pr"
+                        classList={{ pass: pr()!.checks === "pass", fail: pr()!.checks === "fail", pend: pr()!.checks === "pending" }}
+                        title={`PR #${pr()!.number}: ${pr()!.title}${pr()!.checks ? ` (CI: ${pr()!.checks})` : ""}`}
+                      >
+                        #{pr()!.number}
+                        {pr()!.checks === "pass" ? " ✓" : pr()!.checks === "fail" ? " ✗" : pr()!.checks === "pending" ? " …" : ""}
                       </span>
                     </Show>
                     <Show when={live() > 0}>

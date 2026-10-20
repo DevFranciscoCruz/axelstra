@@ -27,6 +27,8 @@ struct State {
     pending: Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>,
 }
 
+mod voice;
+
 fn connect() -> Result<Client> {
     let token = proto::load_or_create_token()?;
     let pipe = proto::pipe_name();
@@ -198,6 +200,42 @@ fn session_detach(state: tauri::State<'_, Arc<State>>, id: u32) {
 }
 
 /// What a "new terminal" should run on this OS: the user's login shell on Unix, PowerShell on Windows.
+/// Desktop toast whose click brings the window forward and tells the UI which session it came from.
+/// Returns false where the OS toast has no click callback (the UI then uses the plain notification plugin).
+#[tauri::command]
+fn notify_session(app: tauri::AppHandle, title: String, body: String, worktree: String, session: u32) -> bool {
+    #[cfg(windows)]
+    {
+        use tauri::Emitter;
+        let handle = app.clone();
+        let shown = tauri_winrt_notification::Toast::new(&app.config().identifier)
+            .title(&title)
+            .text1(&body)
+            .on_activated(move |_| {
+                if let Some(w) = handle.get_webview_window("main") {
+                    let _ = w.unminimize();
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+                let _ = handle.emit("notification-click", json!({"worktree": worktree, "session": session}));
+                Ok(())
+            })
+            .show();
+        shown.is_ok()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, title, body, worktree, session);
+        false
+    }
+}
+
+/// The UI confirmed the close: exit for real (the exit hook still installs a downloaded update).
+#[tauri::command]
+fn app_quit(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 #[tauri::command]
 fn default_shell() -> (String, Vec<String>) {
     if cfg!(windows) {
@@ -300,7 +338,18 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .manage(Arc::new(State::default()))
-        .invoke_handler(tauri::generate_handler![daemon_call, session_write, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write])
+        .manage(voice::Voice::default())
+        // closing the window asks the UI first (it shows the confirmation, or quits when the user opted out)
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    use tauri::Emitter;
+                    let _ = window.emit("close-requested", ());
+                }
+            }
+        })
+        .invoke_handler(tauri::generate_handler![daemon_call, session_write, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write, notify_session, app_quit, voice::voice_status, voice::voice_download, voice::voice_transcribe])
         .build(tauri::generate_context!())
         .expect("error while building axelstra")
         .run(|app, event| {
