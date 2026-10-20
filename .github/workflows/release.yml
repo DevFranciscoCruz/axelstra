@@ -1,8 +1,6 @@
 name: release
-# Push a tag `vX.Y.Z` to build, sign and publish. The installer, its .sig and latest.json are
-# attached to the GitHub Release (the repo is private: the app never reads GitHub itself, a
-# server-side proxy holding a read-only token serves /update/latest and the download).
-# Needed secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+# Push a tag `vX.Y.Z` to build the installer and attach it to the GitHub Release. Installs and
+# updates are manual: download Axelstra_<version>_x64-setup.exe from the release and run it.
 on:
   push:
     tags: ['v*']
@@ -38,23 +36,15 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
       - name: Daemon sidecar
         run: powershell -NoProfile -File scripts/prepare-sidecar.ps1
-      - name: Build the signed installer
+      - name: Build the installer
         working-directory: app
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --config src-tauri/tauri.release.conf.json --config '{"version":"${{ steps.v.outputs.version }}"}'
       - name: Stage artifacts
         shell: bash
         run: |
-          V="${{ steps.v.outputs.version }}"
-          B="target/release/bundle/nsis"
-          mkdir -p "out/releases/$V"
-          cp "$B"/*-setup.exe "out/releases/$V/setup.exe"
-          cp "$B"/*-setup.exe.sig "out/releases/$V/setup.exe.sig"
-          node scripts/write-latest-json.mjs --version "$V" --sig-file "out/releases/$V/setup.exe.sig" \
-            --base-url "${{ vars.UPDATES_BASE_URL }}" --notes "Axelstra $V" --out out/latest.json
-          sha256sum "out/releases/$V/setup.exe"
+          mkdir -p out
+          cp target/release/bundle/nsis/*-setup.exe out/
+          sha256sum out/*-setup.exe
       - name: Attach to the GitHub Release
         if: env.DRY_RUN != 'true'
         shell: bash
@@ -62,11 +52,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           V="${{ steps.v.outputs.version }}"
-          FILES=("out/releases/$V/setup.exe" "out/releases/$V/setup.exe.sig" out/latest.json)
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${FILES[@]}" --clobber
+            gh release upload "$GITHUB_REF_NAME" out/*-setup.exe --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "${FILES[@]}" --title "Axelstra $V" --notes "Axelstra $V"
+            gh release create "$GITHUB_REF_NAME" out/*-setup.exe --title "Axelstra $V" --notes "Axelstra $V"
           fi
       - name: Keep the dry-run installer on the run
         if: env.DRY_RUN == 'true'
