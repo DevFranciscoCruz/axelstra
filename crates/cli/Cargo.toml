@@ -1,0 +1,9 @@
+[package]
+name = "axelstra"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axelstra-core = { path = "../core" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
