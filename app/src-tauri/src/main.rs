@@ -221,8 +221,12 @@ fn notify_session(app: tauri::AppHandle, title: String, body: String, worktree: 
     #[cfg(windows)]
     {
         use tauri::Emitter;
+        // Windows hides toasts (and their sound) while a game or presentation is fullscreen; a plain system
+        // beep still gets through, so the toast stays silent and this one is the audible part.
+        unsafe { windows_sys::Win32::System::Diagnostics::Debug::MessageBeep(windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONASTERISK) };
         let handle = app.clone();
         let shown = tauri_winrt_notification::Toast::new(&app.config().identifier)
+            .sound(None)
             .title(&title)
             .text1(&body)
             .on_activated(move |_| {
