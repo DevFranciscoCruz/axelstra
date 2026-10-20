@@ -595,3 +595,11 @@ button.danger { color: #ef7676; }
 .pal-item.on { background: rgba(167, 139, 250, .16); }
 .pal-hint { color: var(--muted); font-size: 11px; }
 .pal-empty { padding: 14px; color: var(--muted); font-size: 12px; text-align: center; }
+
+.cbtn { visibility: hidden; background: none; border: 0; padding: 0 2px; cursor: pointer; font-size: 11px; }
+tr.row:hover .cbtn { visibility: visible; }
+.cbtn + .lnum { margin-left: 2px; }
+tr.cmt td { background: #171821; padding: 8px 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--accent); border-radius: 6px; padding: 6px 8px; font: inherit; }
+.cmt-actions { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.cmt-msg { color: #e5c07b; font-size: 12px; }
