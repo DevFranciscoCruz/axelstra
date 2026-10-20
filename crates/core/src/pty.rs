@@ -186,6 +186,11 @@ impl Session {
         self.child.lock().unwrap().process_id()
     }
 
+    /// Private memory of everything the session runs, right now.
+    pub fn memory_now(&self) -> u64 {
+        self.job.memory_now()
+    }
+
     pub fn job_usage(&self) -> (u64, u64) {
         self.job.usage()
     }
