@@ -1,0 +1,8 @@
+{
+  "identifier": "dev.axelstra.desktop",
+  "bundle": {
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  }
+}

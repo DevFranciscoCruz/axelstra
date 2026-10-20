@@ -17,3 +17,13 @@ Local build: `powershell -File scripts/build-installer.ps1` (prints the installe
 
 The automatic updater (signed releases, `/latest` proxy) was built and then removed; it is in the
 git history (commit `cbde50a`).
+
+### macOS
+
+Releases also carry a `.dmg` for Apple silicon. It is **not signed or notarized** (that needs a paid Apple developer account), so macOS blocks the first launch. Drag Axelstra to Applications, then either right-click the app and choose Open, or run:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Axelstra.app
+```
+
+Build locally with `sh scripts/prepare-sidecar.sh && cd app && npx tauri build --bundles dmg --config src-tauri/tauri.release.conf.json`.

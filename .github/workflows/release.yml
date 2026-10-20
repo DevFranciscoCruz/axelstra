@@ -1,6 +1,7 @@
 name: release
-# Push a tag `vX.Y.Z` to build the installer and attach it to the GitHub Release. Installs and
-# updates are manual: download Axelstra_<version>_x64-setup.exe from the release and run it.
+# Push a tag `vX.Y.Z` to build the installers and attach them to the GitHub Release. Installs and
+# updates are manual: download Axelstra_<version>_x64-setup.exe (Windows) or the .dmg (macOS, Apple
+# silicon) from the release. The macOS build is not signed or notarized: see the README.
 on:
   push:
     tags: ['v*']
@@ -13,8 +14,13 @@ on:
 permissions: { contents: write }
 jobs:
   release:
+    name: release (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
     # Swap for the self-hosted runner label if the repo gets access to one.
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
@@ -24,7 +30,7 @@ jobs:
         with: { node-version: 22 }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
+      - run: cargo test --no-fail-fast -p axelstra-core -p axelstra-daemon -p axelstra
       - run: npm ci
         working-directory: app
       - name: Version
@@ -34,17 +40,26 @@ jobs:
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0"; fi
           if [[ "$GITHUB_REF_TYPE" == "tag" && ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "bad tag $GITHUB_REF_NAME"; exit 1; fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
-      - name: Daemon sidecar
+      - name: Daemon sidecar (Windows)
+        if: runner.os == 'Windows'
         run: powershell -NoProfile -File scripts/prepare-sidecar.ps1
-      - name: Build the installer
+      - name: Daemon sidecar (macOS)
+        if: runner.os == 'macOS'
+        run: sh scripts/prepare-sidecar.sh
+      - name: Build the installer (Windows)
+        if: runner.os == 'Windows'
         working-directory: app
         run: npx tauri build --config src-tauri/tauri.release.conf.json --config '{"version":"${{ steps.v.outputs.version }}"}'
+      - name: Build the disk image (macOS)
+        if: runner.os == 'macOS'
+        working-directory: app
+        run: npx tauri build --bundles dmg --config src-tauri/tauri.release.conf.json --config '{"version":"${{ steps.v.outputs.version }}"}'
       - name: Stage artifacts
         shell: bash
         run: |
           mkdir -p out
-          cp target/release/bundle/nsis/*-setup.exe out/
-          sha256sum out/*-setup.exe
+          if [[ "$RUNNER_OS" == "Windows" ]]; then cp target/release/bundle/nsis/*-setup.exe out/; else cp target/release/bundle/dmg/*.dmg out/; fi
+          ls -l out
       - name: Attach to the GitHub Release
         if: env.DRY_RUN != 'true'
         shell: bash
@@ -52,15 +67,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           V="${{ steps.v.outputs.version }}"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" out/*-setup.exe --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" out/*-setup.exe --title "Axelstra $V" --notes "Axelstra $V"
-          fi
+          # both matrix jobs get here: whoever is first creates the release, the other uploads into it
+          gh release create "$GITHUB_REF_NAME" --title "Axelstra $V" --notes "Axelstra $V" 2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" out/* --clobber
       - name: Keep the dry-run installer on the run
         if: env.DRY_RUN == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: axelstra-dry-run
+          name: axelstra-dry-run-${{ runner.os }}
           path: out/
           retention-days: 7
