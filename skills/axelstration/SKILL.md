@@ -1,9 +1,9 @@
 ---
-name: axelstra-orchestration
+name: axelstration
 description: Coordinate parallel agents inside Axelstra with the `axelstra` CLI. Use when asked to split work across worktrees or agents, delegate to workers, run tests in a throwaway worker, or collect results from other sessions. Workers show up as tabs in the Axelstra app.
 ---
 
-# Axelstra orchestration
+# Axelstration
 
 You are running inside an Axelstra terminal. The `axelstra` CLI talks to the same daemon as the app, so everything you start appears as a tab in the app and the user can watch or take over.
 
