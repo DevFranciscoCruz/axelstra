@@ -20,8 +20,19 @@ pub struct Out {
     pub stderr: String,
 }
 
+/// The daemon has no console, so a console child (git, gh, cmd) would flash a new window
+/// every time it starts. Call this on every Command the daemon spawns itself.
+pub fn quiet(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    cmd
+}
+
 pub fn run(cwd: &Path, args: &[&str]) -> Result<Out> {
-    let o = Command::new("git")
+    let o = quiet(&mut Command::new("git"))
         .current_dir(cwd)
         .args(args)
         .output()

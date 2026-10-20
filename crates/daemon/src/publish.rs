@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::Command;
 
 fn exec(cwd: &Path, prog: &str, args: &[&str]) -> Result<(bool, String)> {
-    let o = Command::new(prog)
+    let o = axelstra_core::git::quiet(&mut Command::new(prog))
         .current_dir(cwd)
         // never block waiting for a credential prompt nobody can see
         .env("GIT_TERMINAL_PROMPT", "0")
