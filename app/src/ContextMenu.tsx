@@ -5,7 +5,7 @@ export type MenuItem =
   | {
       label: string;
       icon?: string;
-      run?: () => void | Promise<void>;
+      run?: () => unknown;
       danger?: boolean;
       disabled?: boolean;
       /** submenu; opens on hover */

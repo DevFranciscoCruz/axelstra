@@ -10,7 +10,7 @@
 /// Version of the app <-> daemon contract. A daemon outlives app updates, so the app only restarts
 /// a daemon older than this; bump it when the app starts calling something an old daemon lacks.
 /// 2: app.dir, session.pending, session.pending_clear.
-pub const PROTO: u64 = 2;
+pub const PROTO: u64 = 3;
 
 pub const MAX_FRAME: usize = 16 << 20;
 

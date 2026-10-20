@@ -83,6 +83,128 @@ pub fn list(wt: &Path, rel: &str) -> Result<Vec<Entry>> {
     Ok(out)
 }
 
+/// Files whose relative path contains every word of `query` (case-insensitive), `.gitignore`
+/// applied. Name matches come first, then shorter paths; capped so a huge tree stays cheap.
+pub fn search(wt: &Path, query: &str) -> Result<Vec<String>> {
+    let words: Vec<String> = query.to_lowercase().split_whitespace().map(String::from).collect();
+    if words.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut hits: Vec<(bool, String)> = Vec::new();
+    for (seen, e) in ignore::WalkBuilder::new(wt).hidden(false).filter_entry(|e| e.file_name() != ".git").build().enumerate() {
+        if seen > 100_000 {
+            break;
+        }
+        let Ok(e) = e else { continue };
+        if !e.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        let Ok(rel) = e.path().strip_prefix(wt) else { continue };
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        let low = rel.to_lowercase();
+        if words.iter().all(|w| low.contains(w)) {
+            let name = low.rsplit('/').next().unwrap_or(&low).to_string();
+            hits.push((!words.iter().all(|w| name.contains(w)), rel));
+        }
+    }
+    hits.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.len().cmp(&b.1.len())).then(a.1.cmp(&b.1)));
+    Ok(hits.into_iter().take(100).map(|h| h.1).collect())
+}
+
+#[derive(Debug, Serialize)]
+pub struct Match {
+    pub path: String,
+    pub line: usize,
+    pub text: String,
+}
+
+/// Lines containing `query` (case-insensitive) in text files, `.gitignore` applied; capped.
+pub fn grep(wt: &Path, query: &str) -> Result<Vec<Match>> {
+    let q = query.to_lowercase();
+    let mut out = Vec::new();
+    if q.trim().is_empty() {
+        return Ok(out);
+    }
+    for (seen, e) in ignore::WalkBuilder::new(wt).hidden(false).filter_entry(|e| e.file_name() != ".git").build().enumerate() {
+        if seen > 50_000 || out.len() >= 200 {
+            break;
+        }
+        let Ok(e) = e else { continue };
+        if !e.file_type().is_some_and(|t| t.is_file()) || e.metadata().map(|m| m.len() > MAX_FILE_BYTES).unwrap_or(true) {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(e.path()) else { continue };
+        if bytes.contains(&0) {
+            continue;
+        }
+        let Ok(text) = String::from_utf8(bytes) else { continue };
+        let Ok(rel) = e.path().strip_prefix(wt) else { continue };
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        for (i, l) in text.lines().enumerate() {
+            if l.to_lowercase().contains(&q) {
+                out.push(Match { path: rel.clone(), line: i + 1, text: l.trim().chars().take(200).collect() });
+                if out.len() >= 200 {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn not_git(rel: &str) -> Result<()> {
+    if rel.is_empty() || rel == ".git" || rel.starts_with(".git/") {
+        bail!("not allowed");
+    }
+    Ok(())
+}
+
+/// New empty file or folder; refuses to overwrite.
+pub fn create(wt: &Path, rel: &str, dir: bool) -> Result<()> {
+    not_git(rel)?;
+    let p = resolve(wt, rel)?;
+    if p.exists() {
+        bail!("already exists");
+    }
+    if dir {
+        std::fs::create_dir_all(&p)?;
+    } else {
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::File::create_new(&p)?;
+    }
+    Ok(())
+}
+
+pub fn rename(wt: &Path, from: &str, to: &str) -> Result<()> {
+    not_git(from)?;
+    not_git(to)?;
+    let a = resolve(wt, from)?;
+    let b = resolve(wt, to)?;
+    if !a.exists() {
+        bail!("not found");
+    }
+    if b.exists() {
+        bail!("already exists");
+    }
+    std::fs::rename(a, b)?;
+    Ok(())
+}
+
+/// Permanent delete of a file or folder inside the worktree (symlinks are unlinked, not followed).
+pub fn delete(wt: &Path, rel: &str) -> Result<()> {
+    not_git(rel)?;
+    let p = resolve(wt, rel)?;
+    let md = std::fs::symlink_metadata(&p).context("not found")?;
+    if md.is_dir() {
+        std::fs::remove_dir_all(&p)?;
+    } else {
+        std::fs::remove_file(&p)?;
+    }
+    Ok(())
+}
+
 pub fn read(wt: &Path, rel: &str) -> Result<Opened> {
     let p = resolve(wt, rel)?;
     let md = std::fs::metadata(&p).context("file not found")?;
