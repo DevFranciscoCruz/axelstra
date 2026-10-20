@@ -30,6 +30,7 @@ struct State {
     pending: Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>,
 }
 
+mod gpu;
 mod stats;
 mod voice;
 
@@ -367,6 +368,7 @@ fn update_apply(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>) -> R
 }
 
 fn main() {
+    gpu::prefer_best_gpu();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
