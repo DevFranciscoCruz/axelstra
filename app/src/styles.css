@@ -836,3 +836,10 @@ kbd { font: inherit; font-size: 11px; border: 1px solid var(--line-3); border-bo
 button.sb-item { cursor: pointer; }
 button.sb-item:hover { background: rgba(255, 255, 255, .06); color: var(--text); }
 .sb-item.on { color: var(--ok); }
+
+.orch-row { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-bottom: 1px solid var(--line-2); }
+.orch-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.orch-head { display: flex; align-items: center; gap: 8px; }
+.orch-limit { width: 56px; }
+.orch-row .grow { flex: 1; }
+.orch-row button { padding: 3px 9px; font-size: 12px; }

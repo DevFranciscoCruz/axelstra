@@ -138,6 +138,7 @@ export const [ports, setPorts] = createSignal<number[]>([]);
 /** the automations dialog */
 export const [showAutomations, setShowAutomations] = createSignal(false);
 export const [showAgentSearch, setShowAgentSearch] = createSignal(false);
+export const [showOrchestra, setShowOrchestra] = createSignal(false);
 
 /** worktrees pinned to the top of their project (remembered in the browser storage) */
 const loadPins = (): string[] => {

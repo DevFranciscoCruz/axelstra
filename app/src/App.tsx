@@ -16,6 +16,7 @@ import { PanelIcon } from "./PanelIcon";
 import { CloseConfirm } from "./CloseConfirm";
 import { ConfirmHost } from "./Confirm";
 import { AgentSearch } from "./AgentSearch";
+import { Orchestra } from "./Orchestra";
 import { UsageChip } from "./Usage";
 import { StatusBar } from "./StatusBar";
 import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
@@ -35,6 +36,8 @@ import {
   showAutomations,
   showAgentSearch,
   setShowAgentSearch,
+  showOrchestra,
+  setShowOrchestra,
   ports,
   setPorts,
   splitSession,
@@ -302,12 +305,16 @@ export function App() {
                 { label: "Novo terminal", run: () => void newTerminal() },
                 { label: "Dividir terminal", run: () => void toggleSplit() },
                 { label: "Pesquisar conversas", hint: "Ctrl+Shift+F", run: () => setShowAgentSearch(true) },
+                { label: "Orquestração: agentes e workers", run: () => setShowOrchestra(true) },
               ]
             : []
         }
       />
       <Show when={showAgentSearch()}>
         <AgentSearch />
+      </Show>
+      <Show when={showOrchestra()}>
+        <Orchestra />
       </Show>
       <Show when={showAutomations()}>
         <Automations />
@@ -361,7 +368,7 @@ export function App() {
                   )}
                 >
                   <span class="dot" classList={{ on: s.running }} />
-                  <span>{s.label ?? `Sessão ${s.id}`}</span>
+                  <span>{s.meta?.worker ? "↳ " : ""}{s.label ?? `Sessão ${s.id}`}</span>
                   <button
                     class="x"
                     title="Fechar"
