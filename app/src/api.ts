@@ -29,3 +29,18 @@ export const addProject = (path: string) => call<Project>("project.add", { path 
 export const removeProject = (id: string) => call("project.remove", { id });
 export const createWorktree = (project: string, name: string) => call<Worktree>("worktree.create", { project, name });
 export const removeWorktree = (project: string, path: string) => call("worktree.remove", { project, path });
+
+export type FileChange = {
+  path: string;
+  status: string;
+  untracked: boolean;
+  staged: boolean;
+  added: number;
+  removed: number;
+  binary: boolean;
+};
+export type Changes = { against: string; files: FileChange[] };
+
+export const gitChanges = (worktree: string, base?: string) => call<Changes>("git.changes", { worktree, base });
+export const gitDiff = (worktree: string, path: string, base?: string) =>
+  call<{ diff: string }>("git.diff", { worktree, path, base }).then((r) => r.diff);
