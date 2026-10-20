@@ -51,6 +51,20 @@ impl Registry {
         }
     }
 
+    /// True while a live session works in this worktree (any terminal or agent with it as worktree or cwd).
+    fn worktree_busy(&self, path: &str) -> bool {
+        let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
+        let want = norm(path);
+        // one lock at a time (the rest of the daemon takes sessions before metas)
+        let alive: Vec<u32> = self.sessions.lock().unwrap().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, _)| *id).collect();
+        let metas = self.metas.lock().unwrap();
+        let in_meta = |id: &u32| metas.get(id).and_then(|m| m["worktree"].as_str()).map(|w| norm(w) == want).unwrap_or(false);
+        let hit = alive.iter().any(in_meta);
+        drop(metas);
+        let specs = self.specs.lock().unwrap();
+        hit || alive.iter().any(|id| specs.get(id).and_then(|sp| sp["cwd"].as_str()).map(|c| norm(c).starts_with(&want)).unwrap_or(false))
+    }
+
     fn get(&self, id: u32) -> Option<Arc<Session>> {
         self.sessions.lock().unwrap().get(&id).cloned()
     }
@@ -148,8 +162,19 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
 fn spawn_scheduler(reg: Arc<Registry>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(30));
+        let mut n = 0u32;
         loop {
             tick.tick().await;
+            n += 1;
+            if n % 20 == 0 && reg.saved.with_file_name("janitor.on").exists() {
+                let r = reg.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    for s in crate::janitor::sweep(&r.store, &|path| r.worktree_busy(path), false) {
+                        eprintln!("janitor: {s}");
+                    }
+                })
+                .await;
+            }
             let r = reg.clone();
             let _ = tokio::task::spawn_blocking(move || {
                 let _g = r.auto_lock.lock().unwrap();
@@ -558,6 +583,22 @@ fn dispatch(
             let file = reg.saved.parent().unwrap_or(std::path::Path::new("")).join("status").join(format!("{key}.json"));
             let status = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
             Ok(json!({"status": status}))
+        }
+        "worktree.sweep" => {
+            let dry = p["dry_run"].as_bool().unwrap_or(false);
+            let done = tokio::task::block_in_place(|| crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path), dry));
+            Ok(json!({"swept": done}))
+        }
+        "janitor.auto" => {
+            let flag = reg.saved.with_file_name("janitor.on");
+            if let Some(on) = p["on"].as_bool() {
+                if on {
+                    let _ = std::fs::write(&flag, "1");
+                } else {
+                    let _ = std::fs::remove_file(&flag);
+                }
+            }
+            Ok(json!({"on": flag.exists()}))
         }
         "codex.limits" => Ok(json!({"limits": crate::agentlog::codex_limits()})),
         "computer.status" => Ok(json!({"enabled": reg.computer.load(Ordering::SeqCst)})),

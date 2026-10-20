@@ -66,6 +66,22 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             let (p, wt) = find_worktree(&projects, &path)?;
             c.call("worktree.remove", json!({"project": p["id"], "path": wt}))?;
         }
+        Cmd::Worktree { cmd: WtCmd::Sweep { dry_run, auto } } => {
+            if let Some(a) = auto {
+                let r = c.call("janitor.auto", json!({"on": a == "on"}))?;
+                println!("automatic sweep: {}", if r["on"] == json!(true) { "on" } else { "off" });
+                return Ok(());
+            }
+            let r = c.call("worktree.sweep", json!({"dry_run": dry_run}))?;
+            let list = r["swept"].as_array().cloned().unwrap_or_default();
+            for s in &list {
+                let verb = if dry_run { "would remove" } else if s["removed"] == json!(true) { "removed" } else { "could not remove" };
+                println!("{verb} {} ({}, {})", s["path"].as_str().unwrap_or_default(), s["branch"].as_str().unwrap_or_default(), s["why"].as_str().unwrap_or_default());
+            }
+            if list.is_empty() {
+                println!("nothing to remove");
+            }
+        }
         Cmd::Agent { worktree, agent, prompt, report_to, when, idle_secs, lines } => {
             let reap = reap_for(report_to, when.as_deref(), "idle", idle_secs, lines, std::env::var("AXELSTRA_SESSION").ok().as_deref())?;
             println!("{}", spawn_agent(&mut c, &worktree, &agent, prompt.as_deref(), reap, false)?);
