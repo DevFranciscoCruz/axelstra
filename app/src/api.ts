@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type SessionMeta = { project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string };
-export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; label: string | null; meta: SessionMeta | null };
+export type SessionMeta = { project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; parent?: number; worker?: boolean };
+export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   slug?: string;
@@ -212,3 +212,6 @@ export const agentSearch = (query: string, max = 30) => callBg<{ hits: AgentHit[
 
 export type TokenUsage = { input: number; output: number; cache_read: number; cache_write: number; messages: number };
 export const agentUsage = (cwd: string, session?: string) => callBg<{ usage: TokenUsage | null }>("agent.usage", { cwd, session }).then((r) => r.usage);
+
+export type WorkerLimits = { max_workers: number; workers: number };
+export const workerLimits = (max?: number) => call<WorkerLimits>("orch.limits", max === undefined ? {} : { max_workers: max });
