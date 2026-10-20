@@ -2,7 +2,7 @@ import { For, Show, createResource, createSignal } from "solid-js";
 import { Automation, deleteAutomation, listAutomations, runAutomation, saveAutomation } from "./api";
 import { Select } from "./Select";
 import { Modal } from "./Modal";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { ask } from "./Confirm";
 import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations } from "./store";
 
 const DAYS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];

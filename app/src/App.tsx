@@ -14,13 +14,14 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
 import { PanelIcon } from "./PanelIcon";
 import { CloseConfirm } from "./CloseConfirm";
+import { ConfirmHost } from "./Confirm";
 import { AgentSearch } from "./AgentSearch";
 import { UsageChip } from "./Usage";
 import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
 import { ErrorToast } from "./ErrorToast";
 import { Modal } from "./Modal";
 import { labelIcons, press } from "./a11y";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { ask } from "./Confirm";
 import { PullsPanel } from "./PullsPanel";
 import { TerminalView } from "./TerminalView";
 import {
@@ -314,6 +315,7 @@ export function App() {
       <ErrorToast />
       <UpdateToast />
       <CloseConfirm />
+      <ConfirmHost />
       <Show when={showSidebar()}>
         <Sidebar />
       </Show>

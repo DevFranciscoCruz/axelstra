@@ -1,4 +1,4 @@
-import { ask } from "@tauri-apps/plugin-dialog";
+import { ask } from "./Confirm";
 import { createSignal } from "solid-js";
 import { Changes, Commit, GhItem, Project, SessionInfo, Worktree, WtStatus, ghListBg, gitChanges, listProjects, listSessions, worktreeStatus } from "./api";
 

@@ -1,4 +1,5 @@
-import { open, ask } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
+import { ask } from "./Confirm";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { addProject, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
 import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
