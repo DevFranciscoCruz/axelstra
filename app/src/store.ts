@@ -40,6 +40,9 @@ export const pickAgent = () =>
     });
   });
 
+/** bumped whenever the daemon reports file changes in the selected worktree */
+export const [fsTick, setFsTick] = createSignal(0);
+
 export const [projects, setProjects] = createSignal<Project[]>([]);
 export const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
 export const [error, setError] = createSignal("");

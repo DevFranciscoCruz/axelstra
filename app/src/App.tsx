@@ -16,6 +16,7 @@ import {
   defaultAgent,
   setDefaultAgent,
   changesMode,
+  setFsTick,
   norm,
   findWorktree,
   openDiff,
@@ -65,7 +66,10 @@ export function App() {
   createEffect(() => {
     const w = selectedWorktree();
     void watchWorktree(w, (changed) => {
-      if (norm(changed) === norm(selectedWorktree())) void refreshChanges();
+      if (norm(changed) === norm(selectedWorktree())) {
+        setFsTick((n) => n + 1);
+        void refreshChanges();
+      }
     });
   });
 
