@@ -58,39 +58,13 @@ export function Sidebar() {
   const [editSetup, setEditSetup] = createSignal<string | null>(null);
   const [setupText, setSetupText] = createSignal("");
 
-  /** asks which agent to open (or a plain terminal) and starts it in the worktree */
-  const openWith = async (projectId: string, path: string) => {
-    const a = await pickAgent();
-    if (a === null) return;
-    if (a === "shell") {
-      const [program, args] = await defaultShell();
-      await spawnSession(program, args, "shell", path, { project: projectId, worktree: path, kind: "shell" });
-    } else {
-      await launchDefaultAgent(projectId, path, a, AGENTS[a]);
-    }
-  };
-
-  // clicking the main worktree of a project with nothing running opens the default agent right away,
-  // ready to delegate with /orchestration
-  const opening = new Set<string>();
-  const openWorktree = async (projectId: string, path: string, isMain: boolean) => {
+  // selecting a worktree never starts anything: agents and terminals come from the user or from restoring sessions
+  const openWorktree = async (_projectId: string, path: string, _isMain: boolean) => {
     if (editorDirty()) {
       if (!(await confirmDiscard())) return;
       setEditorDirty(false);
     }
     selectWorktree(path);
-    if (!isMain || opening.has(path)) return;
-    await refreshSessions();
-    if (sessionsOf(path).length > 0) return;
-    opening.add(path);
-    try {
-      await launchDefaultAgent(projectId, path, defaultAgent(), AGENTS[defaultAgent()]);
-      await refreshSessions();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      opening.delete(path);
-    }
   };
 
   const run = async (f: () => Promise<unknown>) => {
@@ -109,12 +83,8 @@ export function Sidebar() {
       if (typeof dir !== "string") return;
       const added = await addProject(dir);
       await refreshProjects();
-      // a new project opens straight into Claude on its main worktree
       const main = projects().find((p) => p.id === added.id)?.worktrees.find((w) => w.is_main);
-      if (main) {
-        selectWorktree(main.path);
-        if (sessionsOf(main.path).length === 0) await openWith(added.id, main.path);
-      }
+      if (main) selectWorktree(main.path);
     });
 
   const [pendingWt, setPendingWt] = createSignal<{ project: string; name: string } | null>(null);
@@ -133,7 +103,6 @@ export function Sidebar() {
         setPendingWt(null);
       }
       selectWorktree(w.path);
-      await openWith(projectId, w.path);
       const setup = projects().find((p) => p.id === projectId)?.setup;
       if (setup) {
         const [program, args] = await defaultShell();
