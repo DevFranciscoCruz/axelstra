@@ -1,6 +1,6 @@
-import { For, Show, createEffect, createResource } from "solid-js";
-import { gitDiff } from "./api";
-import { baseRef, changes, openDiff, selectedWorktree } from "./store";
+import { For, Show, createEffect, createResource, createSignal } from "solid-js";
+import { gitDiff, writeSession } from "./api";
+import { activeSession, baseRef, changes, openDiff, selectedWorktree, sessionsOf, setActiveSession, setOpenDiff } from "./store";
 
 type Row = { kind: "hunk" | "add" | "del" | "ctx" | "note"; old?: number; neu?: number; text: string };
 
@@ -43,6 +43,30 @@ export function DiffView() {
   );
   createEffect(() => key() && void 0);
   const rows = () => parseDiff(text() ?? "");
+
+  // comment on a line and send it to a running agent of this worktree
+  const [commenting, setCommenting] = createSignal<number | null>(null);
+  const [note, setNote] = createSignal("");
+  const [sendMsg, setSendMsg] = createSignal("");
+  const sendFeedback = async (r: Row) => {
+    const agents = sessionsOf(selectedWorktree()).filter((s) => s.running && s.meta?.kind === "agent");
+    const target = agents.find((s) => s.id === activeSession()) ?? agents[0];
+    if (!target) {
+      setSendMsg("Nenhum agente a correr neste worktree. Abre um com ✦.");
+      return;
+    }
+    const line = r.neu ?? r.old;
+    const code = r.text.trim().replace(/\s+/g, " ").slice(0, 200);
+    const msg = `Revisão de ${openDiff()} (linha ${line}), código: \`${code}\`. ${note().trim().replace(/\s+/g, " ")}`;
+    try {
+      await writeSession(target.id, msg + "\r");
+      setCommenting(null);
+      setOpenDiff(null);
+      setActiveSession(target.id);
+    } catch (e) {
+      setSendMsg(String(e));
+    }
+  };
   const file = () => changes()?.files.find((x) => x.path === openDiff());
 
   return (
@@ -66,15 +90,43 @@ export function DiffView() {
             <table>
               <tbody>
                 <For each={rows()}>
-                  {(r) => (
-                    <tr class={`row ${r.kind}`}>
-                      <td class="ln">{r.old ?? ""}</td>
-                      <td class="ln">{r.neu ?? ""}</td>
-                      <td class="code">
-                        {r.kind === "add" ? "+" : r.kind === "del" ? "−" : " "}
-                        {r.text}
-                      </td>
-                    </tr>
+                  {(r, i) => (
+                    <>
+                      <tr class={`row ${r.kind}`}>
+                        <td class="ln">{r.old ?? ""}</td>
+                        <td class="ln">
+                          <Show when={r.kind !== "hunk" && r.kind !== "note"} fallback={r.neu ?? ""}>
+                            <button class="cbtn" title="Comentar e enviar ao agente" onClick={() => { setNote(""); setCommenting(commenting() === i() ? null : i()); }}>
+                              💬
+                            </button>
+                            <span class="lnum">{r.neu ?? ""}</span>
+                          </Show>
+                        </td>
+                        <td class="code">
+                          {r.kind === "add" ? "+" : r.kind === "del" ? "−" : " "}
+                          {r.text}
+                        </td>
+                      </tr>
+                      <Show when={commenting() === i()}>
+                        <tr class="cmt">
+                          <td colspan="3">
+                            <textarea
+                              placeholder="O que o agente deve mudar aqui?"
+                              value={note()}
+                              onInput={(e) => setNote(e.currentTarget.value)}
+                              ref={(el) => queueMicrotask(() => el.focus())}
+                            />
+                            <div class="cmt-actions">
+                              <button class="primary" disabled={!note().trim()} onClick={() => void sendFeedback(r)}>
+                                Enviar ao agente
+                              </button>
+                              <button onClick={() => setCommenting(null)}>Cancelar</button>
+                              <span class="cmt-msg">{sendMsg()}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      </Show>
+                    </>
                   )}
                 </For>
               </tbody>
