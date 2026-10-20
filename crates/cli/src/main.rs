@@ -34,6 +34,13 @@ enum Cmd {
     Projects,
     /// Type into a session. Escapes: \e \r \n \xHH
     Send { id: u32, data: String },
+    /// Print a bundled agent guide: `axelstra skills get axelstration`
+    Skills {
+        #[arg(value_parser = ["get"])]
+        action: String,
+        #[arg(value_parser = ["axelstration"])]
+        name: String,
+    },
     /// Install the /axelstration skill for Claude Code and Codex
     InstallSkill,
     /// Send a message to an agent session: pasted as one block, then Enter
@@ -187,6 +194,7 @@ fn main() -> Result<()> {
             let c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
             ctl::run(cmd, c)?;
         }
+        Cmd::Skills { .. } => print!("{}", axelstra_daemon::skill::guide()),
         Cmd::InstallSkill => {
             for f in axelstra_daemon::skill::install_forced()? {
                 println!("installed {}", f.display());
