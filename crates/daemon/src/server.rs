@@ -303,6 +303,16 @@ fn dispatch(
             let base = p["base"].as_str();
             Ok(serde_json::to_value(tokio::task::block_in_place(|| crate::changes::changes(&wt, base))?)?)
         }
+        "git.log" | "git.show" => {
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            tokio::task::block_in_place(|| -> Result<Value> {
+                Ok(if req.method == "git.log" {
+                    json!({"commits": crate::changes::log(&wt, p["base"].as_str())?})
+                } else {
+                    json!({"diff": crate::changes::show(&wt, p["sha"].as_str().unwrap_or_default())?})
+                })
+            })
+        }
         "git.diff" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;

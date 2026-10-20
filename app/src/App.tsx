@@ -1,9 +1,11 @@
 import { For, Show, createEffect, on, onCleanup, onMount } from "solid-js";
 import { SessionInfo, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
+import { CommitView } from "./CommitView";
 import { Editor } from "./Editor";
 import { FilesPanel } from "./FilesPanel";
 import { Kanban } from "./Kanban";
+import { ReviewPanel } from "./ReviewPanel";
 import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
 import { TerminalView } from "./TerminalView";
@@ -12,8 +14,10 @@ import {
   changesMode,
   findWorktree,
   openDiff,
+  openCommit,
   openFile,
   rightTab,
+  setOpenCommit,
   setOpenFile,
   setShowKanban,
   showKanban,
@@ -95,10 +99,11 @@ export function App() {
               {(s) => (
                 <div
                   class="tab"
-                  classList={{ active: !showKanban() && openDiff() === null && openFile() === null && activeSession() === s.id }}
+                  classList={{ active: !showKanban() && openDiff() === null && openFile() === null && openCommit() === null && activeSession() === s.id }}
                   onClick={() => {
                     setOpenDiff(null);
                     setOpenFile(null);
+                    setOpenCommit(null);
                     setShowKanban(false);
                     setActiveSession(s.id);
                   }}
@@ -118,6 +123,17 @@ export function App() {
                 </div>
               )}
             </For>
+            <Show when={openCommit()}>
+              {(c) => (
+                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={c().subject} onClick={() => setShowKanban(false)}>
+                  <span class="dtag">⎇</span>
+                  <span>{c().short}</span>
+                  <button class="x" title="Fechar commit" onClick={() => setOpenCommit(null)}>
+                    ×
+                  </button>
+                </div>
+              )}
+            </Show>
             <Show when={openFile()}>
               {(p) => (
                 <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} onClick={() => setShowKanban(false)}>
@@ -146,6 +162,7 @@ export function App() {
           </div>
           <div class="term-area">
             <Show when={!showKanban()} fallback={<Kanban project={current()!.project.id} />}>
+            <Show when={openCommit() === null} fallback={<CommitView />}>
             <Show
               when={openFile() === null}
               fallback={
@@ -170,11 +187,12 @@ export function App() {
             </Show>
             </Show>
             </Show>
+            </Show>
           </div>
         </Show>
       </main>
       <Show when={current()}>
-        <Show when={rightTab() === "files"} fallback={<ChangesPanel />}>
+        <Show when={rightTab() === "files"} fallback={rightTab() === "review" ? <ReviewPanel /> : <ChangesPanel />}>
           <FilesPanel />
         </Show>
       </Show>

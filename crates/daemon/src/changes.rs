@@ -161,3 +161,78 @@ pub fn diff(wt: &Path, path: &str, base: Option<&str>) -> Result<String> {
     }
     Ok(out)
 }
+
+#[derive(Debug, Serialize)]
+pub struct Commit {
+    pub sha: String,
+    pub short: String,
+    pub author: String,
+    pub date: String,
+    pub subject: String,
+    pub files: u32,
+    pub added: u32,
+    pub removed: u32,
+}
+
+/// Commits on HEAD that `base` does not have (newest first). Without a base: the last 50.
+pub fn log(wt: &Path, base: Option<&str>) -> Result<Vec<Commit>> {
+    let range = base.map(|b| format!("{b}..HEAD"));
+    let mut args = vec!["log", "--no-color", "--no-renames", "-n", "50", "--numstat", "--format=%x1e%H%x1f%h%x1f%an%x1f%aI%x1f%s"];
+    if let Some(r) = &range {
+        args.push(r);
+    }
+    let o = git::run(wt, &args)?;
+    if !o.ok {
+        bail!("git log: {}", o.stderr);
+    }
+    let mut out = Vec::new();
+    for rec in o.stdout.split('\u{1e}').filter(|r| !r.trim().is_empty()) {
+        let mut lines = rec.lines();
+        let head: Vec<&str> = lines.next().unwrap_or_default().split('\u{1f}').collect();
+        if head.len() < 5 {
+            continue;
+        }
+        let (mut files, mut added, mut removed) = (0, 0, 0);
+        for l in lines {
+            let f: Vec<&str> = l.split('\t').collect();
+            if f.len() == 3 {
+                files += 1;
+                // binary files show "-"
+                added += f[0].parse::<u32>().unwrap_or(0);
+                removed += f[1].parse::<u32>().unwrap_or(0);
+            }
+        }
+        out.push(Commit {
+            sha: head[0].into(),
+            short: head[1].into(),
+            author: head[2].into(),
+            date: head[3].into(),
+            subject: head[4].into(),
+            files,
+            added,
+            removed,
+        });
+    }
+    Ok(out)
+}
+
+/// Full patch of one commit. `sha` must be a plain hex id so it can never act as an option.
+pub fn show(wt: &Path, sha: &str) -> Result<String> {
+    if !(7..=40).contains(&sha.len()) || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+        bail!("invalid commit id");
+    }
+    let o = git::run(wt, &["show", "--no-color", "--no-ext-diff", "--no-renames", "-U3", "--format=", sha])?;
+    if !o.ok {
+        bail!("git show: {}", o.stderr);
+    }
+    let mut s = o.stdout;
+    if s.len() > MAX_DIFF_BYTES {
+        let mut cut = MAX_DIFF_BYTES;
+        while !s.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        s.truncate(cut);
+        s.push_str("\n… diff truncated\n");
+    }
+    Ok(s)
+}
