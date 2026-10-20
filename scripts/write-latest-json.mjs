@@ -1,5 +1,6 @@
-// Writes the Tauri updater manifest. The updater needs an absolute installer URL.
-// usage: node write-latest-json.mjs --version 0.2.0 --sig-file setup.exe.sig --base-url https://updates.example/ --notes "text" --out latest.json
+// Writes the Tauri updater manifest. The url is relative (`releases/<v>/setup.exe`): the update
+// proxy rewrites it to its own download route, so the app never sees where the file lives.
+// usage: node write-latest-json.mjs --version 0.2.0 --sig-file setup.exe.sig --notes "text" --out latest.json
 import { readFileSync, writeFileSync } from "node:fs";
 
 const arg = (name, fallback) => {
@@ -13,14 +14,13 @@ const arg = (name, fallback) => {
 
 const version = arg("version");
 if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`bad version ${version}`);
-const base = arg("base-url").replace(/\/+$/, "");
 const manifest = {
   version,
   notes: arg("notes", ""),
   pub_date: new Date().toISOString(),
   platforms: {
     "windows-x86_64": {
-      url: `${base}/releases/${version}/setup.exe`,
+      url: `releases/${version}/setup.exe`,
       signature: readFileSync(arg("sig-file"), "utf8").trim(),
     },
   },

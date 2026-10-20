@@ -33,7 +33,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI2RjlFMjJFNEZDNjdBOTAKUldTUWVzWlBMdUw1dHFKYW9MQWM5Q3ZtSDArSWpYVkpFSzErSjRRN2VQUEVMVldtcUpDZU1ud1oK",
       "endpoints": [
-        "https://pub-d090b108d56046b7884d3b169f33bdce.r2.dev/latest.json"
+        "https://axelstra-updates.invalid/latest.json"
       ],
       "windows": {
         "installMode": "passive"

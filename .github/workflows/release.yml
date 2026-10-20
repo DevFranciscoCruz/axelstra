@@ -1,12 +1,8 @@
 name: release
-# Push a tag `vX.Y.Z` to build, sign and publish. The installer and latest.json go to a public
-# Cloudflare R2 bucket because the repo is private: the app's updater cannot read GitHub releases.
-# Same layout as ScorpioBotsPanel: releases/<version>/setup.exe(.sig) + latest.json.
-#
-# Needed in the repo settings:
-#   secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD,
-#            R2_UPDATES_ACCESS_KEY_ID, R2_UPDATES_SECRET_ACCESS_KEY
-#   vars:    R2_ACCOUNT_ID, R2_BUCKET (e.g. axelstra-releases), UPDATES_BASE_URL (public URL of the bucket)
+# Push a tag `vX.Y.Z` to build, sign and publish. The installer, its .sig and latest.json are
+# attached to the GitHub Release (the repo is private: the app never reads GitHub itself, a
+# server-side proxy holding a read-only token serves /update/latest and the download).
+# Needed secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
 on:
   push:
     tags: ['v*']
@@ -16,7 +12,7 @@ on:
         description: Build and sign only; keep the installer on the run, publish nothing
         type: boolean
         default: true
-permissions: { contents: read }
+permissions: { contents: write }
 jobs:
   release:
     # Swap for the self-hosted runner label if the repo gets access to one.
@@ -59,18 +55,19 @@ jobs:
           node scripts/write-latest-json.mjs --version "$V" --sig-file "out/releases/$V/setup.exe.sig" \
             --base-url "${{ vars.UPDATES_BASE_URL }}" --notes "Axelstra $V" --out out/latest.json
           sha256sum "out/releases/$V/setup.exe"
-      - name: Upload to R2
+      - name: Attach to the GitHub Release
         if: env.DRY_RUN != 'true'
         shell: bash
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_UPDATES_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_UPDATES_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
+          GH_TOKEN: ${{ github.token }}
         run: |
-          E="https://${{ vars.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
-          aws s3 cp out/releases "s3://${{ vars.R2_BUCKET }}/releases" --recursive --endpoint-url "$E"
-          # latest.json last: clients only see a version once its installer is already there
-          aws s3 cp out/latest.json "s3://${{ vars.R2_BUCKET }}/latest.json" --endpoint-url "$E" --content-type application/json
+          V="${{ steps.v.outputs.version }}"
+          FILES=("out/releases/$V/setup.exe" "out/releases/$V/setup.exe.sig" out/latest.json)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${FILES[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${FILES[@]}" --title "Axelstra $V" --notes "Axelstra $V"
+          fi
       - name: Keep the dry-run installer on the run
         if: env.DRY_RUN == 'true'
         uses: actions/upload-artifact@v4
