@@ -586,3 +586,12 @@ button.danger { color: #ef7676; }
 .dot.work { background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
 .dot.attn { background: #e5c07b; box-shadow: 0 0 0 3px rgba(229, 192, 123, .25); animation: none; }
 @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.75); } }
+
+.pal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); display: flex; justify-content: center; align-items: flex-start; padding-top: 14vh; z-index: 60; }
+.pal { width: min(560px, 92vw); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 48px rgba(0, 0, 0, .55); overflow: hidden; }
+.pal-input { width: 100%; background: transparent; color: var(--text); border: 0; border-bottom: 1px solid var(--line); padding: 14px 16px; font: inherit; font-size: 14px; outline: none; }
+.pal-list { max-height: 340px; overflow-y: auto; padding: 6px; }
+.pal-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+.pal-item.on { background: rgba(167, 139, 250, .16); }
+.pal-hint { color: var(--muted); font-size: 11px; }
+.pal-empty { padding: 14px; color: var(--muted); font-size: 12px; text-align: center; }

@@ -8,6 +8,7 @@ import { Kanban } from "./Kanban";
 import { ReviewPanel } from "./ReviewPanel";
 import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
+import { Palette } from "./Palette";
 import { TerminalView } from "./TerminalView";
 import {
   activeSession,
@@ -153,6 +154,16 @@ export function App() {
           </div>
         )}
       </Show>
+      <Palette
+        actions={() =>
+          current()
+            ? [
+                { label: `Novo agente (${defaultAgent()})`, run: () => void newAgent() },
+                { label: "Novo terminal", run: () => void newTerminal() },
+              ]
+            : []
+        }
+      />
       <Sidebar />
       <main class="main">
         <Show when={current()} fallback={<div class="placeholder">Adicione um projeto e escolha um worktree</div>}>
