@@ -30,6 +30,7 @@ struct State {
     pending: Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>,
 }
 
+mod stats;
 mod voice;
 
 fn connect() -> Result<Client> {
@@ -362,7 +363,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![daemon_call, daemon_call_bg, session_write, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write, notify_session, app_quit, voice::voice_status, voice::voice_download, voice::voice_transcribe])
+        .invoke_handler(tauri::generate_handler![daemon_call, daemon_call_bg, session_write, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write, notify_session, app_quit, stats::keep_awake, stats::mem_usage, voice::voice_status, voice::voice_download, voice::voice_transcribe])
         .build(tauri::generate_context!())
         .expect("error while building axelstra")
         .run(|app, event| {

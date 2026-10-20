@@ -310,6 +310,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "axelstra-core",
  "axelstra-daemon",
  "png 0.17.16",
  "serde",
@@ -323,6 +324,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-winrt-notification",
  "ureq",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

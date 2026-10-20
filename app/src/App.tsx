@@ -17,6 +17,7 @@ import { CloseConfirm } from "./CloseConfirm";
 import { ConfirmHost } from "./Confirm";
 import { AgentSearch } from "./AgentSearch";
 import { UsageChip } from "./Usage";
+import { StatusBar } from "./StatusBar";
 import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
 import { ErrorToast } from "./ErrorToast";
 import { Modal } from "./Modal";
@@ -517,6 +518,7 @@ export function App() {
           <FilesPanel />
         </Show>
       </Show>
+      <StatusBar />
     </div>
   );
 }

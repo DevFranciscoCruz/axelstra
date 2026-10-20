@@ -37,7 +37,7 @@ body {
   display: grid;
   grid-template-columns: var(--left-w) minmax(0, 1fr);
   position: relative;
-  height: 100%;
+  height: calc(100% - 24px);
   overflow: hidden;
 }
 
@@ -830,3 +830,9 @@ kbd { font: inherit; font-size: 11px; border: 1px solid var(--line-3); border-bo
 .search-hit:hover { background: #1b1b25; }
 .search-hit.off { cursor: default; }
 .item.wt.pending { opacity: .75; cursor: default; }
+
+.statusbar { position: fixed; left: 0; right: 0; bottom: 0; height: 24px; display: flex; align-items: center; gap: 4px; padding: 0 8px; background: var(--panel); border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; z-index: 5; user-select: none; }
+.sb-item { display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 6px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; cursor: default; }
+button.sb-item { cursor: pointer; }
+button.sb-item:hover { background: rgba(255, 255, 255, .06); color: var(--text); }
+.sb-item.on { color: var(--ok); }
