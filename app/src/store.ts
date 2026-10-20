@@ -74,6 +74,9 @@ export const [showKanban, setShowKanban] = createSignal(false);
 /** a second terminal shown beside the active one (split view); null = no split */
 export const [splitSession, setSplitSession] = createSignal<number | null>(null);
 
+/** dev-server ports opened by the selected worktree's terminals */
+export const [ports, setPorts] = createSignal<number[]>([]);
+
 export const [activeSession, setActiveSession] = createSignal<number | null>(null);
 
 /** "working": produced output in the last few seconds; "idle": quiet; "done": the process ended */

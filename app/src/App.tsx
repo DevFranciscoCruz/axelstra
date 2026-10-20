@@ -1,5 +1,5 @@
 import { For, Show, createEffect, on, onCleanup, onMount } from "solid-js";
-import { SessionInfo, watchWorktree, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
+import { SessionInfo, listPorts, watchWorktree, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
 import { CommitView } from "./CommitView";
 import { Editor } from "./Editor";
@@ -9,6 +9,7 @@ import { ReviewPanel } from "./ReviewPanel";
 import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
 import { Palette } from "./Palette";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { PullsPanel } from "./PullsPanel";
 import { TerminalView } from "./TerminalView";
 import {
@@ -18,6 +19,8 @@ import {
   defaultAgent,
   setDefaultAgent,
   changesMode,
+  ports,
+  setPorts,
   splitSession,
   setSplitSession,
   setFsTick,
@@ -76,6 +79,29 @@ export function App() {
       }
     });
   });
+
+  // dev servers started in this worktree's terminals; a process lookup, so only while something runs
+  const refreshPorts = async () => {
+    const w = selectedWorktree();
+    if (!w || document.hidden || !sessionsOf(w).some((s) => s.running)) {
+      if (ports().length) setPorts([]);
+      return;
+    }
+    try {
+      const p = (await listPorts(w)).map((x) => x.port);
+      if (p.join() !== ports().join()) setPorts(p);
+    } catch {
+      /* transient */
+    }
+  };
+  onMount(() => {
+    const t = setInterval(() => void refreshPorts(), 8000);
+    onCleanup(() => clearInterval(t));
+  });
+  createEffect(on(selectedWorktree, () => {
+    setPorts([]);
+    void refreshPorts();
+  }));
 
   const tabs = () => sessionsOf(selectedWorktree());
   const current = () => findWorktree(selectedWorktree());
@@ -260,6 +286,13 @@ export function App() {
                 </div>
               )}
             </Show>
+            <For each={ports()}>
+              {(port) => (
+                <button class="port" title={`Abrir http://localhost:${port} no navegador`} onClick={() => void openUrl(`http://localhost:${port}`)}>
+                  :{port} ↗
+                </button>
+              )}
+            </For>
             <button class="icon add" title="Dividir: ver dois terminais lado a lado" onClick={() => void toggleSplit()}>
               ⫼
             </button>
