@@ -67,41 +67,8 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             c.call("worktree.remove", json!({"project": p["id"], "path": wt}))?;
         }
         Cmd::Agent { worktree, agent, prompt, report_to, when, idle_secs, lines } => {
-            if agent != "claude" && agent != "codex" {
-                bail!("--agent must be claude or codex");
-            }
-            let projects = c.call("project.list", json!({}))?;
-            let (p, wt) = find_worktree(&projects, &worktree)?;
-            let dir = c.call("app.dir", json!({}))?["dir"].as_str().unwrap_or_default().to_string();
-            let (program, mut args) = default_shell();
-            let ps = program.to_ascii_lowercase().contains("powershell") || program.to_ascii_lowercase().contains("pwsh");
-            let key = (agent == "claude").then(new_uuid);
-            let hooks = format!("{dir}/hooks.json");
-            let mut line = agent.clone();
-            if let Some(k) = &key {
-                if Path::new(&hooks).exists() {
-                    line.push_str(&format!(" --settings {}", if ps { ps_quote(&hooks) } else { sh_quote(&hooks) }));
-                }
-                line.push_str(&format!(" --session-id {k}"));
-            }
-            if let Some(pr) = &prompt {
-                line.push(' ');
-                line.push_str(&if ps { ps_quote(pr) } else { sh_quote(pr) });
-            }
             let reap = reap_for(report_to, when.as_deref(), "idle", idle_secs, lines, std::env::var("AXELSTRA_SESSION").ok().as_deref())?;
-            shell_run(&program, &mut args, ps, &line, reap.is_none());
-            let mut meta = json!({"project": p["id"], "worktree": wt, "kind": "agent", "agent": agent});
-            let mut env = json!({});
-            if let Some(k) = &key {
-                meta["resume"] = json!(k);
-                meta["key"] = json!(k);
-                env = json!({"AXELSTRA_KEY": k, "AXELSTRA_DIR": dir});
-            }
-            let r = c.call(
-                "session.spawn",
-                with_reap(json!({"program": program, "args": args, "cwd": wt, "label": agent, "meta": meta, "env": env, "cols": 120, "rows": 30}), reap),
-            )?;
-            println!("{}", r["id"]);
+            println!("{}", spawn_agent(&mut c, &worktree, &agent, prompt.as_deref(), reap, false)?);
         }
         Cmd::Terminal { worktree, title, cmd, report_to, when, idle_secs, lines } => {
             let projects = c.call("project.list", json!({}))?;
@@ -121,7 +88,7 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             let meta = json!({"project": p["id"], "worktree": wt, "kind": "terminal"});
             let r = c.call(
                 "session.spawn",
-                with_reap(json!({"program": program, "args": args, "cwd": wt, "label": label, "meta": meta, "cols": 120, "rows": 30}), reap),
+                with_reap(json!({"program": program, "args": args, "cwd": wt, "label": label, "meta": meta, "cols": 120, "rows": 30}), reap, false),
             )?;
             println!("{}", r["id"]);
         }
@@ -134,7 +101,7 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             let meta = json!({"project": p["id"], "worktree": wt, "kind": "terminal"});
             let r = c.call(
                 "session.spawn",
-                with_reap(json!({"program": program, "args": args, "cwd": wt, "label": label, "meta": meta, "cols": 120, "rows": 30}), reap),
+                with_reap(json!({"program": program, "args": args, "cwd": wt, "label": label, "meta": meta, "cols": 120, "rows": 30}), reap, false),
             )?;
             println!("{}", r["id"]);
         }
@@ -219,9 +186,48 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             }
             Err(e) => return Err(e),
         },
+        c2 @ (Cmd::Msg { .. } | Cmd::Inbox { .. } | Cmd::Ask { .. } | Cmd::Reply { .. } | Cmd::Done { .. } | Cmd::Escalate { .. } | Cmd::Limit { .. } | Cmd::Flow { .. }) => return super::orchcmd::run(c2, c),
         _ => unreachable!(),
     }
     Ok(())
+}
+
+/// Starts a claude/codex session in `worktree` (visible in the app); returns its session id.
+pub(crate) fn spawn_agent(c: &mut Client, worktree: &Path, agent: &str, prompt: Option<&str>, reap: Option<Value>, worker: bool) -> Result<u32> {
+    if agent != "claude" && agent != "codex" {
+        bail!("--agent must be claude or codex");
+    }
+    let projects = c.call("project.list", json!({}))?;
+    let (p, wt) = find_worktree(&projects, worktree)?;
+    let dir = c.call("app.dir", json!({}))?["dir"].as_str().unwrap_or_default().to_string();
+    let (program, mut args) = default_shell();
+    let ps = program.to_ascii_lowercase().contains("powershell") || program.to_ascii_lowercase().contains("pwsh");
+    let key = (agent == "claude").then(new_uuid);
+    let hooks = format!("{dir}/hooks.json");
+    let mut line = agent.to_string();
+    if let Some(k) = &key {
+        if Path::new(&hooks).exists() {
+            line.push_str(&format!(" --settings {}", if ps { ps_quote(&hooks) } else { sh_quote(&hooks) }));
+        }
+        line.push_str(&format!(" --session-id {k}"));
+    }
+    if let Some(pr) = prompt {
+        line.push(' ');
+        line.push_str(&if ps { ps_quote(pr) } else { sh_quote(pr) });
+    }
+                shell_run(&program, &mut args, ps, &line, reap.is_none());
+    let mut meta = json!({"project": p["id"], "worktree": wt, "kind": "agent", "agent": agent});
+    let mut env = json!({});
+    if let Some(k) = &key {
+        meta["resume"] = json!(k);
+        meta["key"] = json!(k);
+        env = json!({"AXELSTRA_KEY": k, "AXELSTRA_DIR": dir});
+    }
+    let r = c.call(
+        "session.spawn",
+        with_reap(json!({"program": program, "args": args, "cwd": wt, "label": agent, "meta": meta, "env": env, "cols": 120, "rows": 30}), reap, worker),
+    )?;
+    Ok(r["id"].as_u64().unwrap_or(0) as u32)
 }
 
 fn print_ls(v: &Value) {
@@ -275,7 +281,7 @@ fn find_project_by_ref<'a>(projects: &'a Value, r: &str) -> Option<&'a Value> {
 }
 
 /// (project, worktree path as the daemon knows it) for a worktree directory.
-fn find_worktree<'a>(projects: &'a Value, path: &Path) -> Result<(&'a Value, String)> {
+pub(crate) fn find_worktree<'a>(projects: &'a Value, path: &Path) -> Result<(&'a Value, String)> {
     let want = abs_norm(path);
     for p in projects.as_array().map(|a| a.as_slice()).unwrap_or_default() {
         for w in p["worktrees"].as_array().map(|a| a.as_slice()).unwrap_or_default() {
@@ -313,7 +319,7 @@ fn shell_run(program: &str, args: &mut Vec<String>, ps: bool, line: &str, keep_o
 }
 
 /// `--report-to` resolution: Some(None) means "this session", from $AXELSTRA_SESSION.
-fn reap_for(
+pub(crate) fn reap_for(
     report_to: Option<Option<u32>>,
     when: Option<&str>,
     default_when: &str,
@@ -342,15 +348,24 @@ fn reap_for(
     Ok(Some(r))
 }
 
-fn with_reap(mut params: Value, reap: Option<Value>) -> Value {
+/// Adds the worker bookkeeping to a spawn request: the reaper, the parent session (the one running this
+/// CLI, if any) and whether the session counts against the worker limit.
+pub(crate) fn with_reap(mut params: Value, reap: Option<Value>, worker: bool) -> Value {
+    let env_parent = std::env::var("AXELSTRA_SESSION").ok().and_then(|s| s.trim().parse::<u32>().ok());
     if let Some(r) = reap {
+        params["parent"] = r["parent"].clone();
         params["reap"] = r;
+    } else if let Some(p) = env_parent {
+        params["parent"] = json!(p);
+    }
+    if worker {
+        params["worker"] = json!(true);
     }
     params
 }
 
 /// Program and args that run one command line and exit (no interactive shell left behind).
-fn one_shot_line(line: &str) -> (String, Vec<String>) {
+pub(crate) fn one_shot_line(line: &str) -> (String, Vec<String>) {
     if cfg!(windows) {
         ("cmd".into(), vec!["/d".into(), "/c".into(), line.into()])
     } else {

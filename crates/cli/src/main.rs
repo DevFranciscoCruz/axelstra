@@ -43,6 +43,60 @@ enum Cmd {
     },
     /// Install the /axelstration skill for Claude Code and Codex
     InstallSkill,
+    /// Queue a message for another session; agents get a one-line notice, `axelstra inbox` reads it
+    Msg {
+        to: u32,
+        text: String,
+        #[arg(long)]
+        from: Option<u32>,
+        /// do not type a notice into the recipient
+        #[arg(long)]
+        quiet: bool,
+    },
+    /// Read this session's messages (unread unless --all)
+    Inbox {
+        #[arg(long)]
+        all: bool,
+        /// leave the messages unread
+        #[arg(long)]
+        no_mark: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        session: Option<u32>,
+    },
+    /// Ask another session a question and block until it answers (`axelstra reply`)
+    Ask {
+        to: u32,
+        text: String,
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
+    },
+    /// Answer message ID (the answer unblocks `axelstra ask`)
+    Reply { id: u64, text: String },
+    /// Worker: report the result to the parent session and finish (default parent: $AXELSTRA_PARENT)
+    Done {
+        text: String,
+        /// ok, failed or blocked
+        #[arg(long, default_value = "ok")]
+        status: String,
+        #[arg(long)]
+        to: Option<u32>,
+    },
+    /// Worker: ask the parent for help; this session shows as waiting until answered
+    Escalate {
+        text: String,
+        #[arg(long)]
+        to: Option<u32>,
+    },
+    /// Show or set the maximum number of workers running at once
+    Limit { n: Option<usize> },
+    /// Run a task graph from a JSON file: {"tasks":[{"id","worktree","agent"|"cmd","prompt","after":[..]}]}
+    Flow {
+        file: PathBuf,
+        #[arg(long, default_value_t = 3600)]
+        timeout: u64,
+    },
     /// Send a message to an agent session: pasted as one block, then Enter
     Say { id: u32, text: String },
     /// Print a session's output (history + live) for a few seconds
@@ -157,6 +211,7 @@ enum WtCmd {
 }
 
 mod ctl;
+mod orchcmd;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -180,6 +235,14 @@ fn main() -> Result<()> {
         | Cmd::Tail { .. }
         | Cmd::Send { .. }
         | Cmd::Say { .. }
+        | Cmd::Msg { .. }
+        | Cmd::Inbox { .. }
+        | Cmd::Ask { .. }
+        | Cmd::Reply { .. }
+        | Cmd::Done { .. }
+        | Cmd::Escalate { .. }
+        | Cmd::Limit { .. }
+        | Cmd::Flow { .. }
         | Cmd::AddProject { .. }
         | Cmd::SetSetup { .. }
         | Cmd::Projects
