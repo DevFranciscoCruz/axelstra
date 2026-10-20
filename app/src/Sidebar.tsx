@@ -116,13 +116,21 @@ export function Sidebar() {
       }
     });
 
+  const [pendingWt, setPendingWt] = createSignal<{ project: string; name: string } | null>(null);
   const submitWorktree = (projectId: string) =>
     run(async () => {
       const name = newName().trim();
       setCreating(null);
       setNewName("");
       if (!name) return;
-      const w = await createWorktree(projectId, name);
+      // git checks the files out, which takes a while in a big repo: show the row at once
+      setPendingWt({ project: projectId, name });
+      let w;
+      try {
+        w = await createWorktree(projectId, name);
+      } finally {
+        setPendingWt(null);
+      }
       selectWorktree(w.path);
       await openWith(projectId, w.path);
       const setup = projects().find((p) => p.id === projectId)?.setup;
@@ -285,6 +293,12 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 }}
                 ref={(el) => queueMicrotask(() => el.focus())}
               />
+            </Show>
+            <Show when={pendingWt()?.project === p.id}>
+              <div class="item wt pending">
+                <span class="dot work" />
+                <span class="name">A criar {pendingWt()!.name}…</span>
+              </div>
             </Show>
             <For each={[...p.worktrees].sort((a, b) => Number(b.is_main) - Number(a.is_main) || Number(isPinned(b.path)) - Number(isPinned(a.path)))}>
               {(w) => {

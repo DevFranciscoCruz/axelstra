@@ -20,6 +20,9 @@ struct State {
     control: Mutex<Option<Client>>,
     /// keystrokes only, so typing never waits behind a slow control call
     input: Mutex<Option<Client>>,
+    /// slow background polling (git status of every worktree, gh, transcript scans): its own connection,
+    /// so creating a worktree or listing sessions never waits behind it
+    bg: Mutex<Option<Client>>,
     attachments: Mutex<std::collections::HashMap<u32, Arc<AtomicBool>>>,
     /// write side of the change-event connection (see `watch_start`)
     watch: Mutex<Option<Client>>,
@@ -101,6 +104,16 @@ async fn daemon_call(state: tauri::State<'_, Arc<State>>, method: String, params
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_client(&st.control, |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        with_client(&st.bg, |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -349,7 +362,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![daemon_call, session_write, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write, notify_session, app_quit, voice::voice_status, voice::voice_download, voice::voice_transcribe])
+        .invoke_handler(tauri::generate_handler![daemon_call, daemon_call_bg, session_write, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write, notify_session, app_quit, voice::voice_status, voice::voice_download, voice::voice_transcribe])
         .build(tauri::generate_context!())
         .expect("error while building axelstra")
         .run(|app, event| {
