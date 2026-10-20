@@ -1,4 +1,3 @@
-#![cfg(windows)]
 
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
@@ -83,7 +82,7 @@ fn projects_worktrees_and_session_meta() {
     let sid = c
         .call(
             "session.spawn",
-            json!({"program": "cmd", "args": ["/q"], "cwd": wt["path"], "label": "shell",
+            json!({"program": if cfg!(windows) { "cmd" } else { "sh" }, "args": if cfg!(windows) { vec!["/q"] } else { vec![] }, "cwd": wt["path"], "label": "shell",
                    "meta": {"project": id, "worktree": wt["path"]}}),
         )
         .unwrap()["id"]

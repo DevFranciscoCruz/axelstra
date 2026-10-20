@@ -1,4 +1,3 @@
-#![cfg(windows)]
 
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
@@ -48,11 +47,18 @@ fn ui_flow_cards_to_merged_branch() {
     c.call("kanban.save", json!({"project": pid, "title": "beta", "status": "todo", "depends_on": ["alpha"]})).unwrap();
     c.call("kanban.save", json!({"project": pid, "title": "idea only", "status": "backlog"})).unwrap();
 
-    let script = axelstra_core::git::canon(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/fake-agent.ps1")).unwrap();
+    let tools = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools");
+    let agent: Vec<String> = if cfg!(windows) {
+        let script = axelstra_core::git::canon(&tools.join("fake-agent.ps1")).unwrap();
+        ["powershell", "-NoProfile", "-File", &script.to_string_lossy()].map(String::from).to_vec()
+    } else {
+        let script = axelstra_core::git::canon(&tools.join("fake-agent.sh")).unwrap();
+        ["sh", &script.to_string_lossy()].map(String::from).to_vec()
+    };
     let r = c
         .call(
             "orch.start",
-            json!({"project": pid, "agent": ["powershell", "-NoProfile", "-File", script.to_string_lossy()]}),
+            json!({"project": pid, "agent": agent}),
         )
         .unwrap();
     assert_eq!(r["state"], "running");

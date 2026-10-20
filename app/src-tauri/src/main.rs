@@ -7,7 +7,6 @@ use anyhow::{Context, Result};
 use axelstra_daemon::client::{Client, Frame};
 use axelstra_daemon::proto;
 use serde_json::{json, Value};
-use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -41,18 +40,25 @@ fn connect() -> Result<Client> {
 
 /// Starts `axelstra daemon` detached, so it outlives this window.
 fn start_daemon() -> Result<()> {
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let beside = std::env::current_exe()?.with_file_name("axelstra.exe");
+    let name = if cfg!(windows) { "axelstra.exe" } else { "axelstra" };
+    let beside = std::env::current_exe()?.with_file_name(name);
     let exe = if beside.exists() { beside } else { "axelstra".into() };
-    Command::new(exe)
-        .arg("daemon")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW)
-        .spawn()
-        .context("start axelstra daemon (build it with `cargo build -p axelstra`)")?;
+    let mut cmd = Command::new(exe);
+    cmd.arg("daemon").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // own process group: closing the app (or its terminal) does not signal the daemon
+        cmd.process_group(0);
+    }
+    cmd.spawn().context("start axelstra daemon (build it with `cargo build -p axelstra`)")?;
     Ok(())
 }
 
@@ -133,11 +139,23 @@ fn session_detach(state: tauri::State<'_, Arc<State>>, id: u32) {
     }
 }
 
+/// What a "new terminal" should run on this OS: the user's login shell on Unix, PowerShell on Windows.
+#[tauri::command]
+fn default_shell() -> (String, Vec<String>) {
+    if cfg!(windows) {
+        ("powershell".into(), vec!["-NoLogo".into()])
+    } else {
+        let sh = std::env::var("SHELL").unwrap_or_else(|_| if cfg!(target_os = "macos") { "/bin/zsh".into() } else { "/bin/bash".into() });
+        // a login shell loads the user's PATH (Homebrew, nvm...), which a GUI app does not inherit
+        (sh, vec!["-l".into()])
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(State::default()))
-        .invoke_handler(tauri::generate_handler![daemon_call, session_write, session_attach, session_detach])
+        .invoke_handler(tauri::generate_handler![daemon_call, session_write, session_attach, session_detach, default_shell])
         .run(tauri::generate_context!())
         .expect("error while running axelstra");
 }

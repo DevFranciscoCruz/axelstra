@@ -1,5 +1,6 @@
 //! Process-tree ownership. On Windows a Job Object with KILL_ON_JOB_CLOSE
-//! guarantees agents die with the daemon and lets us kill a whole tree.
+//! guarantees agents die with the daemon and lets us kill a whole tree; on
+//! Unix the same is done with process groups.
 
 use anyhow::{bail, Result};
 use std::process::{Child, Command};
@@ -110,27 +111,62 @@ mod imp {
 #[cfg(not(windows))]
 mod imp {
     use super::*;
-    pub struct Job(std::sync::Mutex<Option<u32>>);
+    use std::os::unix::process::CommandExt;
+    use std::sync::Mutex;
+
+    /// Unix has no Job Object: each tracked process leads its own process group
+    /// (portable-pty makes the pty child a session leader; `spawn` below uses
+    /// `process_group(0)`), and killing the group takes the whole tree with it.
+    pub struct Job(Mutex<Vec<i32>>);
+
     impl Job {
         pub fn new() -> Result<Job> {
             Ok(Job(Default::default()))
         }
+
         pub fn spawn(&self, cmd: &mut Command) -> Result<Child> {
+            cmd.process_group(0);
             let c = cmd.spawn()?;
-            *self.0.lock().unwrap() = Some(c.id());
+            self.0.lock().unwrap().push(c.id() as i32);
             Ok(c)
         }
+
         pub fn assign_pid(&self, pid: u32) -> Result<()> {
-            *self.0.lock().unwrap() = Some(pid);
+            self.0.lock().unwrap().push(pid as i32);
             Ok(())
         }
+
         pub fn kill(&self) {
-            if let Some(pid) = *self.0.lock().unwrap() {
-                let _ = Command::new("kill").args(["-9", &pid.to_string()]).status();
+            for pgid in self.0.lock().unwrap().iter() {
+                // the group first (children), the leader itself in case it left the group
+                unsafe {
+                    libc::killpg(*pgid, libc::SIGKILL);
+                    libc::kill(*pgid, libc::SIGKILL);
+                }
             }
         }
+
+        /// (resident memory bytes of the groups right now, cpu ticks: not tracked on unix)
         pub fn usage(&self) -> (u64, u64) {
-            (0, 0)
+            let groups = self.0.lock().unwrap().clone();
+            let Ok(o) = Command::new("ps").args(["-A", "-o", "pgid=,rss="]).output() else { return (0, 0) };
+            let mut kib = 0u64;
+            for l in String::from_utf8_lossy(&o.stdout).lines() {
+                let mut f = l.split_whitespace();
+                if let (Some(g), Some(r)) = (f.next().and_then(|x| x.parse::<i32>().ok()), f.next().and_then(|x| x.parse::<u64>().ok())) {
+                    if groups.contains(&g) {
+                        kib += r;
+                    }
+                }
+            }
+            (kib * 1024, 0)
+        }
+    }
+
+    // like KILL_ON_JOB_CLOSE: dropping the session ends its processes
+    impl Drop for Job {
+        fn drop(&mut self) {
+            self.kill();
         }
     }
 }

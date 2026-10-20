@@ -1,5 +1,4 @@
-//! End-to-end orchestration tests driven by tools/fake-agent.ps1.
-#![cfg(windows)]
+//! End-to-end orchestration tests driven by tools/fake-agent.ps1 (Windows) / fake-agent.sh (Unix).
 
 use axelstra_core::orch::{self, Options, Report};
 use axelstra_core::{card, git};
@@ -46,19 +45,23 @@ impl Env {
     }
 
     fn run(&self, name: &str) -> Report {
-        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/fake-agent.ps1");
-        let script = git::canon(&script).unwrap();
+        let tools = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools");
         let marker = self.root.join("flaky.marker");
+        let agent: Vec<String> = if cfg!(windows) {
+            let script = git::canon(&tools.join("fake-agent.ps1")).unwrap();
+            ["powershell", "-NoProfile", "-File", &script.to_string_lossy(), "-Marker", &marker.to_string_lossy()]
+                .map(String::from)
+                .to_vec()
+        } else {
+            let script = git::canon(&tools.join("fake-agent.sh")).unwrap();
+            ["sh", &script.to_string_lossy(), &marker.to_string_lossy()].map(String::from).to_vec()
+        };
         orch::run(&Options {
             repo: self.repo.clone(),
             name: name.into(),
             max_concurrency: 2,
             wt_root: self.root.join("wt"),
-            agent_override: Some(
-                ["powershell", "-NoProfile", "-File", &script.to_string_lossy(), "-Marker", &marker.to_string_lossy()]
-                    .map(String::from)
-                    .to_vec(),
-            ),
+            agent_override: Some(agent),
             poll_ms: 100,
             runner: None,
         })

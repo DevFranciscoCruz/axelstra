@@ -160,21 +160,25 @@ impl Session {
     }
 }
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
-    fn spawn(args: &[&str]) -> Session {
-        Session::spawn(&Spawn {
-            program: "cmd".into(),
-            args: args.iter().map(|s| s.to_string()).collect(),
-            cwd: None,
-            env: vec![],
-            cols: 80,
-            rows: 24,
-        })
-        .unwrap()
+    /// Runs one command line in the platform shell.
+    fn spawn_cmd(line: &str) -> Session {
+        let (program, args): (&str, Vec<String>) = if cfg!(windows) {
+            ("cmd", vec!["/c".into(), line.into()])
+        } else {
+            ("sh", vec!["-c".into(), line.into()])
+        };
+        Session::spawn(&Spawn { program: program.into(), args, cwd: None, env: vec![], cols: 80, rows: 24 }).unwrap()
+    }
+
+    /// An interactive shell reading from the pty.
+    fn spawn_shell() -> Session {
+        let (program, args): (&str, Vec<String>) = if cfg!(windows) { ("cmd", vec!["/q".into()]) } else { ("sh", vec![]) };
+        Session::spawn(&Spawn { program: program.into(), args, cwd: None, env: vec![], cols: 80, rows: 24 }).unwrap()
     }
 
     fn wait_for(s: &Session, needle: &str) -> bool {
@@ -194,7 +198,7 @@ mod tests {
 
     #[test]
     fn captures_output_and_late_subscriber_replays() {
-        let s = spawn(&["/c", "echo hello-axelstra"]);
+        let s = spawn_cmd("echo hello-axelstra");
         assert!(wait_for(&s, "hello-axelstra"));
         std::thread::sleep(Duration::from_millis(300));
         let (snap, _rx) = s.subscribe();
@@ -203,15 +207,16 @@ mod tests {
 
     #[test]
     fn input_roundtrip() {
-        let s = spawn(&["/q"]);
-        s.write(b"echo mark&echo er42\r\n").unwrap();
+        let s = spawn_shell();
+        let line: &[u8] = if cfg!(windows) { b"echo mark&echo er42\r\n" } else { b"echo mark; echo er42\n" };
+        s.write(line).unwrap();
         assert!(wait_for(&s, "er42"));
         s.kill();
     }
 
     #[test]
     fn kill_ends_process_tree() {
-        let s = spawn(&["/c", "ping -n 60 127.0.0.1 >nul"]);
+        let s = spawn_cmd(if cfg!(windows) { "ping -n 60 127.0.0.1 >nul" } else { "sleep 60; echo done" });
         std::thread::sleep(Duration::from_millis(500));
         assert!(s.try_wait().is_none());
         s.kill();

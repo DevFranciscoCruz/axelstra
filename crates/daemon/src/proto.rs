@@ -37,18 +37,48 @@ pub fn split_session(payload: &[u8]) -> Option<(u32, &[u8])> {
     Some((u32::from_le_bytes(payload[..4].try_into().ok()?), &payload[4..]))
 }
 
+/// Where the daemon listens: a named pipe on Windows, a Unix socket elsewhere.
+#[cfg(windows)]
 pub fn pipe_name() -> String {
     let user = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default();
     format!(r"\\.\pipe\axelstra-{user}")
 }
 
+#[cfg(not(windows))]
+pub fn pipe_name() -> String {
+    data_dir().join("axelstra.sock").to_string_lossy().into_owned()
+}
+
+/// Per-user private state (token, project list, socket).
+pub fn data_dir() -> std::path::PathBuf {
+    let home = || std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let base = if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        home().map(|h| h.join("Library").join("Application Support"))
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| home().map(|h| h.join(".local").join("share")))
+    };
+    base.unwrap_or_else(std::env::temp_dir).join("axelstra")
+}
+
 /// Shared secret, stored under the user's private profile dir.
 pub fn token_path() -> std::path::PathBuf {
-    let base = std::env::var_os("LOCALAPPDATA")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    base.join("axelstra").join("token")
+    data_dir().join("token")
+}
+
+/// Creates the data dir; on Unix it is private to the user (0700).
+pub fn ensure_data_dir() -> anyhow::Result<std::path::PathBuf> {
+    let d = data_dir();
+    std::fs::create_dir_all(&d)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(d)
 }
 
 pub fn load_or_create_token() -> anyhow::Result<String> {
@@ -62,7 +92,12 @@ pub fn load_or_create_token() -> anyhow::Result<String> {
     let mut b = [0u8; 24];
     getrandom::getrandom(&mut b).map_err(|e| anyhow::anyhow!("getrandom: {e}"))?;
     let t: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    std::fs::create_dir_all(p.parent().unwrap())?;
+    ensure_data_dir()?;
     std::fs::write(&p, &t)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600))?;
+    }
     Ok(t)
 }
