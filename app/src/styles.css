@@ -528,3 +528,6 @@ button.icon:hover {
 .m-row label, .m-full { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #8a8a99; flex: 1; min-width: 0; }
 .m-actions { display: flex; gap: 8px; align-items: center; }
 button.danger { color: #ef7676; }
+
+.krun { padding: 6px 12px; background: #1d2a22; color: #a9d8b8; font-size: 12px; user-select: text; }
+.krun.bad { background: #3a2a1a; color: #e5c07b; }

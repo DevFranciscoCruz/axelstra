@@ -19,6 +19,11 @@ struct Registry {
     /// free-form UI data per session (project, worktree...), returned by session.list
     metas: Mutex<HashMap<u32, Value>>,
     store: std::path::PathBuf,
+    /// where background orchestration runs connect back to this daemon
+    pipe: String,
+    token: String,
+    /// latest orchestration run per project id
+    runs: Mutex<HashMap<String, Value>>,
 }
 
 impl Registry {
@@ -48,6 +53,9 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
         labels: Default::default(),
         metas: Default::default(),
         store,
+        pipe: pipe.clone(),
+        token: token.clone(),
+        runs: Default::default(),
     });
     let mut server = ServerOptions::new()
         .first_pipe_instance(true)
@@ -301,6 +309,51 @@ fn dispatch(
             let base = p["base"].as_str();
             let text = tokio::task::block_in_place(|| crate::changes::diff(&wt, path, base))?;
             Ok(json!({"diff": text}))
+        }
+        "orch.start" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            if reg.runs.lock().unwrap().get(&pr.id).is_some_and(|r| r["state"] == "running") {
+                anyhow::bail!("an orchestration is already running for this project");
+            }
+            let repo = axelstra_core::git::canon(std::path::Path::new(&pr.path))?;
+            let name = format!(
+                "ui-{}",
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs()
+            );
+            let max = p["max"].as_u64().unwrap_or(3).clamp(1, 8) as usize;
+            // overriding the agent command is for tests and custom agents; the same
+            // client can already spawn any process, so this grants nothing new
+            let agent: Option<Vec<String>> = p["agent"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+            // connects back to this same daemon: must not hold an async worker
+            let runner = tokio::task::block_in_place(|| crate::runner::DaemonRunner::connect(&reg.pipe, &reg.token))?;
+            let started = json!({"state": "running", "name": name, "integ_branch": format!("orch/{name}")});
+            reg.runs.lock().unwrap().insert(pr.id.clone(), started.clone());
+            let (reg2, pid, n2) = (reg.clone(), pr.id.clone(), name.clone());
+            std::thread::spawn(move || {
+                let res = axelstra_core::orch::run(&axelstra_core::orch::Options {
+                    wt_root: repo.parent().unwrap_or(&repo).join(".axelstra-wt"),
+                    repo,
+                    name: n2.clone(),
+                    max_concurrency: max,
+                    agent_override: agent,
+                    poll_ms: 500,
+                    runner: Some(Arc::new(runner)),
+                });
+                let v = match res {
+                    Ok(r) => json!({"state": "done", "name": n2, "integ_branch": r.integ_branch,
+                        "integ_wt": r.integ_wt, "merged": r.merged, "failed": r.failed,
+                        "needs_review": r.needs_review, "blocked": r.blocked}),
+                    Err(e) => json!({"state": "error", "name": n2, "error": format!("{e:#}")}),
+                };
+                reg2.runs.lock().unwrap().insert(pid, v);
+            });
+            Ok(started)
+        }
+        "orch.status" => {
+            let id = p["project"].as_str().unwrap_or_default();
+            Ok(reg.runs.lock().unwrap().get(id).cloned().unwrap_or(json!({"state": "idle"})))
         }
         "kanban.list" | "kanban.save" | "kanban.move" | "kanban.delete" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
