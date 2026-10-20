@@ -115,6 +115,9 @@ enum Cmd {
         file: PathBuf,
         #[arg(long, default_value_t = 3600)]
         timeout: u64,
+        /// remove each task's worktree once the task succeeded, only when it is clean and its commits are pushed
+        #[arg(long)]
+        cleanup: bool,
     },
     /// Send a message to an agent session: pasted as one block, then Enter
     Say { id: u32, text: String },
