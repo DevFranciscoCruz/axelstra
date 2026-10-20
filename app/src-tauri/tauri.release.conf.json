@@ -1,9 +1,18 @@
 {
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "createUpdaterArtifacts": true,
-    "externalBin": ["binaries/axelstra"],
-    "windows": { "nsis": { "installerIcon": "icons/icon.ico", "installMode": "currentUser" } }
+    "targets": [
+      "nsis"
+    ],
+    "externalBin": [
+      "binaries/axelstra"
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "currentUser",
+        "installerHooks": "./nsis/hooks.nsh"
+      }
+    }
   }
 }
