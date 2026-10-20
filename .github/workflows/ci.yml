@@ -20,3 +20,16 @@ jobs:
       # the app crate needs the desktop toolkit; the engine crates (daemon, orchestrator, CLI) do not
       - name: Engine tests
         run: cargo test --no-fail-fast -p axelstra-core -p axelstra-daemon -p axelstra
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 22 }
+      - run: npm ci
+        working-directory: app
+      - run: npx tsc --noEmit
+        working-directory: app
+      - run: npm test
+        working-directory: app
