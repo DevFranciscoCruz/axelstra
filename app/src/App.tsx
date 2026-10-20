@@ -1,5 +1,5 @@
 import { For, Show, createEffect, on, onCleanup, onMount } from "solid-js";
-import { SessionInfo, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
+import { SessionInfo, watchWorktree, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
 import { CommitView } from "./CommitView";
 import { Editor } from "./Editor";
@@ -16,6 +16,7 @@ import {
   defaultAgent,
   setDefaultAgent,
   changesMode,
+  norm,
   findWorktree,
   openDiff,
   openCommit,
@@ -44,7 +45,8 @@ export function App() {
     // git is the costly part: the change list only matters for the selected worktree, and the project
     // list (worktrees, remote) changes rarely. Both also refresh when the window regains focus
     // and after every action the user takes in the sidebar.
-    const mid = setInterval(() => !document.hidden && void refreshChanges(), 10000);
+    // safety net only: real changes arrive as daemon events (see watchWorktree below)
+    const mid = setInterval(() => !document.hidden && void refreshChanges(), 60000);
     const slow = setInterval(() => !document.hidden && void refreshProjects(), 60000);
     const onFocus = () => {
       void refreshChanges();
@@ -56,6 +58,14 @@ export function App() {
       clearInterval(mid);
       clearInterval(slow);
       window.removeEventListener("focus", onFocus);
+    });
+  });
+
+  // the daemon watches the selected worktree and tells us when files or git state changed
+  createEffect(() => {
+    const w = selectedWorktree();
+    void watchWorktree(w, (changed) => {
+      if (norm(changed) === norm(selectedWorktree())) void refreshChanges();
     });
   });
 

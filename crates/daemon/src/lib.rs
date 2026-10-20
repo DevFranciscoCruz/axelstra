@@ -6,4 +6,5 @@ pub mod projects;
 pub mod publish;
 pub mod proto;
 pub mod server;
+pub mod watcher;
 pub mod runner;

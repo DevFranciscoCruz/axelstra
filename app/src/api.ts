@@ -13,7 +13,7 @@ export type Project = { id: string; name: string; path: string; worktrees: Workt
 export const call = <T = unknown>(method: string, params: Record<string, unknown> = {}) =>
   invoke<T>("daemon_call", { method, params });
 
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { Channel, invoke as tauriInvoke } from "@tauri-apps/api/core";
 export const defaultShell = () => tauriInvoke<[string, string[]]>("default_shell");
 
 /** Opens the chosen agent CLI straight away in a worktree. The shell stays alive after the agent exits. */
@@ -24,6 +24,24 @@ export const launchDefaultAgent = async (project: string, worktree: string, agen
     : [...args, "-c", `${cli}; exec "${program}" -l`];
   const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent" });
   return id;
+};
+
+/** Change events for the selected worktree: the daemon watches the files and tells us, so git runs only when needed. */
+let watchReady: Promise<void> | null = null;
+const startWatch = (onChanged: (worktree: string) => void) => {
+  const ch = new Channel<{ event?: string; worktree?: string }>();
+  ch.onmessage = (m) => m?.event === "fs.changed" && m.worktree && onChanged(m.worktree);
+  return tauriInvoke<void>("watch_start", { onEvent: ch });
+};
+export const watchWorktree = async (worktree: string | null, onChanged: (worktree: string) => void) => {
+  watchReady ??= startWatch(onChanged);
+  try {
+    await watchReady;
+    await tauriInvoke("watch_set", { worktree });
+  } catch {
+    // daemon restarted or never reachable: reconnect on the next selection
+    watchReady = null;
+  }
 };
 
 export const listSessions = () => call<SessionInfo[]>("session.list");

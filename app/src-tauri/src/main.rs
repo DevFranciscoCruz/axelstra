@@ -20,6 +20,8 @@ struct State {
     /// keystrokes only, so typing never waits behind a slow control call
     input: Mutex<Option<Client>>,
     attachments: Mutex<std::collections::HashMap<u32, Arc<AtomicBool>>>,
+    /// write side of the change-event connection (see `watch_start`)
+    watch: Mutex<Option<Client>>,
 }
 
 fn connect() -> Result<Client> {
@@ -132,6 +134,47 @@ async fn session_attach(
     .map_err(|e| e.to_string())?
 }
 
+/// Starts the one change-event stream of the window: `fs.changed` events arrive as JSON strings.
+/// The connection stays open; `watch_set` points it at a worktree.
+#[tauri::command]
+async fn watch_start(state: tauri::State<'_, Arc<State>>, on_event: Channel<InvokeResponseBody>) -> Result<(), String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let c = connect().map_err(|e| format!("{e:#}"))?;
+        let mut rd = c.try_clone().map_err(|e| format!("{e:#}"))?;
+        *st.watch.lock().unwrap() = Some(c);
+        std::thread::spawn(move || {
+            while let Ok(f) = rd.read() {
+                if let Frame::Event(e) = f {
+                    if on_event.send(InvokeResponseBody::Json(e.to_string())).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Watch this worktree (replacing the previous one), or nothing when `worktree` is null.
+#[tauri::command]
+async fn watch_set(state: tauri::State<'_, Arc<State>>, worktree: Option<String>) -> Result<(), String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let mut g = st.watch.lock().unwrap();
+        let c = g.as_mut().ok_or("watch not started")?;
+        match worktree {
+            Some(w) => c.send("watch.subscribe", json!({"worktree": w})),
+            None => c.send("watch.unsubscribe", json!({})),
+        }
+        .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn session_detach(state: tauri::State<'_, Arc<State>>, id: u32) {
     if let Some(stop) = state.attachments.lock().unwrap().remove(&id) {
@@ -155,7 +198,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(State::default()))
-        .invoke_handler(tauri::generate_handler![daemon_call, session_write, session_attach, session_detach, default_shell])
+        .invoke_handler(tauri::generate_handler![daemon_call, session_write, session_attach, session_detach, watch_start, watch_set, default_shell])
         .run(tauri::generate_context!())
         .expect("error while running axelstra");
 }

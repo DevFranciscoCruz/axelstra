@@ -453,6 +453,29 @@ fn dispatch(
             let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
             Ok(serde_json::to_value(crate::projects::add(&reg.store, path)?)?)
         }
+        // one watch per connection (key u32::MAX in `subs`); a new subscribe replaces the old one
+        "watch.subscribe" => {
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            if let Some(old) = subs.remove(&u32::MAX) {
+                old.store(true, Ordering::SeqCst);
+            }
+            let stop = Arc::new(AtomicBool::new(false));
+            let (tx2, path) = (tx.clone(), wt.to_string_lossy().to_string());
+            tokio::task::block_in_place(|| {
+                crate::watcher::start(wt, stop.clone(), move || {
+                    let ev = json!({"event": "fs.changed", "worktree": path});
+                    let _ = tx2.send(encode(EVENT, ev.to_string().as_bytes()));
+                })
+            })?;
+            subs.insert(u32::MAX, stop);
+            Ok(json!({}))
+        }
+        "watch.unsubscribe" => {
+            if let Some(old) = subs.remove(&u32::MAX) {
+                old.store(true, Ordering::SeqCst);
+            }
+            Ok(json!({}))
+        }
         "project.setup" => {
             let id = p["id"].as_str().ok_or_else(|| anyhow::anyhow!("missing id"))?;
             crate::projects::set_setup(&reg.store, id, p["setup"].as_str().map(String::from))?;
