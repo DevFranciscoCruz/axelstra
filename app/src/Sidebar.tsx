@@ -4,6 +4,7 @@ import { addProject, projectLogo, createWorktree, launchDefaultAgent, setProject
 import logo from "./assets/logo.png";
 import {
   AGENTS,
+  setShowAutomations,
   attention,
   sessionState,
   defaultAgent,
@@ -248,6 +249,9 @@ export function Sidebar() {
       </For>
 
       <div class="grow" />
+      <button class="side-link" onClick={() => setShowAutomations(true)}>
+        ⏱ Automations
+      </button>
       <div class="agent-pick" title="Agente aberto ao criar projetos e worktrees">
         <span>Agente</span>
         <div class="menu-wrap">

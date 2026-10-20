@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { projects, selectWorktree, setRightTab, setShowKanban } from "./store";
+import { projects, selectWorktree, setRightTab, setShowAutomations, setShowKanban } from "./store";
 
 export type PaletteAction = { label: string; hint?: string; run: () => void };
 
@@ -32,6 +32,7 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
       { label: "Revisão", hint: "painel", run: () => setRightTab("review") },
       { label: "Pull requests e issues", hint: "painel", run: () => setRightTab("pulls") },
       { label: "Kanban", hint: "vista", run: () => setShowKanban(true) },
+      { label: "Automations", hint: "agendamento", run: () => setShowAutomations(true) },
     );
     for (const p of projects()) {
       for (const w of p.worktrees) {

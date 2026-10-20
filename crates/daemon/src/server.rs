@@ -23,12 +23,71 @@ struct Registry {
     token: String,
     /// latest orchestration run per project id
     runs: Mutex<HashMap<String, Value>>,
+    /// serializes read-modify-write of automations.json (UI saves vs the scheduler)
+    auto_lock: Mutex<()>,
 }
 
 impl Registry {
     fn get(&self, id: u32) -> Option<Arc<Session>> {
         self.sessions.lock().unwrap().get(&id).cloned()
     }
+
+    /// Starts a session and records its label and UI metadata.
+    fn spawn(&self, s: &Spawn, label: Option<&str>, meta: Option<Value>) -> Result<u32> {
+        let sess = Arc::new(Session::spawn(s)?);
+        let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
+        self.sessions.lock().unwrap().insert(id, sess);
+        if let Some(l) = label {
+            self.labels.lock().unwrap().insert(id, l.to_string());
+        }
+        if let Some(m) = meta {
+            self.metas.lock().unwrap().insert(id, m);
+        }
+        Ok(id)
+    }
+}
+
+/// Wakes every 30 s and starts the automations that are due. Missed runs are not replayed.
+fn spawn_scheduler(reg: Arc<Registry>) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            tick.tick().await;
+            let r = reg.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                let _g = r.auto_lock.lock().unwrap();
+                let path = crate::automations::store_path(&r.store);
+                let list = crate::automations::load(&path);
+                for id in crate::automations::due_now(&list, crate::automations::now_ts()) {
+                    if let Err(e) = run_automation(&r, &path, &id) {
+                        eprintln!("automation {id} failed: {e:#}");
+                    }
+                }
+            })
+            .await;
+        }
+    });
+}
+
+/// Fresh worktree + agent session with the automation's prompt. Records the start first so a failure never loops.
+/// The caller holds `auto_lock`.
+fn run_automation(reg: &Registry, path: &std::path::Path, id: &str) -> Result<Value> {
+    let mut list = crate::automations::load(path);
+    let a = list.iter_mut().find(|a| a.id == id).ok_or_else(|| anyhow::anyhow!("unknown automation {id}"))?;
+    a.last_run = crate::automations::now_ts();
+    let a = a.clone();
+    crate::automations::save_all(path, &list)?;
+
+    let pr = crate::projects::find(&reg.store, &a.project)?;
+    let stamp = chrono::Local::now().format("%m%d-%H%M").to_string();
+    let wt = crate::projects::worktree_create(&pr, &format!("auto-{}-{stamp}", a.name))?;
+    // AXELSTRA_AGENT_CLI swaps the agent binary (a wrapper script, or a harmless stand-in in tests)
+    let cli = std::env::var("AXELSTRA_AGENT_CLI").unwrap_or_else(|_| a.agent.clone());
+    let (program, args) = crate::automations::agent_command(&cli, &a.prompt);
+    let spawn = Spawn { program, args, cwd: Some(wt.path.clone().into()), env: vec![], cols: 120, rows: 30 };
+    let meta = json!({"project": pr.id, "worktree": wt.path, "kind": "agent", "automation": a.id});
+    let sid = reg.spawn(&spawn, Some(&a.name), Some(meta))?;
+    Ok(json!({"session": sid, "worktree": wt.path}))
 }
 
 #[derive(Deserialize)]
@@ -55,7 +114,9 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
         pipe: pipe.clone(),
         token: token.clone(),
         runs: Default::default(),
+        auto_lock: Default::default(),
     });
+    spawn_scheduler(reg.clone());
     accept_loop(&pipe, reg, token).await
 }
 
@@ -198,15 +259,8 @@ fn dispatch(
                 cols: p["cols"].as_u64().unwrap_or(120) as u16,
                 rows: p["rows"].as_u64().unwrap_or(30) as u16,
             };
-            let sess = Arc::new(Session::spawn(&s)?);
-            let id = reg.next.fetch_add(1, Ordering::SeqCst) + 1;
-            reg.sessions.lock().unwrap().insert(id, sess);
-            if let Some(l) = p["label"].as_str() {
-                reg.labels.lock().unwrap().insert(id, l.to_string());
-            }
-            if !p["meta"].is_null() {
-                reg.metas.lock().unwrap().insert(id, p["meta"].clone());
-            }
+            let meta = if p["meta"].is_null() { None } else { Some(p["meta"].clone()) };
+            let id = reg.spawn(&s, p["label"].as_str(), meta)?;
             Ok(json!({"id": id}))
         }
         "session.list" => {
@@ -505,6 +559,53 @@ fn dispatch(
             let pids: Vec<u32> =
                 ids.iter().filter_map(|id| reg.get(*id)).filter(|s| s.try_wait().is_none()).filter_map(|s| s.pid()).collect();
             Ok(json!({"ports": tokio::task::block_in_place(|| crate::ports::listening(&pids))?}))
+        }
+        "automation.list" => {
+            let _g = reg.auto_lock.lock().unwrap();
+            Ok(json!({"automations": crate::automations::load(&crate::automations::store_path(&reg.store))}))
+        }
+        "automation.save" => {
+            let _g = reg.auto_lock.lock().unwrap();
+            let path = crate::automations::store_path(&reg.store);
+            let mut a: crate::automations::Automation = serde_json::from_value(p.clone())
+                .map_err(|e| anyhow::anyhow!("invalid automation: {e}"))?;
+            crate::automations::validate(&a)?;
+            crate::projects::find(&reg.store, &a.project)?;
+            let mut list = crate::automations::load(&path);
+            match list.iter_mut().find(|x| !a.id.is_empty() && x.id == a.id) {
+                Some(old) => {
+                    // editing keeps the run history; a changed schedule starts counting from now
+                    if serde_json::to_value(&old.schedule)? != serde_json::to_value(&a.schedule)? {
+                        a.last_run = crate::automations::now_ts();
+                    } else {
+                        a.last_run = old.last_run;
+                    }
+                    *old = a.clone();
+                }
+                None => {
+                    a.id = format!("auto-{}", crate::automations::now_ts());
+                    while list.iter().any(|x| x.id == a.id) {
+                        a.id.push('x');
+                    }
+                    a.last_run = crate::automations::now_ts();
+                    list.push(a.clone());
+                }
+            }
+            crate::automations::save_all(&path, &list)?;
+            Ok(serde_json::to_value(a)?)
+        }
+        "automation.delete" => {
+            let _g = reg.auto_lock.lock().unwrap();
+            let path = crate::automations::store_path(&reg.store);
+            let mut list = crate::automations::load(&path);
+            list.retain(|x| x.id != p["id"].as_str().unwrap_or_default());
+            crate::automations::save_all(&path, &list)?;
+            Ok(json!({}))
+        }
+        "automation.run" => {
+            let _g = reg.auto_lock.lock().unwrap();
+            let path = crate::automations::store_path(&reg.store);
+            tokio::task::block_in_place(|| run_automation(reg, &path, p["id"].as_str().unwrap_or_default()))
         }
         "gh.list" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;

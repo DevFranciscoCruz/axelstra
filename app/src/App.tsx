@@ -9,6 +9,7 @@ import { ReviewPanel } from "./ReviewPanel";
 import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
 import { Palette } from "./Palette";
+import { Automations } from "./Automations";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { PullsPanel } from "./PullsPanel";
 import { TerminalView } from "./TerminalView";
@@ -19,6 +20,7 @@ import {
   defaultAgent,
   setDefaultAgent,
   changesMode,
+  showAutomations,
   ports,
   setPorts,
   splitSession,
@@ -183,8 +185,8 @@ export function App() {
     <div class="app" classList={{ "with-right": current() !== null }}>
       <Show when={agentPrompt()}>
         {(done) => (
-          <div class="modal-back" onClick={() => done()(null)}>
-            <div class="modal" onClick={(e) => e.stopPropagation()}>
+          <div class="agent-back" onClick={() => done()(null)}>
+            <div class="agent-modal" onClick={(e) => e.stopPropagation()}>
               <h3>Abrir com qual agente?</h3>
               <For each={Object.keys(AGENTS)}>
                 {(a) => (
@@ -217,6 +219,9 @@ export function App() {
             : []
         }
       />
+      <Show when={showAutomations()}>
+        <Automations />
+      </Show>
       <Sidebar />
       <main class="main">
         <Show when={current()} fallback={<div class="placeholder">Adicione um projeto e escolha um worktree</div>}>
