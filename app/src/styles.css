@@ -355,7 +355,6 @@ button.icon:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
   text-align: left;
 }
 
@@ -673,7 +672,7 @@ tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: v
 .file .ficon { color: var(--muted); font-size: 12px; flex: none; }
 .fname2 { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; }
 .fname2 .fn { white-space: nowrap; }
-.fname2 .fd { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.fname2 .fd { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .file .st { width: 14px; text-align: center; font-weight: 700; flex: none; }
 .st-M { color: #e5c07b; }
 .st-A { color: #7fd18b; }
