@@ -741,7 +741,10 @@ tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: v
 .update-toast .ut-title { margin: 0; font-weight: 600; }
 .update-toast .ut-sub { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
 .update-toast .ut-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-.update-toast .ut-actions button { height: 32px; padding: 0 12px; }
+.update-toast .ut-actions button { height: 32px; padding: 0 14px; border-radius: 6px; font-size: 13px; }
+.update-toast .ut-actions button:not(.primary) { background: transparent; border: 1px solid var(--line-3); color: var(--text); }
+.update-toast .ut-actions button:not(.primary):hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.update-toast .ut-actions button.primary { border: 0; }
 @keyframes ut-in { from { opacity: 0; transform: translateY(8px); } }
 @media (prefers-reduced-motion: reduce) { .update-toast { animation: none; } }
 
@@ -771,3 +774,28 @@ kbd { font: inherit; font-size: 11px; border: 1px solid var(--line-3); border-bo
 .m-actions { justify-content: flex-end; }
 
 .row:focus-within .cbtn, tr:focus-within .cbtn { opacity: 1; visibility: visible; }
+
+.fsearch { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 12px; }
+.fsearch::placeholder { color: var(--muted); }
+
+/* ---- file explorer ---- */
+.fp-head { padding: 4px 10px 2px; }
+.fp-title { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-search { display: flex; flex-direction: column; gap: 6px; padding: 4px 8px 8px; }
+.fp-search .fsearch { width: 100%; flex: none; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 2px; }
+.seg button { background: none; border: 0; border-radius: 4px; padding: 3px 0; font-size: 12px; color: var(--muted); }
+.seg button.on { background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--line-3); }
+.rlist .file { display: flex; align-items: center; gap: 6px; }
+.rlist .file.root { font-weight: 600; padding-left: 8px; }
+.ficon-svg { flex: none; color: var(--muted); }
+.twisty { width: 12px; flex: none; display: inline-flex; color: var(--muted); }
+.kids { position: relative; }
+.kids::before { content: ""; position: absolute; left: var(--gx); top: 0; bottom: 0; border-left: 1px solid var(--line); pointer-events: none; }
+.file.editing { display: flex; align-items: center; gap: 6px; }
+.fname-input { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 4px; font: inherit; }
+.ghit { margin-bottom: 4px; }
+.gline { display: flex; gap: 8px; padding: 1px 8px 1px 30px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.gline:hover { background: #1b1e26; color: var(--text); }
+.gnum { flex: none; min-width: 28px; text-align: right; opacity: .7; }
+.gtext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -538,13 +538,27 @@ fn dispatch(
                 })
             })
         }
-        "fs.list" | "fs.read" | "fs.stat" | "fs.write" => {
+        "fs.list" | "fs.read" | "fs.stat" | "fs.write" | "fs.search" | "fs.grep" | "fs.create" | "fs.rename" | "fs.delete" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             let path = p["path"].as_str().unwrap_or_default();
             tokio::task::block_in_place(|| -> Result<Value> {
                 use crate::fsops;
                 Ok(match req.method.as_str() {
                     "fs.list" => json!({"entries": fsops::list(&wt, path)?}),
+                    "fs.grep" => json!({"matches": fsops::grep(&wt, p["query"].as_str().unwrap_or_default())?}),
+                    "fs.create" => {
+                        fsops::create(&wt, path, p["dir"].as_bool().unwrap_or(false))?;
+                        json!({})
+                    }
+                    "fs.rename" => {
+                        fsops::rename(&wt, path, p["to"].as_str().unwrap_or_default())?;
+                        json!({})
+                    }
+                    "fs.delete" => {
+                        fsops::delete(&wt, path)?;
+                        json!({})
+                    }
+                    "fs.search" => json!({"files": fsops::search(&wt, p["query"].as_str().unwrap_or_default())?}),
                     "fs.read" => serde_json::to_value(fsops::read(&wt, path)?)?,
                     "fs.stat" => json!({"hash": fsops::stat_hash(&wt, path)?}),
                     _ => {
