@@ -300,6 +300,7 @@ dependencies = [
  "axelstra-core",
  "axelstra-daemon",
  "clap",
+ "serde",
  "serde_json",
  "tokio",
 ]
