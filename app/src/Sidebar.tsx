@@ -37,6 +37,7 @@ export function Sidebar() {
   // project id currently showing the "new worktree" input
   const [creating, setCreating] = createSignal<string | null>(null);
   const [newName, setNewName] = createSignal("");
+  const [agentMenu, setAgentMenu] = createSignal(false);
   // project id whose setup command is being edited
   const [editSetup, setEditSetup] = createSignal<string | null>(null);
   const [setupText, setSetupText] = createSignal("");
@@ -50,6 +51,25 @@ export function Sidebar() {
       await spawnSession(program, args, "shell", path, { project: projectId, worktree: path, kind: "shell" });
     } else {
       await launchDefaultAgent(projectId, path, a, AGENTS[a]);
+    }
+  };
+
+  // clicking the main worktree of a project with nothing running opens the default agent right away,
+  // ready to delegate with /orchestration
+  const opening = new Set<string>();
+  const openWorktree = async (projectId: string, path: string, isMain: boolean) => {
+    selectWorktree(path);
+    if (!isMain || opening.has(path)) return;
+    await refreshSessions();
+    if (sessionsOf(path).length > 0) return;
+    opening.add(path);
+    try {
+      await launchDefaultAgent(projectId, path, defaultAgent(), AGENTS[defaultAgent()]);
+      await refreshSessions();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      opening.delete(path);
     }
   };
 
@@ -186,11 +206,11 @@ export function Sidebar() {
                   <div
                     class="item wt"
                     classList={{ active: norm(selectedWorktree()) === norm(w.path) }}
-                    onClick={() => selectWorktree(w.path)}
+                    onClick={() => void openWorktree(p.id, w.path, w.is_main)}
                     title={w.path}
                   >
                     <span class="dot" classList={{ on: live() > 0 }} />
-                    <span class="name">{w.is_main ? `${label()} (principal)` : label()}</span>
+                    <span class="name">{label()}</span>
                     <Show when={live() > 0}>
                       <span class="count">{live()}</span>
                     </Show>
@@ -215,12 +235,37 @@ export function Sidebar() {
       </For>
 
       <div class="grow" />
-      <label class="agent-pick" title="Agente aberto ao criar projetos e worktrees">
-        Agente
-        <select value={defaultAgent()} onChange={(e) => setDefaultAgent(e.currentTarget.value)}>
-          <For each={Object.keys(AGENTS)}>{(a) => <option value={a}>{a}</option>}</For>
-        </select>
-      </label>
+      <div class="agent-pick" title="Agente aberto ao criar projetos e worktrees">
+        <span>Agente</span>
+        <div class="menu-wrap">
+          <button class="menu-btn" onClick={() => setAgentMenu(!agentMenu())}>
+            {defaultAgent()}
+            <span class="chev">▾</span>
+          </button>
+          <Show when={agentMenu()}>
+            <div class="menu-back" onClick={() => setAgentMenu(false)} />
+            <div class="menu up">
+              <For each={Object.keys(AGENTS)}>
+                {(a) => (
+                  <button
+                    class="menu-item"
+                    classList={{ on: a === defaultAgent() }}
+                    onClick={() => {
+                      setDefaultAgent(a);
+                      setAgentMenu(false);
+                    }}
+                  >
+                    {a}
+                    <Show when={a === defaultAgent()}>
+                      <span class="tick">✓</span>
+                    </Show>
+                  </button>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
+      </div>
       <Show when={error()}>
         <div class="error">{error()}</div>
       </Show>
