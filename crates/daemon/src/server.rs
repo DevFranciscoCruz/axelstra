@@ -32,6 +32,8 @@ struct Registry {
     saved: std::path::PathBuf,
     /// messages between sessions, worker bookkeeping and the worker limit
     bus: crate::msgbus::Bus,
+    /// open connections (the app, CLI calls); a daemon nobody talks to ends itself, see `spawn_idle_exit`
+    clients: std::sync::atomic::AtomicUsize,
 }
 
 impl Registry {
@@ -215,6 +217,7 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
         ),
         saved,
         bus: crate::msgbus::Bus::new(),
+        clients: Default::default(),
     });
     // Claude Code hook: records the agent's current conversation id (it changes on /clear), keyed by AXELSTRA_KEY
     let dir = reg.saved.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
@@ -223,6 +226,7 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::fs::write(dir.join("hooks.json"), hook.to_string());
     spawn_scheduler(reg.clone());
+    spawn_idle_exit(reg.clone());
     accept_loop(&pipe, reg, token).await
 }
 
@@ -274,7 +278,39 @@ async fn read_frame(rd: &mut (impl AsyncReadExt + Unpin)) -> std::io::Result<(u8
     Ok((kind, buf))
 }
 
+/// Keeps a stray daemon from lingering: with no connection, no running session and no enabled automation for
+/// ten minutes (`AXELSTRA_IDLE_EXIT_SECS`, 0 turns it off) it exits. The app normally stops it on quit.
+fn spawn_idle_exit(reg: Arc<Registry>) {
+    let limit: u64 = std::env::var("AXELSTRA_IDLE_EXIT_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(600);
+    if limit == 0 {
+        return;
+    }
+    std::thread::spawn(move || {
+        let mut idle = 0u64;
+        loop {
+            std::thread::sleep(Duration::from_secs(10));
+            let busy = reg.clients.load(Ordering::SeqCst) > 0
+                || reg.sessions.lock().unwrap().values().any(|s| s.try_wait().is_none())
+                || crate::automations::load(&crate::automations::store_path(&reg.store)).iter().any(|a| a.enabled);
+            idle = if busy { 0 } else { idle + 10 };
+            if idle >= limit {
+                std::process::exit(0);
+            }
+        }
+    });
+}
+
+struct ClientGuard(Arc<Registry>);
+
+impl Drop for ClientGuard {
+    fn drop(&mut self) {
+        self.0.clients.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Registry>, token: String) {
+    reg.clients.fetch_add(1, Ordering::SeqCst);
+    let _guard = ClientGuard(reg.clone());
     let (mut rd, mut wr) = tokio::io::split(pipe);
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
     tokio::spawn(async move {
@@ -514,7 +550,7 @@ fn dispatch(
             }
             let target = reg.get(to).ok_or_else(|| anyhow::anyhow!("no such session {to}"))?;
             let text = p["text"].as_str().unwrap_or_default();
-            let m = reg.bus.send(from, to, kind, text, p["reply_to"].as_u64());
+            let m = reg.bus.send(from, to, kind, text, p["reply_to"].as_u64(), p["thread"].as_str().map(String::from));
             // agents get a one-line notice; a worker with a reaper reports through it instead
             let quiet = p["quiet"].as_bool() == Some(true) || (kind == "done" && from.map(|f| reg.bus.is_reaped(f)).unwrap_or(false));
             let agent = reg.metas.lock().unwrap().get(&to).map(|m| m["kind"] == "agent").unwrap_or(false);
@@ -530,6 +566,10 @@ fn dispatch(
             let to = p["session"].as_u64().ok_or_else(|| anyhow::anyhow!("missing session"))? as u32;
             let list = reg.bus.inbox(to, p["all"].as_bool() == Some(true), p["mark"].as_bool() != Some(false));
             Ok(json!(list))
+        }
+        "msg.thread" => {
+            let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
+            Ok(json!(reg.bus.thread(name)))
         }
         "msg.reply_of" => {
             let id = p["id"].as_u64().ok_or_else(|| anyhow::anyhow!("missing id"))?;
@@ -891,6 +931,10 @@ fn dispatch(
         // used by the app updater: the installer cannot replace a running axelstra.exe.
         // Sessions die with the daemon (Job Objects), so the UI warns before calling this.
         "daemon.shutdown" => {
+            // end every terminal and agent now (their specs stay in sessions.json, so they restore on the next start)
+            for s in reg.sessions.lock().unwrap().values() {
+                s.kill();
+            }
             std::thread::spawn(|| {
                 std::thread::sleep(std::time::Duration::from_millis(300));
                 std::process::exit(0);

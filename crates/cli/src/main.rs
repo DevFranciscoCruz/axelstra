@@ -47,6 +47,9 @@ enum Cmd {
     Msg {
         to: u32,
         text: String,
+        /// conversation name, to follow related messages with `axelstra thread`
+        #[arg(long)]
+        thread: Option<String>,
         #[arg(long)]
         from: Option<u32>,
         /// do not type a notice into the recipient
@@ -69,6 +72,8 @@ enum Cmd {
     Ask {
         to: u32,
         text: String,
+        #[arg(long)]
+        thread: Option<String>,
         #[arg(long, default_value_t = 600)]
         timeout: u64,
     },
@@ -88,6 +93,12 @@ enum Cmd {
         text: String,
         #[arg(long)]
         to: Option<u32>,
+    },
+    /// Show a whole conversation: every message sent with --thread NAME, in order
+    Thread {
+        name: String,
+        #[arg(long)]
+        json: bool,
     },
     /// Show or set the maximum number of workers running at once
     Limit { n: Option<usize> },
@@ -242,6 +253,7 @@ fn main() -> Result<()> {
         | Cmd::Done { .. }
         | Cmd::Escalate { .. }
         | Cmd::Limit { .. }
+        | Cmd::Thread { .. }
         | Cmd::Flow { .. }
         | Cmd::AddProject { .. }
         | Cmd::SetSetup { .. }

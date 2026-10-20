@@ -250,7 +250,24 @@ fn notify_session(app: tauri::AppHandle, title: String, body: String, worktree: 
 
 /// The UI confirmed the close: exit for real (the exit hook still installs a downloaded update).
 #[tauri::command]
-fn app_quit(app: tauri::AppHandle) {
+fn app_quit(app: tauri::AppHandle, keep: Option<bool>) {
+    // by default nothing is left running: the daemon ends its terminals and agents and exits too. They come
+    // back through session restore the next time the app opens. `keep` leaves them (and automations) running.
+    if keep != Some(true) {
+        if let Ok(token) = proto::load_or_create_token() {
+            let pipe = proto::pipe_name();
+            if let Ok(mut c) = Client::connect(&pipe, &token) {
+                let _ = c.call("daemon.shutdown", json!({}));
+                drop(c);
+                for _ in 0..30 {
+                    std::thread::sleep(Duration::from_millis(100));
+                    if Client::connect(&pipe, &token).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    }
     app.exit(0);
 }
 
