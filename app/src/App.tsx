@@ -381,13 +381,19 @@ export function App() {
               )}
             </For>
             <button class="icon add" title="Dividir: ver dois terminais lado a lado" classList={{ on: splitSession() !== null }} onClick={() => void toggleSplit()}>
-              ⫼
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+                <path d="M5.5 3v10M10.5 3v10" />
+              </svg>
             </button>
             <button class="icon add" title={`Novo agente (${defaultAgent()})`} onClick={newAgent}>
-              ✦
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1.5c.4 3.4 1.6 4.6 5 5-3.4.4-4.6 1.6-5 5-.4-3.4-1.6-4.6-5-5 3.4-.4 4.6-1.6 5-5z" />
+              </svg>
             </button>
             <button class="icon add" title="Novo terminal" onClick={newTerminal}>
-              +
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+                <path d="M8 3.5v9M3.5 8h9" />
+              </svg>
             </button>
             <Show when={!showRightPanel()}>
               <button class="icon add" title="Mostrar painel direito (Ctrl+Shift+B)" onClick={toggleRightPanel}>

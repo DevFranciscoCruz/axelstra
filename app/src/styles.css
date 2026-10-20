@@ -299,6 +299,12 @@ button.icon:hover {
 .tabbar .add {
   align-self: center;
   margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
 }
 
 .term-area {
