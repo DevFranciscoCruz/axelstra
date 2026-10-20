@@ -317,7 +317,7 @@ fn dispatch(
                     let wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();
                     let ident = axelstra_core::git::identity(repo);
                     json!({"id": pr.id, "name": ident.display_name, "path": pr.path, "worktrees": wts,
-                           "slug": ident.slug, "icon_url": ident.icon_url, "remote": ident.remote})
+                           "setup": pr.setup, "slug": ident.slug, "icon_url": ident.icon_url, "remote": ident.remote})
                 })
                 .collect();
             Ok(Value::Array(v))
@@ -450,6 +450,11 @@ fn dispatch(
         "project.add" => {
             let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
             Ok(serde_json::to_value(crate::projects::add(&reg.store, path)?)?)
+        }
+        "project.setup" => {
+            let id = p["id"].as_str().ok_or_else(|| anyhow::anyhow!("missing id"))?;
+            crate::projects::set_setup(&reg.store, id, p["setup"].as_str().map(String::from))?;
+            Ok(json!({}))
         }
         "project.remove" => {
             crate::projects::remove(&reg.store, p["id"].as_str().unwrap_or_default())?;

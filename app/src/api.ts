@@ -5,6 +5,7 @@ export type SessionInfo = { id: number; running: boolean; label: string | null; 
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   slug?: string;
+  setup?: string | null;
   icon_url?: string | null;
   remote?: string | null;
 };
@@ -34,6 +35,7 @@ export const writeSession = (id: number, data: string) => invoke("session_write"
 export const listProjects = () => call<Project[]>("project.list");
 export const addProject = (path: string) => call<Project>("project.add", { path });
 export const projectLogo = (id: string) => call<{ data_url: string | null }>("project.logo", { id }).then((r) => r.data_url);
+export const setProjectSetup = (id: string, setup: string) => call("project.setup", { id, setup });
 export const removeProject = (id: string) => call("project.remove", { id });
 export const createWorktree = (project: string, name: string) => call<Worktree>("worktree.create", { project, name });
 export const removeWorktree = (project: string, path: string) => call("worktree.remove", { project, path });
