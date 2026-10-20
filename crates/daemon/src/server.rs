@@ -12,11 +12,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tokio::sync::mpsc;
 
-#[derive(Default)]
 struct Registry {
     next: AtomicU32,
     sessions: Mutex<HashMap<u32, Arc<Session>>>,
     labels: Mutex<HashMap<u32, String>>,
+    /// free-form UI data per session (project, worktree...), returned by session.list
+    metas: Mutex<HashMap<u32, Value>>,
+    store: std::path::PathBuf,
 }
 
 impl Registry {
@@ -35,7 +37,18 @@ struct Req {
 
 /// Serves until the process dies. Fails if another daemon owns the pipe.
 pub async fn serve(pipe: String, token: String) -> Result<()> {
-    let reg = Arc::new(Registry::default());
+    serve_with_store(pipe, token, crate::projects::store_path()).await
+}
+
+/// Same as `serve`, with an explicit projects file (tests must not touch the user's).
+pub async fn serve_with_store(pipe: String, token: String, store: std::path::PathBuf) -> Result<()> {
+    let reg = Arc::new(Registry {
+        next: AtomicU32::new(0),
+        sessions: Default::default(),
+        labels: Default::default(),
+        metas: Default::default(),
+        store,
+    });
     let mut server = ServerOptions::new()
         .first_pipe_instance(true)
         .reject_remote_clients(true)
@@ -159,14 +172,20 @@ fn dispatch(
             if let Some(l) = p["label"].as_str() {
                 reg.labels.lock().unwrap().insert(id, l.to_string());
             }
+            if !p["meta"].is_null() {
+                reg.metas.lock().unwrap().insert(id, p["meta"].clone());
+            }
             Ok(json!({"id": id}))
         }
         "session.list" => {
             let l = reg.sessions.lock().unwrap();
             let labels = reg.labels.lock().unwrap();
+            let metas = reg.metas.lock().unwrap();
             let mut v: Vec<Value> = l
                 .iter()
-                .map(|(id, s)| json!({"id": id, "running": s.try_wait().is_none(), "label": labels.get(id)}))
+                .map(|(id, s)| {
+                    json!({"id": id, "running": s.try_wait().is_none(), "label": labels.get(id), "meta": metas.get(id)})
+                })
                 .collect();
             v.sort_by_key(|x| x["id"].as_u64());
             Ok(Value::Array(v))
@@ -246,6 +265,7 @@ fn dispatch(
                 s.kill();
             }
             reg.labels.lock().unwrap().remove(&id);
+            reg.metas.lock().unwrap().remove(&id);
             Ok(json!({}))
         }
         "session.kill" => {
@@ -255,6 +275,36 @@ fn dispatch(
         "session.usage" => {
             let (mem, cpu) = session()?.job_usage();
             Ok(json!({"peak_mem_bytes": mem, "cpu_100ns": cpu}))
+        }
+        "project.list" => {
+            let ps = crate::projects::load(&reg.store);
+            let v: Vec<Value> = ps
+                .iter()
+                .map(|pr| {
+                    let wts = axelstra_core::git::worktree_list(std::path::Path::new(&pr.path)).unwrap_or_default();
+                    json!({"id": pr.id, "name": pr.name, "path": pr.path, "worktrees": wts})
+                })
+                .collect();
+            Ok(Value::Array(v))
+        }
+        "project.add" => {
+            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
+            Ok(serde_json::to_value(crate::projects::add(&reg.store, path)?)?)
+        }
+        "project.remove" => {
+            crate::projects::remove(&reg.store, p["id"].as_str().unwrap_or_default())?;
+            Ok(json!({}))
+        }
+        "worktree.create" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
+            Ok(serde_json::to_value(tokio::task::block_in_place(|| crate::projects::worktree_create(&pr, name))?)?)
+        }
+        "worktree.remove" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
+            tokio::task::block_in_place(|| crate::projects::worktree_remove(&pr, path))?;
+            Ok(json!({}))
         }
         "ping" => Ok(json!({})),
         m => anyhow::bail!("unknown method {m}"),

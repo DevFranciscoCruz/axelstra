@@ -131,3 +131,38 @@ pub fn reset_hard(wt: &Path, sha: &str) -> Result<()> {
 pub fn merge_in_progress(wt: &Path) -> bool {
     run(wt, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).map(|o| o.ok).unwrap_or(false)
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Worktree {
+    pub path: String,
+    pub branch: Option<String>,
+    pub head: String,
+    pub is_main: bool,
+}
+
+/// Top-level directory of the repo containing `path`, or an error if it is not one.
+pub fn repo_root(path: &Path) -> Result<PathBuf> {
+    let top = must(path, &["rev-parse", "--show-toplevel"])?;
+    canon(Path::new(&top))
+}
+
+pub fn worktree_list(repo: &Path) -> Result<Vec<Worktree>> {
+    let out = must(repo, &["worktree", "list", "--porcelain"])?;
+    let mut v: Vec<Worktree> = Vec::new();
+    for block in out.split("\n\n") {
+        let mut w = Worktree { path: String::new(), branch: None, head: String::new(), is_main: v.is_empty() };
+        for l in block.lines() {
+            if let Some(p) = l.strip_prefix("worktree ") {
+                w.path = p.replace('/', std::path::MAIN_SEPARATOR_STR);
+            } else if let Some(h) = l.strip_prefix("HEAD ") {
+                w.head = h.to_string();
+            } else if let Some(b) = l.strip_prefix("branch ") {
+                w.branch = Some(b.strip_prefix("refs/heads/").unwrap_or(b).to_string());
+            }
+        }
+        if !w.path.is_empty() {
+            v.push(w);
+        }
+    }
+    Ok(v)
+}
