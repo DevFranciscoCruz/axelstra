@@ -34,6 +34,8 @@ pub fn quiet(cmd: &mut Command) -> &mut Command {
 pub fn run(cwd: &Path, args: &[&str]) -> Result<Out> {
     let o = quiet(&mut Command::new("git"))
         .current_dir(cwd)
+        // read-only queries must not rewrite .git/index: the watcher would see it and loop
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .args(args)
         .output()
         .with_context(|| format!("spawn git {args:?}"))?;

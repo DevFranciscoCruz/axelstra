@@ -125,6 +125,14 @@ impl Client {
         }
     }
 
+    /// Sends a request without waiting for the reply; whoever reads this connection sees the response frame.
+    pub fn send(&mut self, method: &str, params: Value) -> Result<()> {
+        self.next += 1;
+        let req = json!({"id": self.next, "method": method, "params": params});
+        self.wr.write_all(&encode(JSON, req.to_string().as_bytes()))?;
+        Ok(())
+    }
+
     pub fn send_input(&mut self, session: u32, data: &[u8]) -> Result<()> {
         self.wr.write_all(&session_frame(INPUT, session, data))?;
         Ok(())
