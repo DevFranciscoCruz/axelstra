@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type SessionMeta = { project?: string; worktree?: string; kind?: string };
-export type SessionInfo = { id: number; running: boolean; label: string | null; meta: SessionMeta | null };
+export type SessionInfo = { id: number; running: boolean; idle_ms?: number; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   slug?: string;

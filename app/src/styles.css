@@ -582,3 +582,7 @@ button.danger { color: #ef7676; }
 .modal button.pref { outline: 2px solid var(--accent); }
 
 .off-main { color: #e5c07b; font-size: 11px; margin-left: 4px; }
+
+.dot.work { background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
+.dot.attn { background: #e5c07b; box-shadow: 0 0 0 3px rgba(229, 192, 123, .25); animation: none; }
+@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.75); } }

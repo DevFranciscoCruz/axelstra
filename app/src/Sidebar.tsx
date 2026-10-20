@@ -4,6 +4,8 @@ import { addProject, projectLogo, createWorktree, launchDefaultAgent, setProject
 import logo from "./assets/logo.png";
 import {
   AGENTS,
+  attention,
+  sessionState,
   defaultAgent,
   pickAgent,
   setDefaultAgent,
@@ -202,6 +204,8 @@ export function Sidebar() {
               {(w) => {
                 const label = () => w.branch ?? "(detached)";
                 const live = () => sessionsOf(w.path).filter((s) => s.running).length;
+                const working = () => sessionsOf(w.path).some((s) => sessionState(s) === "working");
+                const needs = () => attention().has(norm(w.path));
                 return (
                   <div
                     class="item wt"
@@ -209,7 +213,11 @@ export function Sidebar() {
                     onClick={() => void openWorktree(p.id, w.path, w.is_main)}
                     title={w.path}
                   >
-                    <span class="dot" classList={{ on: live() > 0 }} />
+                    <span
+                      class="dot"
+                      classList={{ on: live() > 0, work: working(), attn: needs() }}
+                      title={needs() ? "O agente parou: precisa de atenção" : working() ? "A trabalhar" : live() > 0 ? "Parado" : ""}
+                    />
                     <span class="name">{w.is_main ? (p.default_branch ?? "main") : label()}</span>
                     <Show when={w.is_main && w.branch !== (p.default_branch ?? "main")}>
                       <span class="off-main" title={`O worktree principal está em "${label()}", não em ${p.default_branch ?? "main"}`}>

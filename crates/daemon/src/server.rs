@@ -216,7 +216,7 @@ fn dispatch(
             let mut v: Vec<Value> = l
                 .iter()
                 .map(|(id, s)| {
-                    json!({"id": id, "running": s.try_wait().is_none(), "label": labels.get(id), "meta": metas.get(id)})
+                    json!({"id": id, "running": s.try_wait().is_none(), "idle_ms": s.idle_ms(), "label": labels.get(id), "meta": metas.get(id)})
                 })
                 .collect();
             v.sort_by_key(|x| x["id"].as_u64());
