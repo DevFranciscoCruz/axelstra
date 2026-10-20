@@ -34,6 +34,9 @@ enum Cmd {
     Projects,
     /// Type into a session. Escapes: \e \r \n \xHH
     Send { id: u32, data: String },
+    /// Claude Code status line command used by Axelstra sessions (not meant to be run by hand)
+    #[command(hide = true)]
+    StatuslineTee,
     /// Print a bundled agent guide: `axelstra skills get axelstration`
     Skills {
         #[arg(value_parser = ["get"])]
@@ -281,6 +284,7 @@ enum WtCmd {
 }
 
 mod computer;
+mod statusline;
 mod ctl;
 mod orchcmd;
 
@@ -330,6 +334,7 @@ fn main() -> Result<()> {
             let c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
             ctl::run(cmd, c)?;
         }
+        Cmd::StatuslineTee => statusline::tee()?,
         Cmd::Skills { .. } => print!("{}", axelstra_daemon::skill::guide()),
         Cmd::InstallSkill => {
             for f in axelstra_daemon::skill::install_forced()? {

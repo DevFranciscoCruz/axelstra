@@ -197,6 +197,44 @@ pub fn sum_usage(lines: impl Iterator<Item = String>) -> Usage {
     u
 }
 
+/// Codex logs its rate limits (`rate_limits.primary` / `secondary`: used_percent, window_minutes, resets_at or
+/// resets_in_seconds) with every token count event; the last one in a session file is the current state.
+pub fn parse_codex_limits(lines: impl Iterator<Item = String>) -> Option<Value> {
+    let mut last = None;
+    for line in lines {
+        if !line.contains("rate_limits") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+        let rl = v["payload"]["rate_limits"].clone();
+        let rl = if rl.is_object() { rl } else { v["rate_limits"].clone() };
+        if rl.is_object() && (rl["primary"].is_object() || rl["secondary"].is_object()) {
+            last = Some(rl);
+        }
+    }
+    last
+}
+
+/// Rate limits from the newest Codex session file that has them (looks at its last 256 KB).
+pub fn codex_limits() -> Option<Value> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut files = vec![];
+    jsonl_files(&codex_root()?, 0, &mut files);
+    files.sort_by_key(|p| std::cmp::Reverse(mtime(p)));
+    for path in files.into_iter().take(5) {
+        let mut f = std::fs::File::open(&path).ok()?;
+        let len = f.metadata().ok()?.len();
+        f.seek(SeekFrom::Start(len.saturating_sub(256 * 1024))).ok()?;
+        let mut text = String::new();
+        let _ = f.read_to_string(&mut text);
+        if let Some(mut rl) = parse_codex_limits(text.lines().map(String::from)) {
+            rl["as_of"] = serde_json::json!(mtime(&path));
+            return Some(rl);
+        }
+    }
+    None
+}
+
 static CACHE: Mutex<Option<HashMap<PathBuf, (u64, u64, Usage)>>> = Mutex::new(None);
 
 /// Token usage of one Claude conversation: the file named by `session_id`, or the newest one of the project.
@@ -233,6 +271,15 @@ mod tests {
     fn project_dir_name_matches_claudes_scheme() {
         assert_eq!(claude_dir_name(r"C:\Users\franc\Desktop\Projetos\axelstra"), "C--Users-franc-Desktop-Projetos-axelstra");
         assert_eq!(claude_dir_name("/home/a b/x.y"), "-home-a-b-x-y");
+    }
+
+    #[test]
+    fn codex_limits_take_the_last_event() {
+        let a = r#"{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":3.0,"window_minutes":300,"resets_at":1000},"secondary":{"used_percent":10.0,"window_minutes":10080,"resets_at":2000}}}}"#;
+        let b = r#"{"type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":7.5,"window_minutes":300,"resets_at":1500},"secondary":{"used_percent":11.0,"window_minutes":10080,"resets_at":2000}}}}"#;
+        let r = parse_codex_limits([a, "junk", b, r#"{"type":"user"}"#].into_iter().map(String::from)).unwrap();
+        assert_eq!(r["primary"]["used_percent"], 7.5);
+        assert!(parse_codex_limits(std::iter::once("{}".to_string())).is_none());
     }
 
     #[test]

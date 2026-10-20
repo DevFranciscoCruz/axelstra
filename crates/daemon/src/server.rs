@@ -227,6 +227,12 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     let hook = json!({"hooks": {"SessionStart": [{"hooks": [{"type": "command",
         "command": "[ -n \"$AXELSTRA_KEY\" ] || exit 0; mkdir -p \"$AXELSTRA_DIR/sid\" && cat > \"$AXELSTRA_DIR/sid/$AXELSTRA_KEY.json\""}]}]}});
     let _ = std::fs::create_dir_all(&dir);
+    // the status line command hands Claude's own numbers (context window, 5 h and weekly limits) to the app; it then
+    // runs the user's own status line, if they have one, so nothing they see changes
+    let mut hook = hook;
+    if let Ok(exe) = std::env::current_exe() {
+        hook["statusLine"] = json!({"type": "command", "command": format!("\"{}\" statusline-tee", exe.display())});
+    }
     let _ = std::fs::write(dir.join("hooks.json"), hook.to_string());
     spawn_scheduler(reg.clone());
     spawn_idle_exit(reg.clone());
@@ -544,6 +550,16 @@ fn dispatch(
             reg.persist();
             Ok(json!({}))
         }
+        "agent.status" => {
+            let key = p["key"].as_str().unwrap_or_default();
+            if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+                anyhow::bail!("bad key");
+            }
+            let file = reg.saved.parent().unwrap_or(std::path::Path::new("")).join("status").join(format!("{key}.json"));
+            let status = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
+            Ok(json!({"status": status}))
+        }
+        "codex.limits" => Ok(json!({"limits": crate::agentlog::codex_limits()})),
         "computer.status" => Ok(json!({"enabled": reg.computer.load(Ordering::SeqCst)})),
         "computer.enable" => {
             reg.computer.store(p["on"].as_bool() == Some(true), Ordering::SeqCst);
@@ -602,6 +618,12 @@ fn dispatch(
                     .and_then(|t| serde_json::from_str::<Value>(&t).ok())
                     .and_then(|j| j["session_id"].as_str().map(String::from));
                 if let Some(id) = latest {
+                    // a conversation with no replies (cleared, never used) is not worth resuming: start clean
+                    let cwd = rec["cwd"].as_str().or(rec["meta"]["worktree"].as_str()).unwrap_or("");
+                    let empty = crate::agentlog::claude_usage(cwd, Some(&id)).map(|u| u.messages == 0).unwrap_or(true);
+                    if empty {
+                        rec["meta"]["blank"] = Value::Bool(true);
+                    }
                     rec["meta"]["resume"] = Value::String(id);
                 }
             }
