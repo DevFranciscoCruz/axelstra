@@ -101,6 +101,39 @@ mod imp {
         }
     }
 
+    impl Job {
+        /// Private memory right now of every process in the job (what a task manager would add up).
+        pub fn memory_now(&self) -> u64 {
+            use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX};
+            use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+            unsafe {
+                // JOBOBJECT_BASIC_PROCESS_ID_LIST: two counts, then the ids (room for 1000 here)
+                let mut buf = vec![0u64; 2 + 1000];
+                let ok = QueryInformationJobObject(self.0, JobObjectBasicProcessIdList, buf.as_mut_ptr() as *mut _, (buf.len() * 8) as u32, std::ptr::null_mut());
+                if ok == 0 {
+                    return 0;
+                }
+                let n = (buf[0] >> 32) as usize; // NumberOfProcessIdsInList follows NumberOfAssignedProcesses (u32 each)
+                let ids = (buf.as_ptr() as *const u8).add(8) as *const usize;
+                let mut total = 0u64;
+                for i in 0..n.min(1000) {
+                    let pid = *ids.add(i) as u32;
+                    let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+                    if h.is_null() {
+                        continue;
+                    }
+                    let mut c: PROCESS_MEMORY_COUNTERS_EX = std::mem::zeroed();
+                    c.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
+                    if GetProcessMemoryInfo(h, &mut c as *mut _ as *mut PROCESS_MEMORY_COUNTERS, c.cb) != 0 {
+                        total += c.PrivateUsage as u64;
+                    }
+                    CloseHandle(h);
+                }
+                total
+            }
+        }
+    }
+
     impl Drop for Job {
         fn drop(&mut self) {
             unsafe { CloseHandle(self.0) };
@@ -160,6 +193,12 @@ mod imp {
                 }
             }
             (kib * 1024, 0)
+        }
+    }
+
+    impl Job {
+        pub fn memory_now(&self) -> u64 {
+            self.usage().0
         }
     }
 

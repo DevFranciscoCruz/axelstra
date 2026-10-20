@@ -600,7 +600,7 @@ fn dispatch(
             }
             Ok(json!({"on": flag.exists()}))
         }
-        "codex.limits" => Ok(json!({"limits": crate::agentlog::codex_limits()})),
+        "codex.limits" => Ok(json!({"limits": tokio::task::block_in_place(crate::agentlog::codex_limits)})),
         "computer.status" => Ok(json!({"enabled": reg.computer.load(Ordering::SeqCst)})),
         "computer.enable" => {
             reg.computer.store(p["on"].as_bool() == Some(true), Ordering::SeqCst);
@@ -678,6 +678,12 @@ fn dispatch(
         "session.kill" => {
             session()?.kill();
             Ok(json!({}))
+        }
+        "session.resources" => {
+            // memory now and total CPU time of every live session (the caller turns CPU time into a percentage)
+            let l = reg.sessions.lock().unwrap().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, s)| (*id, s.clone())).collect::<Vec<_>>();
+            let v: Vec<Value> = l.iter().map(|(id, s)| json!({"id": id, "mem": s.memory_now(), "cpu_100ns": s.job_usage().1})).collect();
+            Ok(json!({"sessions": v, "cores": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)}))
         }
         "session.usage" => {
             let (mem, cpu) = session()?.job_usage();
