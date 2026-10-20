@@ -12,7 +12,7 @@ export type MenuItem =
       children?: MenuItem[];
     };
 
-type Open = { x: number; y: number; items: MenuItem[] };
+type Open = { x: number; y: number; items: MenuItem[]; minWidth?: number };
 const [menu, setMenu] = createSignal<Open | null>(null);
 
 /** Right-click menu at the pointer. */
@@ -22,10 +22,13 @@ export const showMenu = (e: MouseEvent, items: MenuItem[]) => {
   setMenu({ x: e.clientX, y: e.clientY, items });
 };
 
+/** Menu at a fixed point (dropdowns open under their button). */
+export const showMenuAt = (x: number, y: number, items: MenuItem[], minWidth?: number) => setMenu({ x, y, items, minWidth });
+
 function Items(props: { items: MenuItem[]; sub?: boolean }) {
   const [openSub, setOpenSub] = createSignal<number | null>(null);
   return (
-    <div class="ctx" classList={{ sub: props.sub }}>
+    <div class="ctx" classList={{ sub: props.sub }} style={{ "min-width": "inherit" }}>
       <For each={props.items}>
         {(it, i) =>
           "separator" in it ? (
@@ -83,7 +86,7 @@ export function ContextMenu() {
         const left = () => Math.min(m().x, window.innerWidth - 230);
         const top = () => Math.min(m().y, Math.max(8, window.innerHeight - 40 - m().items.length * 30));
         return (
-          <div class="ctx-root" style={{ left: `${left()}px`, top: `${top()}px` }} onContextMenu={(e) => e.preventDefault()}>
+          <div class="ctx-root" style={{ left: `${left()}px`, top: `${top()}px`, "min-width": m().minWidth ? `${m().minWidth}px` : undefined }} onContextMenu={(e) => e.preventDefault()}>
             <Items items={m().items} />
           </div>
         );

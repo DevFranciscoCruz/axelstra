@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Board, KCard, OrchRun, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchStart, orchStatus } from "./api";
@@ -243,9 +244,11 @@ export function Kanban(props: { project: string }) {
               <div class="m-row">
                 <label>
                   Estado
-                  <select value={d().status} onChange={(e) => setDraft({ ...d(), status: e.currentTarget.value })}>
-                    <For each={COLS}>{(c) => <option value={c.id}>{c.label}</option>}</For>
-                  </select>
+                  <Select
+                    value={d().status}
+                    options={COLS.map((c) => ({ value: c.id, label: c.label }))}
+                    onChange={(v) => setDraft({ ...d(), status: v })}
+                  />
                 </label>
                 <label>
                   Agente

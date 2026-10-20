@@ -1,5 +1,6 @@
 import { For, Show, createResource, createSignal } from "solid-js";
 import { Automation, deleteAutomation, listAutomations, runAutomation, saveAutomation } from "./api";
+import { Select } from "./Select";
 import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations } from "./store";
 
 const DAYS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
@@ -138,34 +139,38 @@ export function Automations() {
               <div class="m-row">
                 <label>
                   Projeto
-                  <select value={d().project} onChange={(e) => setDraft({ ...d(), project: e.currentTarget.value })}>
-                    <For each={projects()}>{(p) => <option value={p.id}>{p.name}</option>}</For>
-                  </select>
+                  <Select
+                    value={d().project}
+                    options={projects().map((p) => ({ value: p.id, label: p.name }))}
+                    onChange={(v) => setDraft({ ...d(), project: v })}
+                  />
                 </label>
                 <label>
                   Agente
-                  <select value={d().agent} onChange={(e) => setDraft({ ...d(), agent: e.currentTarget.value })}>
-                    <For each={AGENT_CLI}>{([v, l]) => <option value={v}>{l}</option>}</For>
-                  </select>
+                  <Select
+                    value={d().agent}
+                    options={AGENT_CLI.map(([v, l]) => ({ value: v, label: l }))}
+                    onChange={(v) => setDraft({ ...d(), agent: v })}
+                  />
                 </label>
               </div>
               <div class="m-row">
                 <label>
                   Repetição
-                  <select
+                  <Select
                     value={d().schedule.kind}
-                    onChange={(e) => {
-                      const k = e.currentTarget.value;
+                    options={[
+                      { value: "interval", label: "A cada N minutos" },
+                      { value: "daily", label: "Todos os dias" },
+                      { value: "weekly", label: "Todas as semanas" },
+                    ]}
+                    onChange={(k) =>
                       setDraft({
                         ...d(),
                         schedule: k === "interval" ? { kind: "interval", minutes: 60 } : k === "daily" ? { kind: "daily", time: "09:00" } : { kind: "weekly", day: 0, time: "09:00" },
-                      });
-                    }}
-                  >
-                    <option value="interval">A cada N minutos</option>
-                    <option value="daily">Todos os dias</option>
-                    <option value="weekly">Todas as semanas</option>
-                  </select>
+                      })
+                    }
+                  />
                 </label>
                 {(() => {
                   const s = () => d().schedule;
@@ -185,12 +190,11 @@ export function Automations() {
                       <Show when={s().kind === "weekly"}>
                         <label>
                           Dia
-                          <select
-                            value={(s() as { day: number }).day}
-                            onChange={(e) => setDraft({ ...d(), schedule: { ...(s() as { kind: "weekly"; day: number; time: string }), day: parseInt(e.currentTarget.value) } })}
-                          >
-                            <For each={DAYS}>{(n, i) => <option value={i()}>{n}</option>}</For>
-                          </select>
+                          <Select
+                            value={String((s() as { day: number }).day)}
+                            options={DAYS.map((n, idx) => ({ value: String(idx), label: n }))}
+                            onChange={(v) => setDraft({ ...d(), schedule: { ...(s() as { kind: "weekly"; day: number; time: string }), day: parseInt(v) } })}
+                          />
                         </label>
                       </Show>
                       <Show when={s().kind !== "interval"}>

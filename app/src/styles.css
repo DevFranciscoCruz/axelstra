@@ -679,3 +679,9 @@ tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: v
 .st-A { color: #7fd18b; }
 .st-D { color: #ef7676; }
 .st-U { color: #ff9e64; }
+
+.select-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px 5px 10px; font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+.select-btn:hover { border-color: var(--accent); }
+.select-btn .chev { color: var(--muted); font-size: 10px; }
+.select-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-root { min-width: 0; }
