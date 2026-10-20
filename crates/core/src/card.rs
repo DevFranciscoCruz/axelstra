@@ -22,6 +22,13 @@ pub struct Meta {
     pub max_retries: u32,
     #[serde(default)]
     pub acceptance: Option<String>,
+    /// claude --permission-mode value
+    #[serde(default = "default_perm")]
+    pub permission_mode: String,
+}
+
+fn default_perm() -> String {
+    "auto".into()
 }
 
 fn default_status() -> String {
@@ -154,6 +161,18 @@ mod tests {
     fn orders_by_deps() {
         let cs = vec![card("b", &["a"]), card("a", &[]), card("c", &["b"])];
         assert_eq!(topo_order(&cs).unwrap(), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn permission_mode_defaults_to_auto_and_can_be_overridden() {
+        let c = card("a", &[]);
+        assert_eq!(c.meta.permission_mode, "auto");
+        let t = "---
+id: x
+permission_mode: plan
+---
+";
+        assert_eq!(parse(t, Path::new("x")).unwrap().meta.permission_mode, "plan");
     }
 
     #[test]
