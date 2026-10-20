@@ -15,10 +15,15 @@
 !macroend
 
 !macro NSIS_HOOK_PREINSTALL
-  ; close the old window (the daemon keeps the terminals) so two windows never coexist
+  ; close the old window (the daemon keeps the terminals) so two windows never coexist. The window asks
+  ; for confirmation before it closes, so the polite request is followed by a forced one: only the UI
+  ; process dies, the daemon (axelstra.exe) and the terminals it owns are not touched.
   nsExec::Exec 'taskkill /IM axelstra-app.exe'
   nsExec::Exec 'taskkill /IM axelstra-app.old.*.exe'
   Sleep 1500
+  nsExec::Exec 'taskkill /F /IM axelstra-app.exe'
+  nsExec::Exec 'taskkill /F /IM axelstra-app.old.*.exe'
+  Sleep 500
   ; leftovers of earlier updates; the ones still running cannot be deleted and stay
   Delete "$INSTDIR\axelstra.old.*.exe"
   Delete "$INSTDIR\axelstra-app.old.*.exe"
