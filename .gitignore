@@ -1,3 +1,4 @@
 /target
 .kanban/
 .axelstra/
+app/src-tauri/binaries/

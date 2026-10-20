@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/axelstra"],
+    "windows": { "nsis": { "installerIcon": "icons/icon.ico", "installMode": "currentUser" } }
+  }
+}
