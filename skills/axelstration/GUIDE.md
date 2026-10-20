@@ -77,6 +77,17 @@ axelstra flow plan.json [--timeout 3600]
 
 A task starts when everything in its `after` list succeeded, never exceeding the worker limit. `flow` prints one line per event plus the last lines of each finished task, and exits 1 if any task failed (its dependents are reported as blocked). Agent tasks end when they call `axelstra done`, go quiet (`idle_secs`, default 20) or exit. Run it in the background of your shell if you want to keep working meanwhile.
 
+## Seeing and driving the desktop
+
+For desktop apps that have no CLI or API (Windows and macOS). The user must turn it on first (command palette, "Controlo do ecrã"); until then every command fails and you cannot enable it yourself. Ask the user if you need it.
+
+- `axelstra computer windows [--json]` — visible windows: id, process, size, position, title.
+- `axelstra computer screenshot [--window ID] [--out file.png]` — saves a PNG (whole screen, or one window) and prints its path: read the image to look at it.
+- `axelstra computer click X Y [--window ID] [--button left|right|middle] [--double]` — coordinates are pixels in the screenshot (from the window's top-left with `--window`).
+- `axelstra computer type "text" [--window ID]`, `axelstra computer key ctrl+s [--window ID]`, `axelstra computer scroll -3 [--x X --y Y]`, `axelstra computer focus ID`.
+
+Take a screenshot before and after acting, and prefer a CLI or API when the app has one.
+
 ## Pattern
 
 1. Plan: split the task into independent pieces; list them for the user if they are not trivial.

@@ -187,8 +187,12 @@ button.primary {
   min-height: 0;
   height: 100%;
   overflow: hidden;
-  padding: 8px 0 0 8px;
   background: var(--bg);
+}
+
+/* the gap sits on the terminal element itself: the fit addon subtracts that padding, but not the host's (border-box), which cut the last row */
+.term-host .xterm {
+  padding: 8px 0 0 8px;
 }
 
 .project {
@@ -843,3 +847,4 @@ button.sb-item:hover { background: rgba(255, 255, 255, .06); color: var(--text);
 .orch-limit { width: 56px; }
 .orch-row .grow { flex: 1; }
 .orch-row button { padding: 3px 9px; font-size: 12px; }
+.computer-on { align-self: center; font-size: 11px; color: #e5484d; padding: 0 8px; white-space: nowrap; cursor: default; }

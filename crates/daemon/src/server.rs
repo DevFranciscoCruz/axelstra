@@ -34,6 +34,8 @@ struct Registry {
     bus: crate::msgbus::Bus,
     /// open connections (the app, CLI calls); a daemon nobody talks to ends itself, see `spawn_idle_exit`
     clients: std::sync::atomic::AtomicUsize,
+    /// agents may look at the screen and drive mouse and keyboard (`axelstra computer`); off at every start
+    computer: AtomicBool,
 }
 
 impl Registry {
@@ -218,6 +220,7 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
         saved,
         bus: crate::msgbus::Bus::new(),
         clients: Default::default(),
+        computer: AtomicBool::new(false),
     });
     // Claude Code hook: records the agent's current conversation id (it changes on /clear), keyed by AXELSTRA_KEY
     let dir = reg.saved.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
@@ -540,6 +543,11 @@ fn dispatch(
             reg.bus.forget(id);
             reg.persist();
             Ok(json!({}))
+        }
+        "computer.status" => Ok(json!({"enabled": reg.computer.load(Ordering::SeqCst)})),
+        "computer.enable" => {
+            reg.computer.store(p["on"].as_bool() == Some(true), Ordering::SeqCst);
+            Ok(json!({"enabled": reg.computer.load(Ordering::SeqCst)}))
         }
         "msg.send" => {
             let to = p["to"].as_u64().ok_or_else(|| anyhow::anyhow!("missing to"))? as u32;

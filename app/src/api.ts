@@ -210,8 +210,11 @@ export const worktreeStatus = (paths: string[]) => callBg<{ status: WtStatus[] }
 export type AgentHit = { agent: "claude" | "codex"; session: string; cwd: string; ts: number; snippet: string };
 export const agentSearch = (query: string, max = 30) => callBg<{ hits: AgentHit[] }>("agent.search", { query, max }).then((r) => r.hits);
 
-export type TokenUsage = { input: number; output: number; cache_read: number; cache_write: number; messages: number };
+export type TokenUsage = { input: number; output: number; cache_read: number; cache_write: number; messages: number; context: number };
 export const agentUsage = (cwd: string, session?: string) => callBg<{ usage: TokenUsage | null }>("agent.usage", { cwd, session }).then((r) => r.usage);
+
+export const computerStatus = () => call<{ enabled: boolean }>("computer.status").then((r) => r.enabled);
+export const computerEnable = (on: boolean) => call<{ enabled: boolean }>("computer.enable", { on }).then((r) => r.enabled);
 
 export type WorkerLimits = { max_workers: number; workers: number };
 export const workerLimits = (max?: number) => call<WorkerLimits>("orch.limits", max === undefined ? {} : { max_workers: max });

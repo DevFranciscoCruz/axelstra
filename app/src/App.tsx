@@ -18,6 +18,7 @@ import { ConfirmHost } from "./Confirm";
 import { AgentSearch } from "./AgentSearch";
 import { Orchestra } from "./Orchestra";
 import { UsageChip } from "./Usage";
+import { computerEnable, computerStatus } from "./api";
 import { StatusBar } from "./StatusBar";
 import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
 import { ErrorToast } from "./ErrorToast";
@@ -38,6 +39,8 @@ import {
   setShowAgentSearch,
   showOrchestra,
   setShowOrchestra,
+  computerOn,
+  setComputerOn,
   ports,
   setPorts,
   splitSession,
@@ -75,6 +78,26 @@ import {
 
 export function App() {
   const [splitFrac, setSplitFrac] = createSignal(0.5);
+  // screen control for agents is a deliberate, per-run permission: asking first, and it ends when the daemon does
+  const toggleComputer = async () => {
+    try {
+      if (computerOn()) {
+        setComputerOn(await computerEnable(false));
+        return;
+      }
+      const ok = await ask("Permitir que os agentes vejam o ecrã e controlem o rato e o teclado?\n\nPodem tirar capturas de qualquer janela e clicar ou escrever em nome de si. Fica ligado até o desligar aqui ou fechar a aplicação.", {
+        title: "Controlo do ecrã",
+        kind: "warning",
+        okLabel: "Permitir",
+        cancelLabel: "Cancelar",
+      });
+      if (ok) setComputerOn(await computerEnable(true));
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+  onMount(() => void computerStatus().then(setComputerOn).catch(() => 0));
+
   onMount(() => {
     labelIcons();
     void refreshProjects();
@@ -306,6 +329,7 @@ export function App() {
                 { label: "Dividir terminal", run: () => void toggleSplit() },
                 { label: "Pesquisar conversas", hint: "Ctrl+Shift+F", run: () => setShowAgentSearch(true) },
                 { label: "Orquestração: agentes e workers", run: () => setShowOrchestra(true) },
+                { label: computerOn() ? "Controlo do ecrã pelos agentes: desligar" : "Controlo do ecrã pelos agentes: ligar", run: () => void toggleComputer() },
               ]
             : []
         }
@@ -418,6 +442,9 @@ export function App() {
             </div>
             <span class="grow" />
             <UsageChip />
+            <Show when={computerOn()}>
+              <span class="computer-on" title="Os agentes podem ver o ecrã e controlar o rato e o teclado. Desligue em: paleta de comandos, «Controlo do ecrã»">● ecrã</span>
+            </Show>
             <For each={ports()}>
               {(port) => (
                 <button class="port" title={`Abrir http://localhost:${port} no navegador`} onClick={() => void openUrl(`http://localhost:${port}`)}>

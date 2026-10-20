@@ -28,13 +28,14 @@ export function UsageChip() {
     });
   });
   const spent = () => (usage() ? usage()!.input + usage()!.output + usage()!.cache_write : 0);
+  const ctx = () => usage()?.context ?? 0;
   return (
     <Show when={usage() && usage()!.messages > 0}>
       <span
         class="usage-chip"
-        title={`Entrada ${usage()!.input.toLocaleString()} · saída ${usage()!.output.toLocaleString()} · cache escrita ${usage()!.cache_write.toLocaleString()} · cache lida ${usage()!.cache_read.toLocaleString()} (${usage()!.messages} mensagens)`}
+        title={`Contexto da conversa: ${ctx().toLocaleString()} tokens (o mesmo número da linha de estado do Claude). Gasto acumulado ${fmt(spent())}, a soma de todos os turnos. Entrada ${usage()!.input.toLocaleString()} · saída ${usage()!.output.toLocaleString()} · cache escrita ${usage()!.cache_write.toLocaleString()} · cache lida ${usage()!.cache_read.toLocaleString()} (${usage()!.messages} mensagens)`}
       >
-        {fmt(spent())} tok
+        {fmt(ctx())} ctx
       </span>
     </Show>
   );

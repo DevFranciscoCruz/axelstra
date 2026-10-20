@@ -100,6 +100,11 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Look at the screen and drive mouse and keyboard (the user must switch it on in the app first)
+    Computer {
+        #[command(subcommand)]
+        cmd: CompCmd,
+    },
     /// Show or set the maximum number of workers running at once
     Limit { n: Option<usize> },
     /// Run a task graph from a JSON file: {"tasks":[{"id","worktree","agent"|"cmd","prompt","after":[..]}]}
@@ -214,6 +219,60 @@ enum Cmd {
 }
 
 #[derive(Subcommand)]
+enum CompCmd {
+    /// List visible windows: id, process, size and position, title
+    Windows {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Save a PNG of a window (--window ID) or of the whole screen; prints the path
+    Screenshot {
+        #[arg(long)]
+        window: Option<u64>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Click at X Y (pixels from the window's top-left with --window, else from the screen's)
+    Click {
+        x: i32,
+        y: i32,
+        #[arg(long)]
+        window: Option<u64>,
+        #[arg(long, default_value = "left")]
+        button: String,
+        #[arg(long)]
+        double: bool,
+    },
+    /// Type text into the focused window (or --window, which is focused first)
+    Type {
+        text: String,
+        #[arg(long)]
+        window: Option<u64>,
+    },
+    /// Press a key or combination such as enter, esc, ctrl+s, alt+f4
+    Key {
+        combo: String,
+        #[arg(long)]
+        window: Option<u64>,
+    },
+    /// Scroll at X Y: positive DY scrolls up, negative down
+    Scroll {
+        #[arg(allow_hyphen_values = true)]
+        dy: i32,
+        #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
+        dx: i32,
+        #[arg(long, default_value_t = 0)]
+        x: i32,
+        #[arg(long, default_value_t = 0)]
+        y: i32,
+        #[arg(long)]
+        window: Option<u64>,
+    },
+    /// Bring a window to the front
+    Focus { window: u64 },
+}
+
+#[derive(clap::Subcommand)]
 enum WtCmd {
     /// Create a worktree; prints its path
     Create { project: String, name: String },
@@ -221,6 +280,7 @@ enum WtCmd {
     Rm { path: PathBuf },
 }
 
+mod computer;
 mod ctl;
 mod orchcmd;
 
@@ -254,6 +314,7 @@ fn main() -> Result<()> {
         | Cmd::Escalate { .. }
         | Cmd::Limit { .. }
         | Cmd::Thread { .. }
+        | Cmd::Computer { .. }
         | Cmd::Flow { .. }
         | Cmd::AddProject { .. }
         | Cmd::SetSetup { .. }
