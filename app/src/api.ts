@@ -141,6 +141,13 @@ export type Saved = { hash?: string; conflict?: boolean; disk_hash?: string };
 
 export const fsList = (worktree: string, path: string) =>
   call<{ entries: FsEntry[] }>("fs.list", { worktree, path }).then((r) => r.entries);
+export const fsSearch = (worktree: string, query: string) =>
+  call<{ files: string[] }>("fs.search", { worktree, query }).then((r) => r.files);
+export type GrepHit = { path: string; line: number; text: string };
+export const fsGrep = (worktree: string, query: string) => call<{ matches: GrepHit[] }>("fs.grep", { worktree, query }).then((r) => r.matches);
+export const fsCreate = (worktree: string, path: string, dir: boolean) => call("fs.create", { worktree, path, dir });
+export const fsRename = (worktree: string, path: string, to: string) => call("fs.rename", { worktree, path, to });
+export const fsDelete = (worktree: string, path: string) => call("fs.delete", { worktree, path });
 export const fsRead = (worktree: string, path: string) => call<Opened>("fs.read", { worktree, path });
 export const fsStat = (worktree: string, path: string) =>
   call<{ hash: string | null }>("fs.stat", { worktree, path }).then((r) => r.hash);
