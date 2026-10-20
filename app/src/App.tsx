@@ -1,5 +1,5 @@
-import { For, Show, createEffect, on, onCleanup, onMount } from "solid-js";
-import { SessionInfo, listPorts, watchWorktree, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
+import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
+import { SessionInfo, restoreSessions, listPorts, watchWorktree, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
 import { CommitView } from "./CommitView";
 import { Editor } from "./Editor";
@@ -11,6 +11,11 @@ import { Palette } from "./Palette";
 import { ContextMenu } from "./ContextMenu";
 import { Automations } from "./Automations";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { UpdateToast } from "./UpdateToast";
+import { ErrorToast } from "./ErrorToast";
+import { Modal } from "./Modal";
+import { labelIcons, press } from "./a11y";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { PullsPanel } from "./PullsPanel";
 import { TerminalView } from "./TerminalView";
 import {
@@ -44,12 +49,39 @@ import {
   setActiveSession,
   setError,
   setOpenDiff,
+  showSidebar,
+  showRightPanel,
+  toggleSidebar,
+  toggleRightPanel,
+  guarded,
+  leftW,
+  rightW,
+  setLeftW,
+  setRightW,
 } from "./store";
 
+/** window-with-side-panel glyph; the panel strip is filled while that panel is shown */
+const PanelIcon = (props: { side: "left" | "right"; on: boolean }) => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+    <rect x="2" y="2.5" width="12" height="11" rx="2.5" />
+    <path d={props.side === "left" ? "M6.2 2.5v11" : "M9.8 2.5v11"} />
+    <Show when={props.on}>
+      <path
+        d={props.side === "left" ? "M4.5 2.5H6.2v11H4.5a2.5 2.5 0 0 1-2.5-2.5V5a2.5 2.5 0 0 1 2.5-2.5z" : "M11.5 2.5H9.8v11h1.7a2.5 2.5 0 0 0 2.5-2.5V5a2.5 2.5 0 0 0-2.5-2.5z"}
+        fill="currentColor"
+        stroke="none"
+      />
+    </Show>
+  </svg>
+);
+
 export function App() {
+  const [splitFrac, setSplitFrac] = createSignal(0.5);
   onMount(() => {
+    labelIcons();
     void refreshProjects();
-    void refreshSessions();
+    // sessions of a previous daemon run come back before the first list, so the sidebar never shows them missing
+    void restoreSessions().catch(() => 0).then(() => refreshSessions());
     // The daemon has no push events yet: poll only while the window is visible.
     const fast = setInterval(() => !document.hidden && void refreshSessions(), 2000);
     // git is the costly part: the change list only matters for the selected worktree, and the project
@@ -63,7 +95,17 @@ export function App() {
       void refreshProjects();
     };
     window.addEventListener("focus", onFocus);
+    // Ctrl+B hides the project list, Ctrl+Shift+B the right panel; captured so the terminal never sees them
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "b") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.shiftKey) toggleRightPanel();
+      else toggleSidebar();
+    };
+    window.addEventListener("keydown", onKey, true);
     onCleanup(() => {
+      window.removeEventListener("keydown", onKey, true);
       clearInterval(fast);
       clearInterval(mid);
       clearInterval(slow);
@@ -174,38 +216,65 @@ export function App() {
   };
 
   const close = async (s: SessionInfo) => {
+    if (s.running && s.meta?.kind === "agent") {
+      const ok = await ask(`Fechar "${s.label ?? `Sessão ${s.id}`}"? O agente em execução é terminado.`, { title: "Fechar agente", kind: "warning", okLabel: "Fechar", cancelLabel: "Cancelar" });
+      if (!ok) return;
+    }
     if (s.running) await killSession(s.id);
     await removeSession(s.id);
     await refreshSessions();
   };
 
+  // drag a panel edge; `dir` flips the delta for the right-hand panel
+  const drag = (e: MouseEvent, dir: 1 | -1, start: number, set: (w: number) => void) => {
+    e.preventDefault();
+    const x0 = e.clientX;
+    const move = (m: MouseEvent) => set(start + dir * (m.clientX - x0));
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      document.body.classList.remove("resizing");
+    };
+    document.body.classList.add("resizing");
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
   const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
   return (
-    <div class="app" classList={{ "with-right": current() !== null }}>
+    <div
+      class="app"
+      classList={{ "with-right": current() !== null && showRightPanel(), "no-left": !showSidebar() }}
+      style={{ "--left-w": `${leftW()}px`, "--right-w": `${rightW()}px` }}
+    >
+      <Show when={showSidebar()}>
+        <div class="resizer" style={{ left: "var(--left-w)" }} onMouseDown={(e) => drag(e, 1, leftW(), setLeftW)} />
+      </Show>
+      <Show when={current() && showRightPanel()}>
+        <div class="resizer right-edge" style={{ right: "var(--right-w)" }} onMouseDown={(e) => drag(e, -1, rightW(), setRightW)} />
+      </Show>
       <Show when={agentPrompt()}>
         {(done) => (
-          <div class="agent-back" onClick={() => done()(null)}>
-            <div class="agent-modal" onClick={(e) => e.stopPropagation()}>
-              <h3>Abrir com qual agente?</h3>
-              <For each={Object.keys(AGENTS)}>
-                {(a) => (
-                  <button
-                    class="primary"
-                    classList={{ pref: a === defaultAgent() }}
-                    onClick={() => {
-                      setDefaultAgent(a);
-                      done()(a);
-                    }}
-                    ref={(el) => a === defaultAgent() && queueMicrotask(() => el.focus())}
-                  >
-                    {a}
-                  </button>
-                )}
-              </For>
-              <button onClick={() => done()("shell")}>Só terminal</button>
-            </div>
-          </div>
+          <Modal label="Abrir com qual agente?" onClose={() => done()(null)} backClass="agent-back" class="agent-modal">
+            <h3>Abrir com qual agente?</h3>
+            <For each={Object.keys(AGENTS)}>
+              {(a) => (
+                <button
+                  class="primary"
+                  classList={{ pref: a === defaultAgent() }}
+                  onClick={() => {
+                    setDefaultAgent(a);
+                    done()(a);
+                  }}
+                  ref={(el) => a === defaultAgent() && queueMicrotask(() => el.focus())}
+                >
+                  {a}
+                </button>
+              )}
+            </For>
+            <button onClick={() => done()("shell")}>Só terminal</button>
+          </Modal>
         )}
       </Show>
       <Palette
@@ -223,11 +292,31 @@ export function App() {
         <Automations />
       </Show>
       <ContextMenu />
-      <Sidebar />
+      <ErrorToast />
+      <UpdateToast />
+      <Show when={showSidebar()}>
+        <Sidebar />
+      </Show>
       <main class="main">
-        <Show when={current()} fallback={<div class="placeholder">Adicione um projeto e escolha um worktree</div>}>
+        <Show
+          when={current()}
+          fallback={
+            <div class="placeholder">
+              <Show when={!showSidebar()}>
+                <button class="icon add" title="Mostrar projetos (Ctrl+B)" onClick={toggleSidebar}>
+                  <PanelIcon side="left" on={false} />
+                </button>
+              </Show>
+              Adicione um projeto e escolha um worktree.
+            </div>
+          }
+        >
           <div class="tabbar">
-            <div class="tab" classList={{ active: showKanban() }} onClick={() => setShowKanban(true)}>
+            <button class="icon add" title="Projetos (Ctrl+B)" classList={{ on: showSidebar() }} onClick={toggleSidebar}>
+              <PanelIcon side="left" on={showSidebar()} />
+            </button>
+            <div class="tabs">
+            <div class="tab" classList={{ active: showKanban() }} {...press(() => guarded(() => setShowKanban(true)), "tab")}>
               <span class="dtag">▦</span>
               <span>Kanban</span>
             </div>
@@ -236,16 +325,20 @@ export function App() {
                 <div
                   class="tab"
                   classList={{ active: !showKanban() && openDiff() === null && openFile() === null && openCommit() === null && activeSession() === s.id }}
-                  onClick={() => {
-                    setOpenDiff(null);
-                    setOpenFile(null);
-                    setOpenCommit(null);
-                    setShowKanban(false);
-                    setActiveSession(s.id);
-                  }}
+                  {...press(
+                    () =>
+                      guarded(() => {
+                        setOpenDiff(null);
+                        setOpenFile(null);
+                        setOpenCommit(null);
+                        setShowKanban(false);
+                        setActiveSession(s.id);
+                      }),
+                    "tab",
+                  )}
                 >
                   <span class="dot" classList={{ on: s.running }} />
-                  <span>{s.label ?? `sessão ${s.id}`}</span>
+                  <span>{s.label ?? `Sessão ${s.id}`}</span>
                   <button
                     class="x"
                     title="Fechar"
@@ -261,7 +354,7 @@ export function App() {
             </For>
             <Show when={openCommit()}>
               {(c) => (
-                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={c().subject} onClick={() => setShowKanban(false)}>
+                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={c().subject} {...press(() => setShowKanban(false), "tab")}>
                   <span class="dtag">⎇</span>
                   <span>{c().short}</span>
                   <button class="x" title="Fechar commit" onClick={() => setOpenCommit(null)}>
@@ -272,10 +365,10 @@ export function App() {
             </Show>
             <Show when={openFile()}>
               {(p) => (
-                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} onClick={() => setShowKanban(false)}>
+                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} {...press(() => setShowKanban(false), "tab")}>
                   <span class="dtag">✎</span>
                   <span>{baseName(p())}</span>
-                  <button class="x" title="Fechar ficheiro" onClick={() => setOpenFile(null)}>
+                  <button class="x" title="Fechar ficheiro" onClick={(e) => { e.stopPropagation(); guarded(() => setOpenFile(null)); }}>
                     ×
                   </button>
                 </div>
@@ -283,7 +376,7 @@ export function App() {
             </Show>
             <Show when={openDiff()}>
               {(p) => (
-                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} onClick={() => setShowKanban(false)}>
+                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} {...press(() => setShowKanban(false), "tab")}>
                   <span class="dtag">Δ</span>
                   <span>{baseName(p())}</span>
                   <button class="x" title="Fechar diff" onClick={() => setOpenDiff(null)}>
@@ -292,6 +385,8 @@ export function App() {
                 </div>
               )}
             </Show>
+            </div>
+            <span class="grow" />
             <For each={ports()}>
               {(port) => (
                 <button class="port" title={`Abrir http://localhost:${port} no navegador`} onClick={() => void openUrl(`http://localhost:${port}`)}>
@@ -299,7 +394,7 @@ export function App() {
                 </button>
               )}
             </For>
-            <button class="icon add" title="Dividir: ver dois terminais lado a lado" onClick={() => void toggleSplit()}>
+            <button class="icon add" title="Dividir: ver dois terminais lado a lado" classList={{ on: splitSession() !== null }} onClick={() => void toggleSplit()}>
               ⫼
             </button>
             <button class="icon add" title={`Novo agente (${defaultAgent()})`} onClick={newAgent}>
@@ -307,6 +402,9 @@ export function App() {
             </button>
             <button class="icon add" title="Novo terminal" onClick={newTerminal}>
               +
+            </button>
+            <button class="icon add" title="Ficheiros / alterações (Ctrl+Shift+B)" classList={{ on: showRightPanel() }} onClick={toggleRightPanel}>
+              <PanelIcon side="right" on={showRightPanel()} />
             </button>
           </div>
           <div class="term-area">
@@ -326,20 +424,48 @@ export function App() {
             >
               <Show
                 when={activeSession() !== null}
-                fallback={<div class="placeholder">Sem terminais neste worktree. Clique em + para abrir um.</div>}
+                fallback={
+                  <div class="placeholder empty">
+                    <div>Sem terminais neste worktree.</div>
+                    <div class="empty-actions">
+                      <button class="primary" onClick={() => void newAgent()}>
+                        ✦ Abrir agente
+                      </button>
+                      <button onClick={() => void newTerminal()}>+ Terminal</button>
+                    </div>
+                    <div class="hints">
+                      <kbd>Ctrl+K</kbd> paleta · <kbd>Ctrl+B</kbd> projetos · <kbd>Ctrl+Shift+B</kbd> painel direito
+                    </div>
+                  </div>
+                }
               >
                 {/* keyed: switching tab remounts the terminal and replays its history */}
                 <Show when={activeSession()} keyed>
                   {(id) => <TerminalView id={id} onExit={() => void refreshSessions()} />}
                 </Show>
                 <Show when={splitSession() !== null && splitSession() !== activeSession() && tabs().some((s) => s.id === splitSession())}>
-                  <div class="split-sep" />
-                  <div class="split-pane">
+                  <div
+                    class="split-sep"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      const area = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+                      const move = (m: MouseEvent) => setSplitFrac(Math.min(0.8, Math.max(0.2, (area.right - m.clientX) / area.width)));
+                      const up = () => {
+                        window.removeEventListener("mousemove", move);
+                        window.removeEventListener("mouseup", up);
+                        document.body.classList.remove("resizing");
+                      };
+                      document.body.classList.add("resizing");
+                      window.addEventListener("mousemove", move);
+                      window.addEventListener("mouseup", up);
+                    }}
+                  />
+                  <div class="split-pane" style={{ flex: `0 0 ${splitFrac() * 100}%` }}>
                     <button class="split-x" title="Fechar divisão" onClick={() => setSplitSession(null)}>
                       ×
                     </button>
                     <Show when={splitSession()} keyed>
-                      {(id) => <TerminalView id={id} onExit={() => void refreshSessions()} />}
+                      {(id) => <TerminalView id={id} focus={false} onExit={() => void refreshSessions()} />}
                     </Show>
                   </div>
                 </Show>
@@ -351,7 +477,7 @@ export function App() {
           </div>
         </Show>
       </main>
-      <Show when={current()}>
+      <Show when={current() && showRightPanel()}>
         <Show when={rightTab() === "files"} fallback={rightTab() === "pulls" ? <PullsPanel /> : <ChangesPanel />}>
           <FilesPanel />
         </Show>

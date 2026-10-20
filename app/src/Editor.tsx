@@ -6,7 +6,7 @@ import { searchKeymap } from "@codemirror/search";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { Opened, fsRead, fsStat, fsWrite } from "./api";
-import { fsTick, setOpenFile } from "./store";
+import { fsTick, guarded, setEditorDirty, setOpenFile } from "./store";
 
 /** Language packs load on demand so the editor itself stays small. */
 async function languageFor(path: string): Promise<Extension> {
@@ -136,7 +136,11 @@ export function Editor(props: { wt: string; path: string }) {
     onCleanup(() => clearInterval(timer));
   });
   createEffect(on(fsTick, () => checkNow?.(), { defer: true }));
-  onCleanup(() => view?.destroy());
+  createEffect(() => setEditorDirty(dirty()));
+  onCleanup(() => {
+    setEditorDirty(false);
+    view?.destroy();
+  });
 
   return (
     <div class="editor">
@@ -151,7 +155,7 @@ export function Editor(props: { wt: string; path: string }) {
         <button class="icon" disabled={!dirty()} title="Guardar (Ctrl+S)" onClick={() => void save()}>
           Guardar
         </button>
-        <button class="icon" title="Fechar" onClick={() => setOpenFile(null)}>
+        <button class="icon" title="Fechar" onClick={() => guarded(() => setOpenFile(null))}>
           ×
         </button>
       </div>

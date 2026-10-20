@@ -25,7 +25,7 @@ export function parseDiff(diff: string): Row[] {
     else if (line.startsWith(" ")) rows.push({ kind: "ctx", old: o++, neu: n++, text: line.slice(1) });
     else if (line.startsWith("\\") || line.startsWith("…")) rows.push({ kind: "note", text: line });
     if (rows.length >= MAX_ROWS) {
-      rows.push({ kind: "note", text: `… mostrando só as primeiras ${MAX_ROWS} linhas` });
+      rows.push({ kind: "note", text: `… a mostrar só as primeiras ${MAX_ROWS} linhas` });
       break;
     }
   }
@@ -52,7 +52,7 @@ export function DiffView() {
     const agents = sessionsOf(selectedWorktree()).filter((s) => s.running && s.meta?.kind === "agent");
     const target = agents.find((s) => s.id === activeSession()) ?? agents[0];
     if (!target) {
-      setSendMsg("Nenhum agente a correr neste worktree. Abre um com ✦.");
+      setSendMsg("Nenhum agente a correr neste worktree. Abra um com ✦.");
       return;
     }
     const line = r.neu ?? r.old;
@@ -97,7 +97,7 @@ export function DiffView() {
                         <td class="ln">
                           <Show when={r.kind !== "hunk" && r.kind !== "note"} fallback={r.neu ?? ""}>
                             <button class="cbtn" title="Comentar e enviar ao agente" onClick={() => { setNote(""); setCommenting(commenting() === i() ? null : i()); }}>
-                              💬
+                              ＋
                             </button>
                             <span class="lnum">{r.neu ?? ""}</span>
                           </Show>

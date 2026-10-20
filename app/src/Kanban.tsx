@@ -2,7 +2,9 @@ import { Select } from "./Select";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Board, KCard, OrchRun, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchStart, orchStatus } from "./api";
-import { refreshProjects } from "./store";
+import { Modal } from "./Modal";
+import { AGENTS, refreshProjects } from "./store";
+import { press } from "./a11y";
 
 const COLS: { id: string; label: string }[] = [
   { id: "backlog", label: "Ideias" },
@@ -173,13 +175,13 @@ export function Kanban(props: { project: string }) {
                 e.preventDefault();
                 setOver(col.id);
               }}
-              onDragLeave={() => setOver(null)}
+              onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setOver(null)}
               onDrop={(e) => void drop(col.id, e)}
             >
               <div class="kcol-head">
                 <span>{col.label}</span>
                 <span class="kcount">{colCards(col.id).length}</span>
-                <button class="icon" title="Novo cartão" onClick={() => edit(undefined, col.id)}>
+                <button class="icon" title="Novo cartão" aria-label="Novo cartão" onClick={() => edit(undefined, col.id)}>
                   +
                 </button>
               </div>
@@ -195,7 +197,7 @@ export function Kanban(props: { project: string }) {
                         setDragId(c.meta.id);
                       }}
                       onDragEnd={() => setDragId(null)}
-                      onClick={() => edit(c)}
+                      {...press(() => edit(c))}
                     >
                       <div class="kcard-title">{c.meta.title || c.meta.id}</div>
                       <Show when={c.body.trim()}>
@@ -226,8 +228,7 @@ export function Kanban(props: { project: string }) {
 
       <Show when={draft()}>
         {(d) => (
-          <div class="modal-back" onClick={() => setDraft(null)}>
-            <div class="modal" onClick={(e) => e.stopPropagation()}>
+          <Modal label={d().id ? "Editar cartão" : "Novo cartão"} dirty onClose={() => setDraft(null)}>
               <input
                 class="m-title"
                 placeholder="Título"
@@ -252,7 +253,11 @@ export function Kanban(props: { project: string }) {
                 </label>
                 <label>
                   Agente
-                  <input value={d().agent} onInput={(e) => setDraft({ ...d(), agent: e.currentTarget.value })} />
+                  <Select
+                    value={d().agent}
+                    options={[...new Set([...Object.keys(AGENTS), d().agent])].map((a) => ({ value: a, label: a }))}
+                    onChange={(v) => setDraft({ ...d(), agent: v })}
+                  />
                 </label>
                 <label>
                   Prioridade
@@ -279,8 +284,7 @@ export function Kanban(props: { project: string }) {
                   Guardar
                 </button>
               </div>
-            </div>
-          </div>
+          </Modal>
         )}
       </Show>
     </div>

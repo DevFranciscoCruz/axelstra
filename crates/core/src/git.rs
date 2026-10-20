@@ -207,7 +207,7 @@ pub struct RepoIdentity {
     pub display_name: String,
     /// "owner/repo" for github remotes
     pub slug: Option<String>,
-    /// the owner's GitHub avatar, the same logo Orca shows
+    /// the owner's GitHub avatar, the same logo shows
     pub icon_url: Option<String>,
     pub remote: Option<String>,
 }

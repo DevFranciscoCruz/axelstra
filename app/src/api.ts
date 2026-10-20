@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export type SessionMeta = { project?: string; worktree?: string; kind?: string };
+export type SessionMeta = { project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string };
 export type SessionInfo = { id: number; running: boolean; idle_ms?: number; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
@@ -17,14 +17,50 @@ export const call = <T = unknown>(method: string, params: Record<string, unknown
 import { Channel, invoke as tauriInvoke } from "@tauri-apps/api/core";
 export const defaultShell = () => tauriInvoke<[string, string[]]>("default_shell");
 
+/** Command line for an agent. On restore it resumes the earlier conversation, falling back to a fresh start. */
+const agentLine = (cli: string, resume: string | undefined, restoring: boolean, ps: boolean, hooks: string) => {
+  const claude = (flags: string) => `claude --settings '${hooks}' ${flags}`;
+  const fresh = cli === "claude" && resume ? claude(`--session-id ${resume}`) : cli;
+  if (!restoring) return fresh;
+  const back = cli === "claude" && resume ? claude(`--resume ${resume}`) : cli === "codex" ? "codex resume --last" : cli;
+  return ps ? `${back}; if (!$?) { ${fresh} }` : `${back} || ${fresh}`;
+};
+
 /** Opens the chosen agent CLI straight away in a worktree. The shell stays alive after the agent exits. */
-export const launchDefaultAgent = async (project: string, worktree: string, agent: string, cli: string) => {
+export const launchDefaultAgent = async (project: string, worktree: string, agent: string, cli: string, restore?: { key?: string; resume?: string }) => {
   const [program, args] = await defaultShell();
-  const run = /powershell|pwsh/i.test(program)
-    ? [...args, "-NoExit", "-Command", cli]
-    : [...args, "-c", `${cli}; exec "${program}" -l`];
-  const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent" });
+  const ps = /powershell|pwsh/i.test(program);
+  // key is stable for the life of the tab; resume is the conversation id, which /clear replaces
+  const key = restore ? restore.key : cli === "claude" ? crypto.randomUUID() : undefined;
+  const resume = restore ? restore.resume ?? key : key;
+  const { dir } = await call<{ dir: string }>("app.dir");
+  const line = agentLine(cli, resume, !!restore, ps, `${dir}/hooks.json`);
+  const run = ps ? [...args, "-NoExit", "-Command", line] : [...args, "-c", `${line}; exec "${program}" -l`];
+  const env = key ? { AXELSTRA_KEY: key, AXELSTRA_DIR: dir } : undefined;
+  const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent", agent: cli, resume, key }, env);
   return id;
+};
+
+/** Brings back the sessions of a previous daemon run (reboot, installer): shells reopen, agents resume their conversation. */
+export const restoreSessions = async (): Promise<number> => {
+  const pending = await call<{ program: string; args?: string[]; cwd?: string; label?: string; meta?: SessionMeta }[]>("session.pending");
+  if (!pending.length) return 0;
+  await call("session.pending_clear");
+  let n = 0;
+  for (const r of pending) {
+    try {
+      const m = r.meta;
+      if (m?.kind === "agent" && m.agent && m.project && m.worktree) {
+        await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume });
+      } else {
+        await spawnSession(r.program, r.args ?? [], r.label ?? undefined, r.cwd, m ?? undefined, (r as { env?: Record<string, string> }).env);
+      }
+      n++;
+    } catch {
+      /* a worktree that no longer exists just is not restored */
+    }
+  }
+  return n;
 };
 
 /** Change events for the selected worktree: the daemon watches the files and tells us, so git runs only when needed. */
@@ -53,7 +89,8 @@ export const spawnSession = (
   label?: string,
   cwd?: string,
   meta?: SessionMeta,
-) => call<{ id: number }>("session.spawn", { program, args, label, cwd, meta, cols: 120, rows: 30 });
+  env?: Record<string, string>,
+) => call<{ id: number }>("session.spawn", { program, args, label, cwd, meta, env, cols: 120, rows: 30 });
 
 export const killSession = (id: number) => call("session.kill", { id });
 export const removeSession = (id: number) => call("session.remove", { id });

@@ -7,6 +7,11 @@
 //!   kind 2  PTY input     `[u32 LE session][bytes]`                 (client -> daemon)
 //!   kind 3  JSON event    `{"event":"session.exit","id":n,"code":c}` (daemon -> client)
 
+/// Version of the app <-> daemon contract. A daemon outlives app updates, so the app only restarts
+/// a daemon older than this; bump it when the app starts calling something an old daemon lacks.
+/// 2: app.dir, session.pending, session.pending_clear.
+pub const PROTO: u64 = 2;
+
 pub const MAX_FRAME: usize = 16 << 20;
 
 pub const JSON: u8 = 0;

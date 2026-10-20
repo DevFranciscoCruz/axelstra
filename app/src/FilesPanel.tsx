@@ -1,18 +1,31 @@
 import { RightTabs } from "./RightTabs";
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createEffect, createSignal, on } from "solid-js";
 import { FsEntry, fsList } from "./api";
-import { changes, openFile, selectedWorktree, setOpenDiff, setOpenFile, setRightTab, setShowKanban, setOpenCommit } from "./store";
+import { press } from "./a11y";
+import { fsTick, guarded, openFile, selectedWorktree, setOpenDiff, setOpenFile, setRightTab, setShowKanban, setOpenCommit } from "./store";
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 
 function Dir(props: { wt: string; path: string; depth: number }) {
   const [entries, setEntries] = createSignal<FsEntry[] | null>(null);
   const [err, setErr] = createSignal("");
-  void fsList(props.wt, props.path)
-    .then(setEntries)
-    .catch((e) => setErr(String(e)));
+  const load = () =>
+    void fsList(props.wt, props.path)
+      .then(setEntries)
+      .catch((e) => setErr(String(e)));
+  load();
+  // the daemon reports file changes: keep the visible folders current
+  createEffect(on(fsTick, load, { defer: true }));
   return (
     <>
+      <Show when={entries() === null && !err()}>
+        <div class="empty">A carregar…</div>
+      </Show>
+      <Show when={entries() !== null && entries()!.length === 0}>
+        <div class="empty" style={{ "padding-left": `${8 + props.depth * 12}px` }}>
+          (vazio)
+        </div>
+      </Show>
       <Show when={err()}>
         <div class="empty">{err()}</div>
       </Show>
@@ -31,13 +44,16 @@ function Node(props: { wt: string; dir: string; e: FsEntry; depth: number }) {
         class="file"
         classList={{ active: !props.e.dir && openFile() === path() }}
         style={pad()}
-        onClick={() => {
+        {...press(() => {
           if (props.e.dir) return setOpen(!open());
-          setOpenDiff(null);
-          setShowKanban(false);
-          setOpenCommit(null);
-          setOpenFile(path());
-        }}
+          guarded(() => {
+            setOpenDiff(null);
+            setShowKanban(false);
+            setOpenCommit(null);
+            setOpenFile(path());
+          });
+        })}
+        aria-expanded={props.e.dir ? open() : undefined}
       >
         <span class="twisty">{props.e.dir ? (open() ? "▾" : "▸") : ""}</span>
         <span class="fname">{props.e.name}</span>
@@ -51,7 +67,6 @@ function Node(props: { wt: string; dir: string; e: FsEntry; depth: number }) {
 
 export function FilesPanel() {
   const [gen, setGen] = createSignal(0);
-  const nChanges = () => changes()?.files.length ?? 0;
   return (
     <aside class="rightbar">
       <RightTabs />

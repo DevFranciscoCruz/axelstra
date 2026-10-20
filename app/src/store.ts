@@ -1,3 +1,4 @@
+import { ask } from "@tauri-apps/plugin-dialog";
 import { createSignal } from "solid-js";
 import { Changes, Commit, Project, SessionInfo, Worktree, gitChanges, listProjects, listSessions } from "./api";
 
@@ -40,16 +41,73 @@ export const pickAgent = () =>
     });
   });
 
+/** left project list and right files/changes panel; remembered between runs */
+const flag = (k: string) => load(k) !== "0";
+const [leftOn, setLeftOn] = createSignal(flag("axelstra.left"));
+const [rightOn, setRightOn] = createSignal(flag("axelstra.right"));
+export const showSidebar = leftOn;
+export const showRightPanel = rightOn;
+export const toggleSidebar = () => {
+  setLeftOn(!leftOn());
+  save("axelstra.left", leftOn() ? "1" : "0");
+};
+export const toggleRightPanel = () => {
+  setRightOn(!rightOn());
+  save("axelstra.right", rightOn() ? "1" : "0");
+};
+
+/** panel widths in px (drag handles); remembered, clamped on use */
+const num = (k: string, d: number) => {
+  const n = Number(load(k));
+  return Number.isFinite(n) && n > 0 ? n : d;
+};
+export const [leftW, setLeftWSig] = createSignal(num("axelstra.leftW", 260));
+export const [rightW, setRightWSig] = createSignal(num("axelstra.rightW", 320));
+export const setLeftW = (w: number) => {
+  const v = Math.round(Math.min(Math.max(w, 180), 480));
+  setLeftWSig(v);
+  save("axelstra.leftW", String(v));
+};
+export const setRightW = (w: number) => {
+  const v = Math.round(Math.min(Math.max(w, 240), 640));
+  setRightWSig(v);
+  save("axelstra.rightW", String(v));
+};
+
+/** unsaved text in the open editor; anything that would close it asks first */
+export const [editorDirty, setEditorDirty] = createSignal(false);
+export const confirmDiscard = async () =>
+  !editorDirty() ||
+  (await ask("Há alterações por guardar neste ficheiro. Descartá-las?", { title: "Editor", kind: "warning", okLabel: "Descartar", cancelLabel: "Cancelar" }));
+/** runs `fn` now, or after the user agrees to drop unsaved editor text */
+export const guarded = (fn: () => void) => {
+  if (!editorDirty()) return fn();
+  void confirmDiscard().then((ok) => {
+    if (ok) {
+      setEditorDirty(false);
+      fn();
+    }
+  });
+};
+
 /** bumped whenever the daemon reports file changes in the selected worktree */
 export const [fsTick, setFsTick] = createSignal(0);
 
 export const [projects, setProjects] = createSignal<Project[]>([]);
 export const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
-export const [error, setError] = createSignal("");
+const [error, setErrorSig] = createSignal("");
+export { error };
+/** errors set by an action stay until dismissed; only the session poll clears its own */
+let errorFromPoll = false;
+export const setError = (m: string) => {
+  errorFromPoll = false;
+  setErrorSig(m);
+};
 
 const [wt, setWt] = createSignal<string | null>(load("axelstra.worktree"));
 export const selectedWorktree = wt;
-export const selectWorktree = (path: string | null) => {
+export const selectWorktree = (path: string | null) => guarded(() => doSelect(path));
+const doSelect = (path: string | null) => {
   setWt(path);
   if (path) setAttention((cur) => { const n = new Set(cur); n.delete(norm(path)); return n; });
   save("axelstra.worktree", path);
@@ -140,9 +198,10 @@ export const refreshSessions = async () => {
     const list = await listSessions();
     trackAgents(list);
     setSessions(list);
-    setError("");
+    if (errorFromPoll) setErrorSig("");
   } catch (e) {
-    setError(String(e));
+    setErrorSig(String(e));
+    errorFromPoll = true;
   }
 };
 

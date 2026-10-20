@@ -66,7 +66,6 @@ fn projects_worktrees_and_session_meta() {
     sh(&repo, &["worktree", "add", "-q", "-b", "foreign", &root.join("foreign-wt").to_string_lossy(), "HEAD"]);
     let list = c.call("project.list", json!({})).unwrap();
     assert_eq!(list[0]["worktrees"].as_array().unwrap().len(), 2);
-    // name and logo come from the origin remote, like Orca; credentials never leak
     assert_eq!(list[0]["name"], "widgets");
     assert_eq!(list[0]["slug"], "Acme/widgets");
     assert_eq!(list[0]["icon_url"], "https://github.com/Acme.png?size=64");

@@ -3,7 +3,9 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { Commit, FileChange, gitCommit, gitLog, gitPr, gitPush } from "./api";
 import { showMenu } from "./ContextMenu";
+import { press } from "./a11y";
 import {
+  guarded,
   baseRef,
   changes,
   changesMode,
@@ -60,6 +62,7 @@ export function ChangesPanel() {
     setNote(null);
     try {
       setNote({ ok: true, text: await f() });
+      setTimeout(() => setNote((n) => (n?.ok ? null : n)), 6000);
     } catch (e) {
       setNote({ ok: false, text: String(e) });
     } finally {
@@ -104,18 +107,20 @@ export function ChangesPanel() {
 
   const canCommit = () => !busy() && files().length > 0 && message().trim().length > 0;
 
-  const openFileDiff = (f: FileChange) => {
-    setOpenFile(null);
-    setShowKanban(false);
-    setOpenCommit(null);
-    setOpenDiff(f.path);
-  };
-  const openCommitView = (c: Commit) => {
-    setOpenDiff(null);
-    setOpenFile(null);
-    setShowKanban(false);
-    setOpenCommit(c);
-  };
+  const openFileDiff = (f: FileChange) =>
+    guarded(() => {
+      setOpenFile(null);
+      setShowKanban(false);
+      setOpenCommit(null);
+      setOpenDiff(f.path);
+    });
+  const openCommitView = (c: Commit) =>
+    guarded(() => {
+      setOpenDiff(null);
+      setOpenFile(null);
+      setShowKanban(false);
+      setOpenCommit(c);
+    });
 
   return (
     <aside class="rightbar">
@@ -187,7 +192,7 @@ export function ChangesPanel() {
 
       <div class="sc-commit">
         <textarea
-          placeholder="Mensagem"
+          placeholder="Mensagem (Ctrl+Enter para fazer commit)"
           rows={3}
           value={message()}
           onInput={(e) => setMessage(e.currentTarget.value)}
@@ -196,7 +201,7 @@ export function ChangesPanel() {
           }}
         />
         <div class="sc-split">
-          <button class="sc-main" disabled={!canCommit()} onClick={() => void doCommit()}>
+          <button class="sc-main" disabled={!canCommit()} title={canCommit() ? "Commit (Ctrl+Enter)" : files().length === 0 ? "Sem alterações para commit" : message().trim() ? "A trabalhar…" : "Escreva uma mensagem"} onClick={() => void doCommit()}>
             ✓ Commit
           </button>
           <button
@@ -224,7 +229,7 @@ export function ChangesPanel() {
       </div>
 
       <div class="sc-body">
-        <div class="sc-title" onClick={() => setShowChanges(!showChanges())}>
+        <div class="sc-title" {...press(() => setShowChanges(!showChanges()))} aria-expanded={showChanges()}>
           <span class="chev">{showChanges() ? "⌄" : "›"}</span>
           <span>ALTERAÇÕES</span>
           <span class="sc-count">{files().length}</span>
@@ -235,7 +240,7 @@ export function ChangesPanel() {
               {(f: FileChange) => {
                 const [dir, name] = split(f.path);
                 return (
-                  <div class="file" classList={{ active: openDiff() === f.path }} onClick={() => openFileDiff(f)} title={`${f.path} (${LABEL[f.status] ?? f.status})`}>
+                  <div class="file" classList={{ active: openDiff() === f.path }} {...press(() => openFileDiff(f))} title={`${f.path} (${LABEL[f.status] ?? f.status})`}>
                     <span class="ficon">▤</span>
                     <span class="fname2">
                       <span class="fn">{name}</span>
@@ -259,7 +264,7 @@ export function ChangesPanel() {
           </div>
         </Show>
 
-        <div class="sc-title" onClick={() => setShowCommits(!showCommits())}>
+        <div class="sc-title" {...press(() => setShowCommits(!showCommits()))} aria-expanded={showCommits()}>
           <span class="chev">{showCommits() ? "⌄" : "›"}</span>
           <span>COMMITS</span>
           <span class="sc-count">{log()?.length ?? 0}</span>
@@ -271,7 +276,7 @@ export function ChangesPanel() {
             </Show>
             <For each={log() ?? []} fallback={<Show when={!log.loading}><div class="empty">{commitsBase() ? `Nada à frente de ${commitsBase()}` : "Sem commits"}</div></Show>}>
               {(c) => (
-                <div class="commit" classList={{ active: openCommit()?.sha === c.sha }} onClick={() => openCommitView(c)} title={c.subject}>
+                <div class="commit" classList={{ active: openCommit()?.sha === c.sha }} {...press(() => openCommitView(c))} title={c.subject}>
                   <div class="csubject">{c.subject}</div>
                   <div class="cmeta">
                     <span class="mono">{c.short}</span> · {c.author} · {when(c.date)}

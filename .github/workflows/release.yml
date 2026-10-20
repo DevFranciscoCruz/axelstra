@@ -1,7 +1,10 @@
 name: release
-# Push a tag `vX.Y.Z` to build the installers and attach them to the GitHub Release. Installs and
-# updates are manual: download Axelstra_<version>_x64-setup.exe (Windows) or the .dmg (macOS, Apple
-# silicon) from the release. The macOS build is not signed or notarized: see the README.
+# Push a tag `vX.Y.Z` to build the installers and attach them to the GitHub Release. The Windows
+# installer is signed for the in-app updater and the release also carries latest.json, which the app
+# reads from releases/latest/download. The .dmg (macOS, Apple silicon) is installed manually and is
+# not signed or notarized: see the README.
+#
+# Needed in the repo settings: secrets TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
 on:
   push:
     tags: ['v*']
@@ -49,7 +52,10 @@ jobs:
       - name: Build the installer (Windows)
         if: runner.os == 'Windows'
         working-directory: app
-        run: npx tauri build --config src-tauri/tauri.release.conf.json --config '{"version":"${{ steps.v.outputs.version }}"}'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --config src-tauri/tauri.release.conf.json --config '{"version":"${{ steps.v.outputs.version }}","bundle":{"createUpdaterArtifacts":true}}'
       - name: Build the disk image (macOS)
         if: runner.os == 'macOS'
         working-directory: app
@@ -58,7 +64,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p out
-          if [[ "$RUNNER_OS" == "Windows" ]]; then cp target/release/bundle/nsis/*-setup.exe out/; else cp target/release/bundle/dmg/*.dmg out/; fi
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp target/release/bundle/nsis/*-setup.exe out/
+            EXE=$(basename out/*-setup.exe)
+            cp "target/release/bundle/nsis/$EXE.sig" "out/$EXE.sig"
+            node scripts/write-latest-json.mjs --version "${{ steps.v.outputs.version }}" --sig-file "out/$EXE.sig"               --url "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME:-v0.0.0}/$EXE"               --notes "Axelstra ${{ steps.v.outputs.version }}" --out out/latest.json
+          else
+            cp target/release/bundle/dmg/*.dmg out/
+          fi
           ls -l out
       - name: Attach to the GitHub Release
         if: env.DRY_RUN != 'true'
@@ -69,7 +82,9 @@ jobs:
           V="${{ steps.v.outputs.version }}"
           # both matrix jobs get here: whoever is first creates the release, the other uploads into it
           gh release create "$GITHUB_REF_NAME" --title "Axelstra $V" --notes "Axelstra $V" 2>/dev/null || true
-          gh release upload "$GITHUB_REF_NAME" out/* --clobber
+          # latest.json goes last: clients only see a version once its installer is already there
+          gh release upload "$GITHUB_REF_NAME" $(ls out/* | grep -v latest.json) --clobber
+          if [[ -f out/latest.json ]]; then gh release upload "$GITHUB_REF_NAME" out/latest.json --clobber; fi
       - name: Keep the dry-run installer on the run
         if: env.DRY_RUN == 'true'
         uses: actions/upload-artifact@v4
