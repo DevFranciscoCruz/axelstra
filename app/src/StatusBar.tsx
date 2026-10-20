@@ -1,9 +1,9 @@
-import { For, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { sessions } from "./store";
 import { LimitsBar } from "./LimitsBar";
 
-type Usage = { app: number; daemon: number; sessions: number; ports: { port: number; pid: number }[] };
+type Usage = { app: number; daemon: number; sessions: number; ports: { port: number; pid: number }[]; cpu: number | null; gpu: number | null; gpu_adapters: [string, number][] };
 
 const KEY = "axelstra.keepAwake";
 const stored = () => {
@@ -66,6 +66,12 @@ export function StatusBar() {
     return `Memória do Axelstra\nAplicação: ${fmt(u.app)}\nDaemon: ${fmt(u.daemon)}\nTerminais e agentes: ${fmt(u.sessions)}`;
   };
   const ports = () => usage()?.ports ?? [];
+  const pct = (n: number) => (n < 10 ? n.toFixed(1) : String(Math.round(n)));
+  const gpuTip = () => {
+    const u = usage();
+    const per = (u?.gpu_adapters ?? []).map(([id, v]) => `Adaptador ${id.split("_").pop()}: ${pct(v)}%`).join("\n");
+    return `GPU usada pelo Axelstra (app, WebView2 e terminais), no motor mais ocupado${per ? "\n" + per : ""}`;
+  };
 
   return (
     <div class="statusbar">
@@ -82,6 +88,25 @@ export function StatusBar() {
         </svg>
         <span>{usage() ? fmt(total()) : "–"}</span>
       </span>
+      <Show when={usage()?.cpu != null}>
+        <span class="sb-item" title="CPU usada pelo Axelstra (app, daemon, terminais e agentes), em % do computador">
+          <svg {...svg}>
+            <rect x="4" y="4" width="8" height="8" rx="1" />
+            <path d="M6.5 1.5v2.5M9.5 1.5v2.5M6.5 12v2.5M9.5 12v2.5M1.5 6.5H4M1.5 9.5H4M12 6.5h2.5M12 9.5h2.5" />
+          </svg>
+          <span>{pct(usage()!.cpu!)}%</span>
+        </span>
+      </Show>
+      <Show when={usage()?.gpu != null}>
+        <span class="sb-item" title={gpuTip()}>
+          <svg {...svg}>
+            <rect x="1.5" y="4.5" width="13" height="7" rx="1" />
+            <circle cx="8" cy="8" r="2" />
+            <path d="M4 11.5v2M12 11.5v2" />
+          </svg>
+          <span>{pct(usage()!.gpu!)}%</span>
+        </span>
+      </Show>
       <span class="sb-item" title={`${running()} terminais e agentes a correr`}>
         <svg {...svg}>
           <path d="M2.5 4.5l3 3-3 3M7.5 11.5h6" />
