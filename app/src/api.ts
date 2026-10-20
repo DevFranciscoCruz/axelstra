@@ -80,6 +80,7 @@ export const listAutomations = () => call<{ automations: Automation[] }>("automa
 export const saveAutomation = (a: Automation) => call<Automation>("automation.save", a as unknown as Record<string, unknown>);
 export const deleteAutomation = (id: string) => call("automation.delete", { id });
 export const runAutomation = (id: string) => call<{ session: number; worktree: string }>("automation.run", { id });
+export const openInEditor = (worktree: string, app: "code") => call("open.editor", { worktree, app });
 export const removeWorktree = (project: string, path: string) => call("worktree.remove", { project, path });
 
 export type FileChange = {

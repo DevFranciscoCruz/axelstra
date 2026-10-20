@@ -1,9 +1,14 @@
 import { open, ask } from "@tauri-apps/plugin-dialog";
 import { For, Show, createResource, createSignal } from "solid-js";
-import { addProject, projectLogo, createWorktree, launchDefaultAgent, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
+import { addProject, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
+import { MenuItem, showMenu } from "./ContextMenu";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import logo from "./assets/logo.png";
 import {
   AGENTS,
+  isPinned,
+  togglePin,
+  setAttention,
   setShowAutomations,
   attention,
   sessionState,
@@ -125,6 +130,69 @@ export function Sidebar() {
       setEditSetup(null);
     });
 
+  const copy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  // frees the memory of a worktree without deleting it: its terminals and agents are closed
+  const sleepWorktree = async (path: string, name: string) => {
+    const live = sessionsOf(path).filter((s) => s.running);
+    if (live.length > 0) {
+      const ok = await ask(`Pôr "${name}" a dormir?\n\nOs ${live.length} terminais e agentes a correr são fechados. O worktree e os ficheiros ficam como estão.`, {
+        title: "Dormir",
+        kind: "warning",
+      });
+      if (!ok) return;
+    }
+    await run(async () => {
+      for (const s of sessionsOf(path)) {
+        if (s.running) await killSession(s.id);
+        await removeSession(s.id);
+      }
+    });
+  };
+
+  const worktreeMenu = (p: { id: string; name: string }, w: { path: string; branch: string | null; is_main: boolean }, label: string): MenuItem[] => [
+    { label: "Atualizar", icon: "↻", run: async () => { await refreshProjects(); await refreshSessions(); } },
+    { separator: true },
+    {
+      label: "Abrir em",
+      icon: "▭",
+      children: [
+        { label: "Explorador de ficheiros", run: () => run(() => revealItemInDir(w.path)) },
+        { label: "VS Code", run: () => run(() => openInEditor(w.path, "code")) },
+      ],
+    },
+    { label: "Copiar caminho", icon: "⧉", run: () => copy(w.path) },
+    { label: "Copiar nome do worktree", icon: "⧉", run: () => copy(w.branch ?? label) },
+    { separator: true },
+    { label: isPinned(w.path) ? "Desafixar" : "Fixar", icon: "⚲", run: () => togglePin(w.path) },
+    { label: "Marcar como não lido", icon: "◔", run: () => setAttention((cur) => new Set(cur).add(norm(w.path))) },
+    { separator: true },
+    { label: "Dormir", icon: "☾", run: () => sleepWorktree(w.path, label) },
+    { label: "Apagar worktree", icon: "🗑", danger: true, disabled: w.is_main, run: () => dropWorktree(p.id, w.path, label) },
+  ];
+
+  const projectMenu = (p: { id: string; name: string; path: string; setup?: string | null }): MenuItem[] => [
+    { label: "Novo worktree", icon: "+", run: () => setCreating(p.id) },
+    { label: "Comando de setup…", icon: "⚙", run: () => { setSetupText(p.setup ?? ""); setEditSetup(p.id); } },
+    { separator: true },
+    {
+      label: "Abrir em",
+      icon: "▭",
+      children: [
+        { label: "Explorador de ficheiros", run: () => run(() => revealItemInDir(p.path)) },
+      ],
+    },
+    { label: "Copiar caminho", icon: "⧉", run: () => copy(p.path) },
+    { separator: true },
+    { label: "Tirar projeto da lista", icon: "✕", danger: true, run: () => run(() => removeProject(p.id)) },
+  ];
+
   const dropWorktree = async (projectId: string, path: string, name: string) => {
     const ok = await ask(
       `Remover o worktree "${name}"?\n\nA pasta e o branch são apagados, incluindo alterações não guardadas. Os terminais dele são fechados.`,
@@ -155,7 +223,7 @@ export function Sidebar() {
       <For each={projects()} fallback={<div class="empty">Nenhum projeto</div>}>
         {(p) => (
           <div class="project">
-            <div class="project-head" title={p.path}>
+            <div class="project-head" title={p.path} onContextMenu={(e) => showMenu(e, projectMenu(p))}>
               <ProjectIcon id={p.id} name={p.name} url={p.icon_url} />
               <span class="pname" title={p.slug ?? p.path}>{p.name}</span>
               <button class="icon" title="Novo worktree" onClick={() => setCreating(creating() === p.id ? null : p.id)}>
@@ -201,7 +269,7 @@ export function Sidebar() {
                 ref={(el) => queueMicrotask(() => el.focus())}
               />
             </Show>
-            <For each={p.worktrees}>
+            <For each={[...p.worktrees].sort((a, b) => Number(b.is_main) - Number(a.is_main) || Number(isPinned(b.path)) - Number(isPinned(a.path)))}>
               {(w) => {
                 const label = () => w.branch ?? "(detached)";
                 const live = () => sessionsOf(w.path).filter((s) => s.running).length;
@@ -212,6 +280,7 @@ export function Sidebar() {
                     class="item wt"
                     classList={{ active: norm(selectedWorktree()) === norm(w.path) }}
                     onClick={() => void openWorktree(p.id, w.path, w.is_main)}
+                    onContextMenu={(e) => showMenu(e, worktreeMenu(p, w, label()))}
                     title={w.path}
                   >
                     <span
@@ -227,6 +296,9 @@ export function Sidebar() {
                     </Show>
                     <Show when={live() > 0}>
                       <span class="count">{live()}</span>
+                    </Show>
+                    <Show when={isPinned(w.path)}>
+                      <span class="pin" title="Fixado">⚲</span>
                     </Show>
                     <Show when={!w.is_main}>
                       <button

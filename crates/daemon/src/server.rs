@@ -607,6 +607,20 @@ fn dispatch(
             let path = crate::automations::store_path(&reg.store);
             tokio::task::block_in_place(|| run_automation(reg, &path, p["id"].as_str().unwrap_or_default()))
         }
+        "open.editor" => {
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            // only editors we know; never a program name from the client
+            let (prog, args): (&str, Vec<String>) = match p["app"].as_str().unwrap_or_default() {
+                "code" if cfg!(windows) => ("cmd", vec!["/d".into(), "/c".into(), "code".into(), wt.to_string_lossy().into_owned()]),
+                "code" => ("code", vec![wt.to_string_lossy().into_owned()]),
+                other => anyhow::bail!("unknown editor {other:?}"),
+            };
+            axelstra_core::git::quiet(&mut std::process::Command::new(prog))
+                .args(args)
+                .spawn()
+                .map_err(|e| anyhow::anyhow!("could not start {prog}: {e}"))?;
+            Ok(json!({}))
+        }
         "gh.list" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let kind = p["kind"].as_str().unwrap_or("pr").to_string();
