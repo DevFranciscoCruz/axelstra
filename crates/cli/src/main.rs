@@ -34,6 +34,10 @@ enum Cmd {
     Projects,
     /// Type into a session. Escapes: \e \r \n \xHH
     Send { id: u32, data: String },
+    /// Install the /axelstra-orchestration skill for Claude Code (~/.claude/skills)
+    InstallSkill,
+    /// Send a message to an agent session: pasted as one block, then Enter
+    Say { id: u32, text: String },
     /// Print a session's output (history + live) for a few seconds
     Tail {
         id: u32,
@@ -167,6 +171,7 @@ fn main() -> Result<()> {
         | Cmd::Kill { .. }
         | Cmd::Tail { .. }
         | Cmd::Send { .. }
+        | Cmd::Say { .. }
         | Cmd::AddProject { .. }
         | Cmd::SetSetup { .. }
         | Cmd::Projects
@@ -180,6 +185,13 @@ fn main() -> Result<()> {
             use axelstra_daemon::{client::Client, proto};
             let c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
             ctl::run(cmd, c)?;
+        }
+        Cmd::InstallSkill => {
+            let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+            let dir = PathBuf::from(home).join(".claude").join("skills").join("axelstra-orchestration");
+            std::fs::create_dir_all(&dir)?;
+            std::fs::write(dir.join("SKILL.md"), include_str!("../../../skills/axelstra-orchestration/SKILL.md"))?;
+            println!("installed {} (use it as /axelstra-orchestration in Claude Code)", dir.display());
         }
         Cmd::Plan { repo } => {
             let cards: Vec<_> = card::load_dir(&repo.join(".kanban"))?
