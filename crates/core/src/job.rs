@@ -16,6 +16,8 @@ mod imp {
 
     pub struct Job(HANDLE);
     unsafe impl Send for Job {}
+    // Job Object handles are safe to use from several threads
+    unsafe impl Sync for Job {}
 
     impl Job {
         pub fn new() -> Result<Job> {

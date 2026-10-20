@@ -12,6 +12,17 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Run the background daemon that owns terminal sessions
+    Daemon,
+    /// List sessions held by the daemon
+    Ls,
+    /// Start a session in the daemon: `axelstra spawn -- cmd /k`
+    Spawn {
+        #[arg(last = true, required = true)]
+        cmd: Vec<String>,
+    },
+    /// Kill a session
+    Kill { id: u32 },
     /// Show cards and the order they would run in
     Plan {
         #[arg(long, default_value = ".")]
@@ -36,6 +47,34 @@ enum Cmd {
 
 fn main() -> Result<()> {
     match Cli::parse().cmd {
+        Cmd::Daemon => {
+            use axelstra_daemon::{proto, server};
+            let token = proto::load_or_create_token()?;
+            // two workers is plenty: the heavy lifting is blocking PTY threads
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()?
+                .block_on(server::serve(proto::pipe_name(), token))?;
+        }
+        Cmd::Ls | Cmd::Spawn { .. } | Cmd::Kill { .. } => {
+            use axelstra_daemon::{client::Client, proto};
+            let mut c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
+            match Cli::parse().cmd {
+                Cmd::Ls => println!("{}", c.call("session.list", serde_json::json!({}))?),
+                Cmd::Kill { id } => {
+                    c.call("session.kill", serde_json::json!({"id": id}))?;
+                }
+                Cmd::Spawn { cmd } => {
+                    let r = c.call(
+                        "session.spawn",
+                        serde_json::json!({"program": cmd[0], "args": &cmd[1..], "cwd": std::env::current_dir()?}),
+                    )?;
+                    println!("{r}");
+                }
+                _ => unreachable!(),
+            }
+        }
         Cmd::Plan { repo } => {
             let cards: Vec<_> = card::load_dir(&repo.join(".kanban"))?
                 .into_iter()
