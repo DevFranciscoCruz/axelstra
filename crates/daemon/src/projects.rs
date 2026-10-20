@@ -64,10 +64,10 @@ pub fn remove(store: &Path, id: &str) -> Result<()> {
 
 /// Only worktrees of registered projects may be inspected, never arbitrary paths.
 pub fn known_worktree(store: &Path, path: &str) -> Result<PathBuf> {
-    let want = path.replace('/', "\\").to_ascii_lowercase();
+    let want = path.replace('\\', "/").to_ascii_lowercase();
     for p in load(store) {
         for w in git::worktree_list(Path::new(&p.path))? {
-            if w.path.replace('/', "\\").to_ascii_lowercase() == want {
+            if w.path.replace('\\', "/").to_ascii_lowercase() == want {
                 return Ok(PathBuf::from(w.path));
             }
         }

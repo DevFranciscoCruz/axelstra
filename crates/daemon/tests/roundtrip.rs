@@ -1,9 +1,24 @@
-#![cfg(windows)]
 
 use axelstra_daemon::client::{Client, Frame};
 use axelstra_daemon::server;
 use serde_json::json;
 use std::time::{Duration, Instant};
+
+#[cfg(windows)]
+const SHELL: &str = "cmd";
+#[cfg(windows)]
+const SHELL_ARGS: [&str; 1] = ["/q"];
+#[cfg(not(windows))]
+const SHELL: &str = "sh";
+#[cfg(not(windows))]
+const SHELL_ARGS: [&str; 0] = [];
+
+/// `echo <a>` then `echo <b>` on one line, the way each shell chains commands
+fn two_echoes(a: &str, b: &str) -> Vec<u8> {
+    let sep = if cfg!(windows) { "&" } else { ";" };
+    let eol = if cfg!(windows) { "\r\n" } else { "\n" };
+    format!("echo {a}{sep}echo {b}{eol}").into_bytes()
+}
 
 fn start() -> (String, String) {
     // blocking pipe reads cannot time out, so a stuck test must not hang the suite
@@ -12,7 +27,7 @@ fn start() -> (String, String) {
         eprintln!("watchdog: test stuck");
         std::process::exit(1);
     });
-    let pipe = format!(r"\\.\pipe\axelstra-test-{}-{:?}", std::process::id(), std::thread::current().id())
+    let pipe = format!("{}-test-{}-{:?}", axelstra_daemon::proto::pipe_name(), std::process::id(), std::thread::current().id())
         .replace("ThreadId(", "")
         .replace(')', "");
     let token = "t".repeat(32);
@@ -58,12 +73,12 @@ fn session_survives_disconnect_and_replays_to_new_client() {
 
     let mut a = Client::connect(&pipe, &token).unwrap();
     let id = a
-        .call("session.spawn", json!({"program": "cmd", "args": ["/q"], "cols": 80, "rows": 24}))
+        .call("session.spawn", json!({"program": SHELL, "args": SHELL_ARGS, "cols": 80, "rows": 24}))
         .unwrap()["id"]
         .as_u64()
         .unwrap() as u32;
     a.call("session.subscribe", json!({"id": id})).unwrap();
-    a.send_input(id, b"echo first&echo -marker\r\n").unwrap();
+    a.send_input(id, &two_echoes("first", "-marker")).unwrap();
     assert!(collect(&mut a, id, "first"));
     drop(a); // UI goes away
 
@@ -73,7 +88,7 @@ fn session_survives_disconnect_and_replays_to_new_client() {
     b.call("session.subscribe", json!({"id": id})).unwrap();
     // snapshot replays what happened while nobody was attached
     assert!(collect(&mut b, id, "first"));
-    b.send_input(id, b"echo second\r\n").unwrap();
+    b.send_input(id, &two_echoes("second", "x")).unwrap();
     assert!(collect(&mut b, id, "second"));
 
     let u = b.call("session.usage", json!({"id": id})).unwrap();

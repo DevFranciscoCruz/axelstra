@@ -8,8 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 struct Registry {
@@ -57,14 +56,39 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
         token: token.clone(),
         runs: Default::default(),
     });
-    let mut server = ServerOptions::new()
-        .first_pipe_instance(true)
-        .reject_remote_clients(true)
-        .create(&pipe)?;
+    accept_loop(&pipe, reg, token).await
+}
+
+#[cfg(windows)]
+async fn accept_loop(pipe: &str, reg: Arc<Registry>, token: String) -> Result<()> {
+    use tokio::net::windows::named_pipe::ServerOptions;
+    let mut server = ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(pipe)?;
     loop {
         server.connect().await?;
         let conn = server;
-        server = ServerOptions::new().reject_remote_clients(true).create(&pipe)?;
+        server = ServerOptions::new().reject_remote_clients(true).create(pipe)?;
+        tokio::spawn(handle(conn, reg.clone(), token.clone()));
+    }
+}
+
+#[cfg(unix)]
+async fn accept_loop(path: &str, reg: Arc<Registry>, token: String) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    if let Some(dir) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(dir)?;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    // a live daemon owns the socket; a leftover file from a crashed one is replaced
+    if std::path::Path::new(path).exists() {
+        if std::os::unix::net::UnixStream::connect(path).is_ok() {
+            anyhow::bail!("another daemon is already listening on {path}");
+        }
+        std::fs::remove_file(path)?;
+    }
+    let listener = tokio::net::UnixListener::bind(path)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    loop {
+        let (conn, _) = listener.accept().await?;
         tokio::spawn(handle(conn, reg.clone(), token.clone()));
     }
 }
@@ -83,7 +107,7 @@ async fn read_frame(rd: &mut (impl AsyncReadExt + Unpin)) -> std::io::Result<(u8
     Ok((kind, buf))
 }
 
-async fn handle(pipe: NamedPipeServer, reg: Arc<Registry>, token: String) {
+async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Registry>, token: String) {
     let (mut rd, mut wr) = tokio::io::split(pipe);
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
     tokio::spawn(async move {

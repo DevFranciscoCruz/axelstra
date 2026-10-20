@@ -12,6 +12,9 @@ export type Project = { id: string; name: string; path: string; worktrees: Workt
 export const call = <T = unknown>(method: string, params: Record<string, unknown> = {}) =>
   invoke<T>("daemon_call", { method, params });
 
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+export const defaultShell = () => tauriInvoke<[string, string[]]>("default_shell");
+
 export const listSessions = () => call<SessionInfo[]>("session.list");
 
 export const spawnSession = (

@@ -1,5 +1,5 @@
 import { For, Show, createEffect, on, onCleanup, onMount } from "solid-js";
-import { SessionInfo, killSession, removeSession, spawnSession } from "./api";
+import { SessionInfo, defaultShell, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
 import { CommitView } from "./CommitView";
 import { Editor } from "./Editor";
@@ -64,7 +64,8 @@ export function App() {
     const c = current();
     if (!c) return;
     try {
-      const { id } = await spawnSession("powershell", ["-NoLogo"], "shell", c.wt.path, {
+      const [program, args] = await defaultShell();
+      const { id } = await spawnSession(program, args, "shell", c.wt.path, {
         project: c.project.id,
         worktree: c.wt.path,
         kind: "shell",

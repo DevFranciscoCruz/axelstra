@@ -1,4 +1,3 @@
-#![cfg(windows)]
 
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;

@@ -1,4 +1,3 @@
-#![cfg(windows)]
 
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
@@ -77,6 +76,8 @@ fn list_read_write_and_confinement() {
 
     // refusals
     assert!(c.call("fs.read", json!({"worktree": w, "path": "bin.dat"})).is_err());
+    assert!(c.call("fs.read", json!({"worktree": w, "path": "../../x"})).is_err());
+    assert!(c.call("fs.read", json!({"worktree": w, "path": "/etc/passwd"})).is_err());
     assert!(c.call("fs.read", json!({"worktree": w, "path": r"..\..\x"})).is_err());
     assert!(c.call("fs.read", json!({"worktree": w, "path": r"C:\Windows\win.ini"})).is_err());
     assert!(c.call("fs.write", json!({"worktree": w, "path": r"..\evil.txt", "text": "x", "eol": "lf"})).is_err());

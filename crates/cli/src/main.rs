@@ -64,6 +64,8 @@ fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Daemon => {
             use axelstra_daemon::{proto, server};
+            #[cfg(target_os = "macos")]
+            adopt_login_path();
             let token = proto::load_or_create_token()?;
             // two workers is plenty: the heavy lifting is blocking PTY threads
             tokio::runtime::Builder::new_multi_thread()
@@ -173,4 +175,18 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Apps started from Finder get launchd's tiny PATH, so `claude`, `git` from Homebrew, `node`...
+/// would not be found. Ask the user's login shell for the real one, once, at daemon start.
+#[cfg(target_os = "macos")]
+fn adopt_login_path() {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    if let Ok(o) = std::process::Command::new(shell).args(["-ilc", "printf %s \"$PATH\""]).output() {
+        let p = String::from_utf8_lossy(&o.stdout);
+        let p = p.lines().last().unwrap_or("").trim();
+        if o.status.success() && !p.is_empty() {
+            std::env::set_var("PATH", p);
+        }
+    }
 }

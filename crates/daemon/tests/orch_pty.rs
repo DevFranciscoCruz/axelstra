@@ -1,5 +1,4 @@
 //! The orchestrator driving agents through daemon PTY sessions.
-#![cfg(windows)]
 
 use axelstra_core::orch::{self, Options};
 use axelstra_core::git;
@@ -58,15 +57,20 @@ fn agents_run_in_daemon_sessions_and_get_cleaned_up() {
         .unwrap();
     }
 
-    let script = git::canon(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/fake-agent.ps1")).unwrap();
+    let tools = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools");
+    let agent: Vec<String> = if cfg!(windows) {
+        let script = git::canon(&tools.join("fake-agent.ps1")).unwrap();
+        ["powershell", "-NoProfile", "-File", &script.to_string_lossy()].map(String::from).to_vec()
+    } else {
+        let script = git::canon(&tools.join("fake-agent.sh")).unwrap();
+        ["sh", &script.to_string_lossy()].map(String::from).to_vec()
+    };
     let report = orch::run(&Options {
         repo: repo.clone(),
         name: "t".into(),
         max_concurrency: 2,
         wt_root: root.join("wt"),
-        agent_override: Some(
-            ["powershell", "-NoProfile", "-File", &script.to_string_lossy()].map(String::from).to_vec(),
-        ),
+        agent_override: Some(agent),
         poll_ms: 100,
         runner: Some(Arc::new(DaemonRunner::connect(&pipe, &token).unwrap())),
     })
