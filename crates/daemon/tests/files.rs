@@ -80,6 +80,9 @@ fn list_read_write_and_confinement() {
     assert!(c.call("fs.read", json!({"worktree": w, "path": "/etc/passwd"})).is_err());
     assert!(c.call("fs.read", json!({"worktree": w, "path": r"..\..\x"})).is_err());
     assert!(c.call("fs.read", json!({"worktree": w, "path": r"C:\Windows\win.ini"})).is_err());
+    assert!(c.call("fs.write", json!({"worktree": w, "path": "../evil.txt", "text": "x", "eol": "lf"})).is_err());
+    // backslash is only a separator on Windows; elsewhere it is an ordinary (harmless) file name
+    #[cfg(windows)]
     assert!(c.call("fs.write", json!({"worktree": w, "path": r"..\evil.txt", "text": "x", "eol": "lf"})).is_err());
     assert!(c.call("fs.list", json!({"worktree": root.to_string_lossy(), "path": ""})).is_err());
 }
