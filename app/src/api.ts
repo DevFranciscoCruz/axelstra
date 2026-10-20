@@ -60,3 +60,8 @@ export const fsStat = (worktree: string, path: string) =>
   call<{ hash: string | null }>("fs.stat", { worktree, path }).then((r) => r.hash);
 export const fsWrite = (worktree: string, path: string, text: string, eol: string, bom: boolean, base_hash?: string) =>
   call<Saved>("fs.write", { worktree, path, text, eol, bom, base_hash });
+
+export const gitCommit = (worktree: string, message: string) => call<{ sha: string }>("git.commit", { worktree, message });
+export const gitPush = (worktree: string) => call<{ output: string }>("git.push", { worktree });
+export const gitPr = (worktree: string, title: string, body: string, base?: string) =>
+  call<{ url: string }>("git.pr", { worktree, title, body, base }).then((r) => r.url);

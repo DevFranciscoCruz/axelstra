@@ -302,6 +302,18 @@ fn dispatch(
             let text = tokio::task::block_in_place(|| crate::changes::diff(&wt, path, base))?;
             Ok(json!({"diff": text}))
         }
+        "git.commit" | "git.push" | "git.pr" => {
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            let s = |k: &str| p[k].as_str().unwrap_or_default().to_string();
+            tokio::task::block_in_place(|| -> Result<Value> {
+                use crate::publish;
+                Ok(match req.method.as_str() {
+                    "git.commit" => serde_json::to_value(publish::commit(&wt, &s("message"))?)?,
+                    "git.push" => json!({"output": publish::push(&wt)?}),
+                    _ => json!({"url": publish::pull_request(&wt, &s("title"), &s("body"), p["base"].as_str())?}),
+                })
+            })
+        }
         "fs.list" | "fs.read" | "fs.stat" | "fs.write" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             let path = p["path"].as_str().unwrap_or_default();
