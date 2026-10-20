@@ -1002,6 +1002,37 @@ fn dispatch(
         // used by the app updater: the installer cannot replace a running axelstra.exe.
         // Sessions die with the daemon (Job Objects), so the UI warns before calling this.
         "daemon.shutdown" => {
+            // remember what was going on, so the next start can pick it up: agents that were working, and the
+            // ephemeral workers that die with this daemon (they are not restored) per coordinator
+            let live: Vec<(u32, bool)> = reg.sessions.lock().unwrap().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, s)| (*id, s.idle_ms() < 5000)).collect();
+            let mut working: Vec<u32> = vec![];
+            let mut lost: HashMap<u32, Vec<String>> = HashMap::new();
+            {
+                let metas = reg.metas.lock().unwrap();
+                for (id, busy) in &live {
+                    let m = metas.get(id);
+                    if reg.bus.is_reaped(*id) {
+                        if let Some(parent) = reg.bus.parent_of(*id) {
+                            let wt = m.and_then(|m| m["worktree"].as_str()).unwrap_or("?");
+                            lost.entry(parent).or_default().push(wt.to_string());
+                        }
+                    } else if *busy && m.and_then(|m| m["kind"].as_str()) == Some("agent") {
+                        working.push(*id);
+                    }
+                }
+            }
+            {
+                let mut specs = reg.specs.lock().unwrap();
+                for (id, spec) in specs.iter_mut() {
+                    if working.contains(id) {
+                        spec["meta"]["interrupted"] = Value::Bool(true);
+                    }
+                    if let Some(w) = lost.get(id) {
+                        spec["meta"]["lost_workers"] = json!(w);
+                    }
+                }
+            }
+            reg.persist();
             // end every terminal and agent now (their specs stay in sessions.json, so they restore on the next start)
             for s in reg.sessions.lock().unwrap().values() {
                 s.kill();
