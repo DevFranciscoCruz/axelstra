@@ -217,6 +217,9 @@ export const refreshSessions = async () => {
   try {
     const list = await listSessions();
     trackAgents(list);
+    // a worktree on screen is being looked at: a flag left from earlier (or set while the window was hidden) is stale
+    const cur = selectedWorktree();
+    if (cur && !document.hidden && attention().has(norm(cur))) setAttention((a) => { const n = new Set(a); n.delete(norm(cur)); return n; });
     setSessions(list);
     if (errorFromPoll) setErrorSig("");
   } catch (e) {
