@@ -3,6 +3,8 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { onCleanup, onMount } from "solid-js";
 import { resizeSession, writeSession } from "./api";
 
@@ -24,6 +26,7 @@ export function TerminalView(props: { id: number; focus?: boolean; onExit?: (cod
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    term.loadAddon(new WebLinksAddon((_e, url) => void openUrl(url)));
     term.open(host);
     try {
       const gl = new WebglAddon();
