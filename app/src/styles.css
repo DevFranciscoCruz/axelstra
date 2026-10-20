@@ -575,11 +575,11 @@ button.danger { color: #ef7676; }
 .menu-item.on { color: var(--accent); }
 .menu-item .tick { font-size: 11px; }
 
-.modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
-.modal { background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 240px; }
-.modal h3 { margin: 0 0 6px; font-size: 14px; }
-.modal button { padding: 8px 10px; border-radius: 6px; cursor: pointer; }
-.modal button.pref { outline: 2px solid var(--accent); }
+.agent-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.agent-modal { background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 240px; }
+.agent-modal h3 { margin: 0 0 6px; font-size: 14px; }
+.agent-modal button { padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.agent-modal button.pref { outline: 2px solid var(--accent); }
 
 .off-main { color: #e5c07b; font-size: 11px; margin-left: 4px; }
 
@@ -622,3 +622,15 @@ tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: v
 
 .port { margin-left: 6px; background: rgba(127, 209, 139, .12); color: var(--ok); border: 1px solid rgba(127, 209, 139, .35); border-radius: 10px; padding: 2px 8px; font: inherit; font-size: 11px; cursor: pointer; align-self: center; }
 .port:hover { background: rgba(127, 209, 139, .22); }
+
+.side-link { background: none; border: 0; color: var(--muted); text-align: left; padding: 8px 10px; font: inherit; font-size: 12px; cursor: pointer; border-radius: 6px; }
+.side-link:hover { color: var(--text); background: rgba(255, 255, 255, .04); }
+.modal.auto { width: min(640px, 94vw); }
+.auto-head { display: flex; align-items: center; gap: 8px; }
+.auto-note { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+.auto-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; max-height: 50vh; }
+.auto-item { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: #14141b; border: 1px solid #2a2a35; border-radius: 8px; }
+.auto-item.off { opacity: .55; }
+.auto-main { flex: 1; min-width: 0; }
+.auto-name { font-size: 13px; font-weight: 600; }
+.auto-sub { font-size: 11px; color: var(--muted); }

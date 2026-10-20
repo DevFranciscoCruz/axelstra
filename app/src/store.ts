@@ -77,6 +77,9 @@ export const [splitSession, setSplitSession] = createSignal<number | null>(null)
 /** dev-server ports opened by the selected worktree's terminals */
 export const [ports, setPorts] = createSignal<number[]>([]);
 
+/** the automations dialog */
+export const [showAutomations, setShowAutomations] = createSignal(false);
+
 export const [activeSession, setActiveSession] = createSignal<number | null>(null);
 
 /** "working": produced output in the last few seconds; "idle": quiet; "done": the process ended */

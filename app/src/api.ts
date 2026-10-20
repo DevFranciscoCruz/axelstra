@@ -71,6 +71,15 @@ export type GhItem = { number: number; title: string; author: string; url: strin
 export const ghList = (project: string, kind: "pr" | "issue") => call<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
 export const worktreeFromPr = (project: string, number: number) => call<Worktree>("worktree.from_pr", { project, number });
 export const listPorts = (worktree: string) => call<{ ports: { port: number; pid: number }[] }>("ports.list", { worktree }).then((r) => r.ports);
+export type Schedule =
+  | { kind: "interval"; minutes: number }
+  | { kind: "daily"; time: string }
+  | { kind: "weekly"; day: number; time: string };
+export type Automation = { id: string; name: string; project: string; agent: string; prompt: string; schedule: Schedule; enabled: boolean; last_run: number };
+export const listAutomations = () => call<{ automations: Automation[] }>("automation.list").then((r) => r.automations);
+export const saveAutomation = (a: Automation) => call<Automation>("automation.save", a as unknown as Record<string, unknown>);
+export const deleteAutomation = (id: string) => call("automation.delete", { id });
+export const runAutomation = (id: string) => call<{ session: number; worktree: string }>("automation.run", { id });
 export const removeWorktree = (project: string, path: string) => call("worktree.remove", { project, path });
 
 export type FileChange = {

@@ -1,3 +1,4 @@
+pub mod automations;
 pub mod changes;
 pub mod client;
 pub mod fsops;
