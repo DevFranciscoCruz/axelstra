@@ -12,6 +12,7 @@ import { ContextMenu } from "./ContextMenu";
 import { Automations } from "./Automations";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
+import { PanelIcon } from "./PanelIcon";
 import { ErrorToast } from "./ErrorToast";
 import { Modal } from "./Modal";
 import { labelIcons, press } from "./a11y";
@@ -59,21 +60,6 @@ import {
   setLeftW,
   setRightW,
 } from "./store";
-
-/** window-with-side-panel glyph; the panel strip is filled while that panel is shown */
-const PanelIcon = (props: { side: "left" | "right"; on: boolean }) => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
-    <rect x="2" y="2.5" width="12" height="11" rx="2.5" />
-    <path d={props.side === "left" ? "M6.2 2.5v11" : "M9.8 2.5v11"} />
-    <Show when={props.on}>
-      <path
-        d={props.side === "left" ? "M4.5 2.5H6.2v11H4.5a2.5 2.5 0 0 1-2.5-2.5V5a2.5 2.5 0 0 1 2.5-2.5z" : "M11.5 2.5H9.8v11h1.7a2.5 2.5 0 0 0 2.5-2.5V5a2.5 2.5 0 0 0-2.5-2.5z"}
-        fill="currentColor"
-        stroke="none"
-      />
-    </Show>
-  </svg>
-);
 
 export function App() {
   const [splitFrac, setSplitFrac] = createSignal(0.5);
@@ -403,9 +389,11 @@ export function App() {
             <button class="icon add" title="Novo terminal" onClick={newTerminal}>
               +
             </button>
-            <button class="icon add" title="Ficheiros / alterações (Ctrl+Shift+B)" classList={{ on: showRightPanel() }} onClick={toggleRightPanel}>
-              <PanelIcon side="right" on={showRightPanel()} />
-            </button>
+            <Show when={!showRightPanel()}>
+              <button class="icon add" title="Mostrar painel direito (Ctrl+Shift+B)" onClick={toggleRightPanel}>
+                <PanelIcon side="right" on={false} />
+              </button>
+            </Show>
           </div>
           <div class="term-area">
             <Show when={!showKanban()} fallback={<Kanban project={current()!.project.id} />}>
