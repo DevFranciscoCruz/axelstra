@@ -649,3 +649,33 @@ tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: v
 .ctx-arrow { color: var(--muted); }
 .ctx-sep { height: 1px; background: var(--line); margin: 5px 4px; }
 .pin { color: var(--accent); font-size: 11px; margin-left: 4px; }
+
+.sc-head { display: flex; align-items: center; gap: 4px; padding: 10px 10px 4px; }
+.pill { background: #262a36; color: var(--text); border: 1px solid var(--line); border-radius: 14px; padding: 4px 12px; font: inherit; font-size: 12px; cursor: pointer; }
+.pill:hover:not(:disabled) { border-color: var(--accent); }
+.sc-branch { padding: 4px 12px 8px; font-size: 12.5px; }
+.sc-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-base { color: var(--muted); margin-top: 2px; }
+.sc-pr { padding: 0 10px 8px; }
+.sc-commit { padding: 0 10px 10px; display: flex; flex-direction: column; gap: 8px; }
+.sc-commit textarea { width: 100%; resize: none; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+.sc-commit textarea:focus { outline: none; border-color: var(--accent); }
+.sc-split { display: flex; }
+.sc-main { flex: 1; background: #262a36; color: var(--text); border: 1px solid var(--line); border-radius: 8px 0 0 8px; padding: 7px; font: inherit; cursor: pointer; }
+.sc-drop { width: 34px; background: #262a36; color: var(--text); border: 1px solid var(--line); border-left: 0; border-radius: 0 8px 8px 0; cursor: pointer; }
+.sc-main:hover:not(:disabled), .sc-drop:hover:not(:disabled) { background: #2d3242; }
+.sc-main:disabled, .sc-drop:disabled { opacity: .5; cursor: default; }
+.sc-body { flex: 1; overflow: auto; padding-bottom: 8px; }
+.sc-title { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--muted); cursor: pointer; user-select: none; }
+.sc-title .chev { width: 12px; }
+.sc-count { background: #262a36; border-radius: 9px; padding: 0 6px; font-weight: 600; color: var(--text); }
+.sc-files { padding: 0 4px; }
+.file .ficon { color: var(--muted); font-size: 12px; flex: none; }
+.fname2 { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; }
+.fname2 .fn { white-space: nowrap; }
+.fname2 .fd { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.file .st { width: 14px; text-align: center; font-weight: 700; flex: none; }
+.st-M { color: #e5c07b; }
+.st-A { color: #7fd18b; }
+.st-D { color: #ef7676; }
+.st-U { color: #ff9e64; }

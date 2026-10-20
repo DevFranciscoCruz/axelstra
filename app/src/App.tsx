@@ -5,7 +5,6 @@ import { CommitView } from "./CommitView";
 import { Editor } from "./Editor";
 import { FilesPanel } from "./FilesPanel";
 import { Kanban } from "./Kanban";
-import { ReviewPanel } from "./ReviewPanel";
 import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
 import { Palette } from "./Palette";
@@ -353,7 +352,7 @@ export function App() {
         </Show>
       </main>
       <Show when={current()}>
-        <Show when={rightTab() === "files"} fallback={rightTab() === "review" ? <ReviewPanel /> : rightTab() === "pulls" ? <PullsPanel /> : <ChangesPanel />}>
+        <Show when={rightTab() === "files"} fallback={rightTab() === "pulls" ? <PullsPanel /> : <ChangesPanel />}>
           <FilesPanel />
         </Show>
       </Show>

@@ -29,7 +29,6 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
     out.push(
       { label: "Ficheiros", hint: "painel", run: () => setRightTab("files") },
       { label: "Alterações", hint: "painel", run: () => setRightTab("changes") },
-      { label: "Revisão", hint: "painel", run: () => setRightTab("review") },
       { label: "Pull requests e issues", hint: "painel", run: () => setRightTab("pulls") },
       { label: "Kanban", hint: "vista", run: () => setShowKanban(true) },
       { label: "Automations", hint: "agendamento", run: () => setShowAutomations(true) },
