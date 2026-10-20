@@ -135,6 +135,7 @@ fn session_detach(state: tauri::State<'_, Arc<State>>, id: u32) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(State::default()))
         .invoke_handler(tauri::generate_handler![daemon_call, session_write, session_attach, session_detach])
         .run(tauri::generate_context!())

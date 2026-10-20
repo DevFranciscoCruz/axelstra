@@ -23,6 +23,10 @@ enum Cmd {
     },
     /// Kill a session
     Kill { id: u32 },
+    /// Register a git repo as a project
+    AddProject { path: PathBuf },
+    /// List projects and their worktrees
+    Projects,
     /// Type into a session. Escapes: \e \r \n \xHH
     Send { id: u32, data: String },
     /// Print a session's output (history + live) for a few seconds
@@ -68,7 +72,7 @@ fn main() -> Result<()> {
                 .build()?
                 .block_on(server::serve(proto::pipe_name(), token))?;
         }
-        Cmd::Ls | Cmd::Spawn { .. } | Cmd::Kill { .. } | Cmd::Tail { .. } | Cmd::Send { .. } => {
+        Cmd::Ls | Cmd::Spawn { .. } | Cmd::Kill { .. } | Cmd::Tail { .. } | Cmd::Send { .. } | Cmd::AddProject { .. } | Cmd::Projects => {
             use axelstra_daemon::{client::Client, proto};
             let mut c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
             match Cli::parse().cmd {
@@ -110,6 +114,12 @@ fn main() -> Result<()> {
                     }
                     c.send_input(id, &out)?;
                 }
+                Cmd::AddProject { path } => {
+                    let abs = axelstra_core::git::canon(&path)?;
+                    let r = c.call("project.add", serde_json::json!({"path": abs}))?;
+                    println!("{r}");
+                }
+                Cmd::Projects => println!("{}", serde_json::to_string_pretty(&c.call("project.list", serde_json::json!({}))?)?),
                 Cmd::Kill { id } => {
                     c.call("session.kill", serde_json::json!({"id": id}))?;
                 }

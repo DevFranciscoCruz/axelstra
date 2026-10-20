@@ -150,6 +150,7 @@ button.primary {
   min-width: 0;
   min-height: 0;
   display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
@@ -165,4 +166,105 @@ button.primary {
   overflow: hidden;
   padding: 8px 0 0 8px;
   background: var(--bg);
+}
+
+.project {
+  margin-bottom: 8px;
+}
+
+.project-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+}
+
+.pname {
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.icon {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+button.icon:hover {
+  background: #232736;
+  color: var(--text);
+}
+
+.wt-input {
+  width: calc(100% - 12px);
+  margin: 2px 6px 6px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font: inherit;
+  outline: none;
+}
+
+.item.wt {
+  margin-left: 6px;
+}
+
+.count {
+  color: var(--ok);
+  font-size: 11px;
+}
+
+.tabbar {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px 6px 0 0;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab.active {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.tab:hover .x,
+.tab.active .x {
+  visibility: visible;
+}
+
+.tabbar .add {
+  align-self: center;
+  margin-left: 4px;
+}
+
+.term-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
 }
