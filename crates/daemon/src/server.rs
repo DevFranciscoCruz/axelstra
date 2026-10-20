@@ -287,6 +287,18 @@ fn dispatch(
                 .collect();
             Ok(Value::Array(v))
         }
+        "git.changes" => {
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            let base = p["base"].as_str();
+            Ok(serde_json::to_value(tokio::task::block_in_place(|| crate::changes::changes(&wt, base))?)?)
+        }
+        "git.diff" => {
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
+            let base = p["base"].as_str();
+            let text = tokio::task::block_in_place(|| crate::changes::diff(&wt, path, base))?;
+            Ok(json!({"diff": text}))
+        }
         "project.add" => {
             let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
             Ok(serde_json::to_value(crate::projects::add(&reg.store, path)?)?)
