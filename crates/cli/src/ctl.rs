@@ -186,7 +186,7 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             }
             Err(e) => return Err(e),
         },
-        c2 @ (Cmd::Msg { .. } | Cmd::Inbox { .. } | Cmd::Ask { .. } | Cmd::Reply { .. } | Cmd::Done { .. } | Cmd::Escalate { .. } | Cmd::Limit { .. } | Cmd::Flow { .. }) => return super::orchcmd::run(c2, c),
+        c2 @ (Cmd::Msg { .. } | Cmd::Inbox { .. } | Cmd::Ask { .. } | Cmd::Reply { .. } | Cmd::Done { .. } | Cmd::Escalate { .. } | Cmd::Limit { .. } | Cmd::Thread { .. } | Cmd::Flow { .. }) => return super::orchcmd::run(c2, c),
         _ => unreachable!(),
     }
     Ok(())

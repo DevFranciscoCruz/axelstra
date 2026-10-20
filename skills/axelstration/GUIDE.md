@@ -47,6 +47,7 @@ axelstra terminal <worktree> --cmd "npm run dev"       # long-lived shell tab
 - `axelstra msg <id> "<text>"` — queue a message for session `<id>`. An agent gets a one-line notice in its screen; the full text stays in its inbox. `--quiet` skips the notice.
 - `axelstra inbox [--all] [--json]` — read your messages (marks them read; `--no-mark` leaves them).
 - `axelstra ask <id> "<question>" [--timeout 600]` — send a question and **block** until the other session answers. Prints the answer.
+- `--thread NAME` on `msg` and `ask` groups related messages (replies inherit it); `axelstra thread NAME` prints the whole conversation in order.
 - `axelstra reply <message-id> "<answer>"` — answer a question you were notified about (the number is in the notice). This unblocks the asker.
 - `axelstra done "<summary>" [--status ok|failed|blocked]` — worker: report to the parent and finish.
 - `axelstra escalate "<problem>"` — worker: ask the parent for help. The worker shows as **waiting** (red dot in the app, `waiting` in `ls`) until you answer with `axelstra msg <worker> "…"`.

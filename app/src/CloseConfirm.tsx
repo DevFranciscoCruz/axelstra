@@ -13,12 +13,21 @@ const wanted = () => {
   }
 };
 
-const quit = () => void invoke("app_quit");
+const KEEP = "axelstra.keepBackground";
+const keepWanted = () => {
+  try {
+    return localStorage.getItem(KEEP) === "1";
+  } catch {
+    return false;
+  }
+};
+const quit = (keep = keepWanted()) => void invoke("app_quit", { keep });
 
 /** the host cancels every window close and asks here first; the terminals live in the daemon and survive */
 export function CloseConfirm() {
   const [open, setOpen] = createSignal(false);
   const [skip, setSkip] = createSignal(false);
+  const [keep, setKeep] = createSignal(keepWanted());
   onMount(() => {
     let un: (() => void) | undefined;
     void listen("close-requested", () => {
@@ -31,20 +40,26 @@ export function CloseConfirm() {
   const confirm = () => {
     try {
       if (skip()) localStorage.setItem(KEY, "0");
+      localStorage.setItem(KEEP, keep() ? "1" : "0");
     } catch {
       /* preference only */
     }
-    quit();
+    quit(keep());
   };
   return (
     <Show when={open()}>
       <Modal label="Fechar janela" onClose={() => setOpen(false)}>
         <div class="m-title" style={{ "font-weight": "600" }}>Fechar o Axelstra?</div>
         <div class="auto-note">
-          {running() > 0
-            ? `${running()} ${running() === 1 ? "sessão em execução continua" : "sessões em execução continuam"} em segundo plano e ${running() === 1 ? "volta" : "voltam"} quando abrir a aplicação outra vez.`
-            : "Não há sessões em execução."}
+          {running() === 0
+            ? "Não há sessões em execução."
+            : keep()
+              ? `${running()} ${running() === 1 ? "sessão continua" : "sessões continuam"} a correr em segundo plano (e consomem recursos) até voltar a abrir a aplicação.`
+              : `${running()} ${running() === 1 ? "sessão é fechada" : "sessões são fechadas"} e nada fica a consumir. ${running() === 1 ? "Volta" : "Voltam"} quando abrir a aplicação outra vez; os agentes retomam a conversa.`}
         </div>
+        <label class="voice-auto" style={{ "align-self": "flex-start" }}>
+          <input type="checkbox" checked={keep()} onChange={(e) => setKeep(e.currentTarget.checked)} /> Manter sessões e automatizações a correr em segundo plano
+        </label>
         <label class="voice-auto" style={{ "align-self": "flex-start" }}>
           <input type="checkbox" checked={skip()} onChange={(e) => setSkip(e.currentTarget.checked)} /> Não perguntar novamente
         </label>

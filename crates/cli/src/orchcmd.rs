@@ -31,9 +31,9 @@ fn fmt_msg(m: &Value) -> String {
 
 pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
     match cmd {
-        Cmd::Msg { to, text, from, quiet } => {
+        Cmd::Msg { to, text, thread, from, quiet } => {
             let from = from.or_else(|| env_id("AXELSTRA_SESSION"));
-            let r = c.call("msg.send", json!({"from": from, "to": to, "text": text, "kind": "message", "quiet": quiet}))?;
+            let r = c.call("msg.send", json!({"from": from, "to": to, "text": text, "kind": "message", "thread": thread, "quiet": quiet}))?;
             println!("{}", r["id"]);
         }
         Cmd::Inbox { all, no_mark, json, session } => {
@@ -54,9 +54,9 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
                 }
             }
         }
-        Cmd::Ask { to, text, timeout } => {
+        Cmd::Ask { to, text, thread, timeout } => {
             let from = me()?;
-            let q = c.call("msg.send", json!({"from": from, "to": to, "text": text, "kind": "ask"}))?["id"].as_u64().unwrap_or(0);
+            let q = c.call("msg.send", json!({"from": from, "to": to, "text": text, "kind": "ask", "thread": thread}))?["id"].as_u64().unwrap_or(0);
             let t0 = Instant::now();
             loop {
                 let r = c.call("msg.reply_of", json!({"id": q}))?;
@@ -93,6 +93,19 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             let to = parent(to)?;
             c.call("msg.send", json!({"from": me()?, "to": to, "text": text, "kind": "escalate"}))?;
             println!("escalated to session {to}; waiting for an answer in your inbox (`axelstra inbox`)");
+        }
+        Cmd::Thread { name, json } => {
+            let list = c.call("msg.thread", json!({"name": name}))?;
+            let list = list.as_array().cloned().unwrap_or_default();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&list)?);
+            } else if list.is_empty() {
+                println!("no messages in thread {name:?}");
+            } else {
+                for m in &list {
+                    println!("{}\n", fmt_msg(m));
+                }
+            }
         }
         Cmd::Limit { n } => {
             let r = c.call("orch.limits", match n {

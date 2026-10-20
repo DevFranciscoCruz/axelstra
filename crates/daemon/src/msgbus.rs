@@ -18,6 +18,8 @@ pub struct Msg {
     pub kind: String,
     pub text: String,
     pub reply_to: Option<u64>,
+    /// conversation name shared by related messages (replies inherit it)
+    pub thread: Option<String>,
     pub ts: u64,
     pub read: bool,
 }
@@ -107,9 +109,11 @@ impl Bus {
     }
 
     /// Stores a message and applies its side effects. The caller checked that `to` exists.
-    pub fn send(&self, from: Option<u32>, to: u32, kind: &str, text: &str, reply_to: Option<u64>) -> Msg {
+    pub fn send(&self, from: Option<u32>, to: u32, kind: &str, text: &str, reply_to: Option<u64>, thread: Option<String>) -> Msg {
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
-        let m = Msg { id, from, to, kind: kind.to_string(), text: text.to_string(), reply_to, ts: now(), read: false };
+        // an answer belongs to the conversation of the message it answers
+        let thread = thread.or_else(|| reply_to.and_then(|r| self.get(r)).and_then(|o| o.thread));
+        let m = Msg { id, from, to, kind: kind.to_string(), text: text.to_string(), reply_to, thread, ts: now(), read: false };
         self.inbox.lock().unwrap().entry(to).or_default().push(m.clone());
         match (kind, from) {
             ("escalate", Some(f)) => {
@@ -147,6 +151,13 @@ impl Bus {
         out
     }
 
+    /// Every message of a thread, in the order they were sent.
+    pub fn thread(&self, name: &str) -> Vec<Msg> {
+        let mut v: Vec<Msg> = self.inbox.lock().unwrap().values().flatten().filter(|m| m.thread.as_deref() == Some(name)).cloned().collect();
+        v.sort_by_key(|m| m.id);
+        v
+    }
+
     pub fn get(&self, id: u64) -> Option<Msg> {
         self.inbox.lock().unwrap().values().flatten().find(|m| m.id == id).cloned()
     }
@@ -174,10 +185,12 @@ mod tests {
     #[test]
     fn ask_reply_roundtrip() {
         let b = Bus::new();
-        let q = b.send(Some(2), 1, "ask", "which db?", None);
+        let q = b.send(Some(2), 1, "ask", "which db?", None, Some("db".into()));
         assert_eq!(b.unread(1), 1);
         assert!(b.reply_to(q.id).is_none());
-        let r = b.send(Some(1), 2, "reply", "postgres", Some(q.id));
+        let r = b.send(Some(1), 2, "reply", "postgres", Some(q.id), None);
+        assert_eq!(r.thread.as_deref(), Some("db"));
+        assert_eq!(b.thread("db").len(), 2);
         assert_eq!(b.reply_to(q.id).unwrap().text, "postgres");
         assert_eq!(r.to, 2);
         assert_eq!(b.inbox(1, false, true).len(), 1);
@@ -188,16 +201,16 @@ mod tests {
     #[test]
     fn escalate_until_answered() {
         let b = Bus::new();
-        b.send(Some(3), 1, "escalate", "stuck", None);
+        b.send(Some(3), 1, "escalate", "stuck", None, None);
         assert!(b.is_escalated(3));
-        b.send(Some(1), 3, "message", "try X", None);
+        b.send(Some(1), 3, "message", "try X", None, None);
         assert!(!b.is_escalated(3));
     }
 
     #[test]
     fn done_is_recorded_and_forgotten() {
         let b = Bus::new();
-        b.send(Some(4), 1, "done", "all green", None);
+        b.send(Some(4), 1, "done", "all green", None, None);
         assert_eq!(b.finished(4).unwrap()["text"], "all green");
         b.forget(4);
         assert!(b.finished(4).is_none());
