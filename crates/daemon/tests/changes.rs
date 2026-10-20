@@ -85,8 +85,14 @@ fn changes_and_diff() {
 
     // safety: only registered worktrees, only paths inside them
     assert!(c.call("git.changes", json!({"worktree": root})).is_err());
-    assert!(c.call("git.diff", json!({"worktree": w, "path": "..\\r\\keep.txt"})).is_err());
-    assert!(c.call("git.diff", json!({"worktree": w, "path": "C:\\Windows\\win.ini"})).is_err());
+    assert!(c.call("git.diff", json!({"worktree": w, "path": "../r/keep.txt"})).is_err());
+    assert!(c.call("git.diff", json!({"worktree": w, "path": "/etc/passwd"})).is_err());
+    // backslashes only separate directories on Windows
+    #[cfg(windows)]
+    {
+        assert!(c.call("git.diff", json!({"worktree": w, "path": "..\\r\\keep.txt"})).is_err());
+        assert!(c.call("git.diff", json!({"worktree": w, "path": "C:\\Windows\\win.ini"})).is_err());
+    }
 
     // review: commits the branch has over main, and one commit's patch
     let log = c.call("git.log", json!({"worktree": w, "base": "main"})).unwrap();
