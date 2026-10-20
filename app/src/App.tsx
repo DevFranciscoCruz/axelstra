@@ -1,5 +1,5 @@
 import { For, Show, createEffect, on, onCleanup, onMount } from "solid-js";
-import { SessionInfo, defaultShell, killSession, removeSession, spawnSession } from "./api";
+import { SessionInfo, defaultShell, launchClaude, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
 import { CommitView } from "./CommitView";
 import { Editor } from "./Editor";
@@ -70,6 +70,19 @@ export function App() {
         worktree: c.wt.path,
         kind: "shell",
       });
+      await refreshSessions();
+      setOpenDiff(null);
+      setActiveSession(id);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const newClaude = async () => {
+    const c = current();
+    if (!c) return;
+    try {
+      const id = await launchClaude(c.project.id, c.wt.path);
       await refreshSessions();
       setOpenDiff(null);
       setActiveSession(id);
@@ -157,6 +170,9 @@ export function App() {
                 </div>
               )}
             </Show>
+            <button class="icon add" title="Novo Claude" onClick={newClaude}>
+              ✦
+            </button>
             <button class="icon add" title="Novo terminal" onClick={newTerminal}>
               +
             </button>

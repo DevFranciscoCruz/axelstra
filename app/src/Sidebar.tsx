@@ -1,6 +1,6 @@
 import { open, ask } from "@tauri-apps/plugin-dialog";
 import { For, Show, createResource, createSignal } from "solid-js";
-import { addProject, projectLogo, createWorktree, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
+import { addProject, projectLogo, createWorktree, launchClaude, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
 import logo from "./assets/logo.png";
 import {
   error,
@@ -51,7 +51,15 @@ export function Sidebar() {
   const pickProject = () =>
     run(async () => {
       const dir = await open({ directory: true, multiple: false, title: "Escolha um repositório git" });
-      if (typeof dir === "string") await addProject(dir);
+      if (typeof dir !== "string") return;
+      const added = await addProject(dir);
+      await refreshProjects();
+      // a new project opens straight into Claude on its main worktree
+      const main = projects().find((p) => p.id === added.id)?.worktrees.find((w) => w.is_main);
+      if (main) {
+        selectWorktree(main.path);
+        if (sessionsOf(main.path).length === 0) await launchClaude(added.id, main.path);
+      }
     });
 
   const submitWorktree = (projectId: string) =>
@@ -62,6 +70,7 @@ export function Sidebar() {
       if (!name) return;
       const w = await createWorktree(projectId, name);
       selectWorktree(w.path);
+      await launchClaude(projectId, w.path);
       const setup = projects().find((p) => p.id === projectId)?.setup;
       if (setup) {
         const [program, args] = await defaultShell();
