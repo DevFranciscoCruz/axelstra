@@ -25,9 +25,26 @@ struct Registry {
     runs: Mutex<HashMap<String, Value>>,
     /// serializes read-modify-write of automations.json (UI saves vs the scheduler)
     auto_lock: Mutex<()>,
+    /// spawn requests of live sessions, kept on disk so a daemon restart can bring them back
+    specs: Mutex<HashMap<u32, Value>>,
+    /// sessions of the previous daemon run, waiting for the UI to restore (or discard) them
+    pending: Mutex<Vec<Value>>,
+    saved: std::path::PathBuf,
 }
 
 impl Registry {
+    /// Rewrites sessions.json: still-pending sessions first, then the live ones.
+    fn persist(&self) {
+        let mut v = self.pending.lock().unwrap().clone();
+        let specs = self.specs.lock().unwrap();
+        let mut ids: Vec<_> = specs.keys().copied().collect();
+        ids.sort();
+        v.extend(ids.iter().map(|i| specs[i].clone()));
+        if let Ok(text) = serde_json::to_string(&v) {
+            let _ = std::fs::write(&self.saved, text);
+        }
+    }
+
     fn get(&self, id: u32) -> Option<Arc<Session>> {
         self.sessions.lock().unwrap().get(&id).cloned()
     }
@@ -105,6 +122,7 @@ pub async fn serve(pipe: String, token: String) -> Result<()> {
 
 /// Same as `serve`, with an explicit projects file (tests must not touch the user's).
 pub async fn serve_with_store(pipe: String, token: String, store: std::path::PathBuf) -> Result<()> {
+    let saved = store.with_file_name("sessions.json");
     let reg = Arc::new(Registry {
         next: AtomicU32::new(0),
         sessions: Default::default(),
@@ -115,7 +133,18 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
         token: token.clone(),
         runs: Default::default(),
         auto_lock: Default::default(),
+        specs: Default::default(),
+        pending: Mutex::new(
+            std::fs::read_to_string(&saved).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default(),
+        ),
+        saved,
     });
+    // Claude Code hook: records the agent's current conversation id (it changes on /clear), keyed by AXELSTRA_KEY
+    let dir = reg.saved.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let hook = json!({"hooks": {"SessionStart": [{"hooks": [{"type": "command",
+        "command": "[ -n \"$AXELSTRA_KEY\" ] || exit 0; mkdir -p \"$AXELSTRA_DIR/sid\" && cat > \"$AXELSTRA_DIR/sid/$AXELSTRA_KEY.json\""}]}]}});
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join("hooks.json"), hook.to_string());
     spawn_scheduler(reg.clone());
     accept_loop(&pipe, reg, token).await
 }
@@ -242,7 +271,7 @@ fn dispatch(
                 anyhow::bail!("bad token");
             }
             *authed = true;
-            Ok(json!({"proto": 1}))
+            Ok(json!({"proto": PROTO}))
         }
         "session.spawn" => {
             let s = Spawn {
@@ -261,6 +290,10 @@ fn dispatch(
             };
             let meta = if p["meta"].is_null() { None } else { Some(p["meta"].clone()) };
             let id = reg.spawn(&s, p["label"].as_str(), meta)?;
+            let mut spec = p.clone();
+            spec["id"] = Value::Null;
+            reg.specs.lock().unwrap().insert(id, spec);
+            reg.persist();
             Ok(json!({"id": id}))
         }
         "session.list" => {
@@ -352,6 +385,30 @@ fn dispatch(
             }
             reg.labels.lock().unwrap().remove(&id);
             reg.metas.lock().unwrap().remove(&id);
+            reg.specs.lock().unwrap().remove(&id);
+            reg.persist();
+            Ok(json!({}))
+        }
+        "app.dir" => Ok(json!({"dir": reg.saved.parent().unwrap_or(std::path::Path::new("")).to_string_lossy().replace('\\', "/")})),
+        "session.pending" => {
+            let sid_dir = reg.saved.with_file_name("sid");
+            let mut v = reg.pending.lock().unwrap().clone();
+            for rec in v.iter_mut() {
+                // the agent may have started a new conversation (/clear) since: resume the latest one
+                let Some(key) = rec["meta"]["key"].as_str().map(String::from) else { continue };
+                let latest = std::fs::read_to_string(sid_dir.join(format!("{key}.json")))
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                    .and_then(|j| j["session_id"].as_str().map(String::from));
+                if let Some(id) = latest {
+                    rec["meta"]["resume"] = Value::String(id);
+                }
+            }
+            Ok(Value::Array(v))
+        }
+        "session.pending_clear" => {
+            reg.pending.lock().unwrap().clear();
+            reg.persist();
             Ok(json!({}))
         }
         "session.kill" => {
@@ -369,7 +426,6 @@ fn dispatch(
                 .map(|pr| {
                     let repo = std::path::Path::new(&pr.path);
                     let mut wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();
-                    // worktrees made by other tools (e.g. Orca) stay out of the list; only the main one and Axelstra's own
                     wts.retain(|w| w.is_main || w.path.replace('\\', "/").contains("/.axelstra-wt/"));
                     let ident = axelstra_core::git::identity(repo);
                     json!({"id": pr.id, "name": ident.display_name, "path": pr.path, "worktrees": wts,

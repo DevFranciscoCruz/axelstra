@@ -1,7 +1,9 @@
 import { open, ask } from "@tauri-apps/plugin-dialog";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { addProject, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
-import { MenuItem, showMenu } from "./ContextMenu";
+import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
+import { invoke } from "@tauri-apps/api/core";
+import { press } from "./a11y";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import logo from "./assets/logo.png";
 import {
@@ -15,7 +17,9 @@ import {
   defaultAgent,
   pickAgent,
   setDefaultAgent,
-  error,
+  confirmDiscard,
+  editorDirty,
+  setEditorDirty,
   norm,
   projects,
   refreshProjects,
@@ -66,6 +70,10 @@ export function Sidebar() {
   // ready to delegate with /orchestration
   const opening = new Set<string>();
   const openWorktree = async (projectId: string, path: string, isMain: boolean) => {
+    if (editorDirty()) {
+      if (!(await confirmDiscard())) return;
+      setEditorDirty(false);
+    }
     selectWorktree(path);
     if (!isMain || opening.has(path)) return;
     await refreshSessions();
@@ -84,7 +92,6 @@ export function Sidebar() {
   const run = async (f: () => Promise<unknown>) => {
     try {
       await f();
-      setError("");
     } catch (e) {
       setError(String(e));
     }
@@ -132,7 +139,7 @@ export function Sidebar() {
 
   const copy = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await invoke("clipboard_write", { text });
     } catch (e) {
       setError(String(e));
     }
@@ -174,8 +181,15 @@ export function Sidebar() {
     { label: "Marcar como não lido", icon: "◔", run: () => setAttention((cur) => new Set(cur).add(norm(w.path))) },
     { separator: true },
     { label: "Dormir", icon: "☾", run: () => sleepWorktree(w.path, label) },
-    { label: "Apagar worktree", icon: "🗑", danger: true, disabled: w.is_main, run: () => dropWorktree(p.id, w.path, label) },
+    { label: "Remover worktree", icon: "×", danger: true, disabled: w.is_main, run: () => dropWorktree(p.id, w.path, label) },
   ];
+
+  const dropProject = async (id: string, name: string) => {
+    const ok = await ask(`Tirar "${name}" da lista?
+
+Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "warning", okLabel: "Tirar", cancelLabel: "Cancelar" });
+    if (ok) await run(() => removeProject(id));
+  };
 
   const projectMenu = (p: { id: string; name: string; path: string; setup?: string | null }): MenuItem[] => [
     { label: "Novo worktree", icon: "+", run: () => setCreating(p.id) },
@@ -190,7 +204,7 @@ export function Sidebar() {
     },
     { label: "Copiar caminho", icon: "⧉", run: () => copy(p.path) },
     { separator: true },
-    { label: "Tirar projeto da lista", icon: "✕", danger: true, run: () => run(() => removeProject(p.id)) },
+    { label: "Tirar projeto da lista", icon: "✕", danger: true, run: () => dropProject(p.id, p.name) },
   ];
 
   const dropWorktree = async (projectId: string, path: string, name: string) => {
@@ -239,7 +253,7 @@ export function Sidebar() {
               >
                 ⚙
               </button>
-              <button class="icon" title="Tirar da lista (não apaga ficheiros)" onClick={() => run(() => removeProject(p.id))}>
+              <button class="icon" title="Tirar da lista (não apaga ficheiros)" aria-label="Tirar projeto da lista" onClick={() => void dropProject(p.id, p.name)}>
                 ×
               </button>
             </div>
@@ -279,7 +293,8 @@ export function Sidebar() {
                   <div
                     class="item wt"
                     classList={{ active: norm(selectedWorktree()) === norm(w.path) }}
-                    onClick={() => void openWorktree(p.id, w.path, w.is_main)}
+                    {...press(() => void openWorktree(p.id, w.path, w.is_main))}
+                    onKeyUp={(e) => e.key === "ContextMenu" && showMenuAt(e.currentTarget.getBoundingClientRect().left + 24, e.currentTarget.getBoundingClientRect().bottom, worktreeMenu(p, w, label()))}
                     onContextMenu={(e) => showMenu(e, worktreeMenu(p, w, label()))}
                     title={w.path}
                   >
@@ -300,6 +315,17 @@ export function Sidebar() {
                     <Show when={isPinned(w.path)}>
                       <span class="pin" title="Fixado">⚲</span>
                     </Show>
+                    <button
+                      class="x"
+                      title="Mais ações"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const r = e.currentTarget.getBoundingClientRect();
+                        showMenuAt(r.left, r.bottom + 2, worktreeMenu(p, w, label()));
+                      }}
+                    >
+                      ⋯
+                    </button>
                     <Show when={!w.is_main}>
                       <button
                         class="x"
@@ -322,12 +348,12 @@ export function Sidebar() {
 
       <div class="grow" />
       <button class="side-link" onClick={() => setShowAutomations(true)}>
-        ⏱ Automations
+        ⏱ Automatizações
       </button>
       <div class="agent-pick" title="Agente aberto ao criar projetos e worktrees">
         <span>Agente</span>
         <div class="menu-wrap">
-          <button class="menu-btn" onClick={() => setAgentMenu(!agentMenu())}>
+          <button class="menu-btn" aria-haspopup="menu" aria-expanded={agentMenu()} onClick={() => setAgentMenu(!agentMenu())} onKeyDown={(e) => e.key === "Escape" && setAgentMenu(false)}>
             {defaultAgent()}
             <span class="chev">▾</span>
           </button>
@@ -355,9 +381,6 @@ export function Sidebar() {
           </Show>
         </div>
       </div>
-      <Show when={error()}>
-        <div class="error">{error()}</div>
-      </Show>
     </aside>
   );
 }

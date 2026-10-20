@@ -25,18 +25,27 @@ export const showMenu = (e: MouseEvent, items: MenuItem[]) => {
 /** Menu at a fixed point (dropdowns open under their button). */
 export const showMenuAt = (x: number, y: number, items: MenuItem[], minWidth?: number) => setMenu({ x, y, items, minWidth });
 
-function Items(props: { items: MenuItem[]; sub?: boolean }) {
+function Items(props: { items: MenuItem[]; sub?: boolean; flip?: boolean }) {
   const [openSub, setOpenSub] = createSignal<number | null>(null);
+  const [flip, setFlip] = createSignal(false);
   return (
-    <div class="ctx" classList={{ sub: props.sub }} style={{ "min-width": "inherit" }}>
+    <div class="ctx" role="menu" classList={{ sub: props.sub, flip: props.sub && props.flip }} style={{ "min-width": "inherit" }}>
       <For each={props.items}>
         {(it, i) =>
           "separator" in it ? (
             <div class="ctx-sep" />
           ) : (
-            <div class="ctx-wrap" onMouseEnter={() => setOpenSub(it.children ? i() : null)}>
+            <div
+              class="ctx-wrap"
+              onMouseEnter={(e) => {
+                setOpenSub(it.children ? i() : null);
+                setFlip(e.currentTarget.getBoundingClientRect().right + 230 > window.innerWidth);
+              }}
+            >
               <button
                 class="ctx-item"
+                role="menuitem"
+                aria-haspopup={it.children ? "menu" : undefined}
                 classList={{ danger: it.danger, off: it.disabled }}
                 disabled={it.disabled}
                 onClick={(e) => {
@@ -53,7 +62,7 @@ function Items(props: { items: MenuItem[]; sub?: boolean }) {
                 </Show>
               </button>
               <Show when={it.children && openSub() === i()}>
-                <Items items={it.children!} sub />
+                <Items items={it.children!} sub flip={flip()} />
               </Show>
             </div>
           )
@@ -67,7 +76,29 @@ function Items(props: { items: MenuItem[]; sub?: boolean }) {
 export function ContextMenu() {
   onMount(() => {
     const close = () => setMenu(null);
-    const key = (e: KeyboardEvent) => e.key === "Escape" && close();
+    const key = (e: KeyboardEvent) => {
+      if (!menu()) return;
+      if (e.key === "Escape") return close();
+      const act = document.activeElement as HTMLElement | null;
+      const list = act?.closest(".ctx") ?? document.querySelector(".ctx-root > .ctx");
+      const btns = [...(list?.querySelectorAll<HTMLElement>(":scope > .ctx-wrap > .ctx-item:not(:disabled)") ?? [])];
+      const at = act ? btns.indexOf(act) : -1;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const n = e.key === "ArrowDown" ? at + 1 : at - 1;
+        btns[(n + btns.length) % btns.length]?.focus();
+      } else if ((e.key === "ArrowRight" || e.key === "Enter") && act?.getAttribute("aria-haspopup")) {
+        e.preventDefault();
+        act.closest(".ctx-wrap")?.dispatchEvent(new MouseEvent("mouseenter"));
+        queueMicrotask(() => act.closest(".ctx-wrap")?.querySelector<HTMLElement>(".ctx.sub .ctx-item:not(:disabled)")?.focus());
+      } else if (e.key === "ArrowLeft") {
+        const wrap = act?.closest(".ctx.sub")?.closest(".ctx-wrap");
+        if (wrap) {
+          e.preventDefault();
+          wrap.querySelector<HTMLElement>(":scope > .ctx-item")?.focus();
+        }
+      }
+    };
     window.addEventListener("click", close);
     window.addEventListener("blur", close);
     window.addEventListener("keydown", key);
@@ -86,7 +117,7 @@ export function ContextMenu() {
         const left = () => Math.min(m().x, window.innerWidth - 230);
         const top = () => Math.min(m().y, Math.max(8, window.innerHeight - 40 - m().items.length * 30));
         return (
-          <div class="ctx-root" style={{ left: `${left()}px`, top: `${top()}px`, "min-width": m().minWidth ? `${m().minWidth}px` : undefined }} onContextMenu={(e) => e.preventDefault()}>
+          <div class="ctx-root" ref={(el) => queueMicrotask(() => el.querySelector<HTMLElement>(".ctx-item:not(:disabled)")?.focus())} style={{ left: `${left()}px`, top: `${top()}px`, "min-width": m().minWidth ? `${m().minWidth}px` : undefined }} onContextMenu={(e) => e.preventDefault()}>
             <Items items={m().items} />
           </div>
         );

@@ -32,5 +32,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI2RjlFMjJFNEZDNjdBOTAKUldTUWVzWlBMdUw1dHFKYW9MQWM5Q3ZtSDArSWpYVkpFSzErSjRRN2VQUEVMVldtcUpDZU1ud1oK",
+      "endpoints": [
+        "https://github.com/DevFranciscoCruz/axelstra/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

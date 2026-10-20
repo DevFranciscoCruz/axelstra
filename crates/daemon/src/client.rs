@@ -69,6 +69,8 @@ pub struct Client {
     rd: Conn,
     wr: Conn,
     next: u64,
+    /// protocol version the daemon reported in `hello`
+    pub proto: u64,
 }
 
 #[cfg(windows)]
@@ -97,14 +99,15 @@ fn open(path: &str) -> Result<Conn> {
 impl Client {
     pub fn connect(pipe: &str, token: &str) -> Result<Client> {
         let f = open(pipe)?;
-        let mut c = Client { rd: f.try_clone()?, wr: f, next: 0 };
-        c.call("hello", json!({"token": token}))?;
+        let mut c = Client { rd: f.try_clone()?, wr: f, next: 0, proto: 0 };
+        let hello = c.call("hello", json!({"token": token}))?;
+        c.proto = hello["proto"].as_u64().unwrap_or(1);
         Ok(c)
     }
 
     /// Independent handle for a second thread (e.g. one reads while one writes).
     pub fn try_clone(&self) -> Result<Client> {
-        Ok(Client { rd: self.rd.try_clone()?, wr: self.wr.try_clone()?, next: 1 << 40 })
+        Ok(Client { rd: self.rd.try_clone()?, wr: self.wr.try_clone()?, next: 1 << 40, proto: self.proto })
     }
 
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value> {

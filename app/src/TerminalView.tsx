@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -9,7 +10,7 @@ import { resizeSession, writeSession } from "./api";
  * One xterm bound to one daemon session. Only the visible terminal is mounted:
  * the daemon keeps the history, so re-attaching replays what was missed.
  */
-export function TerminalView(props: { id: number; onExit?: (code: number | null) => void }) {
+export function TerminalView(props: { id: number; focus?: boolean; onExit?: (code: number | null) => void }) {
   let host!: HTMLDivElement;
 
   onMount(() => {
@@ -40,15 +41,71 @@ export function TerminalView(props: { id: number; onExit?: (code: number | null)
     };
     invoke("session_attach", { id: props.id, onData: channel });
 
+    // WebView2 gates navigator.clipboard behind a permission prompt, so the clipboard
+    // goes through the native side. Images are saved to a temp PNG and typed as a path.
+    const quote = (p: string) => (/\s/.test(p) ? `"${p}"` : p);
+    const pasteFromClipboard = async () => {
+      try {
+        const c = await invoke<{ kind: string; value: string }>("clipboard_read");
+        if (c.kind === "image") term.paste(quote(c.value) + " ");
+        else if (c.kind === "text") term.paste(c.value);
+      } catch {
+        /* clipboard unavailable */
+      }
+    };
+    const copySelection = () => void invoke("clipboard_write", { text: term.getSelection() }).catch(() => 0);
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== "keydown") return true;
+      const k = e.key.toLowerCase();
+      if (e.ctrlKey && !e.altKey && k === "v") {
+        e.preventDefault();
+        void pasteFromClipboard();
+        return false;
+      }
+      if (e.ctrlKey && !e.altKey && k === "c" && term.hasSelection()) {
+        copySelection();
+        term.clearSelection();
+        return false;
+      }
+      return true;
+    });
+    // right click: copy a selection, otherwise paste (Windows Terminal behaviour)
+    const onCtx = (e: MouseEvent) => {
+      e.preventDefault();
+      if (term.hasSelection()) {
+        copySelection();
+        term.clearSelection();
+      } else void pasteFromClipboard();
+    };
+    host.addEventListener("contextmenu", onCtx);
+
+    // files dropped from the OS arrive as native events carrying paths
+    let unDrop: (() => void) | undefined;
+    let gone = false;
+    void getCurrentWebview()
+      .onDragDropEvent((ev) => {
+        if (ev.payload.type !== "drop") return;
+        const r = host.getBoundingClientRect();
+        const x = ev.payload.position.x / devicePixelRatio;
+        const y = ev.payload.position.y / devicePixelRatio;
+        if (x < r.left || x > r.right || y < r.top || y > r.bottom) return;
+        term.paste(ev.payload.paths.map(quote).join(" ") + " ");
+        term.focus();
+      })
+      .then((u) => (gone ? u() : (unDrop = u)));
+
     term.onData((d) => void writeSession(props.id, d));
     term.onResize(({ cols, rows }) => void resizeSession(props.id, cols, rows));
     void resizeSession(props.id, term.cols, term.rows);
 
     const ro = new ResizeObserver(() => fit.fit());
     ro.observe(host);
-    term.focus();
+    if (props.focus !== false) term.focus();
 
     onCleanup(() => {
+      gone = true;
+      unDrop?.();
+      host.removeEventListener("contextmenu", onCtx);
       ro.disconnect();
       void invoke("session_detach", { id: props.id });
       term.dispose();

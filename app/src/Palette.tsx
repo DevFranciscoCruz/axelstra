@@ -15,13 +15,15 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        e.stopPropagation();
         setQ("");
         setSel(0);
         setOpen(!open());
       }
     };
-    window.addEventListener("keydown", onKey);
-    onCleanup(() => window.removeEventListener("keydown", onKey));
+    // captured, like Ctrl+B: the terminal must never swallow it
+    window.addEventListener("keydown", onKey, true);
+    onCleanup(() => window.removeEventListener("keydown", onKey, true));
   });
 
   const items = createMemo<Item[]>(() => {
@@ -29,9 +31,9 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
     out.push(
       { label: "Ficheiros", hint: "painel", run: () => setRightTab("files") },
       { label: "Alterações", hint: "painel", run: () => setRightTab("changes") },
-      { label: "Pull requests e issues", hint: "painel", run: () => setRightTab("pulls") },
+      { label: "PRs e issues", hint: "painel", run: () => setRightTab("pulls") },
       { label: "Kanban", hint: "vista", run: () => setShowKanban(true) },
-      { label: "Automations", hint: "agendamento", run: () => setShowAutomations(true) },
+      { label: "Automatizações", hint: "agendamento", run: () => setShowAutomations(true) },
     );
     for (const p of projects()) {
       for (const w of p.worktrees) {
@@ -51,6 +53,11 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
     shown();
     setSel(0);
   });
+  // keep the highlighted row visible while arrowing through a long list
+  createEffect(() => {
+    sel();
+    queueMicrotask(() => document.querySelector(".pal-item.on")?.scrollIntoView({ block: "nearest" }));
+  });
 
   const choose = (i: Item | undefined) => {
     setOpen(false);
@@ -63,6 +70,11 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
         <div class="pal" onClick={(e) => e.stopPropagation()}>
           <input
             class="pal-input"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="pal-list"
+            aria-activedescendant={`pal-${sel()}`}
+            aria-label="Paleta de comandos"
             placeholder="Ir para worktree ou executar ação…"
             value={q()}
             onInput={(e) => setQ(e.currentTarget.value)}
@@ -78,10 +90,10 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
             }}
             ref={(el) => queueMicrotask(() => el.focus())}
           />
-          <div class="pal-list">
+          <div class="pal-list" id="pal-list" role="listbox">
             <For each={shown()} fallback={<div class="pal-empty">Nada encontrado</div>}>
               {(i, idx) => (
-                <div class="pal-item" classList={{ on: idx() === sel() }} onMouseEnter={() => setSel(idx())} onClick={() => choose(i)}>
+                <div class="pal-item" id={`pal-${idx()}`} role="option" aria-selected={idx() === sel()} classList={{ on: idx() === sel() }} onMouseEnter={() => setSel(idx())} onClick={() => choose(i)}>
                   <span>{i.label}</span>
                   <span class="pal-hint">{i.hint}</span>
                 </div>
