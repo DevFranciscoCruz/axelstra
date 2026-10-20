@@ -55,9 +55,9 @@ export const restoreSessions = async (): Promise<number> => {
     try {
       const m = r.meta;
       if (m?.kind === "agent" && m.agent && m.project && m.worktree) {
-        // a cleared / never used conversation starts clean instead of loading anything
-        const blank = (m as { blank?: boolean }).blank;
-        await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, blank ? undefined : { key: m.key, resume: m.resume });
+        // a cleared / never used conversation has nothing to bring back: no tab, no process
+        if ((m as { blank?: boolean }).blank) continue;
+        await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume });
       } else {
         await spawnSession(r.program, r.args ?? [], r.label ?? undefined, r.cwd, m ?? undefined, (r as { env?: Record<string, string> }).env);
       }
