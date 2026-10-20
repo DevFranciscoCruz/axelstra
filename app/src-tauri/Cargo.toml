@@ -1,0 +1,13 @@
+[package]
+name = "axelstra-app"
+version.workspace = true
+edition.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+axelstra-daemon = { path = "../../crates/daemon" }
+serde_json = "1"
+anyhow = "1"
