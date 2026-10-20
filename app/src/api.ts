@@ -55,7 +55,9 @@ export const restoreSessions = async (): Promise<number> => {
     try {
       const m = r.meta;
       if (m?.kind === "agent" && m.agent && m.project && m.worktree) {
-        await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume });
+        // a cleared / never used conversation starts clean instead of loading anything
+        const blank = (m as { blank?: boolean }).blank;
+        await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, blank ? undefined : { key: m.key, resume: m.resume });
       } else {
         await spawnSession(r.program, r.args ?? [], r.label ?? undefined, r.cwd, m ?? undefined, (r as { env?: Record<string, string> }).env);
       }
@@ -218,3 +220,14 @@ export const computerEnable = (on: boolean) => call<{ enabled: boolean }>("compu
 
 export type WorkerLimits = { max_workers: number; workers: number };
 export const workerLimits = (max?: number) => call<WorkerLimits>("orch.limits", max === undefined ? {} : { max_workers: max });
+
+/** What Claude Code's status line last reported for an agent tab (context window, 5 h and weekly limits). */
+export type ClaudeStatus = {
+  context_window?: { context_window_size?: number; used_percentage?: number };
+  rate_limits?: { five_hour?: { used_percentage?: number; resets_at?: number }; seven_day?: { used_percentage?: number; resets_at?: number } };
+};
+export const agentStatus = (key: string) => callBg<{ status: ClaudeStatus | null }>("agent.status", { key }).then((r) => r.status);
+
+export type CodexWindow = { used_percent?: number; window_minutes?: number; resets_at?: number; resets_in_seconds?: number };
+export type CodexLimits = { primary?: CodexWindow; secondary?: CodexWindow; as_of?: number };
+export const codexLimits = () => callBg<{ limits: CodexLimits | null }>("codex.limits").then((r) => r.limits);

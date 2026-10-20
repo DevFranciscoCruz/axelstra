@@ -1,6 +1,7 @@
 import { For, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { sessions } from "./store";
+import { LimitsBar } from "./LimitsBar";
 
 type Usage = { app: number; daemon: number; sessions: number; ports: { port: number; pid: number }[] };
 
@@ -93,6 +94,7 @@ export function StatusBar() {
         </svg>
         <span>{ports().length}</span>
       </span>
+      <LimitsBar />
     </div>
   );
 }
