@@ -14,6 +14,18 @@ import {
   setError,
 } from "./store";
 
+function ProjectIcon(props: { name: string; url?: string | null }) {
+  const [broken, setBroken] = createSignal(false);
+  return (
+    <Show
+      when={props.url && !broken()}
+      fallback={<span class="picon letter">{props.name.slice(0, 1).toUpperCase()}</span>}
+    >
+      <img class="picon" src={props.url!} alt="" onError={() => setBroken(true)} />
+    </Show>
+  );
+}
+
 export function Sidebar() {
   // project id currently showing the "new worktree" input
   const [creating, setCreating] = createSignal<string | null>(null);
@@ -77,7 +89,8 @@ export function Sidebar() {
         {(p) => (
           <div class="project">
             <div class="project-head" title={p.path}>
-              <span class="pname">{p.name}</span>
+              <ProjectIcon name={p.name} url={p.icon_url} />
+              <span class="pname" title={p.slug ?? p.path}>{p.name}</span>
               <button class="icon" title="Novo worktree" onClick={() => setCreating(creating() === p.id ? null : p.id)}>
                 +
               </button>

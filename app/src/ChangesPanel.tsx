@@ -1,6 +1,6 @@
 import { For, Show } from "solid-js";
 import { FileChange } from "./api";
-import { changes, changesMode, openDiff, refreshChanges, setChangesMode, setOpenDiff } from "./store";
+import { changes, changesMode, openDiff, refreshChanges, setChangesMode, setOpenDiff, setOpenFile, setRightTab } from "./store";
 
 const LABEL: Record<string, string> = { M: "alterado", A: "novo", D: "apagado", U: "conflito" };
 
@@ -16,7 +16,7 @@ export function ChangesPanel() {
   return (
     <aside class="rightbar">
       <div class="rtabs">
-        <span class="rtab disabled">Ficheiros</span>
+        <span class="rtab" onClick={() => setRightTab("files")}>Ficheiros</span>
         <span class="rtab active">
           Alterações<Show when={files().length}> {files().length}</Show>
         </span>
@@ -45,7 +45,10 @@ export function ChangesPanel() {
           {(f: FileChange) => {
             const [dir, name] = split(f.path);
             return (
-              <div class="file" classList={{ active: openDiff() === f.path }} onClick={() => setOpenDiff(f.path)} title={`${f.path} (${LABEL[f.status] ?? f.status})`}>
+              <div class="file" classList={{ active: openDiff() === f.path }} onClick={() => {
+                  setOpenFile(null);
+                  setOpenDiff(f.path);
+                }} title={`${f.path} (${LABEL[f.status] ?? f.status})`}>
                 <span class={`st st-${f.status}`}>{f.status}</span>
                 <span class="fname">
                   <span class="fdir">{dir}</span>

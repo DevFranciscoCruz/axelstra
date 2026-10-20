@@ -1,6 +1,8 @@
 import { For, Show, createEffect, on, onCleanup, onMount } from "solid-js";
 import { SessionInfo, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
+import { Editor } from "./Editor";
+import { FilesPanel } from "./FilesPanel";
 import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
 import { TerminalView } from "./TerminalView";
@@ -9,6 +11,9 @@ import {
   changesMode,
   findWorktree,
   openDiff,
+  openFile,
+  rightTab,
+  setOpenFile,
   refreshChanges,
   refreshProjects,
   refreshSessions,
@@ -83,9 +88,10 @@ export function App() {
               {(s) => (
                 <div
                   class="tab"
-                  classList={{ active: openDiff() === null && activeSession() === s.id }}
+                  classList={{ active: openDiff() === null && openFile() === null && activeSession() === s.id }}
                   onClick={() => {
                     setOpenDiff(null);
+                    setOpenFile(null);
                     setActiveSession(s.id);
                   }}
                 >
@@ -104,6 +110,17 @@ export function App() {
                 </div>
               )}
             </For>
+            <Show when={openFile()}>
+              {(p) => (
+                <div class="tab active diff-tab" title={p()}>
+                  <span class="dtag">✎</span>
+                  <span>{baseName(p())}</span>
+                  <button class="x" title="Fechar ficheiro" onClick={() => setOpenFile(null)}>
+                    ×
+                  </button>
+                </div>
+              )}
+            </Show>
             <Show when={openDiff()}>
               {(p) => (
                 <div class="tab active diff-tab" title={p()}>
@@ -121,6 +138,14 @@ export function App() {
           </div>
           <div class="term-area">
             <Show
+              when={openFile() === null}
+              fallback={
+                <Show when={openFile()} keyed>
+                  {(f) => <Editor wt={selectedWorktree()!} path={f} />}
+                </Show>
+              }
+            >
+            <Show
               when={openDiff() === null}
               fallback={<DiffView />}
             >
@@ -134,11 +159,14 @@ export function App() {
                 </Show>
               </Show>
             </Show>
+            </Show>
           </div>
         </Show>
       </main>
       <Show when={current()}>
-        <ChangesPanel />
+        <Show when={rightTab() === "files"} fallback={<ChangesPanel />}>
+          <FilesPanel />
+        </Show>
       </Show>
     </div>
   );
