@@ -72,6 +72,13 @@ fn projects_worktrees_and_session_meta() {
     assert!(!list[0]["remote"].as_str().unwrap().contains("ghp_secret"));
     assert_eq!(list[0]["worktrees"][0]["is_main"], true);
 
+    // a logo file in the repo wins over the host avatar
+    assert!(c.call("project.logo", json!({"id": id})).unwrap()["data_url"].is_null());
+    std::fs::create_dir_all(repo.join("assets")).unwrap();
+    std::fs::write(repo.join("assets/logo.png"), [137u8, 80, 78, 71]).unwrap();
+    let logo = c.call("project.logo", json!({"id": id})).unwrap();
+    assert!(logo["data_url"].as_str().unwrap().starts_with("data:image/png;base64,"));
+
     // a session carries its project/worktree so the UI can group it
     let sid = c
         .call(

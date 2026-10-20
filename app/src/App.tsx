@@ -120,7 +120,7 @@ export function App() {
             </For>
             <Show when={openFile()}>
               {(p) => (
-                <div class="tab active diff-tab" title={p()}>
+                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} onClick={() => setShowKanban(false)}>
                   <span class="dtag">✎</span>
                   <span>{baseName(p())}</span>
                   <button class="x" title="Fechar ficheiro" onClick={() => setOpenFile(null)}>
@@ -131,7 +131,7 @@ export function App() {
             </Show>
             <Show when={openDiff()}>
               {(p) => (
-                <div class="tab active diff-tab" title={p()}>
+                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} onClick={() => setShowKanban(false)}>
                   <span class="dtag">Δ</span>
                   <span>{baseName(p())}</span>
                   <button class="x" title="Fechar diff" onClick={() => setOpenDiff(null)}>

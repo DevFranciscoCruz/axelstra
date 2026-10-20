@@ -508,7 +508,7 @@ button.icon:hover {
 .kbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #2a2a33; }
 .ktitle { font-weight: 600; }
 .kerr { padding: 6px 12px; background: #4a1f25; color: #f2b8bd; font-size: 12px; user-select: text; }
-.kcols { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 8px; padding: 10px; overflow: auto; }
+.kcols { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 8px; padding: 10px; overflow: auto; }
 .kcol { display: flex; flex-direction: column; min-height: 0; background: #14141a; border: 1px solid #23232c; border-radius: 8px; }
 .kcol.over { border-color: #d4559b; }
 .kcol-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; font-size: 12px; font-weight: 600; color: #b9b9c6; }
@@ -531,3 +531,6 @@ button.danger { color: #ef7676; }
 
 .krun { padding: 6px 12px; background: #1d2a22; color: #a9d8b8; font-size: 12px; user-select: text; }
 .krun.bad { background: #3a2a1a; color: #e5c07b; }
+.editor, .kanban { flex: 1; min-width: 0; }
+.editor-bar button.icon { font-size: 12px; }
+.editor-bar button.icon:disabled { opacity: .4; cursor: default; }
