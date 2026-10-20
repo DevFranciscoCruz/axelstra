@@ -16,13 +16,13 @@ export const call = <T = unknown>(method: string, params: Record<string, unknown
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 export const defaultShell = () => tauriInvoke<[string, string[]]>("default_shell");
 
-/** Opens Claude Code straight away in a worktree. The shell stays alive after claude exits. */
-export const launchClaude = async (project: string, worktree: string) => {
+/** Opens the chosen agent CLI straight away in a worktree. The shell stays alive after the agent exits. */
+export const launchDefaultAgent = async (project: string, worktree: string, agent: string, cli: string) => {
   const [program, args] = await defaultShell();
   const run = /powershell|pwsh/i.test(program)
-    ? [...args, "-NoExit", "-Command", "claude"]
-    : [...args, "-c", `claude; exec "${program}" -l`];
-  const { id } = await spawnSession(program, run, "claude", worktree, { project, worktree, kind: "agent" });
+    ? [...args, "-NoExit", "-Command", cli]
+    : [...args, "-c", `${cli}; exec "${program}" -l`];
+  const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent" });
   return id;
 };
 

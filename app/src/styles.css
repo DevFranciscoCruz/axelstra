@@ -561,3 +561,12 @@ button.danger { color: #ef7676; }
 .kcol:nth-child(4) .kcol-head span:first-child { color: #d4559b; }
 .kcol:nth-child(5) .kcol-head span:first-child { color: #7fd18b; }
 .kcards { padding-top: 8px; }
+
+.agent-pick { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; color: var(--muted, #888); font-size: 12px; }
+.agent-pick select { background: var(--bg); color: var(--text); border: 1px solid var(--border, #333); border-radius: 6px; padding: 3px 6px; font: inherit; }
+
+.modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.modal { background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 240px; }
+.modal h3 { margin: 0 0 6px; font-size: 14px; }
+.modal button { padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.modal button.pref { outline: 2px solid var(--accent); }

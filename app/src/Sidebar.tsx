@@ -1,8 +1,12 @@
 import { open, ask } from "@tauri-apps/plugin-dialog";
 import { For, Show, createResource, createSignal } from "solid-js";
-import { addProject, projectLogo, createWorktree, launchClaude, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
+import { addProject, projectLogo, createWorktree, launchDefaultAgent, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
 import logo from "./assets/logo.png";
 import {
+  AGENTS,
+  defaultAgent,
+  pickAgent,
+  setDefaultAgent,
   error,
   norm,
   projects,
@@ -37,6 +41,18 @@ export function Sidebar() {
   const [editSetup, setEditSetup] = createSignal<string | null>(null);
   const [setupText, setSetupText] = createSignal("");
 
+  /** asks which agent to open (or a plain terminal) and starts it in the worktree */
+  const openWith = async (projectId: string, path: string) => {
+    const a = await pickAgent();
+    if (a === null) return;
+    if (a === "shell") {
+      const [program, args] = await defaultShell();
+      await spawnSession(program, args, "shell", path, { project: projectId, worktree: path, kind: "shell" });
+    } else {
+      await launchDefaultAgent(projectId, path, a, AGENTS[a]);
+    }
+  };
+
   const run = async (f: () => Promise<unknown>) => {
     try {
       await f();
@@ -58,7 +74,7 @@ export function Sidebar() {
       const main = projects().find((p) => p.id === added.id)?.worktrees.find((w) => w.is_main);
       if (main) {
         selectWorktree(main.path);
-        if (sessionsOf(main.path).length === 0) await launchClaude(added.id, main.path);
+        if (sessionsOf(main.path).length === 0) await openWith(added.id, main.path);
       }
     });
 
@@ -70,7 +86,7 @@ export function Sidebar() {
       if (!name) return;
       const w = await createWorktree(projectId, name);
       selectWorktree(w.path);
-      await launchClaude(projectId, w.path);
+      await openWith(projectId, w.path);
       const setup = projects().find((p) => p.id === projectId)?.setup;
       if (setup) {
         const [program, args] = await defaultShell();
@@ -199,6 +215,12 @@ export function Sidebar() {
       </For>
 
       <div class="grow" />
+      <label class="agent-pick" title="Agente aberto ao criar projetos e worktrees">
+        Agente
+        <select value={defaultAgent()} onChange={(e) => setDefaultAgent(e.currentTarget.value)}>
+          <For each={Object.keys(AGENTS)}>{(a) => <option value={a}>{a}</option>}</For>
+        </select>
+      </label>
       <Show when={error()}>
         <div class="error">{error()}</div>
       </Show>
