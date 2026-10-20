@@ -31,6 +31,12 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             std::process::exit(0);
         }
         Cmd::Send { id, data } => c.send_input(id, &unescape(&data)?)?,
+        Cmd::Say { id, text } => {
+            let mut b = b"\x1b[200~".to_vec();
+            b.extend_from_slice(text.as_bytes());
+            b.extend_from_slice(b"\x1b[201~\r");
+            c.send_input(id, &b)?
+        }
         Cmd::AddProject { path } => {
             let abs = axelstra_core::git::canon(&path)?;
             println!("{}", c.call("project.add", json!({"path": abs}))?);
