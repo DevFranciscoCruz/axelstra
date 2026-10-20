@@ -534,3 +534,10 @@ button.danger { color: #ef7676; }
 .editor, .kanban { flex: 1; min-width: 0; }
 .editor-bar button.icon { font-size: 12px; }
 .editor-bar button.icon:disabled { opacity: .4; cursor: default; }
+
+.commit { padding: 6px 10px; cursor: pointer; border-radius: 4px; }
+.commit:hover, .commit.active { background: #232736; }
+.csubject { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmeta { font-size: 11px; color: #77778a; display: flex; gap: 4px; align-items: baseline; }
+.cmeta .nums { margin-left: auto; }
+.cfile { padding: 6px 10px; margin-top: 8px; background: #1a1a22; font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; position: sticky; top: 0; }

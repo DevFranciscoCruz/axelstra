@@ -1,6 +1,6 @@
 import { For, Show, createSignal } from "solid-js";
 import { FsEntry, fsList } from "./api";
-import { changes, openFile, selectedWorktree, setOpenDiff, setOpenFile, setRightTab, setShowKanban } from "./store";
+import { changes, openFile, selectedWorktree, setOpenDiff, setOpenFile, setRightTab, setShowKanban, setOpenCommit } from "./store";
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 
@@ -34,6 +34,7 @@ function Node(props: { wt: string; dir: string; e: FsEntry; depth: number }) {
           if (props.e.dir) return setOpen(!open());
           setOpenDiff(null);
           setShowKanban(false);
+          setOpenCommit(null);
           setOpenFile(path());
         }}
       >
@@ -57,7 +58,7 @@ export function FilesPanel() {
         <span class="rtab" onClick={() => setRightTab("changes")}>
           Alterações<Show when={nChanges()}> {nChanges()}</Show>
         </span>
-        <span class="rtab disabled">Revisão</span>
+        <span class="rtab" onClick={() => setRightTab("review")}>Revisão</span>
       </div>
       <div class="rtools">
         <span class="grow" />

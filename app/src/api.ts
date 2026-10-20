@@ -91,3 +91,18 @@ export type OrchRun = {
 };
 export const orchStart = (project: string, max = 3) => call<OrchRun>("orch.start", { project, max });
 export const orchStatus = (project: string) => call<OrchRun>("orch.status", { project });
+
+export type Commit = {
+  sha: string;
+  short: string;
+  author: string;
+  date: string;
+  subject: string;
+  files: number;
+  added: number;
+  removed: number;
+};
+export const gitLog = (worktree: string, base?: string) =>
+  call<{ commits: Commit[] }>("git.log", { worktree, base }).then((r) => r.commits);
+export const gitShow = (worktree: string, sha: string) =>
+  call<{ diff: string }>("git.show", { worktree, sha }).then((r) => r.diff);

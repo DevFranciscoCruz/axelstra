@@ -88,4 +88,16 @@ fn changes_and_diff() {
     assert!(c.call("git.changes", json!({"worktree": root})).is_err());
     assert!(c.call("git.diff", json!({"worktree": w, "path": "..\\r\\keep.txt"})).is_err());
     assert!(c.call("git.diff", json!({"worktree": w, "path": "C:\\Windows\\win.ini"})).is_err());
+
+    // review: commits the branch has over main, and one commit's patch
+    let log = c.call("git.log", json!({"worktree": w, "base": "main"})).unwrap();
+    let commits = log["commits"].as_array().unwrap();
+    assert_eq!(commits.len(), 1, "{log}");
+    assert_eq!(commits[0]["subject"], "on branch");
+    assert_eq!((commits[0]["files"].as_u64(), commits[0]["added"].as_u64()), (Some(1), Some(2)));
+    let sha = commits[0]["sha"].as_str().unwrap();
+    let p = c.call("git.show", json!({"worktree": w, "sha": sha})).unwrap()["diff"].as_str().unwrap().to_string();
+    assert!(p.contains("+c1") && p.contains("committed.txt"), "{p}");
+    assert!(c.call("git.show", json!({"worktree": w, "sha": "--output=x"})).is_err(), "option injection");
+    assert!(c.call("git.show", json!({"worktree": w, "sha": "zzzzzzzz"})).is_err());
 }

@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import { Changes, Project, SessionInfo, Worktree, gitChanges, listProjects, listSessions } from "./api";
+import { Changes, Commit, Project, SessionInfo, Worktree, gitChanges, listProjects, listSessions } from "./api";
 
 /** Paths come back with either slash style; compare them in one normal form. */
 export const norm = (p?: string | null) => (p ?? "").replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
@@ -32,12 +32,15 @@ export const selectWorktree = (path: string | null) => {
   setActiveSession(null);
   setOpenDiff(null);
   setOpenFile(null);
+  setOpenCommit(null);
   setShowKanban(false);
   setChanges(null);
 };
 
 /** right panel tab and the file open in the editor (relative to the worktree); null = terminal/diff */
-export const [rightTab, setRightTab] = createSignal<"files" | "changes">("files");
+export const [rightTab, setRightTab] = createSignal<"files" | "changes" | "review">("files");
+/** the commit whose patch replaces the terminal area; null = none */
+export const [openCommit, setOpenCommit] = createSignal<Commit | null>(null);
 export const [openFile, setOpenFile] = createSignal<string | null>(null);
 
 /** the project's kanban board replaces the terminal area when true */
