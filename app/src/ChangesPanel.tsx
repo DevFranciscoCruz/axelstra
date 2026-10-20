@@ -1,5 +1,5 @@
 import { RightTabs } from "./RightTabs";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { ask } from "./Confirm";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { Commit, FileChange, gitCommit, gitLog, gitPr, gitPush } from "./api";
 import { showMenu } from "./ContextMenu";

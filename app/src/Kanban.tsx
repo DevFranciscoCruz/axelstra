@@ -1,5 +1,5 @@
 import { Select } from "./Select";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { ask } from "./Confirm";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Board, KCard, OrchRun, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchStart, orchStatus } from "./api";
 import { Modal } from "./Modal";
