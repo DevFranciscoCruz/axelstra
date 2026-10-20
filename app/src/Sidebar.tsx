@@ -1,6 +1,6 @@
 import { open, ask } from "@tauri-apps/plugin-dialog";
 import { For, Show, createResource, createSignal } from "solid-js";
-import { addProject, projectLogo, createWorktree, removeProject, removeWorktree, killSession, removeSession } from "./api";
+import { addProject, projectLogo, createWorktree, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
 import logo from "./assets/logo.png";
 import {
   error,
@@ -33,6 +33,9 @@ export function Sidebar() {
   // project id currently showing the "new worktree" input
   const [creating, setCreating] = createSignal<string | null>(null);
   const [newName, setNewName] = createSignal("");
+  // project id whose setup command is being edited
+  const [editSetup, setEditSetup] = createSignal<string | null>(null);
+  const [setupText, setSetupText] = createSignal("");
 
   const run = async (f: () => Promise<unknown>) => {
     try {
@@ -59,6 +62,19 @@ export function Sidebar() {
       if (!name) return;
       const w = await createWorktree(projectId, name);
       selectWorktree(w.path);
+      const setup = projects().find((p) => p.id === projectId)?.setup;
+      if (setup) {
+        const [program, args] = await defaultShell();
+        const { id } = await spawnSession(program, args, "setup", w.path, { project: projectId, worktree: w.path, kind: "shell" });
+        // give the shell a moment to print its prompt before typing into it
+        setTimeout(() => void writeSession(id, setup + "\r"), 600);
+      }
+    });
+
+  const saveSetup = (projectId: string) =>
+    run(async () => {
+      await setProjectSetup(projectId, setupText());
+      setEditSetup(null);
     });
 
   const dropWorktree = async (projectId: string, path: string, name: string) => {
@@ -97,10 +113,33 @@ export function Sidebar() {
               <button class="icon" title="Novo worktree" onClick={() => setCreating(creating() === p.id ? null : p.id)}>
                 +
               </button>
+              <button
+                class="icon"
+                title={p.setup ? `Setup: ${p.setup}` : "Comando de setup para novos worktrees"}
+                onClick={() => {
+                  setSetupText(p.setup ?? "");
+                  setEditSetup(editSetup() === p.id ? null : p.id);
+                }}
+              >
+                ⚙
+              </button>
               <button class="icon" title="Tirar da lista (não apaga ficheiros)" onClick={() => run(() => removeProject(p.id))}>
                 ×
               </button>
             </div>
+            <Show when={editSetup() === p.id}>
+              <input
+                class="wt-input"
+                placeholder="setup, ex.: bun install (vazio = nenhum)"
+                value={setupText()}
+                onInput={(e) => setSetupText(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void saveSetup(p.id);
+                  if (e.key === "Escape") setEditSetup(null);
+                }}
+                ref={(el) => queueMicrotask(() => el.focus())}
+              />
+            </Show>
             <Show when={creating() === p.id}>
               <input
                 class="wt-input"

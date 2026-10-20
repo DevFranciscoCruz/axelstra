@@ -11,6 +11,9 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub path: String,
+    /// command run in a terminal of every new worktree (e.g. `bun install`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<String>,
 }
 
 pub fn store_path() -> PathBuf {
@@ -50,10 +53,17 @@ pub fn add(store: &Path, path: &str) -> Result<Project> {
     while v.iter().any(|p| p.id == id) {
         id.push_str("-2");
     }
-    let p = Project { id, name, path: root_s };
+    let p = Project { id, name, path: root_s, setup: None };
     v.push(p.clone());
     save(store, &v)?;
     Ok(p)
+}
+
+pub fn set_setup(store: &Path, id: &str, setup: Option<String>) -> Result<()> {
+    let mut v = load(store);
+    let p = v.iter_mut().find(|p| p.id == id).with_context(|| format!("unknown project {id}"))?;
+    p.setup = setup.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    save(store, &v)
 }
 
 pub fn remove(store: &Path, id: &str) -> Result<()> {

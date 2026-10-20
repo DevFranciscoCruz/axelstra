@@ -25,6 +25,8 @@ enum Cmd {
     Kill { id: u32 },
     /// Register a git repo as a project
     AddProject { path: PathBuf },
+    /// Set the command run in each new worktree of a project (empty clears it)
+    SetSetup { id: String, setup: String },
     /// List projects and their worktrees
     Projects,
     /// Type into a session. Escapes: \e \r \n \xHH
@@ -74,7 +76,7 @@ fn main() -> Result<()> {
                 .build()?
                 .block_on(server::serve(proto::pipe_name(), token))?;
         }
-        Cmd::Ls | Cmd::Spawn { .. } | Cmd::Kill { .. } | Cmd::Tail { .. } | Cmd::Send { .. } | Cmd::AddProject { .. } | Cmd::Projects => {
+        Cmd::Ls | Cmd::Spawn { .. } | Cmd::Kill { .. } | Cmd::Tail { .. } | Cmd::Send { .. } | Cmd::AddProject { .. } | Cmd::SetSetup { .. } | Cmd::Projects => {
             use axelstra_daemon::{client::Client, proto};
             let mut c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
             match Cli::parse().cmd {
@@ -120,6 +122,9 @@ fn main() -> Result<()> {
                     let abs = axelstra_core::git::canon(&path)?;
                     let r = c.call("project.add", serde_json::json!({"path": abs}))?;
                     println!("{r}");
+                }
+                Cmd::SetSetup { id, setup } => {
+                    c.call("project.setup", serde_json::json!({"id": id, "setup": setup}))?;
                 }
                 Cmd::Projects => println!("{}", serde_json::to_string_pretty(&c.call("project.list", serde_json::json!({}))?)?),
                 Cmd::Kill { id } => {
