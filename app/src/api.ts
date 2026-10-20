@@ -65,3 +65,14 @@ export const gitCommit = (worktree: string, message: string) => call<{ sha: stri
 export const gitPush = (worktree: string) => call<{ output: string }>("git.push", { worktree });
 export const gitPr = (worktree: string, title: string, body: string, base?: string) =>
   call<{ url: string }>("git.pr", { worktree, title, body, base }).then((r) => r.url);
+
+export type KCard = {
+  meta: { id: string; title: string; status: string; agent: string; depends_on: string[]; priority: number };
+  body: string;
+};
+export type Board = { cards: KCard[]; broken: { file: string; error: string }[] };
+
+export const kanbanList = (project: string) => call<Board>("kanban.list", { project });
+export const kanbanSave = (project: string, card: Record<string, unknown>) => call<KCard>("kanban.save", { project, ...card });
+export const kanbanMove = (project: string, id: string, status: string) => call("kanban.move", { project, id, status });
+export const kanbanDelete = (project: string, id: string) => call("kanban.delete", { project, id });

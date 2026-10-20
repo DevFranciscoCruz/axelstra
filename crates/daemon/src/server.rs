@@ -302,6 +302,26 @@ fn dispatch(
             let text = tokio::task::block_in_place(|| crate::changes::diff(&wt, path, base))?;
             Ok(json!({"diff": text}))
         }
+        "kanban.list" | "kanban.save" | "kanban.move" | "kanban.delete" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let repo = std::path::PathBuf::from(&pr.path);
+            let s = |k: &str| p[k].as_str().unwrap_or_default().to_string();
+            tokio::task::block_in_place(|| -> Result<Value> {
+                use crate::kanban;
+                Ok(match req.method.as_str() {
+                    "kanban.list" => serde_json::to_value(kanban::list(&repo)?)?,
+                    "kanban.save" => serde_json::to_value(kanban::save(&repo, p["id"].as_str(), &s("title"), &s("body"), p["status"].as_str(), &p)?)?,
+                    "kanban.move" => {
+                        kanban::set_status(&repo, &s("id"), &s("status"))?;
+                        json!({})
+                    }
+                    _ => {
+                        kanban::delete(&repo, &s("id"))?;
+                        json!({})
+                    }
+                })
+            })
+        }
         "git.commit" | "git.push" | "git.pr" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             let s = |k: &str| p[k].as_str().unwrap_or_default().to_string();

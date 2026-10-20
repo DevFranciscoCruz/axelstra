@@ -32,12 +32,16 @@ export const selectWorktree = (path: string | null) => {
   setActiveSession(null);
   setOpenDiff(null);
   setOpenFile(null);
+  setShowKanban(false);
   setChanges(null);
 };
 
 /** right panel tab and the file open in the editor (relative to the worktree); null = terminal/diff */
 export const [rightTab, setRightTab] = createSignal<"files" | "changes">("files");
 export const [openFile, setOpenFile] = createSignal<string | null>(null);
+
+/** the project's kanban board replaces the terminal area when true */
+export const [showKanban, setShowKanban] = createSignal(false);
 
 export const [activeSession, setActiveSession] = createSignal<number | null>(null);
 

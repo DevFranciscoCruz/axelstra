@@ -3,6 +3,7 @@ import { SessionInfo, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
 import { Editor } from "./Editor";
 import { FilesPanel } from "./FilesPanel";
+import { Kanban } from "./Kanban";
 import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
 import { TerminalView } from "./TerminalView";
@@ -14,6 +15,8 @@ import {
   openFile,
   rightTab,
   setOpenFile,
+  setShowKanban,
+  showKanban,
   refreshChanges,
   refreshProjects,
   refreshSessions,
@@ -84,14 +87,19 @@ export function App() {
       <main class="main">
         <Show when={current()} fallback={<div class="placeholder">Adicione um projeto e escolha um worktree</div>}>
           <div class="tabbar">
+            <div class="tab" classList={{ active: showKanban() }} onClick={() => setShowKanban(true)}>
+              <span class="dtag">▦</span>
+              <span>Kanban</span>
+            </div>
             <For each={tabs()}>
               {(s) => (
                 <div
                   class="tab"
-                  classList={{ active: openDiff() === null && openFile() === null && activeSession() === s.id }}
+                  classList={{ active: !showKanban() && openDiff() === null && openFile() === null && activeSession() === s.id }}
                   onClick={() => {
                     setOpenDiff(null);
                     setOpenFile(null);
+                    setShowKanban(false);
                     setActiveSession(s.id);
                   }}
                 >
@@ -137,6 +145,7 @@ export function App() {
             </button>
           </div>
           <div class="term-area">
+            <Show when={!showKanban()} fallback={<Kanban project={current()!.project.id} />}>
             <Show
               when={openFile() === null}
               fallback={
@@ -158,6 +167,7 @@ export function App() {
                   {(id) => <TerminalView id={id} onExit={() => void refreshSessions()} />}
                 </Show>
               </Show>
+            </Show>
             </Show>
             </Show>
           </div>
