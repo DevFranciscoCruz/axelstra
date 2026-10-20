@@ -1,16 +1,17 @@
 use crate::card::{self, Card};
 use crate::git::{self, Merge};
-use crate::job::Job;
-use anyhow::{bail, Context, Result};
+use crate::runner::{AgentSpawn, Handle, ProcessRunner, Runner};
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Options {
     pub repo: PathBuf,
     pub name: String,
@@ -20,6 +21,8 @@ pub struct Options {
     /// Program + args; `{prompt_file}` is substituted. Overrides per-card agent.
     pub agent_override: Option<Vec<String>>,
     pub poll_ms: u64,
+    /// None = headless child processes.
+    pub runner: Option<Arc<dyn Runner>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,8 +76,7 @@ struct Task {
 }
 
 struct Live {
-    child: Child,
-    job: Job,
+    handle: Box<dyn Handle>,
     wt: PathBuf,
     branch: String,
     started: Instant,
@@ -170,14 +172,14 @@ pub fn run(o: &Options) -> Result<Report> {
         for id in running {
             let t = tasks.get_mut(&id).unwrap();
             let live = t.live.as_mut().unwrap();
-            let exited = live.child.try_wait()?;
+            let exited = live.handle.try_wait()?;
             // read after try_wait: an agent may write the result and exit between the two
             let sentinel = read_sentinel(&live.wt);
             let timeout = Duration::from_secs_f64(t.card.meta.timeout_min * 60.0);
             let outcome = if let Some(r) = sentinel {
                 Some(if r.status == "done" { Ok(r.summary) } else { Err(format!("agent reported {}: {}", r.status, r.summary)) })
             } else if let Some(s) = exited {
-                Some(Err(format!("exited ({s}) without result.json")))
+                Some(Err(format!("{s} without result.json")))
             } else if live.started.elapsed() > timeout {
                 Some(Err(format!("timeout after {} min", t.card.meta.timeout_min)))
             } else {
@@ -186,10 +188,8 @@ pub fn run(o: &Options) -> Result<Report> {
             let Some(outcome) = outcome else { continue };
 
             let live = t.live.take().unwrap();
-            live.job.kill();
             let mut live = live;
-            let _ = live.child.wait();
-            drop(live.job);
+            live.handle.kill();
 
             match outcome {
                 Ok(summary) => {
@@ -319,28 +319,33 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
         ),
     )?;
 
+    let runner: Arc<dyn Runner> = o.runner.clone().unwrap_or_else(|| Arc::new(ProcessRunner));
     let spec: Vec<String> = match &o.agent_override {
         Some(v) => v.clone(),
         None => match t.card.meta.agent.as_str() {
-            "claude" => vec!["claude".into(), "-p".into(), "Read .axelstra/prompt.md and do the task described there.".into()],
+            "claude" => {
+                let ask = "Read .axelstra/prompt.md and do the task described there.".to_string();
+                if runner.interactive() {
+                    vec!["claude".into(), ask]
+                } else {
+                    vec!["claude".into(), "-p".into(), ask]
+                }
+            }
             other => bail!("no command configured for agent '{other}'"),
         },
     };
     let pf = prompt.to_string_lossy().to_string();
     let spec: Vec<String> = spec.into_iter().map(|a| a.replace("{prompt_file}", &pf)).collect();
 
-    let log = File::create(run_dir.join("logs").join(format!("{id}.log")))?;
-    let mut cmd = Command::new(&spec[0]);
-    cmd.args(&spec[1..])
-        .current_dir(&wt)
-        .env("AXELSTRA_TASK", id)
-        .env("AXELSTRA_PROMPT_FILE", &pf)
-        .stdin(Stdio::null())
-        .stdout(log.try_clone()?)
-        .stderr(log);
-    let job = Job::new()?;
-    let child = job.spawn(&mut cmd).with_context(|| format!("run {}", spec[0]))?;
-    Ok(Live { child, job, wt, branch, started: Instant::now() })
+    let handle = runner.spawn(&AgentSpawn {
+        program: spec[0].clone(),
+        args: spec[1..].to_vec(),
+        cwd: wt.clone(),
+        env: vec![("AXELSTRA_TASK".into(), id.clone()), ("AXELSTRA_PROMPT_FILE".into(), pf)],
+        label: format!("{}/{}", o.name, id),
+        log: Some(run_dir.join("logs").join(format!("{id}.log"))),
+    })?;
+    Ok(Live { handle, wt, branch, started: Instant::now() })
 }
 
 #[allow(clippy::too_many_arguments)]

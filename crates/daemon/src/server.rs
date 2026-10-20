@@ -16,6 +16,7 @@ use tokio::sync::mpsc;
 struct Registry {
     next: AtomicU32,
     sessions: Mutex<HashMap<u32, Arc<Session>>>,
+    labels: Mutex<HashMap<u32, String>>,
 }
 
 impl Registry {
@@ -155,12 +156,18 @@ fn dispatch(
             let sess = Arc::new(Session::spawn(&s)?);
             let id = reg.next.fetch_add(1, Ordering::SeqCst) + 1;
             reg.sessions.lock().unwrap().insert(id, sess);
+            if let Some(l) = p["label"].as_str() {
+                reg.labels.lock().unwrap().insert(id, l.to_string());
+            }
             Ok(json!({"id": id}))
         }
         "session.list" => {
             let l = reg.sessions.lock().unwrap();
-            let mut v: Vec<Value> =
-                l.iter().map(|(id, s)| json!({"id": id, "running": s.try_wait().is_none()})).collect();
+            let labels = reg.labels.lock().unwrap();
+            let mut v: Vec<Value> = l
+                .iter()
+                .map(|(id, s)| json!({"id": id, "running": s.try_wait().is_none(), "label": labels.get(id)}))
+                .collect();
             v.sort_by_key(|x| x["id"].as_u64());
             Ok(Value::Array(v))
         }
@@ -224,6 +231,21 @@ fn dispatch(
         }
         "session.resize" => {
             session()?.resize(p["cols"].as_u64().unwrap_or(120) as u16, p["rows"].as_u64().unwrap_or(30) as u16)?;
+            Ok(json!({}))
+        }
+        "session.status" => {
+            let code = session()?.try_wait();
+            Ok(json!({"running": code.is_none(), "code": code}))
+        }
+        "session.remove" => {
+            let id = sid()?;
+            if let Some(stop) = subs.remove(&id) {
+                stop.store(true, Ordering::SeqCst);
+            }
+            if let Some(s) = reg.sessions.lock().unwrap().remove(&id) {
+                s.kill();
+            }
+            reg.labels.lock().unwrap().remove(&id);
             Ok(json!({}))
         }
         "session.kill" => {
