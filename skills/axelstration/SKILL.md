@@ -5,7 +5,7 @@ description: Coordinate parallel agents inside Axelstra with the `axelstra` CLI.
 
 # Axelstration
 
-You are running inside an Axelstra terminal. The `axelstra` CLI talks to the same daemon as the app, so everything you start appears as a tab in the app and the user can watch or take over.
+You are running inside an Axelstra terminal (as Claude Code, Codex or any other agent that can run shell commands). The `axelstra` CLI talks to the same daemon as the app, so everything you start appears as a tab in the app and the user can watch or take over.
 
 Your own session id is `$AXELSTRA_SESSION` (PowerShell: `$env:AXELSTRA_SESSION`). Workers report back to it.
 

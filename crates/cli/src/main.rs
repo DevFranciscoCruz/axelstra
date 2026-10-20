@@ -34,7 +34,7 @@ enum Cmd {
     Projects,
     /// Type into a session. Escapes: \e \r \n \xHH
     Send { id: u32, data: String },
-    /// Install the /axelstration skill for Claude Code (~/.claude/skills)
+    /// Install the /axelstration skill for Claude Code and Codex
     InstallSkill,
     /// Send a message to an agent session: pasted as one block, then Enter
     Say { id: u32, text: String },
@@ -188,8 +188,10 @@ fn main() -> Result<()> {
             ctl::run(cmd, c)?;
         }
         Cmd::InstallSkill => {
-            let file = axelstra_daemon::skill::install_forced()?;
-            println!("installed {} (use it as /axelstration in Claude Code)", file.display());
+            for f in axelstra_daemon::skill::install_forced()? {
+                println!("installed {}", f.display());
+            }
+            println!("use it as /axelstration in Claude Code or Codex");
         }
         Cmd::Plan { repo } => {
             let cards: Vec<_> = card::load_dir(&repo.join(".kanban"))?
