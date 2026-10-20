@@ -69,7 +69,7 @@ export function StatusBar() {
   const pct = (n: number) => (n < 10 ? n.toFixed(1) : String(Math.round(n)));
   const gpuTip = () => {
     const u = usage();
-    const per = (u?.gpu_adapters ?? []).map(([id, v]) => `Adaptador ${id.split("_").pop()}: ${pct(v)}%`).join("\n");
+    const per = (u?.gpu_adapters ?? []).map(([id, v]) => `${id}: ${pct(v)}%`).join("\n");
     return `GPU usada pelo Axelstra (app, WebView2 e terminais), no motor mais ocupado${per ? "\n" + per : ""}`;
   };
 

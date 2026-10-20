@@ -193,10 +193,77 @@ mod imp {
                 *by_gpu.entry(luid).or_default().entry(ty).or_default() += v;
             }
             let top = |m: &HashMap<String, f64>| m.values().cloned().fold(0.0, f64::max).min(100.0);
-            let mut adapters: Vec<(String, f64)> = by_gpu.iter().map(|(l, m)| (l.clone(), top(m))).collect();
+            let names = adapter_names();
+            let mut adapters: Vec<(String, f64)> = by_gpu.iter().map(|(l, m)| (names.get(l).cloned().unwrap_or_else(|| format!("GPU {l}")), top(m))).collect();
             adapters.sort_by(|a, b| b.1.total_cmp(&a.1));
             (Some(top(&by_type)), adapters)
         }
+    }
+
+    /// Adapter names by LUID ("0x00000000_0x0000D6B2", the spelling of the GPU counters), asked once from DXGI.
+    fn adapter_names() -> &'static HashMap<String, String> {
+        use std::sync::OnceLock;
+        static NAMES: OnceLock<HashMap<String, String>> = OnceLock::new();
+        NAMES.get_or_init(|| unsafe {
+            use windows_sys::core::GUID;
+            // windows-sys has no DXGI: the one function and the one struct needed, declared here
+            #[repr(C)]
+            struct Luid {
+                low: u32,
+                high: i32,
+            }
+            #[repr(C)]
+            #[allow(non_snake_case)]
+            struct DXGI_ADAPTER_DESC1 {
+                Description: [u16; 128],
+                VendorId: u32,
+                DeviceId: u32,
+                SubSysId: u32,
+                Revision: u32,
+                DedicatedVideoMemory: usize,
+                DedicatedSystemMemory: usize,
+                SharedSystemMemory: usize,
+                AdapterLuid: Luid,
+                Flags: u32,
+            }
+            #[link(name = "dxgi")]
+            extern "system" {
+                fn CreateDXGIFactory1(riid: *const GUID, pp: *mut *mut std::ffi::c_void) -> i32;
+            }
+            let mut out = HashMap::new();
+            // IDXGIFactory1 {770aae78-f26f-4dba-a829-253c83d1b387}
+            let iid = GUID { data1: 0x770a_ae78, data2: 0xf26f, data3: 0x4dba, data4: [0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87] };
+            let mut factory: *mut std::ffi::c_void = std::ptr::null_mut();
+            if CreateDXGIFactory1(&iid, &mut factory) != 0 || factory.is_null() {
+                return out;
+            }
+            // raw COM: the vtable is a list of function pointers
+            type Fn2 = unsafe extern "system" fn(*mut std::ffi::c_void, u32, *mut *mut std::ffi::c_void) -> i32;
+            type FnDesc = unsafe extern "system" fn(*mut std::ffi::c_void, *mut DXGI_ADAPTER_DESC1) -> i32;
+            type FnRelease = unsafe extern "system" fn(*mut std::ffi::c_void) -> u32;
+            let vt = |obj: *mut std::ffi::c_void| *(obj as *const *const usize);
+            let fvt = vt(factory);
+            let enum_adapters1: Fn2 = std::mem::transmute(*fvt.add(12));
+            for i in 0..16 {
+                let mut ad: *mut std::ffi::c_void = std::ptr::null_mut();
+                if enum_adapters1(factory, i, &mut ad) != 0 || ad.is_null() {
+                    break;
+                }
+                let avt = vt(ad);
+                let get_desc1: FnDesc = std::mem::transmute(*avt.add(10));
+                let mut d: DXGI_ADAPTER_DESC1 = std::mem::zeroed();
+                if get_desc1(ad, &mut d) == 0 {
+                    let n = d.Description.iter().position(|c| *c == 0).unwrap_or(d.Description.len());
+                    let name = String::from_utf16_lossy(&d.Description[..n]);
+                    out.insert(format!("0x{:08X}_0x{:08X}", d.AdapterLuid.high as u32, d.AdapterLuid.low), name);
+                }
+                let release: FnRelease = std::mem::transmute(*avt.add(2));
+                release(ad);
+            }
+            let release: FnRelease = std::mem::transmute(*fvt.add(2));
+            release(factory);
+            out
+        })
     }
 
     /// `pid_1234_luid_0x00000000_0x0000D6B2_phys_0_eng_0_engtype_3D` gives (1234, "0x00000000_0x0000D6B2", "3D")
