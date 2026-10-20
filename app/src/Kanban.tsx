@@ -18,6 +18,7 @@ export function Kanban(props: { project: string }) {
   const [err, setErr] = createSignal("");
   const [draft, setDraft] = createSignal<Draft | null>(null);
   const [over, setOver] = createSignal<string | null>(null);
+  const [dragId, setDragId] = createSignal<string | null>(null);
   const [run, setRun] = createSignal<OrchRun>({ state: "idle" });
 
   const pollRun = async () => {
@@ -113,6 +114,7 @@ export function Kanban(props: { project: string }) {
   const drop = async (status: string, e: DragEvent) => {
     e.preventDefault();
     setOver(null);
+    setDragId(null);
     const id = e.dataTransfer?.getData("text/plain");
     if (!id) return;
     try {
@@ -184,18 +186,34 @@ export function Kanban(props: { project: string }) {
                 <For each={colCards(col.id)}>
                   {(c) => (
                     <div
-                      class="kcard"
+                      class={`kcard st-${col.id}`}
+                      classList={{ dragging: dragId() === c.meta.id }}
                       draggable={true}
-                      onDragStart={(e) => e.dataTransfer?.setData("text/plain", c.meta.id)}
+                      onDragStart={(e) => {
+                        e.dataTransfer?.setData("text/plain", c.meta.id);
+                        setDragId(c.meta.id);
+                      }}
+                      onDragEnd={() => setDragId(null)}
                       onClick={() => edit(c)}
                     >
                       <div class="kcard-title">{c.meta.title || c.meta.id}</div>
                       <Show when={c.body.trim()}>
-                        <div class="kcard-body">{c.body.trim().slice(0, 140)}</div>
+                        <div class="kcard-body">{c.body.trim().slice(0, 160)}</div>
                       </Show>
-                      <Show when={c.meta.depends_on.length > 0}>
-                        <div class="kcard-meta">depende de {c.meta.depends_on.join(", ")}</div>
-                      </Show>
+                      <div class="kchips">
+                        <span class="chip agent" title="Agente">{c.meta.agent}</span>
+                        <Show when={c.meta.priority !== 0}>
+                          <span class="chip prio" classList={{ high: c.meta.priority > 0 }} title="Prioridade">
+                            {c.meta.priority > 0 ? "▲" : "▼"} {Math.abs(c.meta.priority)}
+                          </span>
+                        </Show>
+                        <Show when={c.meta.depends_on.length > 0}>
+                          <span class="chip dep" title={`Depende de ${c.meta.depends_on.join(", ")}`}>
+                            ⛓ {c.meta.depends_on.length}
+                          </span>
+                        </Show>
+                        <span class="chip id" title="Id do ficheiro .kanban">{c.meta.id}</span>
+                      </div>
                     </div>
                   )}
                 </For>
