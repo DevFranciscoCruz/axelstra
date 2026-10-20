@@ -503,3 +503,28 @@ button.icon:hover {
 .prow input { flex: 1; min-width: 0; }
 .pnote { font-size: 11px; color: #7fd18b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .pnote.bad { color: #ef7676; white-space: normal; max-height: 80px; overflow: auto; }
+
+.kanban { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.kbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #2a2a33; }
+.ktitle { font-weight: 600; }
+.kerr { padding: 6px 12px; background: #4a1f25; color: #f2b8bd; font-size: 12px; user-select: text; }
+.kcols { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 8px; padding: 10px; overflow: auto; }
+.kcol { display: flex; flex-direction: column; min-height: 0; background: #14141a; border: 1px solid #23232c; border-radius: 8px; }
+.kcol.over { border-color: #d4559b; }
+.kcol-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; font-size: 12px; font-weight: 600; color: #b9b9c6; }
+.kcount { color: #77778a; font-weight: 400; flex: 1; }
+.kcards { flex: 1; overflow: auto; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 6px; }
+.kcard { background: #1c1c24; border: 1px solid #2a2a35; border-radius: 6px; padding: 8px; cursor: grab; }
+.kcard:hover { border-color: #4a4a5c; }
+.kcard-title { font-size: 13px; }
+.kcard-body { margin-top: 4px; font-size: 11px; color: #8a8a99; white-space: pre-wrap; overflow: hidden; max-height: 4.2em; }
+.kcard-meta { margin-top: 4px; font-size: 10px; color: #d4559b; }
+.modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 10; }
+.modal { width: min(560px, 92vw); max-height: 88vh; display: flex; flex-direction: column; gap: 8px; background: #1a1a22; border: 1px solid #33333f; border-radius: 10px; padding: 14px; }
+.modal input, .modal textarea, .modal select { background: #12121a; color: inherit; border: 1px solid #2a2a35; border-radius: 4px; padding: 5px 7px; font: inherit; font-size: 13px; box-sizing: border-box; }
+.m-title { font-size: 15px !important; }
+.m-body { min-height: 180px; resize: vertical; font-family: "Cascadia Code", Consolas, monospace !important; }
+.m-row { display: flex; gap: 8px; }
+.m-row label, .m-full { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #8a8a99; flex: 1; min-width: 0; }
+.m-actions { display: flex; gap: 8px; align-items: center; }
+button.danger { color: #ef7676; }

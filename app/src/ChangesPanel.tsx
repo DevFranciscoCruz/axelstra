@@ -1,7 +1,7 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import { For, Show, createSignal } from "solid-js";
 import { FileChange, gitCommit, gitPr, gitPush } from "./api";
-import { baseRef, changes, changesMode, findWorktree, selectedWorktree, openDiff, refreshChanges, setChangesMode, setOpenDiff, setOpenFile, setRightTab } from "./store";
+import { baseRef, changes, changesMode, findWorktree, selectedWorktree, openDiff, refreshChanges, setChangesMode, setOpenDiff, setOpenFile, setRightTab, setShowKanban } from "./store";
 
 const LABEL: Record<string, string> = { M: "alterado", A: "novo", D: "apagado", U: "conflito" };
 
@@ -91,6 +91,7 @@ export function ChangesPanel() {
             return (
               <div class="file" classList={{ active: openDiff() === f.path }} onClick={() => {
                   setOpenFile(null);
+                  setShowKanban(false);
                   setOpenDiff(f.path);
                 }} title={`${f.path} (${LABEL[f.status] ?? f.status})`}>
                 <span class={`st st-${f.status}`}>{f.status}</span>

@@ -1,6 +1,6 @@
 import { For, Show, createSignal } from "solid-js";
 import { FsEntry, fsList } from "./api";
-import { changes, openFile, selectedWorktree, setOpenDiff, setOpenFile, setRightTab } from "./store";
+import { changes, openFile, selectedWorktree, setOpenDiff, setOpenFile, setRightTab, setShowKanban } from "./store";
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 
@@ -33,6 +33,7 @@ function Node(props: { wt: string; dir: string; e: FsEntry; depth: number }) {
         onClick={() => {
           if (props.e.dir) return setOpen(!open());
           setOpenDiff(null);
+          setShowKanban(false);
           setOpenFile(path());
         }}
       >
