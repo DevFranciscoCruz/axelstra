@@ -60,6 +60,7 @@ impl Env {
                     .to_vec(),
             ),
             poll_ms: 100,
+            runner: None,
         })
         .unwrap()
     }

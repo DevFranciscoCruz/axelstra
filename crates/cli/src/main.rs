@@ -39,6 +39,9 @@ enum Cmd {
         /// Where worktrees live (default: <repo>/../.axelstra-wt)
         #[arg(long)]
         wt_root: Option<PathBuf>,
+        /// Run agents as interactive terminals in the daemon (start it with `axelstra daemon`)
+        #[arg(long)]
+        daemon: bool,
         /// Agent command, `{prompt_file}` is substituted. Everything after `--`.
         #[arg(last = true)]
         agent: Vec<String>,
@@ -85,7 +88,7 @@ fn main() -> Result<()> {
                 println!("{id}  agent={} deps={:?}", c.meta.agent, c.meta.depends_on);
             }
         }
-        Cmd::Start { repo, name, max, wt_root, agent } => {
+        Cmd::Start { repo, name, max, wt_root, daemon, agent } => {
             let repo = axelstra_core::git::canon(&repo)?;
             let wt_root = wt_root.unwrap_or_else(|| repo.parent().unwrap().join(".axelstra-wt"));
             let r = orch::run(&orch::Options {
@@ -95,6 +98,11 @@ fn main() -> Result<()> {
                 wt_root,
                 agent_override: if agent.is_empty() { None } else { Some(agent) },
                 poll_ms: 500,
+                runner: if daemon {
+                    Some(std::sync::Arc::new(axelstra_daemon::runner::DaemonRunner::connect_default()?))
+                } else {
+                    None
+                },
             })?;
             println!("integration: {} ({})", r.integ_branch, r.integ_wt.display());
             println!("merged: {:?}", r.merged);
