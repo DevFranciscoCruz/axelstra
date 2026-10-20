@@ -55,6 +55,17 @@ impl Registry {
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
         let mut s = s.clone();
         s.env.push(("AXELSTRA_SESSION".into(), id.to_string()));
+        // `axelstra` works in every session without any setup: its folder goes first on the session's PATH
+        if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())) {
+            let mut paths = vec![dir];
+            if let Some(cur) = std::env::var_os("PATH") {
+                paths.extend(std::env::split_paths(&cur));
+            }
+            if let Ok(joined) = std::env::join_paths(paths) {
+                s.env.retain(|(k, _)| !k.eq_ignore_ascii_case("PATH"));
+                s.env.push(("PATH".into(), joined.to_string_lossy().into_owned()));
+            }
+        }
         let sess = Arc::new(Session::spawn(&s)?);
         self.sessions.lock().unwrap().insert(id, sess);
         if let Some(l) = label {
