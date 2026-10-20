@@ -1,0 +1,168 @@
+:root {
+  --bg: #0e0f13;
+  --panel: #14161c;
+  --line: #23262f;
+  --text: #d7dae0;
+  --muted: #8b90a0;
+  --accent: #a78bfa;
+  --ok: #4ade80;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 15px;
+  padding: 2px 6px 10px;
+}
+
+.brand img {
+  width: 28px;
+  height: 28px;
+}
+
+.section {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 14px 6px 4px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--accent);
+  color: #15121f;
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-weight: 600;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.item:hover {
+  background: #1b1e26;
+}
+
+.item.active {
+  background: #232736;
+}
+
+.item .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+
+.dot.on {
+  background: var(--ok);
+}
+
+.x {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  visibility: hidden;
+}
+
+.item:hover .x {
+  visibility: visible;
+}
+
+.empty,
+.placeholder {
+  color: var(--muted);
+}
+
+.empty {
+  padding: 6px 8px;
+}
+
+.error {
+  color: #f87171;
+  font-size: 12px;
+  padding: 8px 6px;
+  word-break: break-word;
+}
+
+.main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.placeholder {
+  margin: auto;
+}
+
+.term-host {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 8px 0 0 8px;
+  background: var(--bg);
+}
