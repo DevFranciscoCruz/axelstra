@@ -490,6 +490,22 @@ fn dispatch(
             let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
             Ok(serde_json::to_value(tokio::task::block_in_place(|| crate::projects::worktree_create(&pr, name))?)?)
         }
+        "ports.list" => {
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            let norm = |s: &str| s.replace('\\', "/").to_ascii_lowercase();
+            let key = norm(&wt.to_string_lossy());
+            let ids: Vec<u32> = {
+                let metas = reg.metas.lock().unwrap();
+                metas
+                    .iter()
+                    .filter(|(_, m)| m["worktree"].as_str().map(|w| norm(w)) == Some(key.clone()))
+                    .map(|(id, _)| *id)
+                    .collect()
+            };
+            let pids: Vec<u32> =
+                ids.iter().filter_map(|id| reg.get(*id)).filter(|s| s.try_wait().is_none()).filter_map(|s| s.pid()).collect();
+            Ok(json!({"ports": tokio::task::block_in_place(|| crate::ports::listening(&pids))?}))
+        }
         "gh.list" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let kind = p["kind"].as_str().unwrap_or("pr").to_string();

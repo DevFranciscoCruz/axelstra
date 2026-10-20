@@ -175,6 +175,10 @@ impl Session {
         Some(st.exit_code() as i32)
     }
 
+    pub fn pid(&self) -> Option<u32> {
+        self.child.lock().unwrap().process_id()
+    }
+
     pub fn job_usage(&self) -> (u64, u64) {
         self.job.usage()
     }

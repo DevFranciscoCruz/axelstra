@@ -70,6 +70,7 @@ export const createWorktree = (project: string, name: string) => call<Worktree>(
 export type GhItem = { number: number; title: string; author: string; url: string; state: string; draft: boolean; branch: string; checks: string; review: string };
 export const ghList = (project: string, kind: "pr" | "issue") => call<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
 export const worktreeFromPr = (project: string, number: number) => call<Worktree>("worktree.from_pr", { project, number });
+export const listPorts = (worktree: string) => call<{ ports: { port: number; pid: number }[] }>("ports.list", { worktree }).then((r) => r.ports);
 export const removeWorktree = (project: string, path: string) => call("worktree.remove", { project, path });
 
 export type FileChange = {
