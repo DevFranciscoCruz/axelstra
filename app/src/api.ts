@@ -3,7 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 export type SessionMeta = { project?: string; worktree?: string; kind?: string };
 export type SessionInfo = { id: number; running: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean };
-export type Project = { id: string; name: string; path: string; worktrees: Worktree[] };
+export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
+  slug?: string;
+  icon_url?: string | null;
+  remote?: string | null;
+};
 
 export const call = <T = unknown>(method: string, params: Record<string, unknown> = {}) =>
   invoke<T>("daemon_call", { method, params });
@@ -44,3 +48,15 @@ export type Changes = { against: string; files: FileChange[] };
 export const gitChanges = (worktree: string, base?: string) => call<Changes>("git.changes", { worktree, base });
 export const gitDiff = (worktree: string, path: string, base?: string) =>
   call<{ diff: string }>("git.diff", { worktree, path, base }).then((r) => r.diff);
+
+export type FsEntry = { name: string; dir: boolean };
+export type Opened = { text: string; eol: "lf" | "crlf"; bom: boolean; hash: string };
+export type Saved = { hash?: string; conflict?: boolean; disk_hash?: string };
+
+export const fsList = (worktree: string, path: string) =>
+  call<{ entries: FsEntry[] }>("fs.list", { worktree, path }).then((r) => r.entries);
+export const fsRead = (worktree: string, path: string) => call<Opened>("fs.read", { worktree, path });
+export const fsStat = (worktree: string, path: string) =>
+  call<{ hash: string | null }>("fs.stat", { worktree, path }).then((r) => r.hash);
+export const fsWrite = (worktree: string, path: string, text: string, eol: string, bom: boolean, base_hash?: string) =>
+  call<Saved>("fs.write", { worktree, path, text, eol, bom, base_hash });

@@ -166,3 +166,84 @@ pub fn worktree_list(repo: &Path) -> Result<Vec<Worktree>> {
     }
     Ok(v)
 }
+
+/// `(owner, repo)` when the URL points at github.com. Handles https, ssh and scp-style remotes.
+pub fn parse_github(url: &str) -> Option<(String, String)> {
+    let u = url.trim();
+    let rest = u
+        .strip_prefix("git@github.com:")
+        .or_else(|| u.strip_prefix("ssh://git@github.com/"))
+        .or_else(|| u.strip_prefix("git://github.com/"))
+        .or_else(|| {
+            // https://[user[:token]@]github.com/owner/repo
+            let after = u.strip_prefix("https://").or_else(|| u.strip_prefix("http://"))?;
+            let after = after.rsplit_once('@').map(|(_, h)| h).unwrap_or(after);
+            after.strip_prefix("github.com/")
+        })?;
+    let rest = rest.trim_end_matches('/').trim_end_matches(".git");
+    let (owner, repo) = rest.split_once('/')?;
+    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
+        return None;
+    }
+    Some((owner.to_string(), repo.to_string()))
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RepoIdentity {
+    /// repo name from the origin remote, else the folder name
+    pub display_name: String,
+    /// "owner/repo" for github remotes
+    pub slug: Option<String>,
+    /// the owner's GitHub avatar, the same logo Orca shows
+    pub icon_url: Option<String>,
+    pub remote: Option<String>,
+}
+
+pub fn identity(repo: &Path) -> RepoIdentity {
+    let folder = repo.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let remote = run(repo, &["config", "--get", "remote.origin.url"]).ok().filter(|o| o.ok && !o.stdout.is_empty()).map(|o| o.stdout);
+    // never expose credentials embedded in a remote url
+    let shown = remote.as_deref().map(|u| match (u.find("://"), u.rfind('@')) {
+        (Some(i), Some(a)) if a > i => format!("{}{}", &u[..i + 3], &u[a + 1..]),
+        _ => u.to_string(),
+    });
+    match remote.as_deref().and_then(parse_github) {
+        Some((owner, name)) => RepoIdentity {
+            display_name: name.clone(),
+            slug: Some(format!("{owner}/{name}")),
+            icon_url: Some(format!("https://github.com/{owner}.png?size=64")),
+            remote: shown,
+        },
+        None => {
+            let name = shown
+                .as_deref()
+                .and_then(|u| u.trim_end_matches('/').trim_end_matches(".git").rsplit(['/', ':']).next().map(String::from))
+                .filter(|n| !n.is_empty())
+                .unwrap_or(folder);
+            RepoIdentity { display_name: name, slug: None, icon_url: None, remote: shown }
+        }
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::parse_github;
+
+    #[test]
+    fn parses_github_remotes() {
+        let want = Some(("Scorpio-Bots".to_string(), "scorpio-bot-reborn".to_string()));
+        for u in [
+            "https://github.com/Scorpio-Bots/scorpio-bot-reborn.git",
+            "https://github.com/Scorpio-Bots/scorpio-bot-reborn",
+            "https://user:token@github.com/Scorpio-Bots/scorpio-bot-reborn.git",
+            "git@github.com:Scorpio-Bots/scorpio-bot-reborn.git",
+            "ssh://git@github.com/Scorpio-Bots/scorpio-bot-reborn.git",
+            "https://github.com/Scorpio-Bots/scorpio-bot-reborn/",
+        ] {
+            assert_eq!(parse_github(u), want, "{u}");
+        }
+        assert_eq!(parse_github("https://gitlab.com/a/b.git"), None);
+        assert_eq!(parse_github("https://github.com/onlyowner"), None);
+        assert_eq!(parse_github("/local/path/repo"), None);
+    }
+}

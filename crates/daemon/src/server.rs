@@ -281,8 +281,11 @@ fn dispatch(
             let v: Vec<Value> = ps
                 .iter()
                 .map(|pr| {
-                    let wts = axelstra_core::git::worktree_list(std::path::Path::new(&pr.path)).unwrap_or_default();
-                    json!({"id": pr.id, "name": pr.name, "path": pr.path, "worktrees": wts})
+                    let repo = std::path::Path::new(&pr.path);
+                    let wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();
+                    let ident = axelstra_core::git::identity(repo);
+                    json!({"id": pr.id, "name": ident.display_name, "path": pr.path, "worktrees": wts,
+                           "slug": ident.slug, "icon_url": ident.icon_url, "remote": ident.remote})
                 })
                 .collect();
             Ok(Value::Array(v))
@@ -298,6 +301,27 @@ fn dispatch(
             let base = p["base"].as_str();
             let text = tokio::task::block_in_place(|| crate::changes::diff(&wt, path, base))?;
             Ok(json!({"diff": text}))
+        }
+        "fs.list" | "fs.read" | "fs.stat" | "fs.write" => {
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            let path = p["path"].as_str().unwrap_or_default();
+            tokio::task::block_in_place(|| -> Result<Value> {
+                use crate::fsops;
+                Ok(match req.method.as_str() {
+                    "fs.list" => json!({"entries": fsops::list(&wt, path)?}),
+                    "fs.read" => serde_json::to_value(fsops::read(&wt, path)?)?,
+                    "fs.stat" => json!({"hash": fsops::stat_hash(&wt, path)?}),
+                    _ => {
+                        let text = p["text"].as_str().ok_or_else(|| anyhow::anyhow!("missing text"))?;
+                        let eol = p["eol"].as_str().unwrap_or("lf");
+                        let bom = p["bom"].as_bool().unwrap_or(false);
+                        match fsops::write(&wt, path, text, eol, bom, p["base_hash"].as_str())? {
+                            fsops::Saved::Ok { hash } => json!({"hash": hash}),
+                            fsops::Saved::Conflict { disk_hash } => json!({"conflict": true, "disk_hash": disk_hash}),
+                        }
+                    }
+                })
+            })
         }
         "project.add" => {
             let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;

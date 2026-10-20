@@ -29,6 +29,7 @@ fn projects_worktrees_and_session_meta() {
     std::fs::write(repo.join("a.txt"), "x").unwrap();
     sh(&repo, &["add", "-A"]);
     sh(&repo, &["commit", "-qm", "init"]);
+    sh(&repo, &["remote", "add", "origin", "https://ghp_secret@github.com/Acme/widgets.git"]);
 
     let pipe = format!("{}-proj-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
     let token = "p".repeat(32);
@@ -64,6 +65,11 @@ fn projects_worktrees_and_session_meta() {
 
     let list = c.call("project.list", json!({})).unwrap();
     assert_eq!(list[0]["worktrees"].as_array().unwrap().len(), 2);
+    // name and logo come from the origin remote, like Orca; credentials never leak
+    assert_eq!(list[0]["name"], "widgets");
+    assert_eq!(list[0]["slug"], "Acme/widgets");
+    assert_eq!(list[0]["icon_url"], "https://github.com/Acme.png?size=64");
+    assert!(!list[0]["remote"].as_str().unwrap().contains("ghp_secret"));
     assert_eq!(list[0]["worktrees"][0]["is_main"], true);
 
     // a session carries its project/worktree so the UI can group it

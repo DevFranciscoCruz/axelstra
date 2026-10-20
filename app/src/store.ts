@@ -31,8 +31,13 @@ export const selectWorktree = (path: string | null) => {
   save("axelstra.worktree", path);
   setActiveSession(null);
   setOpenDiff(null);
+  setOpenFile(null);
   setChanges(null);
 };
+
+/** right panel tab and the file open in the editor (relative to the worktree); null = terminal/diff */
+export const [rightTab, setRightTab] = createSignal<"files" | "changes">("files");
+export const [openFile, setOpenFile] = createSignal<string | null>(null);
 
 export const [activeSession, setActiveSession] = createSignal<number | null>(null);
 
