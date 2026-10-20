@@ -62,6 +62,8 @@ fn projects_worktrees_and_session_meta() {
     assert_eq!(wt["branch"], "ax/feat-x");
     assert!(Path::new(wt["path"].as_str().unwrap()).join("a.txt").exists());
 
+    // a worktree made by another tool is not listed
+    sh(&repo, &["worktree", "add", "-q", "-b", "foreign", &root.join("foreign-wt").to_string_lossy(), "HEAD"]);
     let list = c.call("project.list", json!({})).unwrap();
     assert_eq!(list[0]["worktrees"].as_array().unwrap().len(), 2);
     // name and logo come from the origin remote, like Orca; credentials never leak

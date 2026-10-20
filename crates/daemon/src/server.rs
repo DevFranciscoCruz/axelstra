@@ -314,7 +314,9 @@ fn dispatch(
                 .iter()
                 .map(|pr| {
                     let repo = std::path::Path::new(&pr.path);
-                    let wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();
+                    let mut wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();
+                    // worktrees made by other tools (e.g. Orca) stay out of the list; only the main one and Axelstra's own
+                    wts.retain(|w| w.is_main || w.path.replace('\\', "/").contains("/.axelstra-wt/"));
                     let ident = axelstra_core::git::identity(repo);
                     json!({"id": pr.id, "name": ident.display_name, "path": pr.path, "worktrees": wts,
                            "setup": pr.setup, "slug": ident.slug, "icon_url": ident.icon_url, "remote": ident.remote})
