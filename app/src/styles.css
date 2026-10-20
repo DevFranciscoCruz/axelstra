@@ -496,3 +496,10 @@ button.icon:hover {
 .editor-host { flex: 1; min-height: 0; overflow: hidden; }
 .editor-host .cm-editor { height: 100%; }
 .editor-host .cm-scroller { overflow: auto; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; }
+
+.publish { border-top: 1px solid #2a2a33; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.publish textarea, .publish input { width: 100%; box-sizing: border-box; resize: none; background: #15151b; color: inherit; border: 1px solid #2a2a33; border-radius: 4px; padding: 4px 6px; font: inherit; font-size: 12px; }
+.prow { display: flex; gap: 6px; }
+.prow input { flex: 1; min-width: 0; }
+.pnote { font-size: 11px; color: #7fd18b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.pnote.bad { color: #ef7676; white-space: normal; max-height: 80px; overflow: auto; }
