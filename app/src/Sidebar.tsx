@@ -210,7 +210,12 @@ export function Sidebar() {
                     title={w.path}
                   >
                     <span class="dot" classList={{ on: live() > 0 }} />
-                    <span class="name">{label()}</span>
+                    <span class="name">{w.is_main ? (p.default_branch ?? "main") : label()}</span>
+                    <Show when={w.is_main && w.branch !== (p.default_branch ?? "main")}>
+                      <span class="off-main" title={`O worktree principal está em "${label()}", não em ${p.default_branch ?? "main"}`}>
+                        ⚠
+                      </span>
+                    </Show>
                     <Show when={live() > 0}>
                       <span class="count">{live()}</span>
                     </Show>

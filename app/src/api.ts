@@ -6,6 +6,7 @@ export type Worktree = { path: string; branch: string | null; head: string; is_m
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   slug?: string;
   setup?: string | null;
+  default_branch?: string;
   icon_url?: string | null;
   remote?: string | null;
 };
