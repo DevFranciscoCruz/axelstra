@@ -114,7 +114,7 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             })?;
             println!("max workers {} ({} running)", r["max_workers"], r["workers"]);
         }
-        Cmd::Flow { file, timeout } => return flow(c, &file, timeout),
+        Cmd::Flow { file, timeout, cleanup } => return flow(c, &file, timeout, cleanup),
         _ => unreachable!(),
     }
     Ok(())
@@ -206,9 +206,39 @@ fn validate(tasks: &[Task]) -> Result<()> {
     Ok(())
 }
 
+/// Why a worktree must not be deleted, `None` when it is safe: clean tree, not the main one, and every commit is on a remote.
+fn keep_reason(path: &str, is_main: bool) -> Option<String> {
+    if is_main {
+        return Some("main worktree".into());
+    }
+    let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(path).args(args).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    match git(&["status", "--porcelain"]) {
+        Some(s) if s.is_empty() => {}
+        Some(_) => return Some("uncommitted changes".into()),
+        None => return Some("could not read git status".into()),
+    }
+    match git(&["branch", "-r", "--contains", "HEAD"]) {
+        Some(s) if !s.is_empty() => None,
+        _ => Some("commits not pushed".into()),
+    }
+}
+
+fn remove_worktree(c: &mut Client, projects: &Value, t: &Task) {
+    let Ok((p, wp)) = find_worktree(projects, &t.worktree) else { return };
+    let is_main = p["worktrees"].as_array().and_then(|a| a.iter().find(|w| w["path"].as_str() == Some(wp.as_str()))).map_or(false, |w| w["is_main"] == json!(true));
+    if let Some(why) = keep_reason(&wp, is_main) {
+        println!("[flow] {}: worktree kept ({why})", t.id);
+        return;
+    }
+    match c.call("worktree.remove", json!({"project": p["id"], "path": wp})) {
+        Ok(_) => println!("[flow] {}: worktree removed", t.id),
+        Err(e) => println!("[flow] {}: worktree not removed: {e:#}", t.id),
+    }
+}
+
 /// Runs a task graph: a task starts when everything it waits for succeeded, at most as many at once as the
 /// worker limit allows. Prints one line per event and the output tail of each finished task.
-fn flow(mut c: Client, file: &std::path::Path, timeout: u64) -> Result<()> {
+fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool) -> Result<()> {
     let text = std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
     let FlowFile { tasks } = serde_json::from_str(&text).context("flow file must be {\"tasks\": [...]}")?;
     validate(&tasks)?;
@@ -268,6 +298,13 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64) -> Result<()> {
                 st.insert(t.id.clone(), if ok { St::Ok } else { St::Failed });
                 let _ = c.call("session.kill", json!({"id": id}));
                 let _ = c.call("session.remove", json!({"id": id}));
+                if cleanup && ok {
+                    // a worktree another task still needs stays
+                    let shared = tasks.iter().any(|o| o.id != t.id && o.worktree == t.worktree && matches!(st[&o.id], St::Pending | St::Running));
+                    if !shared {
+                        remove_worktree(&mut c, &projects, t);
+                    }
+                }
             }
         }
         // start what is ready
@@ -323,6 +360,22 @@ mod tests {
 
     fn t(id: &str, after: &[&str]) -> Task {
         Task { id: id.into(), worktree: ".".into(), agent: None, prompt: None, cmd: Some("x".into()), after: after.iter().map(|s| s.to_string()).collect(), idle_secs: None, lines: None }
+    }
+
+    #[test]
+    fn a_worktree_with_unpushed_or_unsaved_work_is_kept() {
+        let dir = std::env::temp_dir().join(format!("axl-keep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let g = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&dir).args(args).output().unwrap().status.success());
+        g(&["init", "-q"]);
+        g(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"]);
+        let path = dir.to_string_lossy().to_string();
+        assert_eq!(keep_reason(&path, true).as_deref(), Some("main worktree"));
+        assert_eq!(keep_reason(&path, false).as_deref(), Some("commits not pushed"));
+        std::fs::write(dir.join("f"), "1").unwrap();
+        assert_eq!(keep_reason(&path, false).as_deref(), Some("uncommitted changes"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
