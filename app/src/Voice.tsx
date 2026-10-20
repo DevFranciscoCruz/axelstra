@@ -46,6 +46,7 @@ let stream: MediaStream | null = null;
 let ctx: AudioContext | null = null;
 let node: ScriptProcessorNode | null = null;
 let chunks: Float32Array[] = [];
+let lastPeak = 0;
 
 const lang = () => (navigator.language?.toLowerCase().startsWith("pt") ? "pt" : "auto");
 
@@ -72,7 +73,7 @@ async function transcribe() {
   }
   try {
     const text = await invoke<string>("voice_transcribe", pcm.buffer, { headers: { "x-lang": lang() } });
-    if (!text) setVoiceError("Nenhuma fala detetada.");
+    if (!text) setVoiceError(`Nenhuma fala detetada (nível do microfone ${(lastPeak * 100).toFixed(1)}%).`);
     else if (autoSend() && recTarget !== null) {
       await writeSession(recTarget, text + "\r");
       setDraft(null);
@@ -124,16 +125,17 @@ export async function toggleVoice() {
   }
   setNeedModel(false);
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     ctx = new AudioContext({ sampleRate: 16000 });
     const src = ctx.createMediaStreamSource(stream);
     node = ctx.createScriptProcessor(4096, 1, 1);
     // voice activity: stop after a pause that follows speech; give up if nobody speaks
-    let floor = 0;
-    let frames = 0;
+    let floor = Infinity;
     let heard = false;
     let quietMs = 0;
     let elapsed = 0;
+    let peak = 0;
+    lastPeak = 0;
     node.onaudioprocess = (e) => {
       const data = e.inputBuffer.getChannelData(0);
       chunks.push(new Float32Array(data));
@@ -142,19 +144,21 @@ export async function toggleVoice() {
       const rms = Math.sqrt(sum / data.length);
       const ms = (data.length / 16000) * 1000;
       elapsed += ms;
-      if (frames < 5) {
-        floor = Math.max(floor, rms);
-        frames++;
-        return;
-      }
-      if (rms > Math.max(0.02, floor * 2.5)) {
+      peak = Math.max(peak, rms);
+      lastPeak = peak;
+      // the noise floor is the quietest recent block, creeping up slowly so a noisy room still ends the take
+      floor = floor === Infinity ? rms : Math.min(rms, floor * 1.05);
+      if (rms > Math.max(0.008, floor * 3)) {
         heard = true;
         quietMs = 0;
       } else quietMs += ms;
       if (heard && quietMs >= SILENCE_MS) void stopVoice();
       else if (!heard && elapsed >= NO_SPEECH_MS) {
-        cancelVoice();
-        setVoiceError("Nenhuma fala detetada.");
+        // nothing crossed the threshold: a dead microphone is dropped, anything else still goes to Whisper
+        if (peak < 0.002) {
+          cancelVoice();
+          setVoiceError("Sem sinal do microfone. Verifique o microfone selecionado no Windows.");
+        } else void stopVoice();
       } else if (elapsed >= MAX_MS) void stopVoice();
     };
     const mute = ctx.createGain();
