@@ -143,6 +143,13 @@ impl Session {
         (snap, rx)
     }
 
+    /// The last `max` bytes of recent output.
+    pub fn tail(&self, max: usize) -> Vec<u8> {
+        let r = self.shared.ring.lock().unwrap();
+        let skip = r.buf.len().saturating_sub(max);
+        r.buf.iter().skip(skip).copied().collect()
+    }
+
     /// Milliseconds since the program last produced output of its own.
     pub fn idle_ms(&self) -> u64 {
         now_ms().saturating_sub(self.shared.last_out.load(Ordering::Relaxed))

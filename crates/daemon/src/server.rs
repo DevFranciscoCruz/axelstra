@@ -51,8 +51,11 @@ impl Registry {
 
     /// Starts a session and records its label and UI metadata.
     fn spawn(&self, s: &Spawn, label: Option<&str>, meta: Option<Value>) -> Result<u32> {
-        let sess = Arc::new(Session::spawn(s)?);
+        // the session learns its own id, so a CLI run inside it can name it as the parent of a worker
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut s = s.clone();
+        s.env.push(("AXELSTRA_SESSION".into(), id.to_string()));
+        let sess = Arc::new(Session::spawn(&s)?);
         self.sessions.lock().unwrap().insert(id, sess);
         if let Some(l) = label {
             self.labels.lock().unwrap().insert(id, l.to_string());
@@ -62,6 +65,59 @@ impl Registry {
         }
         Ok(id)
     }
+}
+
+/// Ephemeral worker: when it finishes (process exit, or quiet for `idle_secs` in "idle" mode) its last
+/// output goes to the parent session as if typed, and the worker is closed so it stops using memory.
+/// Typical use: a test run or a helper agent that reports back to the main agent and disappears.
+fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: bool, idle_secs: u64, lines: usize) {
+    std::thread::spawn(move || {
+        let mut worked = false;
+        let mut done_by_idle = false;
+        loop {
+            std::thread::sleep(Duration::from_millis(500));
+            let Some(s) = reg.get(id) else { return };
+            let exited = s.try_wait();
+            let idle = s.idle_ms();
+            if idle < 3000 {
+                worked = true;
+            }
+            if exited.is_some() {
+                break;
+            }
+            if idle_mode && worked && idle >= idle_secs * 1000 && !axelstra_core::waiting::needs_input(&s.tail(4096)) {
+                done_by_idle = true;
+                break;
+            }
+        }
+        let Some(s) = reg.get(id) else { return };
+        // give the output pipe a moment to drain after the process ended
+        std::thread::sleep(Duration::from_millis(300));
+        let code = s.try_wait();
+        let text = axelstra_core::waiting::strip_ansi(&s.tail(32 * 1024));
+        let all: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
+        let tail = all[all.len().saturating_sub(lines)..].join("\n");
+        let label = reg.labels.lock().unwrap().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
+        let status = match (done_by_idle, code) {
+            (true, _) => "terminou (parou de produzir output)".to_string(),
+            (_, Some(0)) => "terminou com sucesso (exit 0)".to_string(),
+            (_, Some(c)) => format!("terminou com erro (exit {c})"),
+            _ => "terminou".to_string(),
+        };
+        if let Some(parent) = parent.and_then(|p| reg.get(p).map(|s| (p, s))) {
+            let agent = reg.metas.lock().unwrap().get(&parent.0).and_then(|m| m["kind"].as_str().map(|k| k == "agent")).unwrap_or(false);
+            let msg = format!("[axelstra] worker \"{label}\" {status}. Últimas linhas:\n{tail}");
+            // an agent TUI takes a multi-line message as one paste; a plain shell gets the single line
+            let data = if agent { format!("\x1b[200~{msg}\x1b[201~\r") } else { format!("echo [axelstra] worker {label}: {status}\r") };
+            let _ = parent.1.write(data.as_bytes());
+        }
+        s.kill();
+        reg.sessions.lock().unwrap().remove(&id);
+        reg.labels.lock().unwrap().remove(&id);
+        reg.metas.lock().unwrap().remove(&id);
+        reg.specs.lock().unwrap().remove(&id);
+        reg.persist();
+    });
 }
 
 /// Wakes every 30 s and starts the automations that are due. Missed runs are not replayed.
@@ -290,6 +346,15 @@ fn dispatch(
             };
             let meta = if p["meta"].is_null() { None } else { Some(p["meta"].clone()) };
             let id = reg.spawn(&s, p["label"].as_str(), meta)?;
+            if let Some(r) = p["reap"].as_object() {
+                // ephemeral worker: never restored after a restart, reports to `parent` and closes itself
+                let parent = r.get("parent").and_then(Value::as_u64).map(|x| x as u32);
+                let idle_mode = r.get("mode").and_then(Value::as_str) == Some("idle");
+                let idle_secs = r.get("idle_secs").and_then(Value::as_u64).unwrap_or(20).max(3);
+                let lines = r.get("lines").and_then(Value::as_u64).unwrap_or(40).clamp(1, 400) as usize;
+                spawn_reaper(reg.clone(), id, parent, idle_mode, idle_secs, lines);
+                return Ok(json!({"id": id}));
+            }
             let mut spec = p.clone();
             spec["id"] = Value::Null;
             reg.specs.lock().unwrap().insert(id, spec);
@@ -303,7 +368,11 @@ fn dispatch(
             let mut v: Vec<Value> = l
                 .iter()
                 .map(|(id, s)| {
-                    json!({"id": id, "running": s.try_wait().is_none(), "idle_ms": s.idle_ms(), "label": labels.get(id), "meta": metas.get(id)})
+                    let running = s.try_wait().is_none();
+                    let idle = s.idle_ms();
+                    // quiet for a moment and the screen ends in a question: the agent waits for the user
+                    let waiting = running && idle >= 1500 && axelstra_core::waiting::needs_input(&s.tail(4096));
+                    json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "label": labels.get(id), "meta": metas.get(id)})
                 })
                 .collect();
             v.sort_by_key(|x| x["id"].as_u64());
@@ -418,6 +487,32 @@ fn dispatch(
         "session.usage" => {
             let (mem, cpu) = session()?.job_usage();
             Ok(json!({"peak_mem_bytes": mem, "cpu_100ns": cpu}))
+        }
+        "worktree.status" => {
+            // only paths the daemon knows; the list comes from the UI and git runs in each
+            let list: Vec<String> = p["paths"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+            let norm = |s: &str| s.replace('\\', "/").to_ascii_lowercase();
+            let out = tokio::task::block_in_place(|| {
+                let mut allowed = std::collections::HashSet::new();
+                for pr in crate::projects::load(&reg.store) {
+                    for w in axelstra_core::git::worktree_list(std::path::Path::new(&pr.path)).unwrap_or_default() {
+                        allowed.insert(norm(&w.path));
+                    }
+                }
+                list.iter().take(64).filter(|w| allowed.contains(&norm(w))).map(|w| crate::wtstatus::status(w)).collect::<Vec<_>>()
+            });
+            Ok(json!({"status": out}))
+        }
+        "agent.search" => {
+            let q = p["query"].as_str().unwrap_or_default().to_string();
+            let max = p["max"].as_u64().unwrap_or(30).clamp(1, 200) as usize;
+            let hits = tokio::task::block_in_place(|| crate::agentlog::search(&q, max));
+            Ok(json!({"hits": hits}))
+        }
+        "agent.usage" => {
+            let cwd = p["cwd"].as_str().unwrap_or_default().to_string();
+            let u = tokio::task::block_in_place(|| crate::agentlog::claude_usage(&cwd, p["session"].as_str()));
+            Ok(json!({"usage": u}))
         }
         "project.list" => {
             let ps = crate::projects::load(&reg.store);
@@ -721,3 +816,4 @@ fn dispatch(
         m => anyhow::bail!("unknown method {m}"),
     }
 }
+

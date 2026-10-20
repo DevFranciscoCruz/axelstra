@@ -5,3 +5,4 @@ pub mod orch;
 pub mod procs;
 pub mod pty;
 pub mod runner;
+pub mod waiting;

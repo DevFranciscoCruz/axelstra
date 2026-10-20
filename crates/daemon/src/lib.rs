@@ -1,3 +1,4 @@
+pub mod agentlog;
 pub mod automations;
 pub mod changes;
 pub mod client;
@@ -10,4 +11,5 @@ pub mod publish;
 pub mod proto;
 pub mod server;
 pub mod watcher;
+pub mod wtstatus;
 pub mod runner;

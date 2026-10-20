@@ -14,8 +14,11 @@ struct Cli {
 enum Cmd {
     /// Run the background daemon that owns terminal sessions
     Daemon,
-    /// List sessions held by the daemon
-    Ls,
+    /// List sessions: id, label, state (working/idle/done), worktree
+    Ls {
+        #[arg(long)]
+        json: bool,
+    },
     /// Start a session in the daemon: `axelstra spawn -- cmd /k`
     Spawn {
         #[arg(last = true, required = true)]
@@ -36,6 +39,78 @@ enum Cmd {
         id: u32,
         #[arg(long, default_value_t = 5)]
         secs: u64,
+    },
+    /// Manage worktrees of registered projects
+    Worktree {
+        #[command(subcommand)]
+        cmd: WtCmd,
+    },
+    /// Start an agent (claude/codex) in a worktree as an app-visible session; prints the session id
+    Agent {
+        worktree: PathBuf,
+        #[arg(long, default_value = "claude")]
+        agent: String,
+        #[arg(long)]
+        prompt: Option<String>,
+        /// Type this worker's output into session ID when done (no value: $AXELSTRA_SESSION)
+        #[arg(long, num_args = 0..=1)]
+        report_to: Option<Option<u32>>,
+        /// When to report: exit or idle (default idle)
+        #[arg(long)]
+        when: Option<String>,
+        #[arg(long)]
+        idle_secs: Option<u64>,
+        #[arg(long)]
+        lines: Option<u32>,
+    },
+    /// Start a plain shell session in a worktree; prints the session id
+    Terminal {
+        worktree: PathBuf,
+        #[arg(long)]
+        title: Option<String>,
+        /// Command to run in the shell (the shell stays open afterwards)
+        #[arg(long)]
+        cmd: Option<String>,
+        /// Type this worker's output into session ID when done (no value: $AXELSTRA_SESSION)
+        #[arg(long, num_args = 0..=1)]
+        report_to: Option<Option<u32>>,
+        /// When to report: exit or idle (default exit)
+        #[arg(long)]
+        when: Option<String>,
+        #[arg(long)]
+        idle_secs: Option<u64>,
+        #[arg(long)]
+        lines: Option<u32>,
+    },
+    /// One-shot worker: run a command in a worktree, report its output to a session when it exits
+    Run {
+        worktree: PathBuf,
+        #[arg(long, num_args = 0..=1)]
+        report_to: Option<Option<u32>>,
+        #[arg(long)]
+        lines: Option<u32>,
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+    /// Print the last lines of a session's screen/history, ANSI stripped
+    Read {
+        id: u32,
+        #[arg(long, default_value_t = 200)]
+        lines: usize,
+    },
+    /// Block until a session is quiet for N seconds or exited (exit 2 on timeout)
+    Wait {
+        id: u32,
+        #[arg(long, default_value_t = 3)]
+        idle_secs: u64,
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
+    },
+    /// Search past agent conversations (needs a daemon with agent.search)
+    Search {
+        text: String,
+        #[arg(long, default_value_t = 20)]
+        max: u32,
     },
     /// Show cards and the order they would run in
     Plan {
@@ -62,8 +137,19 @@ enum Cmd {
     },
 }
 
+#[derive(Subcommand)]
+enum WtCmd {
+    /// Create a worktree; prints its path
+    Create { project: String, name: String },
+    /// Remove a worktree
+    Rm { path: PathBuf },
+}
+
+mod ctl;
+
 fn main() -> Result<()> {
-    match Cli::parse().cmd {
+    let cli = Cli::parse();
+    match cli.cmd {
         Cmd::Daemon => {
             use axelstra_daemon::{proto, server};
             #[cfg(target_os = "macos")]
@@ -76,69 +162,24 @@ fn main() -> Result<()> {
                 .build()?
                 .block_on(server::serve(proto::pipe_name(), token))?;
         }
-        Cmd::Ls | Cmd::Spawn { .. } | Cmd::Kill { .. } | Cmd::Tail { .. } | Cmd::Send { .. } | Cmd::AddProject { .. } | Cmd::SetSetup { .. } | Cmd::Projects => {
+        cmd @ (Cmd::Ls { .. }
+        | Cmd::Spawn { .. }
+        | Cmd::Kill { .. }
+        | Cmd::Tail { .. }
+        | Cmd::Send { .. }
+        | Cmd::AddProject { .. }
+        | Cmd::SetSetup { .. }
+        | Cmd::Projects
+        | Cmd::Worktree { .. }
+        | Cmd::Agent { .. }
+        | Cmd::Terminal { .. }
+        | Cmd::Run { .. }
+        | Cmd::Read { .. }
+        | Cmd::Wait { .. }
+        | Cmd::Search { .. }) => {
             use axelstra_daemon::{client::Client, proto};
-            let mut c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
-            match Cli::parse().cmd {
-                Cmd::Ls => println!("{}", c.call("session.list", serde_json::json!({}))?),
-                Cmd::Tail { id, secs } => {
-                    use axelstra_daemon::client::Frame;
-                    c.call("session.subscribe", serde_json::json!({"id": id}))?;
-                    std::thread::spawn(move || {
-                        while let Ok(f) = c.read() {
-                            if let Frame::Output { data, .. } = f {
-                                print!("{}", String::from_utf8_lossy(&data));
-                            }
-                        }
-                    });
-                    std::thread::sleep(std::time::Duration::from_secs(secs));
-                    std::process::exit(0);
-                }
-                Cmd::Send { id, data } => {
-                    let mut out = Vec::new();
-                    let b = data.as_bytes();
-                    let mut i = 0;
-                    while i < b.len() {
-                        if b[i] == 0x5c && i + 1 < b.len() {
-                            match b[i + 1] {
-                                b'e' => out.push(0x1b),
-                                b'r' => out.push(0x0d),
-                                b'n' => out.push(0x0a),
-                                b'x' if i + 3 < b.len() => {
-                                    out.push(u8::from_str_radix(&data[i + 2..i + 4], 16)?);
-                                    i += 2;
-                                }
-                                o => out.push(o),
-                            }
-                            i += 2;
-                        } else {
-                            out.push(b[i]);
-                            i += 1;
-                        }
-                    }
-                    c.send_input(id, &out)?;
-                }
-                Cmd::AddProject { path } => {
-                    let abs = axelstra_core::git::canon(&path)?;
-                    let r = c.call("project.add", serde_json::json!({"path": abs}))?;
-                    println!("{r}");
-                }
-                Cmd::SetSetup { id, setup } => {
-                    c.call("project.setup", serde_json::json!({"id": id, "setup": setup}))?;
-                }
-                Cmd::Projects => println!("{}", serde_json::to_string_pretty(&c.call("project.list", serde_json::json!({}))?)?),
-                Cmd::Kill { id } => {
-                    c.call("session.kill", serde_json::json!({"id": id}))?;
-                }
-                Cmd::Spawn { cmd } => {
-                    let r = c.call(
-                        "session.spawn",
-                        serde_json::json!({"program": cmd[0], "args": &cmd[1..], "cwd": std::env::current_dir()?}),
-                    )?;
-                    println!("{r}");
-                }
-                _ => unreachable!(),
-            }
+            let c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
+            ctl::run(cmd, c)?;
         }
         Cmd::Plan { repo } => {
             let cards: Vec<_> = card::load_dir(&repo.join(".kanban"))?
