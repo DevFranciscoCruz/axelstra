@@ -173,7 +173,7 @@ pub fn run(o: &Options) -> Result<Report> {
             let exited = live.child.try_wait()?;
             // read after try_wait: an agent may write the result and exit between the two
             let sentinel = read_sentinel(&live.wt);
-            let timeout = Duration::from_secs(t.card.meta.timeout_min * 60);
+            let timeout = Duration::from_secs_f64(t.card.meta.timeout_min * 60.0);
             let outcome = if let Some(r) = sentinel {
                 Some(if r.status == "done" { Ok(r.summary) } else { Err(format!("agent reported {}: {}", r.status, r.summary)) })
             } else if let Some(s) = exited {
