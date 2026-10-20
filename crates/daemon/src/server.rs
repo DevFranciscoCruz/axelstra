@@ -30,6 +30,8 @@ struct Registry {
     /// sessions of the previous daemon run, waiting for the UI to restore (or discard) them
     pending: Mutex<Vec<Value>>,
     saved: std::path::PathBuf,
+    /// messages between sessions, worker bookkeeping and the worker limit
+    bus: crate::msgbus::Bus,
 }
 
 impl Registry {
@@ -93,7 +95,7 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
             if idle < 3000 {
                 worked = true;
             }
-            if exited.is_some() {
+            if exited.is_some() || reg.bus.finished(id).is_some() {
                 break;
             }
             if idle_mode && worked && idle >= idle_secs * 1000 && !axelstra_core::waiting::needs_input(&s.tail(4096)) {
@@ -105,11 +107,13 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
         // give the output pipe a moment to drain after the process ended
         std::thread::sleep(Duration::from_millis(300));
         let code = s.try_wait();
+        let done_msg = reg.bus.finished(id);
         let text = axelstra_core::waiting::strip_ansi(&s.tail(32 * 1024));
         let all: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
         let tail = all[all.len().saturating_sub(lines)..].join("\n");
         let label = reg.labels.lock().unwrap().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
         let status = match (done_by_idle, code) {
+            _ if done_msg.is_some() => "terminou (chamou `axelstra done`)".to_string(),
             (true, _) => "terminou (parou de produzir output)".to_string(),
             (_, Some(0)) => "terminou com sucesso (exit 0)".to_string(),
             (_, Some(c)) => format!("terminou com erro (exit {c})"),
@@ -117,7 +121,11 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
         };
         if let Some(parent) = parent.and_then(|p| reg.get(p).map(|s| (p, s))) {
             let agent = reg.metas.lock().unwrap().get(&parent.0).and_then(|m| m["kind"].as_str().map(|k| k == "agent")).unwrap_or(false);
-            let msg = format!("[axelstra] worker \"{label}\" {status}. Últimas linhas:\n{tail}");
+            let body = match &done_msg {
+                Some(d) => format!("Relatório:\n{}", d["text"].as_str().unwrap_or_default()),
+                None => format!("Últimas linhas:\n{tail}"),
+            };
+            let msg = format!("[axelstra] worker \"{label}\" {status}. {body}");
             // an agent TUI takes a multi-line message as one paste; a plain shell gets the single line
             let data = if agent { format!("\x1b[200~{msg}\x1b[201~\r") } else { format!("echo [axelstra] worker {label}: {status}\r") };
             let _ = parent.1.write(data.as_bytes());
@@ -127,6 +135,7 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
         reg.labels.lock().unwrap().remove(&id);
         reg.metas.lock().unwrap().remove(&id);
         reg.specs.lock().unwrap().remove(&id);
+        reg.bus.forget(id);
         reg.persist();
     });
 }
@@ -205,6 +214,7 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
             std::fs::read_to_string(&saved).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default(),
         ),
         saved,
+        bus: crate::msgbus::Bus::new(),
     });
     // Claude Code hook: records the agent's current conversation id (it changes on /clear), keyed by AXELSTRA_KEY
     let dir = reg.saved.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
@@ -341,7 +351,7 @@ fn dispatch(
             Ok(json!({"proto": PROTO}))
         }
         "session.spawn" => {
-            let s = Spawn {
+            let mut s = Spawn {
                 program: p["program"].as_str().ok_or_else(|| anyhow::anyhow!("missing program"))?.into(),
                 args: p["args"]
                     .as_array()
@@ -355,10 +365,35 @@ fn dispatch(
                 cols: p["cols"].as_u64().unwrap_or(120) as u16,
                 rows: p["rows"].as_u64().unwrap_or(30) as u16,
             };
-            let meta = if p["meta"].is_null() { None } else { Some(p["meta"].clone()) };
+            let mut meta = if p["meta"].is_null() { None } else { Some(p["meta"].clone()) };
+            // a session started on behalf of another one (a worker): remembered as its child
+            let parent = p["parent"].as_u64().or_else(|| p["reap"]["parent"].as_u64()).map(|x| x as u32);
+            let is_worker = p["reap"].is_object() || p["worker"].as_bool() == Some(true);
+            if is_worker {
+                let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
+                let (live, max) = (reg.bus.live_workers(alive), reg.bus.limit());
+                if live >= max {
+                    anyhow::bail!("worker limit reached ({live} running, max {max}): wait for one to finish or raise it with `axelstra limit N`");
+                }
+            }
+            if let Some(par) = parent {
+                let m = meta.get_or_insert_with(|| json!({}));
+                m["parent"] = json!(par);
+                if is_worker {
+                    m["worker"] = json!(true);
+                }
+                s.env.push(("AXELSTRA_PARENT".into(), par.to_string()));
+            }
             let id = reg.spawn(&s, p["label"].as_str(), meta)?;
+            if let Some(par) = parent {
+                reg.bus.set_parent(id, par);
+            }
+            if is_worker {
+                reg.bus.add_worker(id);
+            }
             if let Some(r) = p["reap"].as_object() {
                 // ephemeral worker: never restored after a restart, reports to `parent` and closes itself
+                reg.bus.mark_reaped(id);
                 let parent = r.get("parent").and_then(Value::as_u64).map(|x| x as u32);
                 let idle_mode = r.get("mode").and_then(Value::as_str) == Some("idle");
                 let idle_secs = r.get("idle_secs").and_then(Value::as_u64).unwrap_or(20).max(3);
@@ -382,8 +417,8 @@ fn dispatch(
                     let running = s.try_wait().is_none();
                     let idle = s.idle_ms();
                     // quiet for a moment and the screen ends in a question: the agent waits for the user
-                    let waiting = running && idle >= 1500 && axelstra_core::waiting::needs_input(&s.tail(4096));
-                    json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "label": labels.get(id), "meta": metas.get(id)})
+                    let waiting = running && (reg.bus.is_escalated(*id) || (idle >= 1500 && axelstra_core::waiting::needs_input(&s.tail(4096))));
+                    json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "escalated": reg.bus.is_escalated(*id), "unread": reg.bus.unread(*id), "finished": reg.bus.finished(*id).is_some(), "label": labels.get(id), "meta": metas.get(id)})
                 })
                 .collect();
             v.sort_by_key(|x| x["id"].as_u64());
@@ -466,8 +501,46 @@ fn dispatch(
             reg.labels.lock().unwrap().remove(&id);
             reg.metas.lock().unwrap().remove(&id);
             reg.specs.lock().unwrap().remove(&id);
+            reg.bus.forget(id);
             reg.persist();
             Ok(json!({}))
+        }
+        "msg.send" => {
+            let to = p["to"].as_u64().ok_or_else(|| anyhow::anyhow!("missing to"))? as u32;
+            let from = p["from"].as_u64().map(|x| x as u32);
+            let kind = p["kind"].as_str().unwrap_or("message");
+            if !["message", "ask", "reply", "done", "escalate"].contains(&kind) {
+                anyhow::bail!("unknown message kind {kind}");
+            }
+            let target = reg.get(to).ok_or_else(|| anyhow::anyhow!("no such session {to}"))?;
+            let text = p["text"].as_str().unwrap_or_default();
+            let m = reg.bus.send(from, to, kind, text, p["reply_to"].as_u64());
+            // agents get a one-line notice; a worker with a reaper reports through it instead
+            let quiet = p["quiet"].as_bool() == Some(true) || (kind == "done" && from.map(|f| reg.bus.is_reaped(f)).unwrap_or(false));
+            let agent = reg.metas.lock().unwrap().get(&to).map(|m| m["kind"] == "agent").unwrap_or(false);
+            if agent && !quiet {
+                let label = from
+                    .map(|f| reg.labels.lock().unwrap().get(&f).cloned().unwrap_or_else(|| format!("sessão {f}")))
+                    .unwrap_or_else(|| "o utilizador".into());
+                let _ = target.write(&crate::msgbus::paste(&crate::msgbus::notice(&m, &label)));
+            }
+            Ok(json!({"id": m.id}))
+        }
+        "msg.inbox" => {
+            let to = p["session"].as_u64().ok_or_else(|| anyhow::anyhow!("missing session"))? as u32;
+            let list = reg.bus.inbox(to, p["all"].as_bool() == Some(true), p["mark"].as_bool() != Some(false));
+            Ok(json!(list))
+        }
+        "msg.reply_of" => {
+            let id = p["id"].as_u64().ok_or_else(|| anyhow::anyhow!("missing id"))?;
+            Ok(json!({"reply": reg.bus.reply_to(id), "original": reg.bus.get(id)}))
+        }
+        "orch.limits" => {
+            if let Some(n) = p["max_workers"].as_u64() {
+                reg.bus.set_limit(n as usize);
+            }
+            let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
+            Ok(json!({"max_workers": reg.bus.limit(), "workers": reg.bus.live_workers(alive)}))
         }
         "app.dir" => Ok(json!({"dir": reg.saved.parent().unwrap_or(std::path::Path::new("")).to_string_lossy().replace('\\', "/")})),
         "session.pending" => {
