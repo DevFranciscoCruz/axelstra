@@ -76,21 +76,22 @@ mod imp {
     use std::time::Instant;
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
-    use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX};
     use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
-    /// Working set of one process, `None` when it is gone or not readable.
+    /// Private memory of one process, `None` when it is gone or not readable.
     fn working_set(pid: u32) -> Option<u64> {
         unsafe {
             let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
             if h.is_null() {
                 return None;
             }
-            let mut c: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
-            c.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-            let ok = GetProcessMemoryInfo(h, &mut c, c.cb);
+            let mut c: PROCESS_MEMORY_COUNTERS_EX = std::mem::zeroed();
+            c.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
+            let ok = GetProcessMemoryInfo(h, &mut c as *mut PROCESS_MEMORY_COUNTERS_EX as *mut PROCESS_MEMORY_COUNTERS, c.cb);
             CloseHandle(h);
-            (ok != 0).then_some(c.WorkingSetSize as u64)
+            // private bytes: pages shared between processes (system DLLs, webview) would otherwise be counted once per process
+            (ok != 0).then_some(c.PrivateUsage as u64)
         }
     }
 
