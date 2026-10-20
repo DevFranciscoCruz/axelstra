@@ -212,6 +212,23 @@ pub struct RepoIdentity {
     pub remote: Option<String>,
 }
 
+/// The branch the repo's main worktree is meant to stay on: origin's default, else `main`, else `master`.
+pub fn default_branch(repo: &Path) -> String {
+    if let Ok(o) = run(repo, &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"]) {
+        if o.ok {
+            if let Some(b) = o.stdout.strip_prefix("origin/") {
+                return b.to_string();
+            }
+        }
+    }
+    for b in ["main", "master"] {
+        if run(repo, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{b}")]).map(|o| o.ok).unwrap_or(false) {
+            return b.to_string();
+        }
+    }
+    "main".to_string()
+}
+
 pub fn identity(repo: &Path) -> RepoIdentity {
     let folder = repo.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let remote = run(repo, &["config", "--get", "remote.origin.url"]).ok().filter(|o| o.ok && !o.stdout.is_empty()).map(|o| o.stdout);

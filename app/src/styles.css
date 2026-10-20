@@ -580,3 +580,5 @@ button.danger { color: #ef7676; }
 .modal h3 { margin: 0 0 6px; font-size: 14px; }
 .modal button { padding: 8px 10px; border-radius: 6px; cursor: pointer; }
 .modal button.pref { outline: 2px solid var(--accent); }
+
+.off-main { color: #e5c07b; font-size: 11px; margin-left: 4px; }
