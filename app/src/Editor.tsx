@@ -4,9 +4,9 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { bracketMatching, indentOnInput, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
 import { searchKeymap } from "@codemirror/search";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { Show, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { Opened, fsRead, fsStat, fsWrite } from "./api";
-import { setOpenFile } from "./store";
+import { fsTick, setOpenFile } from "./store";
 
 /** Language packs load on demand so the editor itself stays small. */
 async function languageFor(path: string): Promise<Extension> {
@@ -39,6 +39,8 @@ async function languageFor(path: string): Promise<Extension> {
 }
 
 export function Editor(props: { wt: string; path: string }) {
+  // set once the editor is mounted: re-checks the file on disk
+  let checkNow: (() => void) | undefined;
   let host!: HTMLDivElement;
   let view: EditorView | undefined;
   let meta: Opened | undefined;
@@ -116,8 +118,9 @@ export function Editor(props: { wt: string; path: string }) {
     } catch (e) {
       setMsg(String(e));
     }
-    // agents write to the same files: notice changes made behind our back
-    const timer = setInterval(async () => {
+    // agents write to the same files: notice changes made behind our back. The daemon reports file
+    // changes (fsTick); the slow timer only covers files the watcher ignores.
+    const check = async () => {
       if (document.hidden || !meta || saving()) return;
       try {
         const h = await fsStat(props.wt, props.path);
@@ -125,11 +128,14 @@ export function Editor(props: { wt: string; path: string }) {
         if (dirty()) setConflict(true);
         else await load();
       } catch {
-        /* transient; next tick retries */
+        /* transient; the next change or tick retries */
       }
-    }, 2500);
+    };
+    checkNow = () => void check();
+    const timer = setInterval(check, 30000);
     onCleanup(() => clearInterval(timer));
   });
+  createEffect(on(fsTick, () => checkNow?.(), { defer: true }));
   onCleanup(() => view?.destroy());
 
   return (
