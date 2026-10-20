@@ -325,11 +325,13 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
         None => match t.card.meta.agent.as_str() {
             "claude" => {
                 let ask = "Read .axelstra/prompt.md and do the task described there.".to_string();
-                if runner.interactive() {
-                    vec!["claude".into(), ask]
-                } else {
-                    vec!["claude".into(), "-p".into(), ask]
+                let mut v: Vec<String> =
+                    vec!["claude".into(), "--permission-mode".into(), t.card.meta.permission_mode.clone()];
+                if !runner.interactive() {
+                    v.push("-p".into());
                 }
+                v.push(ask);
+                v
             }
             other => bail!("no command configured for agent '{other}'"),
         },
