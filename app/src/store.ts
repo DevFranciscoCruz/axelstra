@@ -1,6 +1,6 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import { createSignal } from "solid-js";
-import { Changes, Commit, GhItem, Project, SessionInfo, Worktree, WtStatus, ghList, gitChanges, listProjects, listSessions, worktreeStatus } from "./api";
+import { Changes, Commit, GhItem, Project, SessionInfo, Worktree, WtStatus, ghListBg, gitChanges, listProjects, listSessions, worktreeStatus } from "./api";
 
 /** Paths come back with either slash style; compare them in one normal form. */
 export const norm = (p?: string | null) => (p ?? "").replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
@@ -251,7 +251,7 @@ const refreshPrs = async (list: Project[]) => {
   for (const p of list) {
     if (!p.remote) continue;
     try {
-      for (const it of await ghList(p.id, "pr")) if (it.branch) out[prKey(p.id, it.branch)] = it;
+      for (const it of await ghListBg(p.id, "pr")) if (it.branch) out[prKey(p.id, it.branch)] = it;
     } catch {
       /* gh missing or not logged in: no PR badges */
     }

@@ -829,3 +829,4 @@ kbd { font: inherit; font-size: 11px; border: 1px solid var(--line-3); border-bo
 .search-hit { cursor: pointer; }
 .search-hit:hover { background: #1b1b25; }
 .search-hit.off { cursor: default; }
+.item.wt.pending { opacity: .75; cursor: default; }

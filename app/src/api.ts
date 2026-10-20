@@ -14,6 +14,10 @@ export type Project = { id: string; name: string; path: string; worktrees: Workt
 export const call = <T = unknown>(method: string, params: Record<string, unknown> = {}) =>
   invoke<T>("daemon_call", { method, params });
 
+/** same, on a second connection: for slow polling that must not hold up the interactive calls */
+export const callBg = <T = unknown>(method: string, params: Record<string, unknown> = {}) =>
+  invoke<T>("daemon_call_bg", { method, params });
+
 import { Channel, invoke as tauriInvoke } from "@tauri-apps/api/core";
 export const defaultShell = () => tauriInvoke<[string, string[]]>("default_shell");
 
@@ -106,6 +110,7 @@ export const removeProject = (id: string) => call("project.remove", { id });
 export const createWorktree = (project: string, name: string) => call<Worktree>("worktree.create", { project, name });
 export type GhItem = { number: number; title: string; author: string; url: string; state: string; draft: boolean; branch: string; checks: string; review: string };
 export const ghList = (project: string, kind: "pr" | "issue") => call<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
+export const ghListBg = (project: string, kind: "pr" | "issue") => callBg<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
 export const worktreeFromPr = (project: string, number: number) => call<Worktree>("worktree.from_pr", { project, number });
 export const listPorts = (worktree: string) => call<{ ports: { port: number; pid: number }[] }>("ports.list", { worktree }).then((r) => r.ports);
 export type Schedule =
@@ -200,10 +205,10 @@ export const gitShow = (worktree: string, sha: string) =>
   call<{ diff: string }>("git.show", { worktree, sha }).then((r) => r.diff);
 
 export type WtStatus = { path: string; dirty: number; ahead: number; behind: number; upstream: boolean };
-export const worktreeStatus = (paths: string[]) => call<{ status: WtStatus[] }>("worktree.status", { paths }).then((r) => r.status);
+export const worktreeStatus = (paths: string[]) => callBg<{ status: WtStatus[] }>("worktree.status", { paths }).then((r) => r.status);
 
 export type AgentHit = { agent: "claude" | "codex"; session: string; cwd: string; ts: number; snippet: string };
-export const agentSearch = (query: string, max = 30) => call<{ hits: AgentHit[] }>("agent.search", { query, max }).then((r) => r.hits);
+export const agentSearch = (query: string, max = 30) => callBg<{ hits: AgentHit[] }>("agent.search", { query, max }).then((r) => r.hits);
 
 export type TokenUsage = { input: number; output: number; cache_read: number; cache_write: number; messages: number };
-export const agentUsage = (cwd: string, session?: string) => call<{ usage: TokenUsage | null }>("agent.usage", { cwd, session }).then((r) => r.usage);
+export const agentUsage = (cwd: string, session?: string) => callBg<{ usage: TokenUsage | null }>("agent.usage", { cwd, session }).then((r) => r.usage);
