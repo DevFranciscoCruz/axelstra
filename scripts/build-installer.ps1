@@ -1,5 +1,5 @@
 # One command to produce the installer, in steps: daemon sidecar, frontend, NSIS bundle.
-# Each step prints its time and the peak memory of the build tools, so a heavy step is easy to spot.
+# Each step prints its time and the peak memory of the processes it started, so a heavy step is easy to spot.
 # Output: target/release/bundle/nsis/Axelstra_<version>_x64-setup.exe
 #
 #   -Version 0.1.19   installer version (default: the one in tauri.conf.json)
@@ -17,21 +17,28 @@ if (-not $env:LIBCLANG_PATH -and (Test-Path "C:\Program Files\LLVM\bin")) { $env
 # the build should not make the computer sluggish
 (Get-Process -Id $PID).PriorityClass = "BelowNormal"
 
-$tools = "cargo", "rustc", "cl", "link", "lld-link", "node", "makensis", "cmake", "ninja", "clang", "msbuild"
 $summary = @()
 
 function Invoke-Step([string]$Name, [scriptblock]$Body) {
     Write-Host "`n== $Name" -ForegroundColor Cyan
     $peak = 0
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
-    # peak private memory of the build tools, sampled from a background job
-    $sampler = Start-Job -ArgumentList (,$tools) {
-        param($tools)
+    # peak memory of everything this build started, sampled from a background job
+    $sampler = Start-Job -ArgumentList $PID {
+        param($root)
         $max = 0
         while ($true) {
-            $sum = (Get-Process -Name $tools -ErrorAction SilentlyContinue | Measure-Object PrivateMemorySize64 -Sum).Sum
+            # only this build's own process tree: other sessions compiling at the same time do not count
+            $all = Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, WorkingSetSize
+            $kids = $all | Group-Object ParentProcessId -AsHashTable -AsString
+            $stack = [System.Collections.Generic.Stack[uint32]]::new(); $stack.Push($root)
+            $sum = 0
+            while ($stack.Count) {
+                $p = $stack.Pop()
+                foreach ($c in $kids["$p"]) { if ($c) { $sum += $c.WorkingSetSize; $stack.Push($c.ProcessId) } }
+            }
             if ($sum -gt $max) { $max = $sum; Write-Output $max }
-            Start-Sleep -Milliseconds 700
+            Start-Sleep -Milliseconds 1500
         }
     }
     try { & $Body } finally {
