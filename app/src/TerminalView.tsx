@@ -4,9 +4,38 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { onCleanup, onMount } from "solid-js";
-import { resizeSession, writeSession } from "./api";
+import { fsStat, resizeSession, writeSession } from "./api";
+import { guarded, norm, selectedWorktree, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban } from "./store";
+
+/** file paths in terminal output: absolute Windows paths or relative ones with an extension, optionally followed by :line[:col] */
+const PATH_RE = /(?:[A-Za-z]:[\\/][^\s"'`<>|*?()]+|(?:\.{1,2}[\\/])?[\w@.-]+(?:[\\/][\w@.-]+)*\.[A-Za-z][\w]{0,7})(?::\d+(?::\d+)?)?/g;
+
+/** opens a clicked path: inside the selected worktree in the editor, elsewhere in the file manager */
+async function openPathLink(raw: string) {
+  const path = raw.replace(/:\d+(?::\d+)?$/, "").replace(/[.,;:]+$/, "");
+  const wt = selectedWorktree();
+  if (!wt) return;
+  const slashed = path.replace(/\\/g, "/");
+  const abs = /^[A-Za-z]:\//.test(slashed);
+  let rel = slashed.replace(/^\.\//, "");
+  if (abs) {
+    if (!norm(slashed).startsWith(norm(wt) + "/")) return void revealItemInDir(path).catch(() => 0);
+    rel = slashed.slice(wt.replace(/\\/g, "/").replace(/\/$/, "").length + 1);
+  }
+  try {
+    await fsStat(wt, rel); // throws when the file does not exist
+  } catch {
+    return;
+  }
+  guarded(() => {
+    setOpenDiff(null);
+    setShowKanban(false);
+    setOpenCommit(null);
+    setOpenFile(rel);
+  });
+}
 
 /**
  * One xterm bound to one daemon session. Only the visible terminal is mounted:
@@ -27,6 +56,20 @@ export function TerminalView(props: { id: number; focus?: boolean; onExit?: (cod
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon((_e, url) => void openUrl(url)));
+    term.registerLinkProvider({
+      provideLinks(y, cb) {
+        const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+        const out: { range: { start: { x: number; y: number }; end: { x: number; y: number } }; text: string; activate: () => void }[] = [];
+        for (const m of line.matchAll(PATH_RE)) {
+          const at = m.index ?? 0;
+          // a match that starts mid-token (inside a URL, say) is not a path
+          if (at > 0 && /[\w:/@.-]/.test(line[at - 1])) continue;
+          const text = m[0].replace(/[.,;:)]+$/, "");
+          out.push({ text, range: { start: { x: at + 1, y }, end: { x: at + text.length, y } }, activate: () => void openPathLink(text) });
+        }
+        cb(out.length ? out : undefined);
+      },
+    });
     term.open(host);
     try {
       const gl = new WebglAddon();
