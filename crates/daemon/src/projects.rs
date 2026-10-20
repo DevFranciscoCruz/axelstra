@@ -62,6 +62,19 @@ pub fn remove(store: &Path, id: &str) -> Result<()> {
     save(store, &v)
 }
 
+/// Only worktrees of registered projects may be inspected, never arbitrary paths.
+pub fn known_worktree(store: &Path, path: &str) -> Result<PathBuf> {
+    let want = path.replace('/', "\\").to_ascii_lowercase();
+    for p in load(store) {
+        for w in git::worktree_list(Path::new(&p.path))? {
+            if w.path.replace('/', "\\").to_ascii_lowercase() == want {
+                return Ok(PathBuf::from(w.path));
+            }
+        }
+    }
+    bail!("not a worktree of a registered project")
+}
+
 pub fn find(store: &Path, id: &str) -> Result<Project> {
     load(store).into_iter().find(|p| p.id == id).with_context(|| format!("unknown project {id}"))
 }
