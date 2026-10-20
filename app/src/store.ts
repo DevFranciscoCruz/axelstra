@@ -194,10 +194,19 @@ const trackAgents = (list: SessionInfo[]) => {
     const prev = lastState.get(s.id);
     lastState.set(s.id, state);
     const wtPath = s.meta?.worktree;
-    if (s.meta?.kind !== "agent" || !wtPath || prev !== "working" || state === "working") continue;
-    const watching = !document.hidden && document.hasFocus() && norm(selectedWorktree()) === norm(wtPath);
+    if (s.meta?.kind !== "agent" || !wtPath) continue;
+    // back to work: the earlier "needs a look" flag is stale
+    if (state === "working") {
+      if (attention().has(norm(wtPath))) setAttention((cur) => { const n = new Set(cur); n.delete(norm(wtPath)); return n; });
+      continue;
+    }
+    if (prev !== "working") continue;
+    // viewing: the worktree is on screen. watching: and the window has focus. document.hasFocus() is not
+    // reliable inside the webview, so the dot only trusts "visible and selected"; focus only gates the notification.
+    const viewing = !document.hidden && norm(selectedWorktree()) === norm(wtPath);
+    const watching = viewing && document.hasFocus();
+    if (!viewing) setAttention((cur) => new Set(cur).add(norm(wtPath)));
     if (watching) continue;
-    setAttention((cur) => new Set(cur).add(norm(wtPath)));
     const name = wtPath.split(/[\/]/).pop() ?? wtPath;
     const what = state === "done" ? "terminou" : state === "waiting" ? "precisa da tua resposta" : "parou";
     void notify("Axelstra", `${s.label ?? "agente"} ${what} em ${name}`, wtPath, s.id);

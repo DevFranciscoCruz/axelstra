@@ -306,7 +306,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                   >
                     <span
                       class="dot"
-                      classList={{ on: live() > 0, work: working() && !waiting(), attn: needs() && !waiting(), wait: waiting() }}
+                      classList={{ on: live() > 0, work: working() && !waiting(), attn: needs() && !working() && !waiting(), wait: waiting() }}
                       title={waiting() ? "O agente espera pela tua resposta" : needs() ? "O agente parou: precisa de atenção" : working() ? "A trabalhar" : live() > 0 ? "Parado" : ""}
                     />
                     <span class="name">{w.is_main ? (p.default_branch ?? "main") : label()}</span>
