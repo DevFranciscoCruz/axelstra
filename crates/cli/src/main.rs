@@ -23,6 +23,14 @@ enum Cmd {
     },
     /// Kill a session
     Kill { id: u32 },
+    /// Type into a session. Escapes: \e \r \n \xHH
+    Send { id: u32, data: String },
+    /// Print a session's output (history + live) for a few seconds
+    Tail {
+        id: u32,
+        #[arg(long, default_value_t = 5)]
+        secs: u64,
+    },
     /// Show cards and the order they would run in
     Plan {
         #[arg(long, default_value = ".")]
@@ -60,11 +68,48 @@ fn main() -> Result<()> {
                 .build()?
                 .block_on(server::serve(proto::pipe_name(), token))?;
         }
-        Cmd::Ls | Cmd::Spawn { .. } | Cmd::Kill { .. } => {
+        Cmd::Ls | Cmd::Spawn { .. } | Cmd::Kill { .. } | Cmd::Tail { .. } | Cmd::Send { .. } => {
             use axelstra_daemon::{client::Client, proto};
             let mut c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
             match Cli::parse().cmd {
                 Cmd::Ls => println!("{}", c.call("session.list", serde_json::json!({}))?),
+                Cmd::Tail { id, secs } => {
+                    use axelstra_daemon::client::Frame;
+                    c.call("session.subscribe", serde_json::json!({"id": id}))?;
+                    std::thread::spawn(move || {
+                        while let Ok(f) = c.read() {
+                            if let Frame::Output { data, .. } = f {
+                                print!("{}", String::from_utf8_lossy(&data));
+                            }
+                        }
+                    });
+                    std::thread::sleep(std::time::Duration::from_secs(secs));
+                    std::process::exit(0);
+                }
+                Cmd::Send { id, data } => {
+                    let mut out = Vec::new();
+                    let b = data.as_bytes();
+                    let mut i = 0;
+                    while i < b.len() {
+                        if b[i] == 0x5c && i + 1 < b.len() {
+                            match b[i + 1] {
+                                b'e' => out.push(0x1b),
+                                b'r' => out.push(0x0d),
+                                b'n' => out.push(0x0a),
+                                b'x' if i + 3 < b.len() => {
+                                    out.push(u8::from_str_radix(&data[i + 2..i + 4], 16)?);
+                                    i += 2;
+                                }
+                                o => out.push(o),
+                            }
+                            i += 2;
+                        } else {
+                            out.push(b[i]);
+                            i += 1;
+                        }
+                    }
+                    c.send_input(id, &out)?;
+                }
                 Cmd::Kill { id } => {
                     c.call("session.kill", serde_json::json!({"id": id}))?;
                 }
