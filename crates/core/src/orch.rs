@@ -398,7 +398,7 @@ fn first_line(summary: &str, fallback: &str) -> String {
 
 fn run_acceptance(wt: &Path, cmd: &str) -> Result<bool> {
     let st = if cfg!(windows) {
-        Command::new("cmd").args(["/d", "/c", cmd]).current_dir(wt).status()?
+        git::quiet(&mut Command::new("cmd")).args(["/d", "/c", cmd]).current_dir(wt).status()?
     } else {
         Command::new("sh").args(["-c", cmd]).current_dir(wt).status()?
     };
