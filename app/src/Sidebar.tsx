@@ -2,6 +2,7 @@ import { open, ask } from "@tauri-apps/plugin-dialog";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { addProject, projectLogo, createWorktree, removeProject, removeWorktree, killSession, removeSession } from "./api";
 import logo from "./assets/logo.png";
+import { UpdateBanner } from "./UpdateBanner";
 import {
   error,
   norm,
@@ -150,6 +151,8 @@ export function Sidebar() {
         )}
       </For>
 
+      <div class="grow" />
+      <UpdateBanner />
       <Show when={error()}>
         <div class="error">{error()}</div>
       </Show>

@@ -433,6 +433,15 @@ fn dispatch(
             Ok(json!({}))
         }
         "ping" => Ok(json!({})),
+        // used by the app updater: the installer cannot replace a running axelstra.exe.
+        // Sessions die with the daemon (Job Objects), so the UI warns before calling this.
+        "daemon.shutdown" => {
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                std::process::exit(0);
+            });
+            Ok(json!({}))
+        }
         m => anyhow::bail!("unknown method {m}"),
     }
 }

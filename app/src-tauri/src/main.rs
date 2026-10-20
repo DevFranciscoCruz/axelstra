@@ -133,11 +133,56 @@ fn session_detach(state: tauri::State<'_, Arc<State>>, id: u32) {
     }
 }
 
+/// What the UI shows about a pending update. Nothing from the update server is passed on
+/// except the version and notes text.
+#[derive(serde::Serialize)]
+struct UpdateInfo {
+    version: String,
+    notes: Option<String>,
+}
+
+/// `None` = this build is the latest. Errors become one fixed sentence: the plugin's own
+/// error can quote whatever the endpoint answered.
+#[tauri::command]
+async fn update_check(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|_| "updater unavailable".to_string())?;
+    match updater.check().await {
+        Ok(Some(u)) => Ok(Some(UpdateInfo { version: u.version, notes: u.body })),
+        Ok(None) => Ok(None),
+        Err(_) => Err("update check failed".into()),
+    }
+}
+
+/// Downloads, verifies the signature, stops the daemon (the installer cannot overwrite a running
+/// exe), installs and restarts. `expected` is the version the user saw: if a newer release
+/// landed since, nothing is installed. Running terminals and agents end with the daemon.
+#[tauri::command]
+async fn update_install(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, expected: String) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|_| "updater unavailable".to_string())?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|_| "update check failed".to_string())?
+        .ok_or("already up to date")?;
+    if update.version != expected {
+        return Err(format!("a newer release ({}) appeared; check again", update.version));
+    }
+    let bytes = update.download(|_, _| {}, || {}).await.map_err(|_| "download or signature check failed".to_string())?;
+    // best effort: if the daemon is not running there is nothing to stop
+    let _ = with_client(&state.control, |c| c.call("daemon.shutdown", json!({})));
+    std::thread::sleep(Duration::from_millis(800));
+    update.install(bytes).map_err(|_| "install failed".to_string())?;
+    app.restart();
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Arc::new(State::default()))
-        .invoke_handler(tauri::generate_handler![daemon_call, session_write, session_attach, session_detach])
+        .invoke_handler(tauri::generate_handler![daemon_call, session_write, session_attach, session_detach, update_check, update_install])
         .run(tauri::generate_context!())
         .expect("error while running axelstra");
 }
