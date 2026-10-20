@@ -76,3 +76,17 @@ export const kanbanList = (project: string) => call<Board>("kanban.list", { proj
 export const kanbanSave = (project: string, card: Record<string, unknown>) => call<KCard>("kanban.save", { project, ...card });
 export const kanbanMove = (project: string, id: string, status: string) => call("kanban.move", { project, id, status });
 export const kanbanDelete = (project: string, id: string) => call("kanban.delete", { project, id });
+
+export type OrchRun = {
+  state: "idle" | "running" | "done" | "error";
+  name?: string;
+  integ_branch?: string;
+  integ_wt?: string;
+  merged?: string[];
+  failed?: [string, string][];
+  needs_review?: [string, string][];
+  blocked?: string[];
+  error?: string;
+};
+export const orchStart = (project: string, max = 3) => call<OrchRun>("orch.start", { project, max });
+export const orchStatus = (project: string) => call<OrchRun>("orch.status", { project });

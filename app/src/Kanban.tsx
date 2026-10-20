@@ -1,6 +1,7 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
-import { Board, KCard, kanbanDelete, kanbanList, kanbanMove, kanbanSave } from "./api";
+import { Board, KCard, OrchRun, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchStart, orchStatus } from "./api";
+import { refreshProjects } from "./store";
 
 const COLS: { id: string; label: string }[] = [
   { id: "backlog", label: "Ideias" },
@@ -12,11 +13,40 @@ const COLS: { id: string; label: string }[] = [
 
 type Draft = { id?: string; title: string; body: string; status: string; depends: string; agent: string; priority: number };
 
-export function Kanban(props: { project: string; onRun?: () => void }) {
+export function Kanban(props: { project: string }) {
   const [board, setBoard] = createSignal<Board>({ cards: [], broken: [] });
   const [err, setErr] = createSignal("");
   const [draft, setDraft] = createSignal<Draft | null>(null);
   const [over, setOver] = createSignal<string | null>(null);
+  const [run, setRun] = createSignal<OrchRun>({ state: "idle" });
+
+  const pollRun = async () => {
+    try {
+      const prev = run().state;
+      const r = await orchStatus(props.project);
+      setRun(r);
+      // the integration worktree appears in the sidebar once the run starts
+      if (r.state !== prev) void refreshProjects();
+    } catch {
+      /* daemon briefly unavailable: the next tick retries */
+    }
+  };
+  const start = async () => {
+    const n = inCol("todo").length;
+    if (
+      !(await ask(
+        `Despachar ${n} agente(s) para os cartões em "Para fazer"? Cada um corre num worktree isolado e o resultado é integrado num branch novo (orch/…). Nada é enviado para o remote.`,
+        { title: "Executar orquestração", kind: "info" },
+      ))
+    )
+      return;
+    try {
+      setRun(await orchStart(props.project));
+      void refreshProjects();
+    } catch (e) {
+      setErr(String(e));
+    }
+  };
 
   const reload = async () => {
     try {
@@ -28,8 +58,9 @@ export function Kanban(props: { project: string; onRun?: () => void }) {
   };
   onMount(() => {
     void reload();
+    void pollRun();
     // agents move cards while the orchestrator runs
-    const t = setInterval(() => !document.hidden && draft() === null && void reload(), 3000);
+    const t = setInterval(() => !document.hidden && draft() === null && (void reload(), void pollRun()), 3000);
     onCleanup(() => clearInterval(t));
   });
 
@@ -97,19 +128,31 @@ export function Kanban(props: { project: string; onRun?: () => void }) {
       <div class="kbar">
         <span class="ktitle">Kanban</span>
         <span class="grow" />
-        <Show when={props.onRun}>
-          <button
-            class="primary"
-            title="Cria um worktree de integração e despacha um agente por cartão em 'Para fazer'"
-            disabled={inCol("todo").length === 0}
-            onClick={() => props.onRun?.()}
-          >
-            Executar “Para fazer” ({inCol("todo").length})
-          </button>
-        </Show>
+        <button
+          class="primary"
+          title="Cria um worktree de integração e despacha um agente por cartão em 'Para fazer'"
+          disabled={inCol("todo").length === 0 || run().state === "running"}
+          onClick={() => void start()}
+        >
+          {run().state === "running" ? "A executar…" : `Executar “Para fazer” (${inCol("todo").length})`}
+        </button>
       </div>
       <Show when={err()}>
         <div class="kerr">{err()}</div>
+      </Show>
+      <Show when={run().state !== "idle"}>
+        <div class="krun" classList={{ bad: run().state === "error" || (run().failed?.length ?? 0) > 0 }}>
+          <Show when={run().state === "running"}>
+            A executar {run().name} → branch {run().integ_branch}. Os agentes aparecem como terminais nos worktrees task.
+          </Show>
+          <Show when={run().state === "done"}>
+            Terminou: {run().merged?.length ?? 0} integrados em {run().integ_branch}
+            <Show when={(run().failed?.length ?? 0) > 0}> · falharam: {run().failed!.map((f) => `${f[0]} (${f[1]})`).join(", ")}</Show>
+            <Show when={(run().needs_review?.length ?? 0) > 0}> · rever: {run().needs_review!.map((f) => `${f[0]} (${f[1]})`).join(", ")}</Show>
+            <Show when={(run().blocked?.length ?? 0) > 0}> · bloqueados: {run().blocked!.join(", ")}</Show>
+          </Show>
+          <Show when={run().state === "error"}>Orquestração falhou: {run().error}</Show>
+        </div>
       </Show>
       <Show when={board().broken.length > 0}>
         <div class="kerr">
