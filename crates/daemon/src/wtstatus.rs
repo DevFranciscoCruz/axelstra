@@ -3,7 +3,7 @@ use axelstra_core::git;
 use serde::Serialize;
 use std::path::Path;
 
-#[derive(Serialize, Debug, PartialEq, Default)]
+#[derive(Serialize, Debug, PartialEq, Default, Clone)]
 pub struct Status {
     pub path: String,
     /// files with uncommitted changes (modified, staged, untracked)
@@ -32,6 +32,31 @@ pub fn parse(path: &str, out: &str) -> Status {
         }
     }
     s
+}
+
+/// `status` for the UI's polling: one `git status` per worktree every 4 s at most, however many windows or polls ask.
+/// Decisions that delete things (janitor, flow cleanup) call `status` and always see the current state.
+pub fn status_cached(worktree: &str) -> Status {
+    use std::{collections::HashMap, sync::Mutex, time::{Duration, Instant}};
+    static CACHE: Mutex<Option<HashMap<String, (Instant, Status)>>> = Mutex::new(None);
+    let key = worktree.replace('\\', "/").to_ascii_lowercase();
+    if let Ok(mut g) = CACHE.lock() {
+        let map = g.get_or_insert_with(HashMap::new);
+        if let Some((at, st)) = map.get(&key) {
+            if at.elapsed() < Duration::from_secs(4) {
+                return st.clone();
+            }
+        }
+    }
+    let st = status(worktree);
+    if let Ok(mut g) = CACHE.lock() {
+        let map = g.get_or_insert_with(HashMap::new);
+        if map.len() > 256 {
+            map.clear();
+        }
+        map.insert(key, (Instant::now(), st.clone()));
+    }
+    st
 }
 
 pub fn status(worktree: &str) -> Status {

@@ -43,7 +43,13 @@ export function Orchestra() {
   // sessions that have workers, and workers whose parent is gone
   const roots = () => sessions().filter((s) => kids(s.id).length > 0 && !(s.meta?.parent && known(s.meta.parent)));
   const orphans = () => sessions().filter((s) => s.meta?.parent && !known(s.meta.parent));
-  const workerCount = () => sessions().filter((s) => s.meta?.worker && s.running).length;
+  // agents that neither lead workers nor are workers: shown too, so the window is the board for every agent
+  const loners = () => sessions().filter((s) => s.meta?.kind === "agent" && !s.meta?.parent && kids(s.id).length === 0);
+  const since = (ms?: number) => {
+    const m = Math.floor((ms ?? 0) / 60000);
+    return m < 1 ? "" : m < 60 ? ` há ${m} min` : ` há ${Math.floor(m / 60)} h`;
+  };
+  const workerCount =() => sessions().filter((s) => s.meta?.worker && s.running).length;
 
   const open = (s: SessionInfo) => {
     const wt = s.meta?.worktree;
@@ -77,6 +83,7 @@ export function Orchestra() {
           </span>
           <span class="auto-note">
             {baseName(props.s.meta?.worktree)} · {props.s.escalated ? "pediu ajuda" : STATE[st()]}
+            {st() === "working" ? "" : since(props.s.idle_ms)}
           </span>
           <Show when={res()[props.s.id]}>
             <span class="auto-note" title="Memória e CPU de tudo o que esta sessão corre (do computador inteiro)">
@@ -121,7 +128,11 @@ export function Orchestra() {
       <div class="auto-list">
         <For each={roots()}>{(s) => <Row s={s} depth={0} />}</For>
         <For each={orphans()}>{(s) => <Row s={s} depth={1} />}</For>
-        <Show when={roots().length === 0 && orphans().length === 0}>
+        <Show when={loners().length > 0}>
+          <div class="auto-note" style={{ "margin-top": "10px" }}>Outros agentes</div>
+          <For each={loners()}>{(s) => <Row s={s} depth={0} />}</For>
+        </Show>
+        <Show when={roots().length === 0 && orphans().length === 0 && loners().length === 0}>
           <div class="auto-note">
             Ainda não há workers. Peça a um agente (Claude, Codex…) para usar <b>/axelstration</b> e eles aparecem aqui, por baixo de quem os lançou.
           </div>
