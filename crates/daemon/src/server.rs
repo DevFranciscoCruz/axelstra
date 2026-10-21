@@ -157,7 +157,7 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
             let msg = format!("[axelstra] worker \"{label}\" {status}. {body}");
             // an agent TUI takes a multi-line message as one paste; a plain shell gets the single line
             let data = if agent { format!("\x1b[200~{msg}\x1b[201~\r") } else { format!("echo [axelstra] worker {label}: {status}\r") };
-            let _ = parent.1.write(data.as_bytes());
+            crate::msgbus::deliver(parent.1.clone(), data.into_bytes());
         }
         s.kill();
         reg.sessions.lock().unwrap().remove(&id);
@@ -692,7 +692,7 @@ fn dispatch(
                 let label = from
                     .map(|f| reg.labels.lock().unwrap().get(&f).cloned().unwrap_or_else(|| format!("sessão {f}")))
                     .unwrap_or_else(|| "o utilizador".into());
-                let _ = target.write(&crate::msgbus::paste(&crate::msgbus::notice(&m, &label)));
+                crate::msgbus::deliver(target.clone(), crate::msgbus::paste(&crate::msgbus::notice(&m, &label)));
             }
             Ok(json!({"id": m.id}))
         }

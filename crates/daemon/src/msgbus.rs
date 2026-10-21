@@ -46,6 +46,30 @@ pub fn paste(text: &str) -> Vec<u8> {
     format!("\x1b[200~{text}\x1b[201~\r").into_bytes()
 }
 
+/// Types a notice or report into a session without landing in the middle of what the user is typing:
+/// while they typed in the last 3 s it waits for a pause (at most 30 s, then goes anyway). Deferred
+/// deliveries keep their order, and a new one queues behind them.
+pub fn deliver(target: std::sync::Arc<axelstra_core::pty::Session>, data: Vec<u8>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static DEFERRED: AtomicUsize = AtomicUsize::new(0);
+    static ORDER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    const QUIET_MS: u64 = 3000;
+    if DEFERRED.load(Ordering::SeqCst) == 0 && target.since_input_ms() >= QUIET_MS {
+        let _ = target.write_system(&data);
+        return;
+    }
+    DEFERRED.fetch_add(1, Ordering::SeqCst);
+    std::thread::spawn(move || {
+        let _turn = ORDER.lock().unwrap_or_else(|e| e.into_inner());
+        let start = std::time::Instant::now();
+        while target.since_input_ms() < QUIET_MS && start.elapsed().as_secs() < 30 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        let _ = target.write_system(&data);
+        DEFERRED.fetch_sub(1, Ordering::SeqCst);
+    });
+}
+
 /// One-line notice typed into an agent that got a message; the full text is also kept in its inbox.
 pub fn notice(m: &Msg, from_label: &str) -> String {
     let what = match m.kind.as_str() {

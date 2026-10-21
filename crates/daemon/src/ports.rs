@@ -42,8 +42,54 @@ pub fn parse_lsof(out: &str) -> Vec<Port> {
     v
 }
 
+/// Listening TCP sockets straight from the IP helper table: no `netstat` process to spawn every few seconds.
+#[cfg(windows)]
+fn listening_table() -> Result<Vec<Port>> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{GetExtendedTcpTable, TCP_TABLE_OWNER_PID_LISTENER};
+    use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
+
+    /// reads one address family: the table is `u32 count` followed by `count` rows of `row` bytes;
+    /// the port is a network-order u16 in the low half of a u32 and the owning pid is the row's last u32
+    fn family(af: u32, row: usize, port_at: usize) -> Result<Vec<Port>> {
+        let mut size = 0u32;
+        let mut buf: Vec<u32> = Vec::new();
+        // the table can grow between the size query and the read: retry a few times
+        for _ in 0..4 {
+            let rc = unsafe { GetExtendedTcpTable(if size == 0 { std::ptr::null_mut() } else { buf.as_mut_ptr().cast() }, &mut size, 0, af, TCP_TABLE_OWNER_PID_LISTENER, 0) };
+            match rc {
+                0 => {
+                    let bytes = buf.as_ptr().cast::<u8>();
+                    let n = buf[0] as usize;
+                    let mut v = Vec::with_capacity(n);
+                    for i in 0..n {
+                        let at = 4 + i * row;
+                        if at + row > buf.len() * 4 {
+                            break;
+                        }
+                        let u32_at = |o: usize| unsafe { std::ptr::read_unaligned(bytes.add(at + o).cast::<u32>()) };
+                        v.push(Port { port: u16::from_be(u32_at(port_at) as u16), pid: u32_at(row - 4) });
+                    }
+                    return Ok(v);
+                }
+                122 | 0xFFFF_FFFF => buf = vec![0u32; (size as usize).div_ceil(4) + 16], // ERROR_INSUFFICIENT_BUFFER
+                e => anyhow::bail!("GetExtendedTcpTable failed ({e})"),
+            }
+        }
+        anyhow::bail!("GetExtendedTcpTable kept growing")
+    }
+    // MIB_TCPROW_OWNER_PID: state, local addr, local port, remote addr, remote port, pid
+    let mut all = family(AF_INET as u32, 24, 8)?;
+    // MIB_TCP6ROW_OWNER_PID: local addr[16], scope, local port, remote addr[16], scope, remote port, state, pid
+    all.extend(family(AF_INET6 as u32, 56, 20).unwrap_or_default());
+    Ok(all)
+}
+
 fn all_listening() -> Result<Vec<Port>> {
     if cfg!(windows) {
+        #[cfg(windows)]
+        if let Ok(v) = listening_table() {
+            return Ok(v);
+        }
         let o = git::quiet(&mut Command::new("netstat")).args(["-ano", "-p", "TCP"]).output().context("run netstat")?;
         Ok(parse_netstat(&String::from_utf8_lossy(&o.stdout)))
     } else {

@@ -43,7 +43,16 @@ fn measure() -> Usage {
         all.push(daemon);
     }
     let cpu = imp::cpu_percent(&all);
-    let (gpu, gpu_adapters) = imp::gpu(&all);
+    // the GPU counters are the costliest query here and move slowly: sampled every 15 s, the chip keeps the last value
+    static LAST_GPU: std::sync::Mutex<Option<(std::time::Instant, Option<f64>, Vec<(String, f64)>)>> = std::sync::Mutex::new(None);
+    let cached = LAST_GPU.lock().ok().and_then(|g| g.as_ref().filter(|(at, ..)| at.elapsed().as_secs() < 15).map(|(_, v, a)| (*v, a.clone())));
+    let (gpu, gpu_adapters) = cached.unwrap_or_else(|| {
+        let fresh = imp::gpu(&all);
+        if let Ok(mut g) = LAST_GPU.lock() {
+            *g = Some((std::time::Instant::now(), fresh.0, fresh.1.clone()));
+        }
+        fresh
+    });
     if daemon == 0 {
         return Usage { app, cpu, gpu, gpu_adapters, ..Default::default() };
     }
