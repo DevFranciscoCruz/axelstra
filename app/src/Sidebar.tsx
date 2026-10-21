@@ -101,7 +101,7 @@ export function Sidebar() {
 
   const pickProject = () =>
     run(async () => {
-      const dir = await open({ directory: true, multiple: false, title: "Escolha um repositório git" });
+      const dir = await open({ directory: true, multiple: false, title: "Escolha a pasta do projeto" });
       if (typeof dir !== "string") return;
       const added = await addProject(dir);
       await refreshProjects();
