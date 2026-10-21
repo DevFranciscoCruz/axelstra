@@ -366,6 +366,11 @@ export const refreshChanges = async () => {
     setChanges(null);
     return;
   }
+  // a folder without git has no changes to list
+  if (projects().find((p) => p.worktrees.some((x) => norm(x.path) === norm(w)))?.git === false) {
+    setChanges(null);
+    return;
+  }
   try {
     setChanges(await gitChanges(w, baseRef()));
   } catch (e) {

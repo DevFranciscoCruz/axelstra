@@ -221,7 +221,16 @@ pub fn worktree_list(repo: &Path) -> Result<Vec<Worktree>> {
     Ok(v)
 }
 
+/// True when `path` is inside a git repository (a plain folder has no `.git` to find).
+pub fn is_repo(path: &Path) -> bool {
+    run(path, &["rev-parse", "--git-dir"]).map(|o| o.ok).unwrap_or(false)
+}
+
 fn worktree_list_uncached(repo: &Path) -> Result<Vec<Worktree>> {
+    // a project that is just a folder (no git yet) is its own single "main worktree": agents and terminals run in it
+    if !is_repo(repo) {
+        return Ok(vec![Worktree { path: repo.to_string_lossy().to_string(), branch: None, head: String::new(), is_main: true }]);
+    }
     let out = must(repo, &["worktree", "list", "--porcelain"])?;
     let mut v: Vec<Worktree> = Vec::new();
     for block in out.split("\n\n") {

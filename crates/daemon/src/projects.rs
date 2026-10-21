@@ -65,7 +65,12 @@ fn slug(s: &str) -> String {
 }
 
 pub fn add(store: &Path, path: &str) -> Result<Project> {
-    let root = git::repo_root(Path::new(path)).with_context(|| format!("{path} is not inside a git repository"))?;
+    // a folder outside any repository is accepted as it is: the project can start from prompts and `git init` later
+    let root = match git::repo_root(Path::new(path)) {
+        Ok(r) => r,
+        Err(_) if Path::new(path).is_dir() => git::canon(Path::new(path))?,
+        Err(e) => return Err(e).with_context(|| format!("{path} is not a folder")),
+    };
     let root_s = root.to_string_lossy().to_string();
     let mut v = load(store);
     if let Some(p) = v.iter().find(|p| p.path.eq_ignore_ascii_case(&root_s)) {
@@ -132,6 +137,9 @@ fn create_at(p: &Project, name: &str, base: &str) -> Result<git::Worktree> {
         bail!("worktree name is empty");
     }
     let repo = Path::new(&p.path);
+    if !git::is_repo(repo) {
+        bail!("este projeto ainda não é um repositório git: corre `git init` na pasta para poderes criar worktrees");
+    }
     let dir = repo
         .parent()
         .context("repo has no parent directory")?
@@ -194,5 +202,26 @@ mod slug_tests {
         assert_eq!(slug("Otimização"), "Otimizacao");
         assert_eq!(slug("Correção de ação  rápida!"), "Correcao-de-acao-rapida");
         assert_eq!(slug("--a_b--"), "a_b");
+    }
+}
+
+#[cfg(test)]
+mod plain_folder_tests {
+    use super::*;
+
+    #[test]
+    fn a_folder_without_git_is_a_project_with_one_main_worktree() {
+        let root = std::env::temp_dir().join(format!("axl-plain-{}", std::process::id()));
+        let dir = root.join("novo-projeto");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = root.join("projects.json");
+        let p = add(&store, &dir.to_string_lossy()).unwrap();
+        assert_eq!(p.name, "novo-projeto");
+        let wts = git::worktree_list(Path::new(&p.path)).unwrap();
+        assert_eq!(wts.len(), 1);
+        assert!(wts[0].is_main);
+        let err = worktree_create(&p, "x").unwrap_err().to_string();
+        assert!(err.contains("git init"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -4,6 +4,8 @@ export type SessionMeta = { project?: string; worktree?: string; kind?: string; 
 export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
+  /** false for a plain folder that is not a git repository (yet) */
+  git?: boolean;
   slug?: string;
   setup?: string | null;
   default_branch?: string;

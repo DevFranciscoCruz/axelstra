@@ -815,7 +815,7 @@ fn dispatch(
                     let mut wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();
                     wts.retain(|w| w.is_main || w.path.replace('\\', "/").contains("/.axelstra-wt/"));
                     let ident = axelstra_core::git::identity(repo);
-                    json!({"id": pr.id, "name": ident.display_name, "path": pr.path, "worktrees": wts,
+                    json!({"id": pr.id, "name": ident.display_name, "path": pr.path, "worktrees": wts, "git": axelstra_core::git::is_repo(repo),
                            "setup": pr.setup, "default_branch": axelstra_core::git::default_branch(repo), "slug": ident.slug, "icon_url": ident.icon_url, "remote": ident.remote})
                 })
                 .collect();

@@ -46,10 +46,12 @@ fn projects_worktrees_and_session_meta() {
     std::thread::sleep(Duration::from_millis(300));
     let mut c = Client::connect(&pipe, &token).unwrap();
 
-    // a plain folder is rejected
+    // a plain folder is accepted (a project can start without git); a path that does not exist is not
     let plain = root.join("plain");
     std::fs::create_dir_all(&plain).unwrap();
-    assert!(c.call("project.add", json!({"path": plain})).is_err());
+    let pp = c.call("project.add", json!({"path": &plain})).unwrap();
+    c.call("project.remove", json!({"id": pp["id"]})).unwrap();
+    assert!(c.call("project.add", json!({"path": root.join("missing")})).is_err());
 
     // adding from a subfolder resolves to the repo root; adding twice is idempotent
     std::fs::create_dir_all(repo.join("sub")).unwrap();
