@@ -220,8 +220,14 @@ const trackAgents = (list: SessionInfo[]) => {
     if (!viewing) setAttention((cur) => new Set(cur).add(norm(wtPath)));
     if (watching) continue;
     const name = wtPath.split(/[\/]/).pop() ?? wtPath;
-    const what = state === "done" ? "terminou" : state === "waiting" ? "precisa da tua resposta" : "parou";
-    void notify("Axelstra", `${s.label ?? "agente"} ${what} em ${name}`, wtPath, s.id);
+    const who = s.label ?? "O agente";
+    const [head, body] =
+      state === "done"
+        ? [`${who} terminou · ${name}`, `${who} acabou a tarefa na worktree "${name}". Abre para rever o resultado.`]
+        : state === "waiting"
+          ? [`${who} precisa de ti · ${name}`, `${who} fez uma pergunta na worktree "${name}" e precisa da tua resposta para continuar.`]
+          : [`${who} parou · ${name}`, `${who} ficou parado na worktree "${name}" sem terminar. Abre para ver o que aconteceu.`];
+    void notify(head, body, wtPath, s.id);
   }
 };
 

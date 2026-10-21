@@ -115,7 +115,7 @@ describe("attention flag and notifications", () => {
     await tick(store, agent({ idle_ms: 9000, waiting: true }));
     await settle();
     const call = invoke.mock.calls.find((c) => c[0] === "notify_session");
-    expect(String((call?.[1] as { body: string } | undefined)?.body)).toContain("precisa da tua resposta");
+    expect(String((call?.[1] as { body: string } | undefined)?.body)).toContain("precisa da tua resposta para continuar");
   });
 
   it("ignores shells: only agents are flagged", async () => {
