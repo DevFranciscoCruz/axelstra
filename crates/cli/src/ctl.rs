@@ -122,6 +122,13 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             println!("{}", r["id"]);
         }
         Cmd::Read { id, lines } => {
+            // the daemon replays the output through a terminal emulator; an older daemon has no such method
+            if let Ok(r) = c.call("session.screen", json!({"id": id, "lines": lines})) {
+                for l in r["lines"].as_array().into_iter().flatten().filter_map(|l| l.as_str()) {
+                    println!("{l}");
+                }
+                return Ok(());
+            }
             c.call("session.subscribe", json!({"id": id}))?;
             let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
             std::thread::spawn(move || {

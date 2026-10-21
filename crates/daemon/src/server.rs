@@ -137,13 +137,12 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
         std::thread::sleep(Duration::from_millis(300));
         let code = s.try_wait();
         let done_msg = reg.bus.finished(id);
-        let text = axelstra_core::waiting::strip_ansi(&s.tail(32 * 1024));
-        let all: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
-        let tail = all[all.len().saturating_sub(lines)..].join("\n");
+        // what the terminal shows, not the escape-code soup of a TUI redrawing itself
+        let tail = s.screen_lines(lines).join("\n");
         let label = reg.labels.lock().unwrap().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
         let status = match (done_by_idle, code) {
             _ if done_msg.is_some() => "terminou (chamou `axelstra done`)".to_string(),
-            (true, _) => "terminou (parou de produzir output)".to_string(),
+            (true, _) => "foi fechado por ficar parado sem chamar `axelstra done` (se o texto abaixo for uma pergunta, ele estava à espera de uma resposta e não concluiu)".to_string(),
             (_, Some(0)) => "terminou com sucesso (exit 0)".to_string(),
             (_, Some(c)) => format!("terminou com erro (exit {c})"),
             _ => "terminou".to_string(),
@@ -764,6 +763,12 @@ fn dispatch(
         "session.kill" => {
             session()?.kill();
             Ok(json!({}))
+        }
+        // the last lines as the terminal shows them (replayed through an emulator), for `axelstra read` and flow reports
+        "session.screen" => {
+            let s = session()?;
+            let n = p["lines"].as_u64().unwrap_or(40).clamp(1, 500) as usize;
+            Ok(json!({"lines": tokio::task::block_in_place(|| s.screen_lines(n))}))
         }
         "session.resources" => {
             // memory now and total CPU time of every live session (the caller turns CPU time into a percentage)
