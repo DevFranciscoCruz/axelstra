@@ -49,6 +49,9 @@ pub struct Session {
     job: Job,
     shared: Arc<Shared>,
     size: Mutex<(u16, u16)>,
+    /// keystrokes wait here for a writer thread of their own, so a session that stops reading its input
+    /// (a hung process, a huge paste) never blocks typing into the others
+    input: Sender<Vec<u8>>,
 }
 
 impl Session {
@@ -124,9 +127,21 @@ impl Session {
             r.subs.clear();
         });
 
+        let (input, input_rx) = channel::<Vec<u8>>();
+        let w = writer.clone();
+        std::thread::spawn(move || {
+            while let Ok(data) = input_rx.recv() {
+                let mut w = w.lock().unwrap();
+                if w.write_all(&data).and_then(|_| w.flush()).is_err() {
+                    break;
+                }
+            }
+        });
+
         Ok(Session {
             master: Mutex::new(pair.master),
             writer,
+            input,
             child: Mutex::new(child),
             job,
             shared,
@@ -143,6 +158,17 @@ impl Session {
             r.subs.push(tx);
         }
         (snap, rx)
+    }
+
+    /// Puts text in front of everything the session has printed, as if it had come first (the restored
+    /// history of a previous run). Not sent to the program.
+    pub fn seed(&self, text: &[u8]) {
+        let mut r = self.shared.ring.lock().unwrap();
+        for b in text.iter().rev() {
+            r.buf.push_front(*b);
+        }
+        let over = r.buf.len().saturating_sub(RING_BYTES);
+        r.buf.drain(..over);
     }
 
     /// The last `max` bytes of recent output.
@@ -176,10 +202,7 @@ impl Session {
 
     pub fn write(&self, data: &[u8]) -> Result<()> {
         self.shared.last_in.store(now_ms(), Ordering::Relaxed);
-        let mut w = self.writer.lock().unwrap();
-        w.write_all(data)?;
-        w.flush()?;
-        Ok(())
+        self.input.send(data.to_vec()).map_err(|_| anyhow::anyhow!("session input closed"))
     }
 
     /// The last `lines` non-empty lines as the terminal shows them (the recent output replayed through a terminal

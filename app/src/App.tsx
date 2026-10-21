@@ -31,6 +31,8 @@ import { TerminalView } from "./TerminalView";
 import {
   activeSession,
   AGENTS,
+  agentKeys,
+  addAgents,
   agentPrompt,
   defaultAgent,
   setDefaultAgent,
@@ -118,6 +120,7 @@ export function App() {
     void import("@tauri-apps/api/core")
       .then(({ invoke }) => invoke<string[]>("missing_tools"))
       .then((m) => {
+        addAgents(["opencode", "gemini", "aider"].filter((a) => !m.includes(a)));
         const bits: string[] = [];
         if (m.includes("git")) bits.push("o git não está instalado ou não está no PATH (sem ele não há worktrees)");
         if (m.includes("claude") && m.includes("codex")) bits.push("nem o claude nem o codex foram encontrados (instala um deles para usar agentes)");
@@ -130,19 +133,29 @@ export function App() {
     labelIcons();
     void refreshProjects();
     // sessions of a previous daemon run come back before the first list, so the sidebar never shows them missing
-    void restoreSessions()
-      .catch(() => null)
-      .then((r) => {
-        void refreshSessions();
-        if (!r) return;
-        const bits: string[] = [];
-        if (r.restored) bits.push(`${r.restored} ${r.restored === 1 ? "sessão restaurada" : "sessões restauradas"}`);
-        if (r.skipped) bits.push(`${r.skipped} ${r.skipped === 1 ? "conversa vazia ignorada" : "conversas vazias ignoradas"}`);
-        if (r.failed.length) bits.push(`não foi possível restaurar: ${r.failed.join(", ")}`);
-        if (bits.length) showNotice(`Ao reabrir: ${bits.join(" · ")}.`);
-      });
-    // The daemon has no push events yet: poll only while the window is visible.
-    const fast = setInterval(() => !document.hidden && void refreshSessions(), 2000);
+    const restore = (prefix: string) =>
+      restoreSessions()
+        .catch(() => null)
+        .then((r) => {
+          void refreshSessions();
+          if (!r) return;
+          const bits: string[] = [];
+          if (r.restored) bits.push(`${r.restored} ${r.restored === 1 ? "sessão restaurada" : "sessões restauradas"}`);
+          if (r.skipped) bits.push(`${r.skipped} ${r.skipped === 1 ? "conversa vazia ignorada" : "conversas vazias ignoradas"}`);
+          if (r.failed.length) bits.push(`não foi possível restaurar: ${r.failed.join(", ")}`);
+          if (bits.length) showNotice(`${prefix}: ${bits.join(" · ")}.`);
+        });
+    void restore("Ao reabrir");
+    // the daemon crashed or was replaced while the app was open: its sessions are gone, bring them back
+    let unlistenRestart: (() => void) | undefined;
+    void import("@tauri-apps/api/event").then(({ listen }) =>
+      listen("daemon-restarted", () => {
+        showNotice("O daemon foi reiniciado; a restaurar as sessões…");
+        void restore("Após o reinício do daemon");
+      }).then((u) => (unlistenRestart = u)),
+    );
+    // the daemon pushes `session.changed` (see watchWorktree below); this poll is only the safety net
+    const fast = setInterval(() => !document.hidden && void refreshSessions(), 10000);
     // git is the costly part: the change list only matters for the selected worktree, and the project
     // list (worktrees, remote) changes rarely. Both also refresh when the window regains focus
     // and after every action the user takes in the sidebar.
@@ -212,6 +225,7 @@ export function App() {
       clearInterval(slow);
       window.removeEventListener("focus", onFocus);
       unlistenClick?.();
+      unlistenRestart?.();
     });
   });
 
@@ -223,7 +237,7 @@ export function App() {
         setFsTick((n) => n + 1);
         void refreshChanges();
       }
-    });
+    }, () => void refreshSessions());
   });
 
   // dev servers started in this worktree's terminals; a process lookup, so only while something runs
@@ -386,7 +400,7 @@ export function App() {
         {(done) => (
           <Modal label="Abrir com qual agente?" onClose={() => done()(null)} backClass="agent-back" class="agent-modal">
             <h3>Abrir com qual agente?</h3>
-            <For each={Object.keys(AGENTS)}>
+            <For each={agentKeys()}>
               {(a) => (
                 <button
                   class="primary"

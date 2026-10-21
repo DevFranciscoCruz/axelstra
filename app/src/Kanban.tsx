@@ -3,7 +3,7 @@ import { ask } from "./Confirm";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Board, KCard, OrchRun, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchStart, orchStatus } from "./api";
 import { Modal } from "./Modal";
-import { AGENTS, refreshProjects } from "./store";
+import { AGENTS, agentKeys, refreshProjects } from "./store";
 import { press } from "./a11y";
 
 const COLS: { id: string; label: string }[] = [
@@ -255,7 +255,7 @@ export function Kanban(props: { project: string }) {
                   Agente
                   <Select
                     value={d().agent}
-                    options={[...new Set([...Object.keys(AGENTS), d().agent])].map((a) => ({ value: a, label: a }))}
+                    options={[...new Set([...agentKeys(), d().agent])].map((a) => ({ value: a, label: a }))}
                     onChange={(v) => setDraft({ ...d(), agent: v })}
                   />
                 </label>

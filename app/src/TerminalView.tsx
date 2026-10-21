@@ -7,6 +7,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { createEffect, onCleanup, onMount } from "solid-js";
 import { fsStat, resizeSession, writeSession } from "./api";
+import { createSizeSync } from "./termsize";
 import { guarded, norm, selectedWorktree, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban } from "./store";
 
 /** file paths in terminal output: absolute Windows paths or relative ones with an extension, optionally followed by :line[:col] */
@@ -91,7 +92,7 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
         else term.write(`\r\n\x1b[31m[axelstra] não foi possível ligar a esta sessão: ${String(e)}\x1b[0m\r\n`);
       });
     void attach(true).then(() => {
-      told = ""; // a fresh subscription: tell the PTY the size again
+      sizeSync.forget();
       pushSize();
     });
 
@@ -149,32 +150,11 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       .then((u) => (gone ? u() : (unDrop = u)));
 
     term.onData((d) => void writeSession(props.id, d));
-    // The agent draws for the size the PTY has, so the PTY must always end up with the size xterm shows: a mismatch
-    // wraps and overlaps the whole screen. The size is sent only while the terminal is visible, remembered once the
-    // daemon accepted it, and sent again (also after a failure) whenever it differs from what the PTY was told.
+    // see termsize.ts: the PTY must always end up with the size xterm shows
     const visible = () => host.clientWidth > 0 && host.clientHeight > 0;
-    let told = "";
-    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
-    const pushSize = () => {
-      clearTimeout(resizeTimer);
-      if (gone || !visible()) return;
-      const { cols, rows } = term;
-      const key = `${cols}x${rows}`;
-      if (key === told) return;
-      resizeSession(props.id, cols, rows).then(
-        () => {
-          if (term.cols === cols && term.rows === rows) told = key;
-        },
-        () => {
-          resizeTimer = setTimeout(pushSize, 500);
-        },
-      );
-    };
-    // dragging a panel fires many sizes; only the last one is sent (each resize makes the agent redraw everything)
-    term.onResize(() => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(pushSize, 80);
-    });
+    const sizeSync = createSizeSync({ size: () => term, visible, gone: () => gone, send: (c, r) => resizeSession(props.id, c, r) });
+    const pushSize = sizeSync.push;
+    term.onResize(sizeSync.resized);
 
     // a hidden terminal (display: none) has no size: fitting it would shrink its PTY to nothing
     const refit = () => {
@@ -218,6 +198,7 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
 
     onCleanup(() => {
       gone = true;
+      sizeSync.cancel();
       unDrop?.();
       host.removeEventListener("contextmenu", onCtx);
       ro.disconnect();

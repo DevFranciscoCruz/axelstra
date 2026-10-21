@@ -23,6 +23,12 @@ const save = (k: string, v: string | null) => {
 
 /** CLI agents that can be launched; the key is what the UI shows and stores */
 export const AGENTS: Record<string, string> = { claude: "claude", chatgpt: "codex" };
+/** names of the agents the pickers list: the built-in two plus any other agent CLI found on the PATH */
+export const [agentKeys, setAgentKeys] = createSignal<string[]>(Object.keys(AGENTS));
+export const addAgents = (names: string[]) => {
+  for (const n of names) AGENTS[n] = n;
+  setAgentKeys(Object.keys(AGENTS));
+};
 const [agent, setAgentSig] = createSignal<string>(load("axelstra.agent") && AGENTS[load("axelstra.agent")!] ? load("axelstra.agent")! : "claude");
 export const defaultAgent = agent;
 export const setDefaultAgent = (a: string) => {

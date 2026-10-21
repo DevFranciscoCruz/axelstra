@@ -79,7 +79,8 @@ pub fn forget_worktree_lists() {
 pub fn worktree_add(repo: &Path, path: &Path, branch: &str, base: &str) -> Result<()> {
     forget_worktree_lists();
     // checkout.workers=0: one checkout worker per core (git >= 2.32); on Windows this cut a 10k-file checkout from ~2.5 s to ~1 s
-    must(repo, &["-c", "checkout.workers=0", "worktree", "add", "-b", branch, &path.to_string_lossy(), base])?;
+    // core.longpaths: deep trees would otherwise fail with "Filename too long" on Windows
+    must(repo, &["-c", "checkout.workers=0", "-c", "core.longpaths=true", "worktree", "add", "-b", branch, &path.to_string_lossy(), base])?;
     Ok(())
 }
 

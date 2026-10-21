@@ -324,6 +324,11 @@ fn main() -> Result<()> {
             #[cfg(target_os = "macos")]
             adopt_login_path();
             let _ = axelstra_daemon::skill::install();
+            // a panic anywhere leaves a trace (the daemon's stderr goes nowhere)
+            std::panic::set_hook(Box::new(|info| {
+                let line = format!("{} panic: {info}\n", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+                let _ = std::fs::OpenOptions::new().create(true).append(true).open(proto::data_dir().join("crash.log")).and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+            }));
             let token = proto::load_or_create_token()?;
             // two workers is plenty: the heavy lifting is blocking PTY threads
             tokio::runtime::Builder::new_multi_thread()

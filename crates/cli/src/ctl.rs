@@ -218,8 +218,9 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
 
 /// Starts a claude/codex session in `worktree` (visible in the app); returns its session id.
 pub(crate) fn spawn_agent(c: &mut Client, worktree: &Path, agent: &str, prompt: Option<&str>, reap: Option<Value>, worker: bool) -> Result<u32> {
-    if agent != "claude" && agent != "codex" {
-        bail!("--agent must be claude or codex");
+    // any agent CLI on the PATH works (opencode, gemini...); only claude and codex get conversation resume
+    if agent.is_empty() || !agent.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')) {
+        bail!("--agent must be the name of a command on the PATH (claude, codex, opencode...)");
     }
     let projects = c.call("project.list", json!({}))?;
     let (p, wt) = find_worktree(&projects, worktree)?;

@@ -110,13 +110,16 @@ export const restoreSessions = async (): Promise<{ restored: number; skipped: nu
 
 /** Change events for the selected worktree: the daemon watches the files and tells us, so git runs only when needed. */
 let watchReady: Promise<void> | null = null;
-const startWatch = (onChanged: (worktree: string) => void) => {
+const startWatch = (onChanged: (worktree: string) => void, onSessions?: () => void) => {
   const ch = new Channel<{ event?: string; worktree?: string }>();
-  ch.onmessage = (m) => m?.event === "fs.changed" && m.worktree && onChanged(m.worktree);
+  ch.onmessage = (m) => {
+    if (m?.event === "fs.changed" && m.worktree) onChanged(m.worktree);
+    else if (m?.event === "session.changed") onSessions?.();
+  };
   return tauriInvoke<void>("watch_start", { onEvent: ch });
 };
-export const watchWorktree = async (worktree: string | null, onChanged: (worktree: string) => void) => {
-  watchReady ??= startWatch(onChanged);
+export const watchWorktree = async (worktree: string | null, onChanged: (worktree: string) => void, onSessions?: () => void) => {
+  watchReady ??= startWatch(onChanged, onSessions);
   try {
     await watchReady;
     await tauriInvoke("watch_set", { worktree });
