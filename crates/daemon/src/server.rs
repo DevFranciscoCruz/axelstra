@@ -11,6 +11,10 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 
+/// Identifies this daemon run: a client that sees it change knows the daemon restarted (its sessions are gone).
+static INSTANCE: std::sync::LazyLock<u64> =
+    std::sync::LazyLock::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0));
+
 struct Registry {
     next: AtomicU32,
     sessions: Mutex<HashMap<u32, Arc<Session>>>,
@@ -127,9 +131,24 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
             if exited.is_some() || reg.bus.finished(id).is_some() {
                 break;
             }
-            if idle_mode && worked && idle >= idle_secs * 1000 && !axelstra_core::waiting::needs_input(&s.tail(4096)) {
-                done_by_idle = true;
-                break;
+            if idle_mode && worked && idle >= idle_secs * 1000 {
+                let screen = s.screen_lines(12);
+                if axelstra_core::waiting::needs_input(&s.tail(4096)) || axelstra_core::waiting::asks_question(&screen) {
+                    // it is waiting for an answer, not finished: keep it and tell the parent once (until it works again)
+                    if let Some((pid, ps)) = parent.and_then(|p| reg.get(p).map(|s| (p, s))) {
+                        let label = reg.labels.lock().unwrap().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
+                        let text = format!("parou à espera de uma resposta. Últimas linhas:\n{}", screen.join("\n"));
+                        let m = reg.bus.send(Some(id), pid, "escalate", &text, None, None);
+                        let agent = reg.metas.lock().unwrap().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
+                        if agent {
+                            crate::msgbus::deliver(ps, crate::msgbus::paste(&crate::msgbus::notice(&m, &format!("{label} (sessão {id})"))));
+                        }
+                    }
+                    worked = false;
+                } else {
+                    done_by_idle = true;
+                    break;
+                }
             }
         }
         let Some(s) = reg.get(id) else { return };
@@ -396,7 +415,11 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
                 let mut after: Vec<Box<dyn FnOnce() + Send>> = Vec::new();
                 // dispatch does blocking work (git, process spawns, files): off the async workers, of which there are few
                 let t0 = std::time::Instant::now();
-                let res = tokio::task::block_in_place(|| dispatch(&req, &reg, &tx, &mut subs, &mut authed, &token, &mut after));
+                // a bug in one handler must not take every terminal down with the daemon
+                let res = tokio::task::block_in_place(|| {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dispatch(&req, &reg, &tx, &mut subs, &mut authed, &token, &mut after)))
+                        .unwrap_or_else(|_| Err(anyhow::anyhow!("erro interno do daemon em {} (ver crash.log)", req.method)))
+                });
                 // calls that wait on purpose are not slow
                 if !matches!(req.method.as_str(), "ask" | "msg.ask" | "session.wait" | "hello") {
                     crate::lag::note(&format!("daemon {}", req.method), t0.elapsed(), 30);
@@ -434,6 +457,69 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
     }
 }
 
+fn history_file(reg: &Registry, key: &str) -> Option<std::path::PathBuf> {
+    // the key is a uuid; anything else would be a path
+    key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-').then(|| reg.saved.with_file_name("scrollback").join(format!("{key}.txt")))
+}
+
+fn save_history(reg: &Registry, key: &str, lines: &[String]) {
+    let Some(f) = history_file(reg, key) else { return };
+    if lines.is_empty() {
+        return;
+    }
+    if let Some(d) = f.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let _ = std::fs::write(f, lines.join("\n"));
+}
+
+/// The saved history as terminal text (dim, with a header), removed from disk once read.
+fn take_history(reg: &Registry, key: &str) -> Option<String> {
+    let f = history_file(reg, key)?;
+    let text = std::fs::read_to_string(&f).ok()?;
+    let _ = std::fs::remove_file(&f);
+    let body = text.lines().collect::<Vec<_>>().join("\r\n");
+    Some(format!("\x1b[2m── histórico anterior ──\r\n{body}\r\n── fim do histórico ──\x1b[0m\r\n"))
+}
+
+/// Tells a watching client when the state of any session changed (started, exited, went quiet, escalated, got a
+/// message...), so the UI can drop its fast polling. Cheap: it only looks at in-memory counters once a second.
+fn ensure_session_notifier(reg: &Arc<Registry>, tx: &mpsc::UnboundedSender<Vec<u8>>, subs: &mut HashMap<u32, Arc<AtomicBool>>) {
+    const KEY: u32 = u32::MAX - 1;
+    if subs.contains_key(&KEY) {
+        return;
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    subs.insert(KEY, stop.clone());
+    let (reg, tx) = (reg.clone(), tx.clone());
+    std::thread::spawn(move || {
+        let sig = || {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            let sessions = reg.sessions.lock().unwrap();
+            let mut ids: Vec<_> = sessions.keys().copied().collect();
+            ids.sort();
+            for id in ids {
+                let s = &sessions[&id];
+                (id, s.try_wait().is_none(), s.idle_ms() >= 1500, reg.bus.is_escalated(id), reg.bus.unread(id), reg.bus.finished(id).is_some()).hash(&mut h);
+            }
+            h.finish()
+        };
+        // the client lists sessions itself when it connects: only changes after that are news
+        let mut last = sig();
+        while !stop.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(1000));
+            let now = sig();
+            if now != last {
+                last = now;
+                if tx.send(encode(EVENT, json!({"event": "session.changed"}).to_string().as_bytes())).is_err() {
+                    return;
+                }
+            }
+        }
+    });
+}
+
 fn dispatch(
     req: &Req,
     reg: &Arc<Registry>,
@@ -460,7 +546,7 @@ fn dispatch(
                 anyhow::bail!("bad token");
             }
             *authed = true;
-            Ok(json!({"proto": PROTO}))
+            Ok(json!({"proto": PROTO, "instance": *INSTANCE}))
         }
         "session.spawn" => {
             let mut s = Spawn {
@@ -496,7 +582,14 @@ fn dispatch(
                 }
                 s.env.push(("AXELSTRA_PARENT".into(), par.to_string()));
             }
+            let history_key = p["meta"]["key"].as_str().map(String::from);
             let id = reg.spawn(&s, p["label"].as_str(), meta)?;
+            // a restored agent shows what its terminal said before the restart, dimmed, above its own output
+            if let (Some(key), Some(sess)) = (history_key, reg.get(id)) {
+                if let Some(text) = take_history(&reg, &key) {
+                    sess.seed(text.as_bytes());
+                }
+            }
             if let Some(par) = parent {
                 reg.bus.set_parent(id, par);
             }
@@ -973,6 +1066,7 @@ fn dispatch(
         }
         // one watch per connection (key u32::MAX in `subs`); a new subscribe replaces the old one
         "watch.subscribe" => {
+            ensure_session_notifier(reg, tx, subs);
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             if let Some(old) = subs.remove(&u32::MAX) {
                 old.store(true, Ordering::SeqCst);
@@ -989,6 +1083,7 @@ fn dispatch(
             Ok(json!({}))
         }
         "watch.unsubscribe" => {
+            ensure_session_notifier(reg, tx, subs);
             if let Some(old) = subs.remove(&u32::MAX) {
                 old.store(true, Ordering::SeqCst);
             }
@@ -1137,6 +1232,15 @@ fn dispatch(
                 }
             }
             reg.persist();
+            // keep what each agent terminal showed, so the restored tab is not empty
+            {
+                let metas = reg.metas.lock().unwrap();
+                for (id, s) in reg.sessions.lock().unwrap().iter() {
+                    if let Some(key) = metas.get(id).and_then(|m| m["key"].as_str()) {
+                        save_history(&reg, key, &s.screen_lines(300));
+                    }
+                }
+            }
             // end every terminal and agent now (their specs stay in sessions.json, so they restore on the next start)
             for s in reg.sessions.lock().unwrap().values() {
                 s.kill();

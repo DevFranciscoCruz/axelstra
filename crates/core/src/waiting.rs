@@ -64,9 +64,27 @@ pub fn needs_input(tail: &[u8]) -> bool {
     MARKERS.iter().any(|m| last.contains(m)) || (last.contains("❯ 1.") && last.contains("2."))
 }
 
+/// True when the screen's last lines (as rendered, see `Session::screen_lines`) contain a free-form question
+/// the agent put to the user ("Uso X ou Y?"), which has no fixed marker. The TUI's own hints don't count.
+pub fn asks_question(lines: &[String]) -> bool {
+    let from = lines.len().saturating_sub(8);
+    lines[from..].iter().any(|l| {
+        let t = l.trim().trim_matches(|c: char| "│┃|>* ".contains(c)).trim();
+        t.chars().count() >= 8 && t.ends_with('?') && !t.contains("for shortcuts") && !t.starts_with("? ")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn free_form_question_is_detected() {
+        let l = |s: &str| s.to_string();
+        assert!(asks_question(&[l("Analisei o código."), l("● Uso a opção A ou a B?"), l("╭──╮"), l("│ > │")]));
+        assert!(!asks_question(&[l("Tudo feito."), l("  ? for shortcuts")]));
+        assert!(!asks_question(&[l("Terminei.")]));
+    }
 
     #[test]
     fn claude_permission_prompt() {

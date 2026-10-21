@@ -20,6 +20,15 @@ jobs:
       # the app crate needs the desktop toolkit; the engine crates (daemon, orchestrator, CLI) do not
       - name: Engine tests
         run: cargo test --no-fail-fast -p axelstra-core -p axelstra-daemon -p axelstra
+  host:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # catches host (Tauri) compile errors on every push instead of at release time
+      - run: cargo check -p axelstra-app
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 15

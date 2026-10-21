@@ -10,6 +10,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import logo from "./assets/logo.png";
 import {
   AGENTS,
+  agentKeys,
   isPinned,
   togglePin,
   setAttention,
@@ -412,7 +413,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 Agente
                 <select value={newAgent()} onChange={(e) => setNewAgentSig(e.currentTarget.value)}>
                   <option value="none">Nenhum (só o worktree)</option>
-                  <For each={Object.keys(AGENTS)}>{(a) => <option value={a}>{a}</option>}</For>
+                  <For each={agentKeys()}>{(a) => <option value={a}>{a}</option>}</For>
                 </select>
               </label>
               <div class="m-actions" style={{ "justify-content": "flex-end" }}>

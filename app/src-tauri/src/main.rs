@@ -86,19 +86,49 @@ fn start_daemon() -> Result<()> {
     Ok(())
 }
 
-fn with_client<T>(slot: &Mutex<Option<Client>>, f: impl Fn(&mut Client) -> Result<T>) -> Result<T> {
+static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+static LAST_INSTANCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// `connect`, and tells the UI when the daemon behind it is a new run (it crashed or was replaced):
+/// its sessions are gone and the UI restores them from the saved list.
+fn reconnect() -> Result<Client> {
+    let c = connect()?;
+    let prev = LAST_INSTANCE.swap(c.instance, Ordering::SeqCst);
+    if prev != 0 && c.instance != prev {
+        if let Some(app) = APP.get() {
+            use tauri::Emitter;
+            let _ = app.emit("daemon-restarted", ());
+        }
+    }
+    Ok(c)
+}
+
+/// Calls that only read: safe to run twice if the connection broke after the daemon may have received them.
+fn read_only(method: &str) -> bool {
+    let tail = method.rsplit('.').next().unwrap_or(method);
+    matches!(tail, "list" | "status" | "get" | "read" | "screen" | "usage" | "ports" | "pending" | "info" | "stats" | "log" | "inbox" | "thread" | "search" | "logo" | "dir" | "limits" | "diff" | "changes")
+}
+
+fn with_client<T>(slot: &Mutex<Option<Client>>, retry: bool, f: impl Fn(&mut Client) -> Result<T>) -> Result<T> {
     let mut g = slot.lock().unwrap();
     if g.is_none() {
-        *g = Some(connect()?);
+        *g = Some(reconnect()?);
     }
     match f(g.as_mut().unwrap()) {
         Ok(v) => Ok(v),
         // the daemon answered with an error: the connection is fine and the call must not run twice
         Err(e) if e.downcast_ref::<axelstra_daemon::client::Remote>().is_some() => Err(e),
-        Err(_) => {
-            // the connection may be stale (daemon restarted): reconnect once
-            *g = Some(connect()?);
-            f(g.as_mut().unwrap())
+        Err(e) => {
+            // the connection may be stale (daemon restarted): reconnect. Run the call again only when that
+            // cannot repeat a side effect (it never left, or it only reads)
+            let never_sent = e.downcast_ref::<axelstra_daemon::client::NotSent>().is_some();
+            *g = None;
+            *g = Some(reconnect()?);
+            if retry || never_sent {
+                f(g.as_mut().unwrap())
+            } else {
+                Err(e.context("a ligação ao daemon caiu durante o pedido; confirma o estado antes de repetir"))
+            }
         }
     }
 }
@@ -107,7 +137,7 @@ fn with_client<T>(slot: &Mutex<Option<Client>>, f: impl Fn(&mut Client) -> Resul
 async fn daemon_call(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, String> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        with_client(&st.control, |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
+        with_client(&st.control, read_only(&method), |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -117,7 +147,7 @@ async fn daemon_call(state: tauri::State<'_, Arc<State>>, method: String, params
 async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, String> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        with_client(&st.bg, |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
+        with_client(&st.bg, read_only(&method), |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -157,7 +187,7 @@ fn input_sender(st: &Arc<State>) -> &'static std::sync::mpsc::Sender<(u32, Vec<u
                 pending.push((id, data));
                 for (id, data) in pending {
                     let t = std::time::Instant::now();
-                    let _ = with_client(&st.input, |c| c.send_input(id, &data));
+                    let _ = with_client(&st.input, true, |c| c.send_input(id, &data));
                     lag_note("keystroke to daemon", t.elapsed());
                 }
             }
@@ -318,7 +348,7 @@ fn app_quit(app: tauri::AppHandle, keep: Option<bool>) {
     app.exit(0);
 }
 
-/// Which of the tools the app leans on are not on PATH (git, claude, codex, gh), for a one-time hint at startup.
+/// Which of the tools the app leans on are not on PATH (git, claude, codex, gh) plus other agent CLIs worth offering (opencode, gemini, aider).
 #[tauri::command]
 fn missing_tools() -> Vec<String> {
     let dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
@@ -328,7 +358,7 @@ fn missing_tools() -> Vec<String> {
         vec![String::new()]
     };
     let has = |name: &str| dirs.iter().any(|d| exts.iter().any(|e| d.join(format!("{name}{e}")).is_file()));
-    ["git", "claude", "codex", "gh"].into_iter().filter(|t| !has(t)).map(String::from).collect()
+    ["git", "claude", "codex", "gh", "opencode", "gemini", "aider"].into_iter().filter(|t| !has(t)).map(String::from).collect()
 }
 
 #[tauri::command]
@@ -435,6 +465,10 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .manage(Arc::new(State::default()))
         .manage(voice::Voice::default())
+        .setup(|app| {
+            let _ = APP.set(app.handle().clone());
+            Ok(())
+        })
         // closing the window asks the UI first (it shows the confirmation, or quits when the user opted out)
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
