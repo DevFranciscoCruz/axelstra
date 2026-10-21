@@ -167,26 +167,32 @@ pub struct Usage {
     pub context: u64,
 }
 
-pub fn sum_usage(lines: impl Iterator<Item = String>) -> Usage {
-    let mut u = Usage::default();
-    let mut seen: HashSet<String> = HashSet::new();
-    for line in lines {
+/// Running token totals of one conversation, fed line by line so a growing transcript is only read from where it stopped.
+#[derive(Default, Clone)]
+pub struct UsageAcc {
+    pub u: Usage,
+    seen: HashSet<String>,
+}
+
+impl UsageAcc {
+    pub fn feed(&mut self, line: &str) {
         if !line.contains("\"usage\"") {
-            continue;
+            return;
         }
-        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(line) else { return };
         let m = &v["message"];
         let usage = &m["usage"];
         if !usage.is_object() {
-            continue;
+            return;
         }
         // a streamed reply is logged in pieces that repeat the same message id: count it once
         if let Some(id) = m["id"].as_str() {
-            if !seen.insert(id.to_string()) {
-                continue;
+            if !self.seen.insert(id.to_string()) {
+                return;
             }
         }
         let n = |k: &str| usage[k].as_u64().unwrap_or(0);
+        let u = &mut self.u;
         u.input += n("input_tokens");
         u.output += n("output_tokens");
         u.cache_read += n("cache_read_input_tokens");
@@ -194,7 +200,14 @@ pub fn sum_usage(lines: impl Iterator<Item = String>) -> Usage {
         u.messages += 1;
         u.context = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
     }
-    u
+}
+
+pub fn sum_usage(lines: impl Iterator<Item = String>) -> Usage {
+    let mut acc = UsageAcc::default();
+    for line in lines {
+        acc.feed(&line);
+    }
+    acc.u
 }
 
 /// Codex logs its rate limits (`rate_limits.primary` / `secondary`: used_percent, window_minutes, resets_at or
@@ -260,7 +273,8 @@ pub fn codex_limits() -> Option<Value> {
     None
 }
 
-static CACHE: Mutex<Option<HashMap<PathBuf, (u64, u64, Usage)>>> = Mutex::new(None);
+/// per transcript: (length, mtime, bytes already consumed, totals so far)
+static CACHE: Mutex<Option<HashMap<PathBuf, (u64, u64, u64, UsageAcc)>>> = Mutex::new(None);
 
 /// Token usage of one Claude conversation: the file named by `session_id`, or the newest one of the project.
 pub fn claude_usage(cwd: &str, session_id: Option<&str>) -> Option<Usage> {
@@ -277,14 +291,35 @@ pub fn claude_usage(cwd: &str, session_id: Option<&str>) -> Option<Usage> {
     let (len, mt) = (meta.len(), mtime(&path));
     let mut cache = CACHE.lock().unwrap();
     let map = cache.get_or_insert_with(HashMap::new);
-    if let Some((l, m, u)) = map.get(&path) {
+    let mut prev = map.remove(&path);
+    if let Some((l, m, _, acc)) = &prev {
         if *l == len && *m == mt {
-            return Some(u.clone());
+            let u = acc.u.clone();
+            map.insert(path, prev.take().unwrap());
+            return Some(u);
         }
     }
-    let f = std::fs::File::open(&path).ok()?;
-    let u = sum_usage(BufReader::new(f).lines().map_while(Result::ok));
-    map.insert(path, (len, mt, u.clone()));
+    // the file only grows: continue after the last complete line already read; a shorter file starts over
+    let (mut off, mut acc) = match prev {
+        Some((l, _, off, acc)) if len >= l => (off, acc),
+        _ => (0, UsageAcc::default()),
+    };
+    let mut f = std::fs::File::open(&path).ok()?;
+    std::io::Seek::seek(&mut f, std::io::SeekFrom::Start(off)).ok()?;
+    let mut r = BufReader::new(f);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let n = std::io::BufRead::read_line(&mut r, &mut line).ok()?;
+        // a last line without its newline may still be being written: leave it for the next read
+        if n == 0 || !line.ends_with('\n') {
+            break;
+        }
+        off += n as u64;
+        acc.feed(&line);
+    }
+    let u = acc.u.clone();
+    map.insert(path, (len, mt, off, acc));
     Some(u)
 }
 

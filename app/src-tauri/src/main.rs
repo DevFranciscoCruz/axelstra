@@ -261,6 +261,10 @@ fn session_detach(state: tauri::State<'_, Arc<State>>, id: u32) {
 /// Returns false where the OS toast has no click callback (the UI then uses the plain notification plugin).
 #[tauri::command]
 fn notify_session(app: tauri::AppHandle, title: String, body: String, worktree: String, session: u32) -> bool {
+    // the taskbar button flashes until the window is brought back, even when the toast was missed
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.request_user_attention(Some(tauri::UserAttentionType::Informational));
+    }
     #[cfg(windows)]
     {
         use tauri::Emitter;
