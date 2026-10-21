@@ -27,6 +27,8 @@ struct Registry {
     auto_lock: Mutex<()>,
     /// running `axelstra flow` plans: flow id -> [{id, worktree, state}] (what the sidebar shows as queued/running/done)
     flows: Mutex<HashMap<String, Value>>,
+    /// project.list answer reused for a few seconds (it starts several git processes per project)
+    plist: Mutex<Option<(std::time::Instant, Value)>>,
     /// spawn requests of live sessions, kept on disk so a daemon restart can bring them back
     specs: Mutex<HashMap<u32, Value>>,
     /// sessions of the previous daemon run, waiting for the UI to restore (or discard) them
@@ -57,6 +59,13 @@ impl Registry {
     fn worktree_busy(&self, path: &str) -> bool {
         let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
         let want = norm(path);
+        // a worktree a running flow plan still has to use (queued or running) is not finished, whatever its branch says
+        let in_flow = self.flows.lock().unwrap().values().any(|t| {
+            t.as_array().map(|a| a.iter().any(|x| x["worktree"].as_str().map(|w| norm(w) == want).unwrap_or(false) && matches!(x["state"].as_str(), Some("queued") | Some("running")))).unwrap_or(false)
+        });
+        if in_flow {
+            return true;
+        }
         // one lock at a time (the rest of the daemon takes sessions before metas)
         let alive: Vec<u32> = self.sessions.lock().unwrap().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, _)| *id).collect();
         let metas = self.metas.lock().unwrap();
@@ -168,6 +177,22 @@ fn spawn_scheduler(reg: Arc<Registry>) {
         loop {
             tick.tick().await;
             n += 1;
+            if n == 1 {
+                // folders parked by worktree removals in an earlier run
+                let r = reg.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    for pr in crate::projects::load(&r.store) {
+                        for w in axelstra_core::git::worktree_list(std::path::Path::new(&pr.path)).unwrap_or_default() {
+                            if let Some(parent) = std::path::Path::new(&w.path).parent() {
+                                if !w.is_main {
+                                    axelstra_core::git::purge_trash(parent);
+                                }
+                            }
+                        }
+                    }
+                })
+                .await;
+            }
             if n % 20 == 0 && reg.saved.with_file_name("janitor.on").exists() {
                 let r = reg.clone();
                 let _ = tokio::task::spawn_blocking(move || {
@@ -241,6 +266,7 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
         runs: Default::default(),
         auto_lock: Default::default(),
         flows: Default::default(),
+        plist: Default::default(),
         specs: Default::default(),
         pending: Mutex::new(
             std::fs::read_to_string(&saved).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default(),
@@ -369,7 +395,13 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
                     break;
                 }
                 let mut after: Vec<Box<dyn FnOnce() + Send>> = Vec::new();
-                let res = dispatch(&req, &reg, &tx, &mut subs, &mut authed, &token, &mut after);
+                // dispatch does blocking work (git, process spawns, files): off the async workers, of which there are few
+                let t0 = std::time::Instant::now();
+                let res = tokio::task::block_in_place(|| dispatch(&req, &reg, &tx, &mut subs, &mut authed, &token, &mut after));
+                // calls that wait on purpose are not slow
+                if !matches!(req.method.as_str(), "ask" | "msg.ask" | "session.wait" | "hello") {
+                    crate::lag::note(&format!("daemon {}", req.method), t0.elapsed(), 30);
+                }
                 let body = match res {
                     Ok(v) => json!({"id": req.id, "result": v}),
                     Err(e) => json!({"id": req.id, "error": format!("{e:#}")}),
@@ -386,7 +418,11 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
             INPUT if authed => {
                 if let Some((id, data)) = split_session(&payload) {
                     if let Some(s) = reg.get(id) {
-                        let _ = s.write(data);
+                        let t0 = std::time::Instant::now();
+                        tokio::task::block_in_place(|| {
+                            let _ = s.write(data);
+                        });
+                        crate::lag::note("daemon pty write", t0.elapsed(), 20);
                     }
                 }
             }
@@ -409,6 +445,10 @@ fn dispatch(
     after: &mut Vec<Box<dyn FnOnce() + Send>>,
 ) -> Result<Value> {
     let p = &req.params;
+    // anything that changes projects or worktrees makes the cached project list stale
+    if (req.method.starts_with("worktree.") && req.method != "worktree.status") || (req.method.starts_with("project.") && !matches!(req.method.as_str(), "project.list" | "project.logo" | "project.log")) {
+        *reg.plist.lock().unwrap() = None;
+    }
     let sid = || -> Result<u32> {
         Ok(p.get("id").and_then(Value::as_u64).ok_or_else(|| anyhow::anyhow!("missing id"))? as u32)
     };
@@ -513,17 +553,28 @@ fn dispatch(
                 if !snap.is_empty() {
                     let _ = tx.send(session_frame(OUTPUT, id, &snap));
                 }
+                let mut quiet_ticks = 0u32;
                 loop {
                     if stop.load(Ordering::SeqCst) {
                         return;
                     }
                     match rx.recv_timeout(Duration::from_millis(200)) {
                         Ok(d) => {
+                            quiet_ticks = 0;
                             if tx.send(session_frame(OUTPUT, id, &d)).is_err() {
                                 return;
                             }
                         }
                         Err(RecvTimeoutError::Timeout) => {
+                            // an empty frame every 5 quiet seconds: a client that stopped listening (its tab closed) wakes up,
+                            // sees it is detached and hangs up, instead of staying blocked until this session prints again
+                            quiet_ticks += 1;
+                            if quiet_ticks >= 25 {
+                                quiet_ticks = 0;
+                                if tx.send(session_frame(OUTPUT, id, &[])).is_err() {
+                                    return;
+                                }
+                            }
                             // ConPTY may keep the output pipe open after the process is gone
                             if s.try_wait().is_some() {
                                 while let Ok(d) = rx.recv_timeout(Duration::from_millis(150)) {
@@ -679,7 +730,9 @@ fn dispatch(
                 if let Some(id) = latest {
                     // a conversation with no replies (cleared, never used) is not worth resuming: start clean
                     let cwd = rec["cwd"].as_str().or(rec["meta"]["worktree"].as_str()).unwrap_or("");
-                    let empty = crate::agentlog::claude_usage(cwd, Some(&id)).map(|u| u.messages == 0).unwrap_or(true);
+                    // only a conversation file that exists and has no replies counts as empty; a file that cannot be found
+                    // (another config dir, a different path spelling) is resumed and, failing that, started fresh
+                    let empty = crate::agentlog::claude_usage(cwd, Some(&id)).map(|u| u.messages == 0).unwrap_or(false);
                     if empty {
                         rec["meta"]["blank"] = Value::Bool(true);
                     }
@@ -687,6 +740,21 @@ fn dispatch(
                 }
             }
             Ok(Value::Array(v))
+        }
+        "session.pending_remove" => {
+            // one restored (or deliberately skipped) entry leaves the list; the rest wait, so a failure midway loses nothing
+            let rec = &p["rec"];
+            let same = |a: &Value| match (a["meta"]["key"].as_str(), rec["meta"]["key"].as_str()) {
+                (Some(x), Some(y)) => x == y,
+                _ => a["program"] == rec["program"] && a["cwd"] == rec["cwd"] && a["label"] == rec["label"],
+            };
+            let mut list = reg.pending.lock().unwrap();
+            if let Some(i) = list.iter().position(same) {
+                list.remove(i);
+            }
+            drop(list);
+            reg.persist();
+            Ok(json!({}))
         }
         "session.pending_clear" => {
             reg.pending.lock().unwrap().clear();
@@ -734,6 +802,11 @@ fn dispatch(
             Ok(json!({"usage": u}))
         }
         "project.list" => {
+            if let Some((at, v)) = reg.plist.lock().unwrap().as_ref() {
+                if at.elapsed() < Duration::from_secs(3) {
+                    return Ok(v.clone());
+                }
+            }
             let ps = crate::projects::load(&reg.store);
             let v: Vec<Value> = ps
                 .iter()
@@ -746,7 +819,9 @@ fn dispatch(
                            "setup": pr.setup, "default_branch": axelstra_core::git::default_branch(repo), "slug": ident.slug, "icon_url": ident.icon_url, "remote": ident.remote})
                 })
                 .collect();
-            Ok(Value::Array(v))
+            let all = Value::Array(v);
+            *reg.plist.lock().unwrap() = Some((std::time::Instant::now(), all.clone()));
+            Ok(all)
         }
         "git.changes" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;

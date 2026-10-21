@@ -65,6 +65,19 @@ impl Write for Conn {
     }
 }
 
+/// An error the daemon itself returned (the call arrived and was refused), as opposed to a broken connection:
+/// retrying such a call would only repeat the refusal, or worse, repeat a side effect.
+#[derive(Debug)]
+pub struct Remote(pub String);
+
+impl std::fmt::Display for Remote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Remote {}
+
 pub struct Client {
     rd: Conn,
     wr: Conn,
@@ -119,7 +132,7 @@ impl Client {
             match self.read()? {
                 Frame::Response(v) if v["id"].as_u64() == Some(id) => {
                     if let Some(e) = v.get("error") {
-                        bail!("{method}: {}", e.as_str().unwrap_or("error"));
+                        return Err(anyhow::Error::new(Remote(format!("{method}: {}", e.as_str().unwrap_or("error")))));
                     }
                     return Ok(v["result"].clone());
                 }

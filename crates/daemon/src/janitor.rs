@@ -11,6 +11,11 @@ use std::process::Command;
 
 /// Why this branch counts as merged, `None` when it does not (or cannot be told).
 pub fn merged_reason(repo: &Path, branch: &str, default: &str) -> Option<String> {
+    // a branch nobody committed to is "inside" the default branch too, and must not be mistaken for merged work
+    if !has_own_commits(repo, branch) {
+        return None;
+    }
+    let tip = git::run(repo, &["rev-parse", branch]).ok().filter(|o| o.ok).map(|o| o.stdout.trim().to_string())?;
     let upstream = format!("origin/{default}");
     if git::run(repo, &["merge-base", "--is-ancestor", branch, &upstream]).map(|o| o.ok).unwrap_or(false) {
         return Some(format!("already in {upstream}"));
@@ -18,12 +23,22 @@ pub fn merged_reason(repo: &Path, branch: &str, default: &str) -> Option<String>
     let o = git::quiet(&mut Command::new("gh"))
         .current_dir(repo)
         .env("GH_PROMPT_DISABLED", "1")
-        .args(["pr", "list", "--state", "merged", "--head", branch, "--limit", "1", "--json", "number"])
+        .args(["pr", "list", "--state", "merged", "--head", branch, "--limit", "1", "--json", "number,headRefOid"])
         .output()
         .ok()
         .filter(|o| o.status.success())?;
     let v: Value = serde_json::from_slice(&o.stdout).ok()?;
-    v.as_array()?.first().and_then(|p| p["number"].as_u64()).map(|n| format!("PR #{n} merged"))
+    let pr = v.as_array()?.first()?.clone();
+    // the merged PR must be exactly what is here: commits added after the merge would be lost with the branch
+    if pr["headRefOid"].as_str() != Some(tip.as_str()) {
+        return None;
+    }
+    pr["number"].as_u64().map(|n| format!("PR #{n} merged"))
+}
+
+/// True when the branch's reflog records a commit made on it (a fresh branch only has its creation).
+pub fn has_own_commits(repo: &Path, branch: &str) -> bool {
+    git::run(repo, &["reflog", "show", "--format=%gs", branch]).map(|o| o.ok && o.stdout.lines().any(|l| l.starts_with("commit"))).unwrap_or(false)
 }
 
 fn sweep_project(p: &Project, busy: &dyn Fn(&str) -> bool, dry: bool, out: &mut Vec<Value>) -> Result<()> {
@@ -71,7 +86,14 @@ mod tests {
         g(&commit);
         // a local "origin/main" stands in for the remote
         g(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
-        g(&["branch", "ax/done"]);
+        // created and never committed to: not merged work
+        g(&["branch", "ax/fresh"]);
+        assert!(merged_reason(&dir, "ax/fresh", "main").is_none());
+        g(&["checkout", "-q", "-b", "ax/done"]);
+        g(&commit);
+        g(&["checkout", "-q", "main"]);
+        g(&["merge", "-q", "--ff-only", "ax/done"]);
+        g(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
         g(&["checkout", "-q", "-b", "ax/new"]);
         g(&commit);
         assert_eq!(merged_reason(&dir, "ax/done", "main").as_deref(), Some("already in origin/main"));

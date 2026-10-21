@@ -68,7 +68,16 @@ pub fn current_branch(repo: &Path) -> Result<String> {
     must(repo, &["rev-parse", "--abbrev-ref", "HEAD"])
 }
 
+/// `git worktree list` is asked many times a second by the UI and the daemon (every folder check starts a process):
+/// the answer is reused for a moment and dropped whenever a worktree is added or removed here.
+static WT_CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, (std::time::Instant, Vec<Worktree>)>>> = std::sync::Mutex::new(None);
+
+pub fn forget_worktree_lists() {
+    *WT_CACHE.lock().unwrap() = None;
+}
+
 pub fn worktree_add(repo: &Path, path: &Path, branch: &str, base: &str) -> Result<()> {
+    forget_worktree_lists();
     must(repo, &["worktree", "add", "-b", branch, &path.to_string_lossy(), base])?;
     Ok(())
 }
@@ -76,6 +85,7 @@ pub fn worktree_add(repo: &Path, path: &Path, branch: &str, base: &str) -> Resul
 /// Worktree removal often fails on Windows while a handle is still open,
 /// so retry with backoff and finally park the directory in a trash folder.
 pub fn worktree_remove(repo: &Path, path: &Path) -> Result<()> {
+    forget_worktree_lists();
     let p = path.to_string_lossy().to_string();
     for ms in [100u64, 300, 1000, 3000] {
         if run(repo, &["worktree", "remove", "--force", &p])?.ok {
@@ -89,9 +99,28 @@ pub fn worktree_remove(repo: &Path, path: &Path) -> Result<()> {
             path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()
         ));
         std::fs::rename(path, &trash).with_context(|| format!("park {}", path.display()))?;
+        // the parked folder (node_modules and all) is deleted in the background once whatever held it lets go
+        if let Some(dir) = trash.parent().map(Path::to_path_buf) {
+            std::thread::spawn(move || {
+                for _ in 0..6 {
+                    sleep(Duration::from_secs(10));
+                    purge_trash(&dir);
+                }
+            });
+        }
     }
     must(repo, &["worktree", "prune"])?;
     Ok(())
+}
+
+/// Deletes the `.axelstra-trash-*` folders left in `dir` by removals that had to park a worktree.
+pub fn purge_trash(dir: &Path) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        if e.file_name().to_string_lossy().starts_with(".axelstra-trash-") {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
 }
 
 pub fn branch_delete(repo: &Path, branch: &str) -> Result<()> {
@@ -160,6 +189,18 @@ pub fn repo_root(path: &Path) -> Result<PathBuf> {
 }
 
 pub fn worktree_list(repo: &Path) -> Result<Vec<Worktree>> {
+    let key = repo.to_string_lossy().to_string();
+    if let Some((at, v)) = WT_CACHE.lock().unwrap().as_ref().and_then(|m| m.get(&key)) {
+        if at.elapsed() < Duration::from_secs(3) {
+            return Ok(v.clone());
+        }
+    }
+    let v = worktree_list_uncached(repo)?;
+    WT_CACHE.lock().unwrap().get_or_insert_with(Default::default).insert(key, (std::time::Instant::now(), v.clone()));
+    Ok(v)
+}
+
+fn worktree_list_uncached(repo: &Path) -> Result<Vec<Worktree>> {
     let out = must(repo, &["worktree", "list", "--porcelain"])?;
     let mut v: Vec<Worktree> = Vec::new();
     for block in out.split("\n\n") {

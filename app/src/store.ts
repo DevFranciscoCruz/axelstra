@@ -97,6 +97,15 @@ export const [projects, setProjects] = createSignal<Project[]>([]);
 export const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
 const [error, setErrorSig] = createSignal("");
 export { error };
+/** a short informational message (not a failure): shown for a few seconds */
+export const [notice, setNoticeSig] = createSignal("");
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+export const showNotice = (m: string) => {
+  setNoticeSig(m);
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => setNoticeSig(""), 9000);
+};
+
 /** errors set by an action stay until dismissed; only the session poll clears its own */
 let errorFromPoll = false;
 export const setError = (m: string) => {
@@ -232,6 +241,16 @@ const refreshFlows = async () => {
   }
 };
 
+/** The new list, but with the old object wherever nothing changed: keyed lists then keep their DOM (tabs keep focus,
+ *  icons do not reload) instead of being rebuilt on every poll. */
+export const keepSame = <T>(prev: T[], next: T[], key: (x: T) => string | number): T[] => {
+  const old = new Map(prev.map((x) => [key(x), x] as const));
+  return next.map((n) => {
+    const o = old.get(key(n));
+    return o !== undefined && JSON.stringify(o) === JSON.stringify(n) ? o : n;
+  });
+};
+
 export const refreshSessions = async () => {
   void refreshFlows();
   try {
@@ -240,7 +259,7 @@ export const refreshSessions = async () => {
     // a worktree on screen is being looked at: a flag left from earlier (or set while the window was hidden) is stale
     const cur = selectedWorktree();
     if (cur && !document.hidden && attention().has(norm(cur))) setAttention((a) => { const n = new Set(a); n.delete(norm(cur)); return n; });
-    setSessions(list);
+    setSessions((prev) => keepSame(prev, list, (s) => s.id));
     if (errorFromPoll) setErrorSig("");
   } catch (e) {
     setErrorSig(String(e));
@@ -285,7 +304,7 @@ const refreshPrs = async (list: Project[]) => {
 export const refreshProjects = async () => {
   try {
     const list = await listProjects();
-    setProjects(list);
+    setProjects((prev) => keepSame(prev, list, (p) => p.id));
     void refreshWtStatus(list);
     void refreshPrs(list);
   } catch (e) {
