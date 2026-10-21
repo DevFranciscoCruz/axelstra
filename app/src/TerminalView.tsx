@@ -90,7 +90,10 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
         if (retry) setTimeout(() => void attach(false), 600);
         else term.write(`\r\n\x1b[31m[axelstra] não foi possível ligar a esta sessão: ${String(e)}\x1b[0m\r\n`);
       });
-    void attach(true);
+    void attach(true).then(() => {
+      told = ""; // a fresh subscription: tell the PTY the size again
+      pushSize();
+    });
 
     // WebView2 gates navigator.clipboard behind a permission prompt, so the clipboard
     // goes through the native side. Images are saved to a temp PNG and typed as a path.
@@ -146,18 +149,40 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       .then((u) => (gone ? u() : (unDrop = u)));
 
     term.onData((d) => void writeSession(props.id, d));
-    // dragging a panel fires many sizes; only the last one is sent (each resize makes the agent redraw everything)
+    // The agent draws for the size the PTY has, so the PTY must always end up with the size xterm shows: a mismatch
+    // wraps and overlaps the whole screen. The size is sent only while the terminal is visible, remembered once the
+    // daemon accepted it, and sent again (also after a failure) whenever it differs from what the PTY was told.
+    const visible = () => host.clientWidth > 0 && host.clientHeight > 0;
+    let told = "";
     let resizeTimer: ReturnType<typeof setTimeout> | undefined;
-    term.onResize(({ cols, rows }) => {
+    const pushSize = () => {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => void resizeSession(props.id, cols, rows), 80);
+      if (gone || !visible()) return;
+      const { cols, rows } = term;
+      const key = `${cols}x${rows}`;
+      if (key === told) return;
+      resizeSession(props.id, cols, rows).then(
+        () => {
+          if (term.cols === cols && term.rows === rows) told = key;
+        },
+        () => {
+          resizeTimer = setTimeout(pushSize, 500);
+        },
+      );
+    };
+    // dragging a panel fires many sizes; only the last one is sent (each resize makes the agent redraw everything)
+    term.onResize(() => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(pushSize, 80);
     });
-    void resizeSession(props.id, term.cols, term.rows);
 
     // a hidden terminal (display: none) has no size: fitting it would shrink its PTY to nothing
     const refit = () => {
-      if (host.clientWidth > 0 && host.clientHeight > 0) fit.fit();
+      if (!visible()) return;
+      fit.fit();
+      pushSize();
     };
+    refit();
     const ro = new ResizeObserver(refit);
     ro.observe(host);
 
