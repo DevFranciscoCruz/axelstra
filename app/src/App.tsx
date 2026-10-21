@@ -60,6 +60,7 @@ import {
   refreshChanges,
   refreshProjects,
   refreshSessions,
+  sessions,
   showNotice,
   openSession,
   selectedWorktree,
@@ -214,6 +215,24 @@ export function App() {
   }));
 
   const tabs = () => sessionsOf(selectedWorktree());
+
+  // Terminals of the last few tabs stay mounted (hidden): switching back is instant, keeps the scroll position and
+  // does not replay the history. Older ones are unmounted. Order is stable so nothing is moved in the DOM.
+  const KEEP = 5;
+  const [kept, setKept] = createSignal<number[]>([]);
+  const lastUsed = new Map<number, number>();
+  createEffect(() => {
+    const id = activeSession();
+    if (id === null || id === undefined) return;
+    lastUsed.set(id, Date.now());
+    setKept((k) => {
+      const next = k.includes(id) ? k : [...k, id];
+      if (next.length <= KEEP) return next;
+      const oldest = next.filter((x) => x !== id).sort((a, b) => (lastUsed.get(a) ?? 0) - (lastUsed.get(b) ?? 0))[0];
+      return next.filter((x) => x !== oldest);
+    });
+  });
+  const keptLive = () => kept().filter((id) => id !== splitSession() && sessions().some((s) => s.id === id));
   const current = () => findWorktree(selectedWorktree());
 
   // reload the change list when the worktree, its project data or the compare mode changes
@@ -532,10 +551,13 @@ export function App() {
                   </div>
                 }
               >
-                {/* keyed: switching tab remounts the terminal and replays its history */}
-                <Show when={activeSession()} keyed>
-                  {(id) => <TerminalView id={id} onExit={() => void refreshSessions()} />}
-                </Show>
+                <For each={keptLive()}>
+                  {(id) => (
+                    <div class="term-slot" style={{ display: id === activeSession() ? "flex" : "none" }}>
+                      <TerminalView id={id} active={() => id === activeSession()} onExit={() => void refreshSessions()} />
+                    </div>
+                  )}
+                </For>
                 <Show when={splitSession() !== null && splitSession() !== activeSession() && tabs().some((s) => s.id === splitSession())}>
                   <div
                     class="split-sep"

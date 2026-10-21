@@ -181,6 +181,12 @@ button.primary {
   margin: auto;
 }
 
+.term-slot {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
 .term-host {
   flex: 1;
   min-width: 0;

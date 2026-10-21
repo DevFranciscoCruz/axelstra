@@ -5,7 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { onCleanup, onMount } from "solid-js";
+import { createEffect, onCleanup, onMount } from "solid-js";
 import { fsStat, resizeSession, writeSession } from "./api";
 import { guarded, norm, selectedWorktree, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban } from "./store";
 
@@ -41,7 +41,7 @@ async function openPathLink(raw: string) {
  * One xterm bound to one daemon session. Only the visible terminal is mounted:
  * the daemon keeps the history, so re-attaching replays what was missed.
  */
-export function TerminalView(props: { id: number; focus?: boolean; onExit?: (code: number | null) => void }) {
+export function TerminalView(props: { id: number; focus?: boolean; active?: () => boolean; onExit?: (code: number | null) => void }) {
   let host!: HTMLDivElement;
 
   onMount(() => {
@@ -85,7 +85,12 @@ export function TerminalView(props: { id: number; focus?: boolean; onExit?: (cod
       if (m instanceof ArrayBuffer) term.write(new Uint8Array(m));
       else if (m && (m as { event?: string }).event === "session.exit") props.onExit?.((m as { code: number | null }).code);
     };
-    invoke("session_attach", { id: props.id, onData: channel });
+    const attach = (retry: boolean) =>
+      invoke("session_attach", { id: props.id, onData: channel }).catch((e) => {
+        if (retry) setTimeout(() => void attach(false), 600);
+        else term.write(`\r\n\x1b[31m[axelstra] não foi possível ligar a esta sessão: ${String(e)}\x1b[0m\r\n`);
+      });
+    void attach(true);
 
     // WebView2 gates navigator.clipboard behind a permission prompt, so the clipboard
     // goes through the native side. Images are saved to a temp PNG and typed as a path.
@@ -141,10 +146,19 @@ export function TerminalView(props: { id: number; focus?: boolean; onExit?: (cod
       .then((u) => (gone ? u() : (unDrop = u)));
 
     term.onData((d) => void writeSession(props.id, d));
-    term.onResize(({ cols, rows }) => void resizeSession(props.id, cols, rows));
+    // dragging a panel fires many sizes; only the last one is sent (each resize makes the agent redraw everything)
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+    term.onResize(({ cols, rows }) => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => void resizeSession(props.id, cols, rows), 80);
+    });
     void resizeSession(props.id, term.cols, term.rows);
 
-    const ro = new ResizeObserver(() => fit.fit());
+    // a hidden terminal (display: none) has no size: fitting it would shrink its PTY to nothing
+    const refit = () => {
+      if (host.clientWidth > 0 && host.clientHeight > 0) fit.fit();
+    };
+    const ro = new ResizeObserver(refit);
     ro.observe(host);
 
     // Moving the window to a screen with another scale leaves the WebGL glyph atlas at the old size (garbled,
@@ -156,7 +170,7 @@ export function TerminalView(props: { id: number; focus?: boolean; onExit?: (cod
       } catch {
         /* canvas renderer has no atlas */
       }
-      fit.fit();
+      refit();
       term.refresh(0, term.rows - 1);
       watchDpr();
     };
@@ -166,7 +180,16 @@ export function TerminalView(props: { id: number; focus?: boolean; onExit?: (cod
       dpr.addEventListener("change", onDprChange, { once: true });
     };
     watchDpr();
-    if (props.focus !== false) term.focus();
+    if (props.focus !== false && (props.active?.() ?? true)) term.focus();
+    // a terminal that was hidden (another tab in front) is fitted and focused again when it comes back
+    createEffect(() => {
+      if (!(props.active?.() ?? true)) return;
+      requestAnimationFrame(() => {
+        refit();
+        term.refresh(0, term.rows - 1);
+        if (props.focus !== false) term.focus();
+      });
+    });
 
     onCleanup(() => {
       gone = true;
