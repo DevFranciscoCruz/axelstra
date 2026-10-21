@@ -86,6 +86,27 @@ pub fn worktree_add(repo: &Path, path: &Path, branch: &str, base: &str) -> Resul
 /// so retry with backoff and finally park the directory in a trash folder.
 pub fn worktree_remove(repo: &Path, path: &Path) -> Result<()> {
     forget_worktree_lists();
+    // Fast path: renaming the folder is instant however big it is (node_modules, target/...), so the caller does not
+    // wait for the files to be deleted. git forgets the worktree, and the folder is emptied in the background.
+    if path.exists() {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        let trash = path.with_file_name(format!(
+            ".axelstra-trash-{}-{stamp}",
+            path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()
+        ));
+        if std::fs::rename(path, &trash).is_ok() {
+            must(repo, &["worktree", "prune"])?;
+            if let Some(dir) = trash.parent().map(Path::to_path_buf) {
+                std::thread::spawn(move || {
+                    for wait in [0u64, 10, 10, 30, 60] {
+                        sleep(Duration::from_secs(wait));
+                        purge_trash(&dir);
+                    }
+                });
+            }
+            return Ok(());
+        }
+    }
     let p = path.to_string_lossy().to_string();
     for ms in [100u64, 300, 1000, 3000] {
         if run(repo, &["worktree", "remove", "--force", &p])?.ok {
