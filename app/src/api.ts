@@ -131,6 +131,18 @@ export const watchWorktree = async (worktree: string | null, onChanged: (worktre
 
 export const listSessions = () => call<SessionInfo[]>("session.list");
 
+/** Size of the last terminal that was on screen. A new session starts at this size, so the agent draws its first screen
+ * right and is not resized a moment later (a resize leaves part of the old screen behind). */
+let lastTerm = { cols: 0, rows: 0 };
+export const rememberTermSize = (cols: number, rows: number) => {
+  if (cols >= 20 && rows >= 5) lastTerm = { cols, rows };
+};
+const startSize = () =>
+  lastTerm.cols
+    ? lastTerm
+    : // nothing on screen yet (restoring at startup): the terminal area is roughly the window minus the side panels
+      { cols: Math.max(80, Math.floor((window.innerWidth * 0.7 - 16) / 7.8)), rows: Math.max(24, Math.floor((window.innerHeight - 110) / 15)) };
+
 export const spawnSession = (
   program: string,
   args: string[] = [],
@@ -138,7 +150,7 @@ export const spawnSession = (
   cwd?: string,
   meta?: SessionMeta,
   env?: Record<string, string>,
-) => call<{ id: number }>("session.spawn", { program, args, label, cwd, meta, env, cols: 120, rows: 30 });
+) => call<{ id: number }>("session.spawn", { program, args, label, cwd, meta, env, ...startSize() });
 
 export const killSession = (id: number) => call("session.kill", { id });
 export const removeSession = (id: number) => call("session.remove", { id });
