@@ -73,30 +73,37 @@ export const restartNote = (interrupted: boolean, lost: string[]) => {
 };
 
 /** Brings back the sessions of a previous daemon run (reboot, installer): shells reopen, agents resume their conversation. */
-export const restoreSessions = async (): Promise<number> => {
+export const restoreSessions = async (): Promise<{ restored: number; skipped: number; failed: string[] }> => {
   const pending = await call<{ program: string; args?: string[]; cwd?: string; label?: string; meta?: SessionMeta }[]>("session.pending");
-  if (!pending.length) return 0;
-  await call("session.pending_clear");
-  let n = 0;
+  let restored = 0;
+  let skipped = 0;
+  const failed: string[] = [];
   for (const r of pending) {
+    const m = r.meta;
     try {
-      const m = r.meta;
       if (m?.kind === "agent" && m.agent && m.project && m.worktree) {
         // a cleared / never used conversation has nothing to bring back: no tab, no process
-        if ((m as { blank?: boolean }).blank) continue;
-        const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume });
-        const x = m as { interrupted?: boolean; lost_workers?: string[] };
-        const note = restartNote(!!x.interrupted, x.lost_workers ?? []);
-        if (note) void nudge(id, note).catch(() => 0);
+        if ((m as { blank?: boolean }).blank) {
+          skipped++;
+        } else {
+          const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume });
+          const x = m as { interrupted?: boolean; lost_workers?: string[] };
+          const note = restartNote(!!x.interrupted, x.lost_workers ?? []);
+          if (note) void nudge(id, note).catch(() => 0);
+          restored++;
+        }
       } else {
         await spawnSession(r.program, r.args ?? [], r.label ?? undefined, r.cwd, m ?? undefined, (r as { env?: Record<string, string> }).env);
+        restored++;
       }
-      n++;
     } catch {
-      /* a worktree that no longer exists just is not restored */
+      // usually a worktree that no longer exists
+      failed.push(r.label ?? m?.worktree ?? r.cwd ?? r.program);
     }
+    // this entry is dealt with either way; the others stay listed until their turn, so a crash midway loses nothing
+    await call("session.pending_remove", { rec: r }).catch(() => 0);
   }
-  return n;
+  return { restored, skipped, failed };
 };
 
 /** Change events for the selected worktree: the daemon watches the files and tells us, so git runs only when needed. */

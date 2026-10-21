@@ -1,4 +1,4 @@
-import { Show, createEffect, createSignal, onCleanup } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { TokenUsage, agentUsage } from "./api";
 import { activeSession, sessions } from "./store";
 
@@ -7,12 +7,17 @@ const fmt = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `
 /** tokens spent by the Claude conversation in the active tab, read from Claude's own transcript */
 export function UsageChip() {
   const [usage, setUsage] = createSignal<TokenUsage | null>(null);
-  createEffect(() => {
+  // only a change of tab or conversation restarts the polling, not every refresh of the session list
+  const target = createMemo(() => {
     const s = sessions().find((x) => x.id === activeSession());
     const cwd = s?.meta?.worktree;
-    const conv = s?.meta?.resume ?? s?.meta?.key;
+    if (!s || s.meta?.kind !== "agent" || s.meta.agent !== "claude" || !cwd) return "";
+    return JSON.stringify([cwd, s.meta?.resume ?? s.meta?.key ?? ""]);
+  });
+  createEffect(() => {
+    const [cwd, conv] = target() ? (JSON.parse(target()) as [string, string]) : ["", ""];
     setUsage(null);
-    if (!s || s.meta?.kind !== "agent" || s.meta.agent !== "claude" || !cwd) return;
+    if (!cwd) return;
     let alive = true;
     const load = () => {
       if (document.hidden) return;

@@ -60,6 +60,7 @@ import {
   refreshChanges,
   refreshProjects,
   refreshSessions,
+  showNotice,
   openSession,
   selectedWorktree,
   sessionsOf,
@@ -114,7 +115,17 @@ export function App() {
     labelIcons();
     void refreshProjects();
     // sessions of a previous daemon run come back before the first list, so the sidebar never shows them missing
-    void restoreSessions().catch(() => 0).then(() => refreshSessions());
+    void restoreSessions()
+      .catch(() => null)
+      .then((r) => {
+        void refreshSessions();
+        if (!r) return;
+        const bits: string[] = [];
+        if (r.restored) bits.push(`${r.restored} ${r.restored === 1 ? "sessão restaurada" : "sessões restauradas"}`);
+        if (r.skipped) bits.push(`${r.skipped} ${r.skipped === 1 ? "conversa vazia ignorada" : "conversas vazias ignoradas"}`);
+        if (r.failed.length) bits.push(`não foi possível restaurar: ${r.failed.join(", ")}`);
+        if (bits.length) showNotice(`Ao reabrir: ${bits.join(" · ")}.`);
+      });
     // The daemon has no push events yet: poll only while the window is visible.
     const fast = setInterval(() => !document.hidden && void refreshSessions(), 2000);
     // git is the costly part: the change list only matters for the selected worktree, and the project

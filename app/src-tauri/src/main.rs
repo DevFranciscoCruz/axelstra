@@ -93,6 +93,8 @@ fn with_client<T>(slot: &Mutex<Option<Client>>, f: impl Fn(&mut Client) -> Resul
     }
     match f(g.as_mut().unwrap()) {
         Ok(v) => Ok(v),
+        // the daemon answered with an error: the connection is fine and the call must not run twice
+        Err(e) if e.downcast_ref::<axelstra_daemon::client::Remote>().is_some() => Err(e),
         Err(_) => {
             // the connection may be stale (daemon restarted): reconnect once
             *g = Some(connect()?);
@@ -121,23 +123,9 @@ async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, par
     .map_err(|e| e.to_string())?
 }
 
-/// Typing lag diagnosis: anything slower than this is written to `<data dir>/lag.log` (kept small).
-const LAG_MS: u128 = 40;
-
+/// Typing lag diagnosis: slow steps go to `<data dir>/lag.log` (shared with the daemon's own slow calls).
 fn lag_note(what: &str, took: std::time::Duration) {
-    if took.as_millis() < LAG_MS {
-        return;
-    }
-    let path = axelstra_daemon::proto::data_dir().join("lag.log");
-    // start over when it grows past 256 KB
-    if std::fs::metadata(&path).map(|m| m.len() > 256 * 1024).unwrap_or(false) {
-        let _ = std::fs::remove_file(&path);
-    }
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        use std::io::Write;
-        let _ = writeln!(f, "{now} {what}: {} ms", took.as_millis());
-    }
+    axelstra_daemon::lag::note(what, took, 40);
 }
 
 /// The webview reports its own stalls (main thread blocked) here.
@@ -146,17 +134,41 @@ fn lag_log(what: String, ms: u64) {
     lag_note(&format!("webview {what}"), std::time::Duration::from_millis(ms));
 }
 
-#[tauri::command]
-async fn session_write(state: tauri::State<'_, Arc<State>>, id: u32, data: String) -> Result<(), String> {
-    let st = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let t = std::time::Instant::now();
-        let r = with_client(&st.input, |c| c.send_input(id, data.as_bytes())).map_err(|e| format!("{e:#}"));
-        lag_note("keystroke to daemon", t.elapsed());
-        r
+/// Keystrokes go to the daemon through one writer thread: in order (a lock race between per-key tasks could swap
+/// them), and a stalled daemon never blocks the UI. Bytes queued for the same session are sent as one frame.
+static INPUT_TX: std::sync::OnceLock<std::sync::mpsc::Sender<(u32, Vec<u8>)>> = std::sync::OnceLock::new();
+
+fn input_sender(st: &Arc<State>) -> &'static std::sync::mpsc::Sender<(u32, Vec<u8>)> {
+    INPUT_TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<(u32, Vec<u8>)>();
+        let st = st.clone();
+        std::thread::spawn(move || {
+            while let Ok((mut id, mut data)) = rx.recv() {
+                let mut pending: Vec<(u32, Vec<u8>)> = vec![];
+                while let Ok((i, d)) = rx.try_recv() {
+                    if i == id {
+                        data.extend(d);
+                    } else {
+                        pending.push((id, std::mem::take(&mut data)));
+                        id = i;
+                        data = d;
+                    }
+                }
+                pending.push((id, data));
+                for (id, data) in pending {
+                    let t = std::time::Instant::now();
+                    let _ = with_client(&st.input, |c| c.send_input(id, &data));
+                    lag_note("keystroke to daemon", t.elapsed());
+                }
+            }
+        });
+        tx
     })
-    .await
-    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn session_write(state: tauri::State<'_, Arc<State>>, id: u32, data: String) -> Result<(), String> {
+    input_sender(state.inner()).send((id, data.into_bytes())).map_err(|e| e.to_string())
 }
 
 /// Streams a session to the webview: raw bytes for output, a JSON string for events.
@@ -179,6 +191,8 @@ async fn session_attach(
                     break;
                 }
                 let sent = match f {
+                    // the daemon's keep-alive (see the forwarder): only there so a detached tab can hang up
+                    Frame::Output { data, .. } if data.is_empty() => Ok(()),
                     Frame::Output { data, .. } => on_data.send(InvokeResponseBody::Raw(data)),
                     Frame::Event(e) => on_data.send(InvokeResponseBody::Json(e.to_string())),
                     Frame::Response(_) => Ok(()),

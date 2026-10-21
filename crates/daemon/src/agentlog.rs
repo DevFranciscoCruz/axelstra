@@ -215,16 +215,41 @@ pub fn parse_codex_limits(lines: impl Iterator<Item = String>) -> Option<Value> 
     last
 }
 
+/// The newest session files of Codex, which keeps them under `YYYY/MM/DD/rollout-<time>-<id>.jsonl`: walks the date
+/// folders newest first and stops once it has `want` files, instead of listing every conversation ever made.
+pub fn newest_codex_files(root: &Path, want: usize) -> Vec<PathBuf> {
+    fn newest_first(dir: &Path) -> Vec<PathBuf> {
+        let mut v: Vec<PathBuf> = std::fs::read_dir(dir).map(|rd| rd.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+        v.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+        v
+    }
+    let mut out = vec![];
+    for year in newest_first(root).into_iter().filter(|p| p.is_dir()) {
+        for month in newest_first(&year).into_iter().filter(|p| p.is_dir()) {
+            for day in newest_first(&month).into_iter().filter(|p| p.is_dir()) {
+                out.extend(newest_first(&day).into_iter().filter(|p| p.extension().is_some_and(|x| x == "jsonl")));
+                if out.len() >= want {
+                    out.truncate(want);
+                    return out;
+                }
+            }
+        }
+    }
+    // an older layout with the files straight in the root
+    out.extend(newest_first(root).into_iter().filter(|p| p.extension().is_some_and(|x| x == "jsonl")));
+    out.truncate(want);
+    out
+}
+
 /// Rate limits from the newest Codex session file that has them (looks at its last 256 KB).
 pub fn codex_limits() -> Option<Value> {
     use std::io::{Read, Seek, SeekFrom};
-    let mut files = vec![];
-    jsonl_files(&codex_root()?, 0, &mut files);
-    files.sort_by_key(|p| std::cmp::Reverse(mtime(p)));
-    for path in files.into_iter().take(5) {
-        let mut f = std::fs::File::open(&path).ok()?;
-        let len = f.metadata().ok()?.len();
-        f.seek(SeekFrom::Start(len.saturating_sub(256 * 1024))).ok()?;
+    for path in newest_codex_files(&codex_root()?, 5) {
+        let Ok(mut f) = std::fs::File::open(&path) else { continue };
+        let Ok(len) = f.metadata().map(|m| m.len()) else { continue };
+        if f.seek(SeekFrom::Start(len.saturating_sub(256 * 1024))).is_err() {
+            continue;
+        }
         let mut text = String::new();
         let _ = f.read_to_string(&mut text);
         if let Some(mut rl) = parse_codex_limits(text.lines().map(String::from)) {
@@ -271,6 +296,19 @@ mod tests {
     fn project_dir_name_matches_claudes_scheme() {
         assert_eq!(claude_dir_name(r"C:\Users\franc\Desktop\Projetos\axelstra"), "C--Users-franc-Desktop-Projetos-axelstra");
         assert_eq!(claude_dir_name("/home/a b/x.y"), "-home-a-b-x-y");
+    }
+
+    #[test]
+    fn codex_files_are_found_under_the_date_folders_newest_first() {
+        let root = std::env::temp_dir().join(format!("axl-codex-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (d, f) in [("2026/10/19", "rollout-a.jsonl"), ("2026/10/20", "rollout-b.jsonl"), ("2026/09/30", "rollout-c.jsonl")] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+            std::fs::write(root.join(d).join(f), "{}").unwrap();
+        }
+        let names: Vec<String> = newest_codex_files(&root, 2).iter().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).collect();
+        assert_eq!(names, ["rollout-b.jsonl", "rollout-a.jsonl"]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

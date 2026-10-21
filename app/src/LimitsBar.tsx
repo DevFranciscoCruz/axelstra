@@ -1,4 +1,4 @@
-import { Show, createEffect, createSignal, onCleanup } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { ClaudeStatus, CodexLimits, CodexWindow, agentStatus, codexLimits } from "./api";
 import { activeSession, sessions } from "./store";
 
@@ -53,9 +53,12 @@ const codexSecs = (w?: CodexWindow, asOf = 0) => {
 
 /** Claude's 5 h / weekly limits and context (from its status line) and Codex's limits, next to the status bar. */
 export function LimitsBar() {
-  createEffect(() => {
+  const claudeKey = createMemo(() => {
     const s = sessions().find((x) => x.id === activeSession());
-    const key = s?.meta?.agent === "claude" ? s.meta.key : undefined;
+    return s?.meta?.agent === "claude" ? s.meta.key : undefined;
+  });
+  createEffect(() => {
+    const key = claudeKey();
     let alive = true;
     const load = () => {
       if (document.hidden) return;

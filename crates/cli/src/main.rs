@@ -327,7 +327,7 @@ fn main() -> Result<()> {
             let token = proto::load_or_create_token()?;
             // two workers is plenty: the heavy lifting is blocking PTY threads
             tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
+                .worker_threads(4)
                 .enable_all()
                 .build()?
                 .block_on(server::serve(proto::pipe_name(), token))?;

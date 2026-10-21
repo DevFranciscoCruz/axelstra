@@ -6,6 +6,7 @@ pub mod fsops;
 pub mod gh;
 pub mod janitor;
 pub mod kanban;
+pub mod lag;
 pub mod msgbus;
 pub mod ports;
 pub mod projects;
