@@ -66,7 +66,7 @@ export const restartNote = (interrupted: boolean, lost: string[]) => {
   if (interrupted) parts.push("Axelstra was restarted and this conversation was resumed. You were in the middle of a task: continue where you left off.");
   if (lost.length) {
     parts.push(
-      `Workers you started were stopped by the restart and are gone: ${lost.join(", ")}. Their worktrees keep what they had already done. Run \`axelstra ls\` and relaunch what is unfinished (a running \`axelstra flow\` is gone too).`,
+      `Workers you started were stopped by the restart and are gone: ${lost.join(", ")}. Their worktrees keep what they had already done. Run \`axelstra ls\` and relaunch what is unfinished (a running \`axelstra flow\` stopped too: run it again with \`--resume\` and it skips what finished).`,
     );
   }
   return parts.length ? `[axelstra] ${parts.join(" ")}` : "";
@@ -249,6 +249,13 @@ export const computerStatus = () => call<{ enabled: boolean }>("computer.status"
 export const computerEnable = (on: boolean) => call<{ enabled: boolean }>("computer.enable", { on }).then((r) => r.enabled);
 
 export type WorkerLimits = { max_workers: number; workers: number };
+export type SessionRes = { id: number; mem: number; cpu_100ns: number };
+export const sessionResources = () => callBg<{ sessions: SessionRes[]; cores: number }>("session.resources");
+
+/** tasks of running `axelstra flow` plans: queued (waiting for its turn), running, done, failed, blocked */
+export type FlowTask = { id: string; worktree: string; state: string };
+export const flowTasks = () => callBg<{ tasks: FlowTask[] }>("flow.list").then((r) => r.tasks);
+
 export const workerLimits = (max?: number) => call<WorkerLimits>("orch.limits", max === undefined ? {} : { max_workers: max });
 
 /** What Claude Code's status line last reported for an agent tab (context window, 5 h and weekly limits). */

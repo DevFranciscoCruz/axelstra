@@ -1,6 +1,6 @@
 import { ask } from "./Confirm";
 import { createSignal } from "solid-js";
-import { Changes, Commit, GhItem, Project, SessionInfo, Worktree, WtStatus, ghListBg, gitChanges, listProjects, listSessions, worktreeStatus } from "./api";
+import { Changes, Commit, FlowTask, GhItem, Project, SessionInfo, Worktree, WtStatus, flowTasks, ghListBg, gitChanges, listProjects, listSessions, worktreeStatus } from "./api";
 
 /** Paths come back with either slash style; compare them in one normal form. */
 export const norm = (p?: string | null) => (p ?? "").replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
@@ -216,7 +216,24 @@ const trackAgents = (list: SessionInfo[]) => {
   }
 };
 
+/** worktree (normalized path) -> its state in a running flow plan, for worktrees that have no session yet */
+export const [flowState, setFlowState] = createSignal<Record<string, string>>({});
+const refreshFlows = async () => {
+  try {
+    const out: Record<string, string> = {};
+    const rank: Record<string, number> = { running: 4, queued: 3, failed: 2, blocked: 2, done: 1 };
+    for (const t of await flowTasks()) {
+      const k = norm(t.worktree);
+      if (!out[k] || (rank[t.state] ?? 0) > (rank[out[k]] ?? 0)) out[k] = t.state;
+    }
+    setFlowState(out);
+  } catch {
+    /* an older daemon has no flow.list */
+  }
+};
+
 export const refreshSessions = async () => {
+  void refreshFlows();
   try {
     const list = await listSessions();
     trackAgents(list);

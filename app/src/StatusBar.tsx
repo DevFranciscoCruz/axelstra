@@ -67,11 +67,6 @@ export function StatusBar() {
   };
   const ports = () => usage()?.ports ?? [];
   const pct = (n: number) => (n < 10 ? n.toFixed(1) : String(Math.round(n)));
-  const gpuTip = () => {
-    const u = usage();
-    const per = (u?.gpu_adapters ?? []).map(([id, v]) => `${id}: ${pct(v)}%`).join("\n");
-    return `GPU usada pelo Axelstra (app, WebView2 e terminais), no motor mais ocupado${per ? "\n" + per : ""}`;
-  };
 
   return (
     <div class="statusbar">
@@ -98,7 +93,7 @@ export function StatusBar() {
         </span>
       </Show>
       <Show when={usage()?.gpu != null}>
-        <span class="sb-item" title={gpuTip()}>
+        <span class="sb-item">
           <svg {...svg}>
             <rect x="1.5" y="4.5" width="13" height="7" rx="1" />
             <circle cx="8" cy="8" r="2" />

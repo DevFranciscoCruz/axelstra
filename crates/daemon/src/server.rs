@@ -25,6 +25,8 @@ struct Registry {
     runs: Mutex<HashMap<String, Value>>,
     /// serializes read-modify-write of automations.json (UI saves vs the scheduler)
     auto_lock: Mutex<()>,
+    /// running `axelstra flow` plans: flow id -> [{id, worktree, state}] (what the sidebar shows as queued/running/done)
+    flows: Mutex<HashMap<String, Value>>,
     /// spawn requests of live sessions, kept on disk so a daemon restart can bring them back
     specs: Mutex<HashMap<u32, Value>>,
     /// sessions of the previous daemon run, waiting for the UI to restore (or discard) them
@@ -238,6 +240,7 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
         token: token.clone(),
         runs: Default::default(),
         auto_lock: Default::default(),
+        flows: Default::default(),
         specs: Default::default(),
         pending: Mutex::new(
             std::fs::read_to_string(&saved).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default(),
@@ -599,6 +602,21 @@ fn dispatch(
                 }
             }
             Ok(json!({"on": flag.exists()}))
+        }
+        "flow.set" => {
+            let id = p["flow"].as_str().unwrap_or_default().to_string();
+            if !id.is_empty() {
+                reg.flows.lock().unwrap().insert(id, p["tasks"].clone());
+            }
+            Ok(json!({}))
+        }
+        "flow.clear" => {
+            reg.flows.lock().unwrap().remove(p["flow"].as_str().unwrap_or_default());
+            Ok(json!({}))
+        }
+        "flow.list" => {
+            let all: Vec<Value> = reg.flows.lock().unwrap().values().flat_map(|t| t.as_array().cloned().unwrap_or_default()).collect();
+            Ok(json!({"tasks": all}))
         }
         "codex.limits" => Ok(json!({"limits": tokio::task::block_in_place(crate::agentlog::codex_limits)})),
         "computer.status" => Ok(json!({"enabled": reg.computer.load(Ordering::SeqCst)})),
