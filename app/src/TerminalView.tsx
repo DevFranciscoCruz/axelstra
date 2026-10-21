@@ -146,6 +146,26 @@ export function TerminalView(props: { id: number; focus?: boolean; onExit?: (cod
 
     const ro = new ResizeObserver(() => fit.fit());
     ro.observe(host);
+
+    // Moving the window to a screen with another scale leaves the WebGL glyph atlas at the old size (garbled,
+    // overlapping text): rebuild it and refit whenever the pixel ratio changes.
+    let dpr: MediaQueryList | null = null;
+    const onDprChange = () => {
+      try {
+        term.clearTextureAtlas();
+      } catch {
+        /* canvas renderer has no atlas */
+      }
+      fit.fit();
+      term.refresh(0, term.rows - 1);
+      watchDpr();
+    };
+    const watchDpr = () => {
+      dpr?.removeEventListener("change", onDprChange);
+      dpr = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      dpr.addEventListener("change", onDprChange, { once: true });
+    };
+    watchDpr();
     if (props.focus !== false) term.focus();
 
     onCleanup(() => {
@@ -153,6 +173,7 @@ export function TerminalView(props: { id: number; focus?: boolean; onExit?: (cod
       unDrop?.();
       host.removeEventListener("contextmenu", onCtx);
       ro.disconnect();
+      dpr?.removeEventListener("change", onDprChange);
       void invoke("session_detach", { id: props.id });
       term.dispose();
     });
