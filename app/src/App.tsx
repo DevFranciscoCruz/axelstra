@@ -113,6 +113,19 @@ export function App() {
 
   onMount(() => void computerStatus().then(setComputerOn).catch(() => 0));
 
+  // a missing git, or no agent CLI at all, is explained once at startup instead of surfacing as a cryptic failure later
+  onMount(() =>
+    void import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke<string[]>("missing_tools"))
+      .then((m) => {
+        const bits: string[] = [];
+        if (m.includes("git")) bits.push("o git não está instalado ou não está no PATH (sem ele não há worktrees)");
+        if (m.includes("claude") && m.includes("codex")) bits.push("nem o claude nem o codex foram encontrados (instala um deles para usar agentes)");
+        if (bits.length) showNotice(`Falta configurar: ${bits.join("; ")}.`);
+      })
+      .catch(() => 0),
+  );
+
   onMount(() => {
     labelIcons();
     void refreshProjects();
