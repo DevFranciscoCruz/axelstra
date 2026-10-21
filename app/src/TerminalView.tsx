@@ -3,6 +3,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { createEffect, onCleanup, onMount } from "solid-js";
@@ -55,6 +56,9 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // emoji and wide glyphs agents print take two cells, as in the agent's own width table
+    term.loadAddon(new Unicode11Addon());
+    term.unicode.activeVersion = "11";
     term.loadAddon(new WebLinksAddon((_e, url) => void openUrl(url)));
     term.registerLinkProvider({
       provideLinks(y, cb) {
