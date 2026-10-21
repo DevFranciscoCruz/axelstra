@@ -152,6 +152,10 @@ enum St {
 /// What a session printed last; a fresh connection because `Client` is consumed by reading.
 fn read_tail(id: u32, lines: usize) -> Result<String> {
     let mut c = Client::connect(&axelstra_daemon::proto::pipe_name(), &axelstra_daemon::proto::load_or_create_token()?)?;
+    if let Ok(r) = c.call("session.screen", json!({"id": id, "lines": lines})) {
+        let v: Vec<&str> = r["lines"].as_array().into_iter().flatten().filter_map(|l| l.as_str()).collect();
+        return Ok(v.join("\n"));
+    }
     c.call("session.subscribe", json!({"id": id}))?;
     let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
     std::thread::spawn(move || {

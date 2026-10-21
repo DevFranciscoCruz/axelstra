@@ -48,6 +48,7 @@ pub struct Session {
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     job: Job,
     shared: Arc<Shared>,
+    size: Mutex<(u16, u16)>,
 }
 
 impl Session {
@@ -129,6 +130,7 @@ impl Session {
             child: Mutex::new(child),
             job,
             shared,
+            size: Mutex::new((s.cols, s.rows)),
         })
     }
 
@@ -180,7 +182,15 @@ impl Session {
         Ok(())
     }
 
+    /// The last `lines` non-empty lines as the terminal shows them (the recent output replayed through a terminal
+    /// emulator at the session's real size), for reports and `read`.
+    pub fn screen_lines(&self, lines: usize) -> Vec<String> {
+        let (cols, rows) = *self.size.lock().unwrap();
+        crate::screen::last_lines(&self.tail(256 * 1024), cols, rows, lines)
+    }
+
     pub fn resize(&self, cols: u16, rows: u16) -> Result<()> {
+        *self.size.lock().unwrap() = (cols, rows);
         self.master
             .lock()
             .unwrap()
