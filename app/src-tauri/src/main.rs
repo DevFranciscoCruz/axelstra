@@ -318,8 +318,21 @@ fn app_quit(app: tauri::AppHandle, keep: Option<bool>) {
     app.exit(0);
 }
 
+/// Which of the tools the app leans on are not on PATH (git, claude, codex, gh), for a one-time hint at startup.
 #[tauri::command]
-fn default_shell() -> (String, Vec<String>) {
+fn missing_tools() -> Vec<String> {
+    let dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    let exts: Vec<String> = if cfg!(windows) {
+        std::env::var("PATHEXT").unwrap_or_else(|_| ".EXE;.CMD;.BAT".into()).split(';').map(|e| e.to_lowercase()).collect()
+    } else {
+        vec![String::new()]
+    };
+    let has = |name: &str| dirs.iter().any(|d| exts.iter().any(|e| d.join(format!("{name}{e}")).is_file()));
+    ["git", "claude", "codex", "gh"].into_iter().filter(|t| !has(t)).map(String::from).collect()
+}
+
+#[tauri::command]
+fn default_shell()-> (String, Vec<String>) {
     if cfg!(windows) {
         ("powershell".into(), vec!["-NoLogo".into()])
     } else {
@@ -432,7 +445,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![daemon_call, daemon_call_bg, session_write, lag_log, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write, notify_session, app_quit, stats::keep_awake, stats::mem_usage, voice::voice_status, voice::voice_download, voice::voice_transcribe])
+        .invoke_handler(tauri::generate_handler![missing_tools, daemon_call, daemon_call_bg, session_write, lag_log, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write, notify_session, app_quit, stats::keep_awake, stats::mem_usage, voice::voice_status, voice::voice_download, voice::voice_transcribe])
         .build(tauri::generate_context!())
         .expect("error while building axelstra")
         .run(|app, event| {
