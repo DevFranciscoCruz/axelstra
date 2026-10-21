@@ -33,11 +33,34 @@ fn save(store: &Path, v: &[Project]) -> Result<()> {
     Ok(())
 }
 
+/// Accented letters become their plain form ("Otimização" -> "Otimizacao"); anything else outside
+/// `[A-Za-z0-9_-]` becomes `-`, and runs of `-` collapse into one.
 fn slug(s: &str) -> String {
-    let t: String = s
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
-        .collect();
+    let plain = |c: char| match c {
+        'á' | 'à' | 'â' | 'ã' | 'ä' | 'å' => 'a',
+        'Á' | 'À' | 'Â' | 'Ã' | 'Ä' | 'Å' => 'A',
+        'é' | 'è' | 'ê' | 'ë' => 'e',
+        'É' | 'È' | 'Ê' | 'Ë' => 'E',
+        'í' | 'ì' | 'î' | 'ï' => 'i',
+        'Í' | 'Ì' | 'Î' | 'Ï' => 'I',
+        'ó' | 'ò' | 'ô' | 'õ' | 'ö' => 'o',
+        'Ó' | 'Ò' | 'Ô' | 'Õ' | 'Ö' => 'O',
+        'ú' | 'ù' | 'û' | 'ü' => 'u',
+        'Ú' | 'Ù' | 'Û' | 'Ü' => 'U',
+        'ç' => 'c',
+        'Ç' => 'C',
+        'ñ' => 'n',
+        'Ñ' => 'N',
+        c => c,
+    };
+    let mut t = String::new();
+    for c in s.chars().map(plain) {
+        let c = if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' };
+        if c == '-' && t.ends_with('-') {
+            continue;
+        }
+        t.push(c);
+    }
     t.trim_matches('-').to_string()
 }
 
@@ -160,4 +183,16 @@ pub fn logo_data_url(repo: &Path) -> Option<String> {
         return Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)));
     }
     None
+}
+
+#[cfg(test)]
+mod slug_tests {
+    use super::slug;
+
+    #[test]
+    fn accents_become_plain_letters() {
+        assert_eq!(slug("Otimização"), "Otimizacao");
+        assert_eq!(slug("Correção de ação  rápida!"), "Correcao-de-acao-rapida");
+        assert_eq!(slug("--a_b--"), "a_b");
+    }
 }
