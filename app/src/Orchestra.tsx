@@ -1,5 +1,5 @@
-import { For, Show, createResource, createSignal } from "solid-js";
-import { SessionInfo, killSession, removeSession, workerLimits } from "./api";
+import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import { SessionInfo, SessionRes, killSession, removeSession, sessionResources, workerLimits } from "./api";
 import { ask } from "./Confirm";
 import { Modal } from "./Modal";
 import { openSession, refreshSessions, sessionState, sessions, setShowOrchestra } from "./store";
@@ -11,6 +11,32 @@ const STATE: Record<string, string> = { working: "a trabalhar", waiting: "espera
 export function Orchestra() {
   const [limits, { refetch }] = createResource(() => workerLimits().catch(() => null));
   const [max, setMax] = createSignal<number | null>(null);
+  // memory now and CPU (% of the machine, from the change in CPU time between two readings) of each session
+  const [res, setRes] = createSignal<Record<number, { mem: number; cpu: number | null }>>({});
+  let prev: { at: number; cpu: Record<number, number> } | null = null;
+  const pollRes = async () => {
+    if (document.hidden) return;
+    try {
+      const r = await sessionResources();
+      const at = Date.now();
+      const out: Record<number, { mem: number; cpu: number | null }> = {};
+      for (const s of r.sessions as SessionRes[]) {
+        const before = prev?.cpu[s.id];
+        const dt = prev ? (at - prev.at) / 1000 : 0;
+        out[s.id] = { mem: s.mem, cpu: before !== undefined && dt > 0.5 ? Math.min(100, Math.max(0, (s.cpu_100ns - before) / 1e7 / dt / r.cores) * 100) : null };
+      }
+      prev = { at, cpu: Object.fromEntries(r.sessions.map((s) => [s.id, s.cpu_100ns])) };
+      setRes(out);
+    } catch {
+      /* an older daemon has no session.resources */
+    }
+  };
+  onMount(() => {
+    void pollRes();
+    const t = setInterval(() => void pollRes(), 3000);
+    onCleanup(() => clearInterval(t));
+  });
+  const mb = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.round(n / 1024 ** 2)} MB`);
 
   const kids = (id: number) => sessions().filter((s) => s.meta?.parent === id);
   const known = (id: number) => sessions().some((s) => s.id === id);
@@ -52,6 +78,12 @@ export function Orchestra() {
           <span class="auto-note">
             {baseName(props.s.meta?.worktree)} · {props.s.escalated ? "pediu ajuda" : STATE[st()]}
           </span>
+          <Show when={res()[props.s.id]}>
+            <span class="auto-note" title="Memória e CPU de tudo o que esta sessão corre (do computador inteiro)">
+              {mb(res()[props.s.id].mem)}
+              {res()[props.s.id].cpu !== null ? ` · ${res()[props.s.id].cpu!.toFixed(res()[props.s.id].cpu! < 10 ? 1 : 0)}% CPU` : ""}
+            </span>
+          </Show>
           <Show when={(props.s.unread ?? 0) > 0}>
             <span class="wt-badge" title="Mensagens por ler">✉ {props.s.unread}</span>
           </Show>

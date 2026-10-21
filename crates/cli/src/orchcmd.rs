@@ -114,7 +114,7 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             })?;
             println!("max workers {} ({} running)", r["max_workers"], r["workers"]);
         }
-        Cmd::Flow { file, timeout, cleanup } => return flow(c, &file, timeout, cleanup),
+        Cmd::Flow { file, timeout, cleanup, resume } => return flow(c, &file, timeout, cleanup, resume),
         _ => unreachable!(),
     }
     Ok(())
@@ -206,6 +206,38 @@ fn validate(tasks: &[Task]) -> Result<()> {
     Ok(())
 }
 
+fn flow_state_path(flow_id: &str) -> PathBuf {
+    // FNV-1a of the plan's path names its progress file
+    let h = flow_id.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+    axelstra_daemon::proto::data_dir().join("flows").join(format!("{h:016x}.json"))
+}
+
+fn state_word(s: St) -> &'static str {
+    match s {
+        St::Pending => "queued",
+        St::Running => "running",
+        St::Ok => "done",
+        St::Failed => "failed",
+        St::Blocked => "blocked",
+    }
+}
+
+/// Tells the daemon (for the sidebar) and the disk (for `--resume`) where each task stands, when it changed.
+fn publish(c: &mut Client, flow_id: &str, state_file: &std::path::Path, tasks: &[Task], st: &HashMap<String, St>, last: &mut String) {
+    let snapshot: Vec<Value> = tasks.iter().map(|t| json!({"id": t.id, "worktree": t.worktree.to_string_lossy(), "state": state_word(st[&t.id])})).collect();
+    let text = Value::Array(snapshot.clone()).to_string();
+    if text == *last {
+        return;
+    }
+    *last = text;
+    let _ = c.call("flow.set", json!({"flow": flow_id, "tasks": snapshot}));
+    let saved: HashMap<&str, &str> = tasks.iter().map(|t| (t.id.as_str(), state_word(st[&t.id]))).collect();
+    if let Some(dir) = state_file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(state_file, serde_json::to_string(&saved).unwrap_or_default());
+}
+
 /// Why a worktree must not be deleted, `None` when it is safe: clean tree, not the main one, and every commit is on a remote.
 fn keep_reason(path: &str, is_main: bool) -> Option<String> {
     if is_main {
@@ -238,7 +270,7 @@ fn remove_worktree(c: &mut Client, projects: &Value, t: &Task) {
 
 /// Runs a task graph: a task starts when everything it waits for succeeded, at most as many at once as the
 /// worker limit allows. Prints one line per event and the output tail of each finished task.
-fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool) -> Result<()> {
+fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resume: bool) -> Result<()> {
     let text = std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
     let FlowFile { tasks } = serde_json::from_str(&text).context("flow file must be {\"tasks\": [...]}")?;
     validate(&tasks)?;
@@ -247,6 +279,19 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool) -> R
         find_worktree(&projects, &t.worktree)?;
     }
     let mut st: HashMap<String, St> = tasks.iter().map(|t| (t.id.clone(), St::Pending)).collect();
+    // progress is kept on disk, so a plan interrupted by closing the app can go on where it was
+    let flow_id = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf()).to_string_lossy().to_string();
+    let state_file = flow_state_path(&flow_id);
+    if resume {
+        let saved: HashMap<String, String> = std::fs::read_to_string(&state_file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        for t in &tasks {
+            if saved.get(&t.id).map(String::as_str) == Some("done") {
+                st.insert(t.id.clone(), St::Ok);
+                println!("[flow] {}: already done, skipped", t.id);
+            }
+        }
+    }
+    let mut last_published = String::new();
     let mut sess: HashMap<String, u32> = HashMap::new();
     let mut worked: HashMap<String, bool> = HashMap::new();
     let mut told_waiting: HashMap<String, bool> = HashMap::new();
@@ -307,6 +352,7 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool) -> R
                 }
             }
         }
+        publish(&mut c, &flow_id, &state_file, &tasks, &st, &mut last_published);
         // start what is ready
         for t in &tasks {
             if st[&t.id] != St::Pending || !t.after.iter().all(|d| st[d] == St::Ok) {
@@ -346,7 +392,12 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool) -> R
         }
         std::thread::sleep(Duration::from_millis(1000));
     }
+    publish(&mut c, &flow_id, &state_file, &tasks, &st, &mut last_published);
+    let _ = c.call("flow.clear", json!({"flow": flow_id}));
     let bad = tasks.iter().filter(|t| matches!(st[&t.id], St::Failed | St::Blocked)).count();
+    if bad == 0 {
+        let _ = std::fs::remove_file(&state_file);
+    }
     println!("[flow] finished: {} ok, {} failed or blocked", tasks.len() - bad, bad);
     if bad > 0 {
         std::process::exit(1);

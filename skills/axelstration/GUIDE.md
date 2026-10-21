@@ -75,6 +75,8 @@ For work with dependencies, write a JSON file and let `flow` run it:
 axelstra flow plan.json [--timeout 3600]
 ```
 
+If the app was closed in the middle of a plan, run the same command again with `--resume`: tasks that already finished are skipped and the rest runs again. While a plan runs, the app shows the worktrees still waiting for their turn as hollow dots.
+
 Add `--cleanup` to remove each task's worktree as soon as the task succeeded. A worktree is only removed when it is clean and all its commits are on a remote (otherwise `flow` says why it kept it), never the main one, and never while another task still uses it.
 
 A task starts when everything in its `after` list succeeded, never exceeding the worker limit. `flow` prints one line per event plus the last lines of each finished task, and exits 1 if any task failed (its dependents are reported as blocked). Agent tasks end when they call `axelstra done`, go quiet (`idle_secs`, default 20) or exit. Run it in the background of your shell if you want to keep working meanwhile.

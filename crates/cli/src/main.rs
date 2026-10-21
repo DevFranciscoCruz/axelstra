@@ -118,6 +118,9 @@ enum Cmd {
         /// remove each task's worktree once the task succeeded, only when it is clean and its commits are pushed
         #[arg(long)]
         cleanup: bool,
+        /// continue a plan that was interrupted (app closed): tasks that finished are skipped, the rest runs again
+        #[arg(long)]
+        resume: bool,
     },
     /// Send a message to an agent session: pasted as one block, then Enter
     Say { id: u32, text: String },

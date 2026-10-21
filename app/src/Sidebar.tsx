@@ -24,6 +24,7 @@ import {
   setDefaultAgent,
   confirmDiscard,
   editorDirty,
+  flowState,
   setEditorDirty,
   norm,
   projects,
@@ -285,6 +286,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 const working = () => sessionsOf(w.path).some((s) => sessionState(s) === "working");
                 const waiting = () => sessionsOf(w.path).some((s) => sessionState(s) === "waiting");
                 const needs = () => attention().has(norm(w.path));
+                const queued = () => live() === 0 && flowState()[norm(w.path)] === "queued";
                 const st = () => wtStatus()[norm(w.path)];
                 const pr = () => prByBranch()[prKey(p.id, w.branch)];
                 return (
@@ -298,8 +300,8 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                   >
                     <span
                       class="dot"
-                      classList={{ on: live() > 0, work: working() && !waiting(), attn: needs() && !working() && !waiting(), wait: waiting() }}
-                      title={waiting() ? "O agente espera pela tua resposta" : needs() ? "O agente parou: precisa de atenção" : working() ? "A trabalhar" : live() > 0 ? "Parado" : ""}
+                      classList={{ on: live() > 0, work: working() && !waiting(), attn: needs() && !working() && !waiting(), wait: waiting(), queued: queued() }}
+                      title={queued() ? "Na fila: o flow ainda não chegou a esta tarefa" : waiting() ? "O agente espera pela tua resposta" : needs() ? "O agente parou: precisa de atenção" : working() ? "A trabalhar" : live() > 0 ? "Parado" : ""}
                     />
                     <span class="name">{w.is_main ? (p.default_branch ?? "main") : label()}</span>
                     <Show when={w.is_main && w.branch !== (p.default_branch ?? "main")}>
