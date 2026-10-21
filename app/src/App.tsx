@@ -61,6 +61,7 @@ import {
   refreshProjects,
   refreshSessions,
   sessions,
+  sessionState,
   showNotice,
   openSession,
   selectedWorktree,
@@ -163,6 +164,27 @@ export function App() {
         void toggleVoice();
         return;
       }
+      // Ctrl+Tab / Ctrl+Shift+Tab cycle the tabs of this worktree, Ctrl+1..9 jump to one, Ctrl+J goes to the next agent waiting for an answer
+      if (e.key === "Tab" || (/^[1-9]$/.test(e.key) && !e.shiftKey)) {
+        const list = tabs();
+        if (!list.length) return;
+        const at = list.findIndex((t) => t.id === activeSession());
+        const pick = e.key === "Tab" ? list[(at + (e.shiftKey ? -1 : 1) + list.length) % list.length] : list[Number(e.key) - 1];
+        if (!pick) return;
+        e.preventDefault();
+        e.stopPropagation();
+        showTab(pick);
+        return;
+      }
+      if (k === "j" && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        const waiting = sessions().filter((x) => x.meta?.kind === "agent" && x.meta.worktree && sessionState(x) === "waiting");
+        if (!waiting.length) return showNotice("Nenhum agente está à espera de resposta.");
+        const next = waiting.find((x) => x.id > activeSession()!) ?? waiting[0];
+        openSession(next.meta!.worktree!, next.id);
+        return;
+      }
       if (k !== "b") return;
       e.preventDefault();
       e.stopPropagation();
@@ -215,6 +237,14 @@ export function App() {
   }));
 
   const tabs = () => sessionsOf(selectedWorktree());
+  const showTab = (s: SessionInfo) =>
+    guarded(() => {
+      setOpenDiff(null);
+      setOpenFile(null);
+      setOpenCommit(null);
+      setShowKanban(false);
+      setActiveSession(s.id);
+    });
 
   // Terminals of the last few tabs stay mounted (hidden): switching back is instant, keeps the scroll position and
   // does not replay the history. Older ones are unmounted. Order is stable so nothing is moved in the DOM.
@@ -433,7 +463,7 @@ export function App() {
                     "tab",
                   )}
                 >
-                  <span class="dot" classList={{ on: s.running }} />
+                  <span class="dot" classList={{ on: s.running, work: sessionState(s) === "working" && s.meta?.kind === "agent", wait: sessionState(s) === "waiting" }} />
                   <span>{s.meta?.worker ? "↳ " : ""}{s.label ?? `Sessão ${s.id}`}</span>
                   <button
                     class="x"
