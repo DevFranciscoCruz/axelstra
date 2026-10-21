@@ -786,7 +786,7 @@ fn dispatch(
                         allowed.insert(norm(&w.path));
                     }
                 }
-                list.iter().take(64).filter(|w| allowed.contains(&norm(w))).map(|w| crate::wtstatus::status(w)).collect::<Vec<_>>()
+                list.iter().take(64).filter(|w| allowed.contains(&norm(w))).map(|w| crate::wtstatus::status_cached(w)).collect::<Vec<_>>()
             });
             Ok(json!({"status": out}))
         }
