@@ -155,6 +155,23 @@ impl Session {
         now_ms().saturating_sub(self.shared.last_out.load(Ordering::Relaxed))
     }
 
+    /// Milliseconds since the user last typed into this session (u64::MAX if never).
+    pub fn since_input_ms(&self) -> u64 {
+        match self.shared.last_in.load(Ordering::Relaxed) {
+            0 => u64::MAX,
+            t => now_ms().saturating_sub(t),
+        }
+    }
+
+    /// Writes text that did not come from the user (a notice, a report): it is not counted as typing,
+    /// so the output it provokes still reads as the program working.
+    pub fn write_system(&self, data: &[u8]) -> Result<()> {
+        let mut w = self.writer.lock().unwrap();
+        w.write_all(data)?;
+        w.flush()?;
+        Ok(())
+    }
+
     pub fn write(&self, data: &[u8]) -> Result<()> {
         self.shared.last_in.store(now_ms(), Ordering::Relaxed);
         let mut w = self.writer.lock().unwrap();
