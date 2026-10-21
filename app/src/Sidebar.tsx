@@ -27,6 +27,7 @@ import {
   flowState,
   setEditorDirty,
   norm,
+  showNotice,
   projects,
   refreshProjects,
   refreshSessions,
@@ -210,7 +211,10 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
     { label: "Tirar projeto da lista", icon: "✕", danger: true, run: () => dropProject(p.id, p.name) },
   ];
 
+  // worktrees being removed: a second click (or menu entry) while it runs is ignored
+  const removing = new Set<string>();
   const dropWorktree = async (projectId: string, path: string, name: string) => {
+    if (removing.has(norm(path))) return showNotice(`A remover "${name}"…`);
     // what would be lost, so the question is not a blind "are you sure"
     const st = wtStatus()[norm(path)];
     const risks: string[] = [];
@@ -223,15 +227,22 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
       `Remover o worktree "${name}"?${lost}\n\nA pasta e o branch são apagados e os terminais dele são fechados.`,
       { title: "Remover worktree", kind: "warning" },
     );
-    if (!ok) return;
-    await run(async () => {
-      for (const s of sessionsOf(path)) {
-        if (s.running) await killSession(s.id);
-        await removeSession(s.id);
-      }
-      await removeWorktree(projectId, path);
-      if (norm(selectedWorktree()) === norm(path)) selectWorktree(null);
-    });
+    if (!ok || removing.has(norm(path))) return;
+    removing.add(norm(path));
+    showNotice(`A remover "${name}"…`);
+    try {
+      await run(async () => {
+        for (const s of sessionsOf(path)) {
+          if (s.running) await killSession(s.id);
+          await removeSession(s.id);
+        }
+        await removeWorktree(projectId, path);
+        if (norm(selectedWorktree()) === norm(path)) selectWorktree(null);
+      });
+      showNotice(`"${name}" removido.`);
+    } finally {
+      removing.delete(norm(path));
+    }
   };
 
   return (
