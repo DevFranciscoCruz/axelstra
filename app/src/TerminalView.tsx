@@ -6,7 +6,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { createEffect, onCleanup, onMount } from "solid-js";
-import { fsStat, resizeSession, writeSession } from "./api";
+import { fsStat, rememberTermSize, resizeSession, writeSession } from "./api";
 import { createSizeSync } from "./termsize";
 import { guarded, norm, selectedWorktree, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban } from "./store";
 
@@ -160,6 +160,7 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
     const refit = () => {
       if (!visible()) return;
       fit.fit();
+      rememberTermSize(term.cols, term.rows);
       pushSize();
     };
     refit();
