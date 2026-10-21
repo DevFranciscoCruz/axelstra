@@ -211,8 +211,16 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
   ];
 
   const dropWorktree = async (projectId: string, path: string, name: string) => {
+    // what would be lost, so the question is not a blind "are you sure"
+    const st = wtStatus()[norm(path)];
+    const risks: string[] = [];
+    if (st?.dirty) risks.push(`${st.dirty} ${st.dirty === 1 ? "ficheiro com alterações" : "ficheiros com alterações"} por guardar`);
+    if (st && st.ahead > 0) risks.push(st.upstream ? `${st.ahead} ${st.ahead === 1 ? "commit" : "commits"} por enviar` : `${st.ahead} ${st.ahead === 1 ? "commit" : "commits"} que só existem aqui (sem remoto)`);
+    const live = sessionsOf(path).filter((x) => x.running).length;
+    if (live) risks.push(`${live} ${live === 1 ? "terminal ou agente a correr" : "terminais ou agentes a correr"}`);
+    const lost = risks.length ? `\n\nVais perder: ${risks.join("; ")}.` : "\n\nNão há alterações nem commits por enviar.";
     const ok = await ask(
-      `Remover o worktree "${name}"?\n\nA pasta e o branch são apagados, incluindo alterações não guardadas. Os terminais dele são fechados.`,
+      `Remover o worktree "${name}"?${lost}\n\nA pasta e o branch são apagados e os terminais dele são fechados.`,
       { title: "Remover worktree", kind: "warning" },
     );
     if (!ok) return;
