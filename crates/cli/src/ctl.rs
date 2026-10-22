@@ -237,10 +237,16 @@ pub(crate) fn spawn_agent(c: &mut Client, worktree: &Path, agent: &str, prompt: 
         line.push_str(&format!(" --session-id {k}"));
     }
     if let Some(pr) = prompt {
+        // an ephemeral worker must know how to report: without it the daemon can only scrape its screen
+        let full = if reap.is_some() && !pr.contains("axelstra done") {
+            format!("{pr}\n\nWhen finished, run `axelstra done \"<summary: what you did, what is left>\"` (add `--status failed` or `--status blocked` when it applies). If you need a decision, run `axelstra ask $AXELSTRA_PARENT \"<question>\"`. If you are stuck, run `axelstra escalate \"<problem>\"`.")
+        } else {
+            pr.to_string()
+        };
         line.push(' ');
-        line.push_str(&if ps { ps_quote(pr) } else { sh_quote(pr) });
+        line.push_str(&if ps { ps_quote(&full) } else { sh_quote(&full) });
     }
-                shell_run(&program, &mut args, ps, &line, reap.is_none());
+    shell_run(&program, &mut args, ps, &line, reap.is_none());
     let mut meta = json!({"project": p["id"], "worktree": wt, "kind": "agent", "agent": agent});
     let mut env = json!({});
     if let Some(k) = &key {
