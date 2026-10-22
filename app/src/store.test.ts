@@ -126,6 +126,24 @@ describe("attention flag and notifications", () => {
     expect(String((call?.[1] as { body: string } | undefined)?.body)).toContain("precisa da tua resposta para continuar");
   });
 
+  it("tells the host when the agent is waiting on the user", async () => {
+    const store = await load();
+    store.selectWorktree(OTHER);
+    await tick(store, agent({ idle_ms: 100 }));
+    await tick(store, agent({ idle_ms: 9000, waiting: true }));
+    await settle();
+    expect((invoke.mock.calls.find((c) => c[0] === "notify_session")?.[1] as { waiting: boolean }).waiting).toBe(true);
+  });
+
+  it("does not claim waiting for an agent that just stopped", async () => {
+    const store = await load();
+    store.selectWorktree(OTHER);
+    await tick(store, agent({ idle_ms: 100 }));
+    await tick(store, agent({ idle_ms: 9000 }));
+    await settle();
+    expect((invoke.mock.calls.find((c) => c[0] === "notify_session")?.[1] as { waiting: boolean }).waiting).toBe(false);
+  });
+
   it("ignores shells: only agents are flagged", async () => {
     const store = await load();
     store.selectWorktree(OTHER);
@@ -272,5 +290,24 @@ describe("project preferences", () => {
     store.setProjectPref("p1", { terse: "tiny" });
     expect(store.projectTerse("p1")).toBe("tiny");
     expect(store.projectTerse("p2")).toBeUndefined();
+  });
+});
+
+describe("friendlyError", () => {
+  it("explains a known failure and keeps the original text", async () => {
+    const { friendlyError } = await load();
+    const out = friendlyError("fatal: not a git repository (or any parent)");
+    expect(out.startsWith("Esta pasta não é um repositório git.")).toBe(true);
+    expect(out).toContain("(fatal: not a git repository (or any parent))");
+  });
+  it("leaves an unknown message alone", async () => {
+    const { friendlyError } = await load();
+    expect(friendlyError("something odd")).toBe("something odd");
+  });
+  it("cuts a long original at 160 characters", async () => {
+    const { friendlyError } = await load();
+    const out = friendlyError("not a git repository " + "x".repeat(300));
+    expect(out).toContain("…)");
+    expect(out.length).toBeLessThan(260);
   });
 });

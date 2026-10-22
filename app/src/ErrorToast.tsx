@@ -1,6 +1,6 @@
 import { Show } from "solid-js";
 import { Icon } from "./Icon";
-import { error, notice, setError, setNoticeSig } from "./store";
+import { daemonReconnecting, error, notice, setError, setNoticeSig } from "./store";
 
 // .error-toast is position:fixed on its own; inside the stack the wrapper positions, the toasts flow
 const FLOW = { position: "static", transform: "none" } as const;
@@ -8,7 +8,7 @@ const FLOW = { position: "static", transform: "none" } as const;
 /** Failures from any action stay until dismissed; plain notices go away by themselves. Both show at once, stacked (at most one of each). */
 export function ErrorToast() {
   return (
-    <Show when={error() || notice()}>
+    <Show when={error() || notice() || daemonReconnecting()}>
       <div
         style={{
           position: "fixed",
@@ -23,6 +23,11 @@ export function ErrorToast() {
           "max-width": "min(560px, 92vw)",
         }}
       >
+        <Show when={daemonReconnecting()}>
+          <div class="error-toast notice" role="status" style={FLOW}>
+            <span class="et-msg">A reconectar ao daemon…</span>
+          </div>
+        </Show>
         <Show when={notice()}>
           <div class="error-toast notice" role="status" style={FLOW}>
             <span class="et-msg">{notice()}</span>

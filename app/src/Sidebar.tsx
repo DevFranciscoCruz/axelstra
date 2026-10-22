@@ -7,6 +7,7 @@ import { Modal } from "./Modal";
 import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
 import { invoke } from "@tauri-apps/api/core";
 import { press } from "./a11y";
+import { S } from "./strings";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import logo from "./assets/logo.png";
 import {
@@ -23,6 +24,7 @@ import {
   prKey,
   projectAgent,
   projectPrefsOf,
+  projectTerse,
   setProjectPref,
   watchDispatch,
   dispatchTopics,
@@ -197,7 +199,7 @@ export function Sidebar() {
         setPendingWt(null);
       }
       selectWorktree(w.path);
-      if (newAgent() !== "none") await launchDefaultAgent(projectId, w.path, newAgent(), AGENTS[newAgent()]);
+      if (newAgent() !== "none") await launchDefaultAgent(projectId, w.path, newAgent(), AGENTS[newAgent()], undefined, undefined, projectTerse(projectId));
       let setup = projects().find((p) => p.id === projectId)?.setup;
       if (!setup && (await getSettings().then((x) => x.auto_install, () => false))) {
         const pm = await detectPackageManagers(projectId).catch(() => null);
@@ -245,6 +247,14 @@ export function Sidebar() {
 
   const worktreeMenu = (p: { id: string; name: string }, w: { path: string; branch: string | null; is_main: boolean }, label: string): MenuItem[] => [
     { label: "Atualizar", icon: "refresh", run: async () => { await refreshProjects(); await refreshSessions(); } },
+    {
+      label: S.replies,
+      icon: "sparkle",
+      children: [
+        { label: "Seguir o global", icon: projectTerse(p.id) ? undefined : "check", run: () => setProjectPref(p.id, { terse: undefined }) },
+        ...(["off", "short", "tiny"] as const).map((v) => ({ label: S.terse[v].label, icon: projectTerse(p.id) === v ? "check" : undefined, run: () => setProjectPref(p.id, { terse: v }) })),
+      ],
+    },
     { separator: true },
     {
       label: "Abrir em",

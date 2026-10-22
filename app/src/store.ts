@@ -134,6 +134,8 @@ export const [projects, setProjects] = createSignal<Project[]>([]);
 export const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
 const [error, setErrorSig] = createSignal("");
 export { error };
+/** the app is reconnecting to the daemon (it was replaced or crashed): the UI says so until it is back */
+export const [daemonReconnecting, setDaemonReconnecting] = createSignal(false);
 /** a short informational message (not a failure): shown for a few seconds */
 export const [notice, setNoticeSig] = createSignal("");
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -162,7 +164,7 @@ const FRIENDLY: [RegExp, string][] = [
   [/connection (refused|reset)|pipe.*(closed|broken)|os error 232|os error 109/i, "Sem ligação ao daemon. Vai tentar de novo; se persistir, reinicia o Axelstra."],
   [/unknown method/i, "O daemon em execução é antigo. Reinicia o Axelstra para o atualizar."],
 ];
-const friendlyError = (m: string) => {
+export const friendlyError = (m: string) => {
   const hit = FRIENDLY.find(([re]) => re.test(m));
   return hit ? `${hit[1]}\n(${m.length > 160 ? m.slice(0, 160) + "…" : m})` : m;
 };
@@ -257,9 +259,9 @@ export const openSession = (path: string, id: number) =>
     setActiveSession(id);
   });
 
-const notify = async (title: string, body: string, worktree: string, session: number) => {
+const notify = async (title: string, body: string, worktree: string, session: number, waiting: boolean) => {
   try {
-    if (await invoke<boolean>("notify_session", { title, body, worktree, session })) return;
+    if (await invoke<boolean>("notify_session", { title, body, worktree, session, waiting })) return;
     const n = await import("@tauri-apps/plugin-notification");
     let ok = await n.isPermissionGranted();
     if (!ok) ok = (await n.requestPermission()) === "granted";
@@ -300,7 +302,7 @@ const trackAgents = (list: SessionInfo[]) => {
         : state === "waiting"
           ? [`${who} precisa de ti · ${name}`, `${who} fez uma pergunta na worktree "${name}" e precisa da tua resposta para continuar.`]
           : [`${who} parou · ${name}`, `${who} ficou parado na worktree "${name}" sem terminar. Abre para ver o que aconteceu.`];
-    void notify(head, body, wtPath, s.id);
+    void notify(head, body, wtPath, s.id, state === "waiting");
   }
 };
 

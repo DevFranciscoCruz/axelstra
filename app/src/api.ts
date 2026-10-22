@@ -31,7 +31,8 @@ export type Settings = {
   notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice;
 };
 export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice };
-export const getSettings = () => call<Settings>("settings.get");
+/** `terse` asks for the rules of that level (a project's own choice) instead of the saved one */
+export const getSettings = (terse?: Terse) => call<Settings>("settings.get", terse ? { terse } : {});
 export const setSettings = (patch: SettingsPatch) => call("settings.set", patch);
 
 /** Result of `fn`, remembered once it succeeded; a failure is not remembered, so the next call tries again. */
@@ -50,13 +51,17 @@ export const defaultShell = shellOnce;
 export const resetShellCache = () => shellOnce.reset();
 export const daemonShutdown = () => call("daemon.shutdown");
 
-/** What the Rust side reports for the Diagnostics section; every field may be missing. */
+/** What the Rust `diagnostics` command reports. */
 export type Diagnostics = {
-  daemon?: { version?: string; proto?: number | string };
-  paths?: Record<string, string>;
-  lag_log?: string;
-  missing_tools?: string[];
-  lag?: unknown;
+  app_version: string;
+  app_proto: number;
+  daemon_connected: boolean;
+  daemon_proto: number | null;
+  daemon_instance: number | null;
+  data_dir: string;
+  lag_log: string;
+  lag_log_bytes: number;
+  missing_tools: string[];
 };
 export const diagnostics = () => tauriInvoke<Diagnostics>("diagnostics");
 
@@ -76,7 +81,8 @@ export const agentLine = (cli: string, resume: string | undefined, restoring: bo
 };
 
 /** Opens the chosen agent CLI straight away in a worktree. The shell stays alive after the agent exits.
- * `pre.rules` lets a batch (restore) read the settings once instead of once per session. */
+ * `pre.rules` lets a batch (restore) read the settings once instead of once per session.
+ * `terse` is the project's own reply style; undefined follows the global setting. */
 export const launchDefaultAgent = async (
   project: string,
   worktree: string,
@@ -84,11 +90,12 @@ export const launchDefaultAgent = async (
   cli: string,
   restore?: { key?: string; resume?: string },
   pre?: { rules: string | null },
+  terse?: Terse,
 ) => {
   const [[program, args], dir, rules] = await Promise.all([
     defaultShell(),
     dirOnce(),
-    pre ? pre.rules : getSettings().then((x) => x.rules, () => null),
+    pre ? pre.rules : getSettings(terse).then((x) => x.rules, () => null),
   ]);
   const ps = /powershell|pwsh/i.test(program);
   // key is stable for the life of the tab; resume is the conversation id, which /clear replaces

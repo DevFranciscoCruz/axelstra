@@ -88,7 +88,7 @@ function Diagnostics() {
 
 /** App-wide preferences. Each change is saved at once; agents already open keep their current behaviour. */
 export function Settings() {
-  const [s, { mutate, refetch }] = createResource(getSettings);
+  const [s, { mutate, refetch }] = createResource(() => getSettings());
   const [restarting, setRestarting] = createSignal(false);
   const save = async (patch: SettingsPatch) => {
     try {

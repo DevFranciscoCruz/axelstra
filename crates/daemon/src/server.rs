@@ -856,7 +856,8 @@ fn dispatch(
         "app.dir" => Ok(json!({"dir": reg.saved.parent().unwrap_or(std::path::Path::new("")).to_string_lossy().replace('\\', "/")})),
         "settings.get" => {
             let saved = read_settings(&reg.saved);
-            let terse = saved["terse"].as_str().filter(|l| ["off", "short", "tiny"].contains(l)).unwrap_or("off");
+            // `terse` in the request asks for the rules of that level instead of the saved one (a project's own choice)
+            let terse = p["terse"].as_str().or(saved["terse"].as_str()).filter(|l| ["off", "short", "tiny"].contains(l)).unwrap_or("off");
             let installed = tokio::task::block_in_place(|| crate::projects::package_managers(None, None).0);
             let pm = saved["pm"].as_str().filter(|m| installed.contains(m)).map(String::from);
             let (shell, notify_sound, notify_mode) = ui_settings(&saved);

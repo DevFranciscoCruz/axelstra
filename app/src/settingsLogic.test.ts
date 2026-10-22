@@ -30,14 +30,20 @@ describe("waitUntil", () => {
 });
 
 describe("diagnosticRows", () => {
-  it("lists what was reported and nothing else", () => {
+  const info = { app_version: "0.3.1", app_proto: 7, daemon_connected: true, daemon_proto: 7, daemon_instance: 42, data_dir: "C:/d", lag_log: "C:/d/lag.log", lag_log_bytes: 0, missing_tools: [] };
+  it("lists what was reported", () => {
     expect(diagnosticRows(null)).toEqual([]);
-    expect(diagnosticRows({ daemon: { version: "0.3.1", proto: 7 }, paths: { data: "C:/d" }, lag_log: "C:/d/lag.log" })).toEqual([
-      { label: "daemon", value: "0.3.1 · proto 7" },
-      { label: "data", value: "C:/d" },
-      { label: "lag.log", value: "C:/d/lag.log" },
+    expect(diagnosticRows(info)).toEqual([
+      { label: "Aplicação", value: "0.3.1 · protocolo 7" },
+      { label: "Daemon", value: "protocolo 7 · instância 42" },
+      { label: "Pasta de dados", value: "C:/d" },
+      { label: "Registo de lag", value: "C:/d/lag.log" },
     ]);
-    expect(diagnosticRows({})).toEqual([]);
+  });
+  it("says when the daemon is not connected and sizes a lag log", () => {
+    const rows = diagnosticRows({ ...info, daemon_connected: false, daemon_proto: null, daemon_instance: null, lag_log_bytes: 2048 });
+    expect(rows[1].value).toBe("sem ligação");
+    expect(rows[3].value).toBe("C:/d/lag.log (2 KB)");
   });
 });
 
