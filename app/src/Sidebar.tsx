@@ -1,7 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { ask } from "./Confirm";
-import { For, Show, createResource, createSignal } from "solid-js";
-import { addProject, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
+import { For, Show, createEffect, createResource, createSignal } from "solid-js";
+import { addProject, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
 import { Modal } from "./Modal";
 import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
 import { invoke } from "@tauri-apps/api/core";
@@ -80,6 +80,13 @@ export function Sidebar() {
   // project id whose setup command is being edited
   const [editSetup, setEditSetup] = createSignal<string | null>(null);
   const [setupText, setSetupText] = createSignal("");
+  // package managers installed on this machine, offered as one-click setup commands
+  const [pms, setPms] = createSignal<{ installed: string[]; suggested: string | null }>({ installed: [], suggested: null });
+  createEffect(() => {
+    const id = editSetup();
+    if (!id) return;
+    detectPackageManagers(id).then(setPms, () => setPms({ installed: [], suggested: null }));
+  });
 
   // selecting a worktree never starts anything: agents and terminals come from the user or from restoring sessions
   const openWorktree = async (_projectId: string, path: string, _isMain: boolean) => {
@@ -292,6 +299,23 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 }}
                 ref={(el) => queueMicrotask(() => el.focus())}
               />
+              <Show when={pms().installed.length > 0}>
+                <div class="pm-row">
+                  <For each={pms().installed}>
+                    {(m) => (
+                      <button
+                        class="pill"
+                        classList={{ active: setupText() === `${m} install` }}
+                        title={m === pms().suggested ? "Sugerido pelo lockfile do projeto" : `Usar ${m} install`}
+                        onClick={() => setSetupText(`${m} install`)}
+                      >
+                        {m}
+                        {m === pms().suggested ? " ★" : ""}
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </Show>
             </Show>
             <Show when={pendingWt()?.project === p.id}>
               <div class="item wt pending">

@@ -52,7 +52,7 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       scrollback: 5000,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: { background: "#0e0f13", foreground: "#d7dae0", cursor: "#a78bfa" },
+      theme: { background: "#1e1f23", foreground: "#d7dae0", cursor: "#a78bfa" },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);

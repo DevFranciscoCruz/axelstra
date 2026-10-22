@@ -162,6 +162,7 @@ export const listProjects = () => call<Project[]>("project.list");
 export const addProject = (path: string) => call<Project>("project.add", { path });
 export const projectLogo = (id: string) => call<{ data_url: string | null }>("project.logo", { id }).then((r) => r.data_url);
 export const setProjectSetup = (id: string, setup: string) => call("project.setup", { id, setup });
+export const detectPackageManagers = (id: string) => call<{ installed: string[]; suggested: string | null }>("pm.detect", { id });
 export const removeProject = (id: string) => call("project.remove", { id });
 export const createWorktree = (project: string, name: string) => call<Worktree>("worktree.create", { project, name });
 export type GhItem = { number: number; title: string; author: string; url: string; state: string; draft: boolean; branch: string; checks: string; review: string };
