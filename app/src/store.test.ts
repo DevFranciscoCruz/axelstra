@@ -2,16 +2,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo } from "./api";
 
 const invoke = vi.hoisted(() => vi.fn(async (cmd: string, _args?: unknown) => (cmd === "notify_session" ? true : undefined)));
-const sessionsNow = vi.hoisted(() => ({ list: [] as unknown[] }));
+const sessionsNow = vi.hoisted(() => ({ list: [] as unknown[], calls: 0, gate: null as Promise<void> | null }));
+const projectsNow = vi.hoisted(() => ({ list: [] as unknown[] }));
+const changesNow = vi.hoisted(() => ({ answer: (_wt: string): Promise<unknown> => Promise.resolve(null) }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("./Confirm", () => ({ ask: vi.fn(async () => true) }));
 vi.mock("./api", () => ({
-  listSessions: async () => sessionsNow.list,
-  listProjects: async () => [],
+  listSessions: async () => {
+    sessionsNow.calls++;
+    await sessionsNow.gate;
+    return sessionsNow.list;
+  },
+  listProjects: async () => projectsNow.list,
   worktreeStatus: async () => [],
   ghListBg: async () => [],
-  gitChanges: async () => null,
+  gitChanges: (wt: string) => changesNow.answer(wt),
+  flowTasks: async () => [],
+  callBg: async () => ({}),
 }));
 
 const WT = "C:/work/proj-a";
@@ -126,5 +134,143 @@ describe("attention flag and notifications", () => {
     await tick(store, { ...shell, idle_ms: 9000 });
     expect(store.attention().size).toBe(0);
     expect(await notified()).toBe(0);
+  });
+});
+
+describe("keepSame", () => {
+  it("reuses the old object when only ignored fields moved", async () => {
+    const { keepSame } = await load();
+    const a = { id: 1, idle: 5, name: "x" };
+    const out = keepSame([a], [{ id: 1, idle: 900, name: "x" }], (x) => x.id, (x) => ({ ...x, idle: 0 }));
+    expect(out[0]).toBe(a);
+    const changed = keepSame([a], [{ id: 1, idle: 900, name: "y" }], (x) => x.id, (x) => ({ ...x, idle: 0 }));
+    expect(changed[0]).not.toBe(a);
+  });
+
+  it("keeps session objects across polls while idle_ms only ticks", async () => {
+    const store = await load();
+    await tick(store, agent({ idle_ms: 10_000 }));
+    const first = store.sessions()[0];
+    await tick(store, agent({ idle_ms: 15_000 }));
+    expect(store.sessions()[0]).toBe(first);
+    // crossing into "working" is a real change
+    await tick(store, agent({ idle_ms: 100 }));
+    expect(store.sessions()[0]).not.toBe(first);
+  });
+});
+
+describe("refreshSessions", () => {
+  it("shares one trailing poll between calls that arrive during a poll", async () => {
+    const store = await load();
+    sessionsNow.calls = 0;
+    let open!: () => void;
+    sessionsNow.gate = new Promise<void>((r) => (open = r));
+    const calls = [store.refreshSessions(), store.refreshSessions(), store.refreshSessions()];
+    sessionsNow.gate = null;
+    open();
+    await Promise.all(calls);
+    expect(sessionsNow.calls).toBe(2);
+  });
+});
+
+describe("removed sessions", () => {
+  it("forgets the state of a session that is gone, so a reused id starts fresh", async () => {
+    const store = await load();
+    store.selectWorktree(OTHER);
+    await tick(store, agent({ idle_ms: 100 }));
+    sessionsNow.list = [];
+    await store.refreshSessions();
+    // same id comes back already quiet: it was never seen working, so nothing to flag
+    await tick(store, agent({ idle_ms: 9000 }));
+    expect(store.attention().size).toBe(0);
+  });
+});
+
+describe("refreshChanges", () => {
+  it("drops an answer for a worktree that is no longer selected", async () => {
+    const wts = [WT, OTHER].map((path) => ({ path, branch: "b", head: "h", is_main: false }));
+    projectsNow.list = [{ id: "p", name: "p", path: "C:/work", worktrees: wts }];
+    const store = await load();
+    await store.refreshProjects();
+    const slow: Record<string, (v: unknown) => void> = {};
+    changesNow.answer = (wt) => new Promise((r) => (slow[wt] = r));
+    store.selectWorktree(WT);
+    const first = store.refreshChanges();
+    store.selectWorktree(OTHER);
+    const second = store.refreshChanges();
+    slow[OTHER]({ files: [{ path: "b.ts" }] });
+    await second;
+    slow[WT]({ files: [{ path: "a.ts" }] });
+    await first;
+    expect((store.changes() as unknown as { files: { path: string }[] }).files[0].path).toBe("b.ts");
+    projectsNow.list = [];
+    changesNow.answer = () => Promise.resolve(null);
+  });
+});
+
+describe("main view", () => {
+  it("showView clears every overlay and openFileAt remembers the line", async () => {
+    const store = await load();
+    store.setOpenDiff("a.ts");
+    store.setShowKanban(true);
+    store.openFileAt("src/x.ts", 42);
+    expect(store.openFile()).toBe("src/x.ts");
+    expect(store.fileLine()).toBe(42);
+    expect(store.openDiff()).toBeNull();
+    expect(store.showKanban()).toBe(false);
+    store.showView();
+    expect(store.openFile()).toBeNull();
+    expect(store.fileLine()).toBeNull();
+  });
+});
+
+describe("tab order", () => {
+  it("puts dragged tabs first and the rest after in natural order", async () => {
+    const { orderTabs, moveBefore } = await load();
+    const list = [{ id: 1 }, { id: 2 }, { id: 3 }];
+    expect(orderTabs(list, []).map((x) => x.id)).toEqual([1, 2, 3]);
+    expect(orderTabs(list, [3, 1]).map((x) => x.id)).toEqual([3, 1, 2]);
+    expect(moveBefore([], [1, 2, 3], 3, 1)).toEqual([3, 1, 2]);
+    expect(moveBefore([], [1, 2, 3], 1, null)).toEqual([2, 3, 1]);
+    expect(moveBefore([9], [1, 2], 2, 1)).toEqual([9, 2, 1]);
+    expect(moveBefore([4], [1, 2], 1, 99)).toEqual([4]);
+  });
+
+  it("reopens the most recently closed tab first", async () => {
+    const store = await load();
+    store.rememberClosed(agent({ id: 1, label: "um" }));
+    store.rememberClosed(agent({ id: 2, label: "dois" }));
+    expect(store.popClosed()?.label).toBe("dois");
+    expect(store.popClosed()?.label).toBe("um");
+    expect(store.popClosed()).toBeNull();
+  });
+
+  it("a renamed tab shows its new name, an empty name restores the original", async () => {
+    const store = await load();
+    const s = agent({ id: 7, label: "claude" });
+    store.renameTab(7, "  api  ");
+    expect(store.tabLabel(s)).toBe("api");
+    store.renameTab(7, "");
+    expect(store.tabLabel(s)).toBe("claude");
+  });
+});
+
+describe("project preferences", () => {
+  it("a project can pick its own agent and fall back to the global one", async () => {
+    const store = await load();
+    expect(store.projectAgent("p1")).toBe("claude");
+    store.setProjectPref("p1", { agent: "chatgpt" });
+    expect(store.projectAgent("p1")).toBe("chatgpt");
+    expect(store.projectAgent("p2")).toBe("claude");
+    store.setProjectPref("p1", { agent: undefined });
+    expect(store.projectAgent("p1")).toBe("claude");
+    expect(store.projectPrefsOf("p1")).toEqual({});
+  });
+
+  it("remembers the reply style per project", async () => {
+    const store = await load();
+    store.setProjectPref("p1", { terse: "tiny" });
+    expect(store.projectTerse("p1")).toBe("tiny");
+    expect(store.projectTerse("p2")).toBeUndefined();
   });
 });
