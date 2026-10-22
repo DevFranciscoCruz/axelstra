@@ -1103,6 +1103,11 @@ fn dispatch(
             crate::projects::set_setup(&reg.store, id, p["setup"].as_str().map(String::from))?;
             Ok(json!({}))
         }
+        "pm.detect" => {
+            let path = p["id"].as_str().and_then(|id| crate::projects::find(&reg.store, id).ok()).map(|pr| std::path::PathBuf::from(pr.path));
+            let (installed, suggested) = tokio::task::block_in_place(|| crate::projects::package_managers(path.as_deref()));
+            Ok(json!({"installed": installed, "suggested": suggested}))
+        }
         "project.remove" => {
             crate::projects::remove(&reg.store, p["id"].as_str().unwrap_or_default())?;
             Ok(json!({}))

@@ -87,6 +87,28 @@ pub fn add(store: &Path, path: &str) -> Result<Project> {
     Ok(p)
 }
 
+const PACKAGE_MANAGERS: [&str; 4] = ["bun", "pnpm", "yarn", "npm"];
+
+fn on_path(name: &str) -> bool {
+    let exts: Vec<String> = if cfg!(windows) {
+        std::env::var("PATHEXT").unwrap_or(".EXE;.CMD;.BAT".into()).split(';').map(|e| e.to_ascii_lowercase()).collect()
+    } else {
+        vec![String::new()]
+    };
+    std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).any(|d| exts.iter().any(|e| d.join(format!("{name}{e}")).is_file())))
+        .unwrap_or(false)
+}
+
+/// Package managers installed on this machine, and the one to suggest for the project at `path`: the manager
+/// whose lockfile the project has, else the first installed one (bun, pnpm, yarn, npm in that order).
+pub fn package_managers(path: Option<&Path>) -> (Vec<&'static str>, Option<&'static str>) {
+    let installed: Vec<&'static str> = PACKAGE_MANAGERS.iter().copied().filter(|n| on_path(n)).collect();
+    let locks = [("bun", "bun.lock"), ("bun", "bun.lockb"), ("pnpm", "pnpm-lock.yaml"), ("yarn", "yarn.lock"), ("npm", "package-lock.json")];
+    let from_lock = path.and_then(|p| locks.iter().find(|(m, f)| installed.contains(m) && p.join(f).is_file()).map(|(m, _)| *m));
+    (installed.clone(), from_lock.or_else(|| installed.first().copied()))
+}
+
 pub fn set_setup(store: &Path, id: &str, setup: Option<String>) -> Result<()> {
     let mut v = load(store);
     let p = v.iter_mut().find(|p| p.id == id).with_context(|| format!("unknown project {id}"))?;
@@ -223,5 +245,25 @@ mod plain_folder_tests {
         let err = worktree_create(&p, "x").unwrap_err().to_string();
         assert!(err.contains("git init"), "{err}");
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod package_manager_tests {
+    use super::package_managers;
+
+    #[test]
+    fn suggestion_is_installed_and_follows_the_lockfile() {
+        let dir = std::env::temp_dir().join(format!("axl-pm-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("package-lock.json"), "{}").unwrap();
+        let (installed, suggested) = package_managers(Some(&dir));
+        if let Some(s) = suggested {
+            assert!(installed.contains(&s));
+        }
+        if installed.contains(&"npm") {
+            assert_eq!(suggested, Some("npm"));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
