@@ -1,16 +1,13 @@
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
-import { DispatchMeta, dispatchMeta } from "./api";
+import { For, Show, createMemo, onCleanup } from "solid-js";
 import { Icon } from "./Icon";
 import { Modal } from "./Modal";
-import { norm, projects, selectWorktree, sessionState, sessionsOf, setShowDispatcher } from "./store";
+import { dispatchTopics, norm, projects, selectWorktree, sessionState, sessionsOf, setShowDispatcher, watchDispatch } from "./store";
 
 /** Live view of what the main session dispatched: one card per topic (worktree) with its latest requests. */
 export function Dispatcher() {
-  const [meta, setMeta] = createSignal<DispatchMeta>({});
-  const load = () => void dispatchMeta().then(setMeta, () => {});
-  load();
-  const timer = setInterval(load, 3000);
-  onCleanup(() => clearInterval(timer));
+  // the store polls once for everyone who shows the topics (and not while the window is hidden)
+  onCleanup(watchDispatch());
+  const meta = dispatchTopics;
 
   const topics = createMemo(() => {
     const out: { project: string; path: string; branch: string; title: string; requests: string[]; archived: boolean; updated: number }[] = [];
