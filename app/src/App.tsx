@@ -14,6 +14,8 @@ import { ContextMenu } from "./ContextMenu";
 import { Automations } from "./Automations";
 import { Dispatcher } from "./Dispatcher";
 import { Settings } from "./Settings";
+import { Shortcuts } from "./Shortcuts";
+import { isTextTarget, overlayOpen } from "./keyboard";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
 import { PanelIcon } from "./PanelIcon";
@@ -41,10 +43,23 @@ import {
   setDefaultAgent,
   changesMode,
   showAutomations,
+  setShowAutomations,
   showDispatcher,
+  setShowDispatcher,
   showSettings,
   showAgentSearch,
   setShowAgentSearch,
+  setShowSettings,
+  setShowShortcuts,
+  showShortcuts,
+  showView,
+  projectAgent,
+  tabLabel,
+  renameTab,
+  sortedTabs,
+  moveTab,
+  rememberClosed,
+  popClosed,
   showOrchestra,
   setShowOrchestra,
   computerOn,
@@ -62,6 +77,7 @@ import {
   rightTab,
   setOpenCommit,
   setOpenFile,
+  setOpenDiff,
   setShowKanban,
   showKanban,
   refreshChanges,
@@ -75,7 +91,6 @@ import {
   sessionsOf,
   setActiveSession,
   setError,
-  setOpenDiff,
   showSidebar,
   showRightPanel,
   toggleSidebar,
@@ -122,8 +137,7 @@ export function App() {
 
   // a missing git, or no agent CLI at all, is explained once at startup instead of surfacing as a cryptic failure later
   onMount(() =>
-    void import("@tauri-apps/api/core")
-      .then(({ invoke }) => invoke<string[]>("missing_tools"))
+    void tauriInvoke<string[]>("missing_tools")
       .then((m) => {
         addAgents(["opencode", "gemini", "aider"].filter((a) => !m.includes(a)));
         const bits: string[] = [];
@@ -179,10 +193,25 @@ export function App() {
         void refreshSessions().then(() => openSession(e.payload.worktree, e.payload.session));
       }).then((u) => (unlistenClick = u)),
     );
-    // Ctrl+B hides the project list, Ctrl+Shift+B the right panel; captured so the terminal never sees them
+    // Ctrl+B hides the project list, Ctrl+Shift+B the right panel; captured so the terminal never sees them.
+    // The ones that move around the page leave dialogs, the editor and text fields alone.
     const onKey = (e: KeyboardEvent) => {
+      // "?" lists the shortcuts, but only where it is not a character being typed
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (overlayOpen() || isTextTarget(e.target) || (e.target as HTMLElement | null)?.closest?.(".xterm")) return;
+        e.preventDefault();
+        setShowShortcuts(true);
+        return;
+      }
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
       const k = e.key.toLowerCase();
+      if (k === "," && !e.shiftKey) {
+        if (overlayOpen()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setShowSettings(true);
+        return;
+      }
       if (k === "f" && e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
@@ -193,6 +222,13 @@ export function App() {
         e.preventDefault();
         e.stopPropagation();
         void toggleVoice();
+        return;
+      }
+      if (overlayOpen() || isTextTarget(e.target)) return;
+      if (k === "t" && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        void reopenClosed();
         return;
       }
       // Ctrl+Tab / Ctrl+Shift+Tab cycle the tabs of this worktree, Ctrl+1..9 jump to one, Ctrl+J goes to the next agent waiting for an answer
@@ -268,14 +304,16 @@ export function App() {
     void refreshPorts();
   }));
 
-  const tabs = () => sessionsOf(selectedWorktree());
+  const tabs = () => sortedTabs(sessionsOf(selectedWorktree()));
+  // making the session shown in the split pane the active one swaps the two, so the pane never ends up empty
+  const activate = (id: number) => {
+    if (id === splitSession()) setSplitSession(activeSession() !== id ? activeSession() : null);
+    setActiveSession(id);
+  };
   const showTab = (s: SessionInfo) =>
     guarded(() => {
-      setOpenDiff(null);
-      setOpenFile(null);
-      setOpenCommit(null);
-      setShowKanban(false);
-      setActiveSession(s.id);
+      showView();
+      activate(s.id);
     });
 
   // Terminals of the last few tabs stay mounted (hidden): switching back is instant, keeps the scroll position and
@@ -294,11 +332,16 @@ export function App() {
       return next.filter((x) => x !== oldest);
     });
   });
-  const keptLive = () => kept().filter((id) => id !== splitSession() && sessions().some((s) => s.id === id));
+  const keptLive = () => kept().filter((id) => (id !== splitSession() || id === activeSession()) && sessions().some((s) => s.id === id));
   const current = () => findWorktree(selectedWorktree());
 
   // reload the change list when the worktree, its project data or the compare mode changes
   createEffect(on([selectedWorktree, () => current()?.wt.path, changesMode], () => void refreshChanges()));
+
+  // the same session in both panes would leave one of them blank (e.g. after a notification opened the split one)
+  createEffect(() => {
+    if (splitSession() !== null && splitSession() === activeSession()) setSplitSession(null);
+  });
 
   // keep one terminal tab selected whenever the worktree has terminals
   createEffect(() => {
@@ -308,19 +351,20 @@ export function App() {
     if (t.length === 0 && a !== null) setActiveSession(null);
   });
 
+  const spawnShell = async (c: NonNullable<ReturnType<typeof current>>) => {
+    const [program, args] = await defaultShell();
+    const { id } = await spawnSession(program, args, "shell", c.wt.path, { project: c.project.id, worktree: c.wt.path, kind: "shell" });
+    await refreshSessions();
+    return id;
+  };
+
   const newTerminal = async () => {
     const c = current();
     if (!c) return;
     try {
-      const [program, args] = await defaultShell();
-      const { id } = await spawnSession(program, args, "shell", c.wt.path, {
-        project: c.project.id,
-        worktree: c.wt.path,
-        kind: "shell",
-      });
-      await refreshSessions();
-      setOpenDiff(null);
-      setActiveSession(id);
+      const id = await spawnShell(c);
+      showView();
+      activate(id);
     } catch (e) {
       setError(String(e));
     }
@@ -340,10 +384,7 @@ export function App() {
     const c = current();
     if (!c) return;
     try {
-      const [program, args] = await defaultShell();
-      const { id } = await spawnSession(program, args, "shell", c.wt.path, { project: c.project.id, worktree: c.wt.path, kind: "shell" });
-      await refreshSessions();
-      setSplitSession(id);
+      setSplitSession(await spawnShell(c));
     } catch (e) {
       setError(String(e));
     }
@@ -352,25 +393,55 @@ export function App() {
   const newAgent = async () => {
     const c = current();
     if (!c) return;
+    const agent = projectAgent(c.project.id);
     try {
-      const id = await launchDefaultAgent(c.project.id, c.wt.path, defaultAgent(), AGENTS[defaultAgent()]);
+      const id = await launchDefaultAgent(c.project.id, c.wt.path, agent, AGENTS[agent]);
       await refreshSessions();
-      setOpenDiff(null);
-      setActiveSession(id);
+      showView();
+      activate(id);
     } catch (e) {
       setError(String(e));
     }
   };
 
   const close = async (s: SessionInfo) => {
-    if (s.running && s.meta?.kind === "agent") {
-      const ok = await ask(`Fechar "${s.label ?? `Sessão ${s.id}`}"? O agente em execução é terminado.`, { title: "Fechar agente", kind: "warning", okLabel: "Fechar", cancelLabel: "Cancelar" });
-      if (!ok) return;
+    try {
+      if (s.running && s.meta?.kind === "agent") {
+        const ok = await ask(`Fechar "${tabLabel(s)}"? O agente em execução é terminado.`, { title: "Fechar agente", kind: "warning", okLabel: "Fechar", cancelLabel: "Cancelar" });
+        if (!ok) return;
+      }
+      rememberClosed(s);
+      if (s.running) await killSession(s.id);
+      await removeSession(s.id);
+    } catch (e) {
+      setError(String(e));
     }
-    if (s.running) await killSession(s.id);
-    await removeSession(s.id);
     await refreshSessions();
   };
+
+  // Ctrl+Shift+T: bring back the tab closed last (a shell opens anew; an agent resumes its conversation)
+  const reopenClosed = async () => {
+    const t = popClosed();
+    if (!t) return showNotice("Nenhum separador fechado para reabrir.");
+    const target = findWorktree(t.meta?.worktree ?? null) ?? current();
+    if (!target) return;
+    const m = t.meta;
+    try {
+      const id =
+        m?.kind === "agent" && m.agent
+          ? await launchDefaultAgent(target.project.id, target.wt.path, t.label ?? m.agent, m.agent, { key: m.key, resume: m.resume })
+          : await spawnShell(target);
+      await refreshSessions();
+      openSession(target.wt.path, id);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  // tab being renamed (double click), tab being dragged and the one it hovers
+  const [renaming, setRenaming] = createSignal<number | null>(null);
+  const [dragTab, setDragTab] = createSignal<number | null>(null);
+  const [dropOn, setDropOn] = createSignal<number | null>(null);
 
   // drag a panel edge; `dir` flips the delta for the right-hand panel
   const drag = (e: MouseEvent, dir: 1 | -1, start: number, set: (w: number) => void) => {
@@ -425,19 +496,28 @@ export function App() {
         )}
       </Show>
       <Palette
-        actions={() =>
-          current()
+        actions={() => [
+          ...(current()
             ? [
-                { label: `Novo agente (${defaultAgent()})`, run: () => void newAgent() },
+                { label: `Novo agente (${projectAgent(current()!.project.id)})`, run: () => void newAgent() },
                 { label: "Novo terminal", run: () => void newTerminal() },
                 { label: "Dividir terminal", run: () => void toggleSplit() },
-                { label: "Pesquisar conversas", hint: "Ctrl+Shift+F", run: () => setShowAgentSearch(true) },
-                { label: "Orquestração: agentes e workers", run: () => setShowOrchestra(true) },
-                { label: computerOn() ? "Controlo do ecrã pelos agentes: desligar" : "Controlo do ecrã pelos agentes: ligar", run: () => void toggleComputer() },
+                { label: "Reabrir último separador fechado", hint: "Ctrl+Shift+T", run: () => void reopenClosed() },
               ]
-            : []
-        }
+            : []),
+          { label: "Pesquisar conversas", hint: "Ctrl+Shift+F", run: () => setShowAgentSearch(true) },
+          { label: "Orquestração: agentes e workers", run: () => setShowOrchestra(true) },
+          { label: "Definições", hint: "Ctrl+,", run: () => setShowSettings(true) },
+          { label: "Despachante", hint: "pedidos enviados a cada worktree", run: () => setShowDispatcher(true) },
+          { label: "Automatizações", hint: "agendamento", run: () => setShowAutomations(true) },
+          { label: "Atalhos de teclado", hint: "?", run: () => setShowShortcuts(true) },
+          { label: showSidebar() ? "Ocultar projetos" : "Mostrar projetos", hint: "Ctrl+B", run: toggleSidebar },
+          { label: computerOn() ? "Controlo do ecrã pelos agentes: desligar" : "Controlo do ecrã pelos agentes: ligar", run: () => void toggleComputer() },
+        ]}
       />
+      <Show when={showShortcuts()}>
+        <Shortcuts />
+      </Show>
       <Show when={showAgentSearch()}>
         <AgentSearch />
       </Show>
@@ -489,20 +569,61 @@ export function App() {
                 <div
                   class="tab"
                   classList={{ active: !showKanban() && openDiff() === null && openFile() === null && openCommit() === null && activeSession() === s.id }}
-                  {...press(
-                    () =>
-                      guarded(() => {
-                        setOpenDiff(null);
-                        setOpenFile(null);
-                        setOpenCommit(null);
-                        setShowKanban(false);
-                        setActiveSession(s.id);
-                      }),
-                    "tab",
-                  )}
+                  style={dropOn() === s.id && dragTab() !== s.id ? { "box-shadow": "inset 2px 0 0 var(--accent, #7aa2f7)" } : undefined}
+                  draggable={renaming() !== s.id}
+                  onDragStart={(e) => {
+                    setDragTab(s.id);
+                    e.dataTransfer?.setData("text/plain", String(s.id));
+                  }}
+                  onDragOver={(e) => {
+                    if (dragTab() === null) return;
+                    e.preventDefault();
+                    setDropOn(s.id);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const from = dragTab();
+                    if (from !== null) moveTab(tabs().map((t) => t.id), from, s.id);
+                    setDragTab(null);
+                    setDropOn(null);
+                  }}
+                  onDragEnd={() => {
+                    setDragTab(null);
+                    setDropOn(null);
+                  }}
+                  onDblClick={() => setRenaming(s.id)}
+                  onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+                  onAuxClick={(e) => {
+                    if (e.button !== 1) return;
+                    e.preventDefault();
+                    void close(s);
+                  }}
+                  {...press(() => showTab(s), "tab")}
                 >
                   <span class="dot" classList={{ on: s.running, work: sessionState(s) === "working" && s.meta?.kind === "agent", wait: sessionState(s) === "waiting" }} />
-                  <span>{s.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{s.label ?? `Sessão ${s.id}`}</span>
+                  <Show
+                    when={renaming() === s.id}
+                    fallback={<span>{s.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{tabLabel(s)}</span>}
+                  >
+                    <input
+                      style={{ width: "120px", font: "inherit", color: "inherit", background: "transparent", border: "1px solid var(--line-3)", "border-radius": "4px", padding: "0 4px" }}
+                      value={tabLabel(s)}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === "Enter") {
+                          renameTab(s.id, e.currentTarget.value);
+                          setRenaming(null);
+                        } else if (e.key === "Escape") setRenaming(null);
+                      }}
+                      onBlur={(e) => {
+                        if (renaming() !== s.id) return;
+                        renameTab(s.id, e.currentTarget.value);
+                        setRenaming(null);
+                      }}
+                      ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
+                    />
+                  </Show>
                   <button
                     class="x"
                     title="Fechar"

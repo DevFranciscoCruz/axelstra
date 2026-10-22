@@ -2,7 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
-import { DispatchMeta, addProject, getSettings, detectPackageManagers, dispatchMeta, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
+import { addProject, getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
 import { Modal } from "./Modal";
 import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
 import { invoke } from "@tauri-apps/api/core";
@@ -21,9 +21,11 @@ import {
   wtStatus,
   prByBranch,
   prKey,
-  defaultAgent,
-  pickAgent,
-  setDefaultAgent,
+  projectAgent,
+  projectPrefsOf,
+  setProjectPref,
+  watchDispatch,
+  dispatchTopics,
   confirmDiscard,
   editorDirty,
   flowState,
@@ -84,13 +86,9 @@ export function Sidebar() {
     }
   };
   // project id whose setup command is being edited
-  // titles the dispatcher gave each worktree (axelstra dispatch), refreshed while the sidebar is open
-  const [topics, setTopics] = createSignal<DispatchMeta>({});
-  const loadTopics = () => void dispatchMeta().then(setTopics, () => {});
-  loadTopics();
-  const topicTimer = setInterval(loadTopics, 5000);
-  onCleanup(() => clearInterval(topicTimer));
-  const topic = (path: string) => topics()[norm(path)];
+  // titles the dispatcher gave each worktree (axelstra dispatch), polled by the store while the sidebar is open
+  onCleanup(watchDispatch());
+  const topic = (path: string) => dispatchTopics()[norm(path)];
   // worktrees whose agent list is folded away
   const AGENTS_KEY = "axelstra.agentsHidden";
   const [agentsHidden, setAgentsHidden] = createSignal<ReadonlySet<string>>(
@@ -175,6 +173,13 @@ export function Sidebar() {
       const main = projects().find((p) => p.id === added.id)?.worktrees.find((w) => w.is_main);
       if (main) selectWorktree(main.path);
     });
+
+  // a project with its own default agent starts new worktrees with it
+  createEffect(() => {
+    const id = creating();
+    const own = id ? projectPrefsOf(id).agent : undefined;
+    if (own && AGENTS[own]) setNewAgentSig(own);
+  });
 
   const [pendingWt, setPendingWt] = createSignal<{ project: string; name: string } | null>(null);
   const submitWorktree = (projectId: string) =>
@@ -269,6 +274,14 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
   const projectMenu = (p: { id: string; name: string; path: string; setup?: string | null }): MenuItem[] => [
     { label: "Novo worktree", icon: "plus", run: () => setCreating(p.id) },
     { label: "Comando de setup…", icon: "gear", run: () => { setSetupText(p.setup ?? ""); setEditSetup(p.id); } },
+    {
+      label: "Agente por omissão",
+      icon: "sparkle",
+      children: [
+        { label: "Seguir o global", icon: projectPrefsOf(p.id).agent ? undefined : "check", run: () => setProjectPref(p.id, { agent: undefined }) },
+        ...agentKeys().map((a) => ({ label: a, icon: projectPrefsOf(p.id).agent === a ? "check" : undefined, run: () => setProjectPref(p.id, { agent: a }) })),
+      ],
+    },
     { separator: true },
     {
       label: "Abrir em",

@@ -1,6 +1,7 @@
 import { ask } from "./Confirm";
 import { createSignal } from "solid-js";
-import { Changes, Commit, FlowTask, GhItem, Project, SessionInfo, Worktree, WtStatus, flowTasks, ghListBg, gitChanges, listProjects, listSessions, worktreeStatus } from "./api";
+import { invoke } from "@tauri-apps/api/core";
+import { Changes, Commit, DispatchMeta, FlowTask, GhItem, Project, SessionInfo, Terse, Worktree, WtStatus, callBg, flowTasks, ghListBg, gitChanges, listProjects, listSessions, worktreeStatus } from "./api";
 
 /** Paths come back with either slash style; compare them in one normal form. */
 export const norm = (p?: string | null) => (p ?? "").replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
@@ -35,6 +36,36 @@ export const setDefaultAgent = (a: string) => {
   if (!AGENTS[a]) return;
   setAgentSig(a);
   save("axelstra.agent", a);
+};
+
+/** Settings that belong to one project, remembered in the browser storage next to the global ones. */
+export type ProjectPrefs = { agent?: string; terse?: Terse };
+const loadPrefs = (): Record<string, ProjectPrefs> => {
+  try {
+    const v = JSON.parse(load("axelstra.projectPrefs") ?? "{}");
+    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+};
+const [projectPrefs, setProjectPrefsSig] = createSignal<Record<string, ProjectPrefs>>(loadPrefs());
+/** the agent a project opens by default: its own choice, else the global one */
+export const projectAgent = (id?: string | null) => {
+  const a = id ? projectPrefs()[id]?.agent : undefined;
+  return a && AGENTS[a] ? a : defaultAgent();
+};
+export const projectPrefsOf = (id: string): ProjectPrefs => projectPrefs()[id] ?? {};
+/** reply style chosen for one project; undefined = follow the global setting */
+export const projectTerse = (id?: string | null): Terse | undefined => (id ? projectPrefs()[id]?.terse : undefined);
+/** changes one project's preference; `undefined` for a field removes it (back to the global value) */
+export const setProjectPref = (id: string, patch: ProjectPrefs) => {
+  const next = { ...projectPrefs() };
+  const merged: ProjectPrefs = { ...next[id], ...patch };
+  for (const k of Object.keys(merged) as (keyof ProjectPrefs)[]) if (merged[k] === undefined) delete merged[k];
+  if (Object.keys(merged).length) next[id] = merged;
+  else delete next[id];
+  setProjectPrefsSig(next);
+  save("axelstra.projectPrefs", JSON.stringify(next));
 };
 
 /** Modal asking which agent to open. Resolves with the agent key, "shell" for a plain terminal, or null if dismissed. */
@@ -145,10 +176,7 @@ const doSelect = (path: string | null) => {
   save("axelstra.worktree", path);
   setActiveSession(null);
   setSplitSession(null);
-  setOpenDiff(null);
-  setOpenFile(null);
-  setOpenCommit(null);
-  setShowKanban(false);
+  showView();
   setChanges(null);
 };
 
@@ -157,9 +185,26 @@ export const [rightTab, setRightTab] = createSignal<"files" | "changes" | "pulls
 /** the commit whose patch replaces the terminal area; null = none */
 export const [openCommit, setOpenCommit] = createSignal<Commit | null>(null);
 export const [openFile, setOpenFile] = createSignal<string | null>(null);
+/** line to put the cursor on when the open file was reached from a path link; null = top */
+export const [fileLine, setFileLine] = createSignal<number | null>(null);
 
 /** the project's kanban board replaces the terminal area when true */
 export const [showKanban, setShowKanban] = createSignal(false);
+
+/** One place that picks what fills the main area: no argument = the terminal; the views exclude each other. */
+export const showView = (v: { diff?: string; file?: string; commit?: Commit; kanban?: boolean } = {}) => {
+  setOpenDiff(v.diff ?? null);
+  setOpenFile(v.file ?? null);
+  setFileLine(null);
+  setOpenCommit(v.commit ?? null);
+  setShowKanban(v.kanban ?? false);
+};
+/** opens a file (relative to the worktree) in the editor, at `line` when given; asks first if the editor has unsaved text */
+export const openFileAt = (path: string, line?: number) =>
+  guarded(() => {
+    showView({ file: path });
+    setFileLine(line && line > 0 ? line : null);
+  });
 
 /** a second terminal shown beside the active one (split view); null = no split */
 export const [splitSession, setSplitSession] = createSignal<number | null>(null);
@@ -171,6 +216,7 @@ export const [ports, setPorts] = createSignal<number[]>([]);
 export const [showAutomations, setShowAutomations] = createSignal(false);
 export const [showSettings, setShowSettings] = createSignal(false);
 export const [showDispatcher, setShowDispatcher] = createSignal(false);
+export const [showShortcuts, setShowShortcuts] = createSignal(false);
 export const [showAgentSearch, setShowAgentSearch] = createSignal(false);
 export const [showOrchestra, setShowOrchestra] = createSignal(false);
 /** agents may look at the screen and drive the mouse and keyboard (held by the daemon, off at every start) */
@@ -213,7 +259,6 @@ export const openSession = (path: string, id: number) =>
 
 const notify = async (title: string, body: string, worktree: string, session: number) => {
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
     if (await invoke<boolean>("notify_session", { title, body, worktree, session })) return;
     const n = await import("@tauri-apps/plugin-notification");
     let ok = await n.isPermissionGranted();
@@ -226,6 +271,9 @@ const notify = async (title: string, body: string, worktree: string, session: nu
 
 /** an agent that was working and went quiet needs a look: flag it and notify if the user is elsewhere */
 const trackAgents = (list: SessionInfo[]) => {
+  // sessions that were removed leave nothing behind
+  const alive = new Set(list.map((s) => s.id));
+  for (const id of lastState.keys()) if (!alive.has(id)) lastState.delete(id);
   for (const s of list) {
     const state = sessionState(s);
     const prev = lastState.get(s.id);
@@ -273,29 +321,114 @@ const refreshFlows = async () => {
 };
 
 /** The new list, but with the old object wherever nothing changed: keyed lists then keep their DOM (tabs keep focus,
- *  icons do not reload) instead of being rebuilt on every poll. */
-export const keepSame = <T>(prev: T[], next: T[], key: (x: T) => string | number): T[] => {
+ *  icons do not reload) instead of being rebuilt on every poll. `sig` is what counts as a change (default: everything);
+ *  pass one that leaves out fields that move on every poll. */
+export const keepSame = <T>(prev: T[], next: T[], key: (x: T) => string | number, sig: (x: T) => unknown = (x) => x): T[] => {
   const old = new Map(prev.map((x) => [key(x), x] as const));
   return next.map((n) => {
     const o = old.get(key(n));
-    return o !== undefined && JSON.stringify(o) === JSON.stringify(n) ? o : n;
+    return o !== undefined && JSON.stringify(sig(o)) === JSON.stringify(sig(n)) ? o : n;
   });
 };
 
-export const refreshSessions = async () => {
+/** A session as far as the UI can tell: idle_ms changes on every poll, but only its "working" side and the minute
+ *  the labels show matter, so those stand in for it. */
+const sessionSig = (s: SessionInfo) => ({ ...s, idle_ms: s.idle_ms === undefined ? undefined : [s.idle_ms < WORKING_MS, Math.floor(s.idle_ms / 60000)] });
+
+const pollSessions = async () => {
   void refreshFlows();
   try {
     const list = await listSessions();
     trackAgents(list);
+    pruneTabState(list);
     // a worktree on screen is being looked at: a flag left from earlier (or set while the window was hidden) is stale
     const cur = selectedWorktree();
     if (cur && !document.hidden && attention().has(norm(cur))) setAttention((a) => { const n = new Set(a); n.delete(norm(cur)); return n; });
-    setSessions((prev) => keepSame(prev, list, (s) => s.id));
+    setSessions((prev) => keepSame(prev, list, (s) => s.id, sessionSig));
     if (errorFromPoll) setErrorSig("");
   } catch (e) {
     setErrorSig(String(e));
     errorFromPoll = true;
   }
+};
+
+/** One poll at a time. A call that arrives meanwhile shares one trailing poll (so it still sees data newer than
+ *  the call), instead of piling up requests behind the slow one. */
+let polling: Promise<void> | null = null;
+let trailing: Promise<void> | null = null;
+export const refreshSessions = (): Promise<void> => {
+  if (!polling) return (polling = pollSessions().finally(() => (polling = null)));
+  return (trailing ??= polling.then(() => {
+    trailing = null;
+    return refreshSessions();
+  }));
+};
+
+/** titles the dispatcher gave each worktree, polled once for everyone who shows them */
+export const [dispatchTopics, setDispatchTopics] = createSignal<DispatchMeta>({});
+const pollDispatch = () => callBg<DispatchMeta>("dispatch.meta").then(setDispatchTopics, () => {});
+let dispUsers = 0;
+let dispTimer: ReturnType<typeof setInterval> | undefined;
+/** call from a component that shows `dispatchTopics`; returns the function that stops watching (the poll ends with the last one) */
+export const watchDispatch = () => {
+  void pollDispatch();
+  if (dispUsers++ === 0) dispTimer = setInterval(() => !document.hidden && void pollDispatch(), 4000);
+  return () => {
+    if (--dispUsers === 0) clearInterval(dispTimer);
+  };
+};
+
+// ---- tabs of the selected worktree: names, order and the ones just closed ----
+/** names the user gave tabs (the daemon knows only the original label) */
+const [tabNames, setTabNames] = createSignal<Record<number, string>>({});
+export const tabLabel = (s: SessionInfo) => tabNames()[s.id] ?? s.label ?? `Sessão ${s.id}`;
+export const renameTab = (id: number, name: string) => {
+  const n = name.trim();
+  setTabNames((cur) => {
+    const next = { ...cur };
+    if (n) next[id] = n;
+    else delete next[id];
+    return next;
+  });
+};
+/** the order the user dragged tabs into; ids not in it follow in their natural order */
+const [tabOrder, setTabOrder] = createSignal<number[]>([]);
+export const orderTabs = <T extends { id: number }>(list: T[], order: number[]): T[] => {
+  const at = (x: T) => {
+    const i = order.indexOf(x.id);
+    return i < 0 ? Infinity : i;
+  };
+  return list.map((x, i) => [x, i] as const).sort(([a, i], [b, j]) => (at(a) === at(b) ? i - j : at(a) < at(b) ? -1 : 1)).map(([x]) => x);
+};
+/** the new order after dragging `id` before `target` (null = to the end), given the ids on screen in their current order */
+export const moveBefore = (order: number[], shown: number[], id: number, target: number | null): number[] => {
+  if (id === target) return order;
+  const rest = shown.filter((x) => x !== id);
+  const at = target === null ? rest.length : rest.indexOf(target);
+  if (at < 0) return order;
+  rest.splice(at, 0, id);
+  return [...order.filter((x) => !shown.includes(x)), ...rest];
+};
+export const moveTab = (shown: number[], id: number, target: number | null) => setTabOrder((cur) => moveBefore(cur, shown, id, target));
+export const sortedTabs = <T extends { id: number }>(list: T[]) => orderTabs(list, tabOrder());
+
+/** tabs closed recently, newest last, so Ctrl+Shift+T can bring one back */
+export type ClosedTab = { label: string | null; meta: SessionInfo["meta"] };
+const CLOSED_MAX = 10;
+const [closedTabs, setClosedTabs] = createSignal<ClosedTab[]>([]);
+export const rememberClosed = (s: SessionInfo) => setClosedTabs((cur) => [...cur, { label: tabNames()[s.id] ?? s.label, meta: s.meta }].slice(-CLOSED_MAX));
+/** the most recently closed tab, taken off the list; null when there is none */
+export const popClosed = (): ClosedTab | null => {
+  const cur = closedTabs();
+  if (!cur.length) return null;
+  setClosedTabs(cur.slice(0, -1));
+  return cur[cur.length - 1];
+};
+/** forgets names and positions of sessions that no longer exist */
+const pruneTabState = (list: SessionInfo[]) => {
+  const alive = new Set(list.map((s) => s.id));
+  if (Object.keys(tabNames()).some((k) => !alive.has(Number(k)))) setTabNames((cur) => Object.fromEntries(Object.entries(cur).filter(([k]) => alive.has(Number(k)))));
+  if (tabOrder().some((id) => !alive.has(id))) setTabOrder((cur) => cur.filter((id) => alive.has(id)));
 };
 
 /** git state per worktree (keyed by normalized path) and the open PR per branch, for the sidebar badges */
@@ -368,7 +501,10 @@ export const baseRef = (): string | undefined => {
   return c?.project.worktrees.find((w) => w.is_main)?.branch ?? undefined;
 };
 
+/** newest refreshChanges call; an answer that is no longer the newest (other worktree, other mode) is dropped */
+let changesReq = 0;
 export const refreshChanges = async () => {
+  const req = ++changesReq;
   const w = selectedWorktree();
   if (!w || !findWorktree(w)) {
     setChanges(null);
@@ -380,8 +516,10 @@ export const refreshChanges = async () => {
     return;
   }
   try {
-    setChanges(await gitChanges(w, baseRef()));
+    const c = await gitChanges(w, baseRef());
+    if (req === changesReq) setChanges(c);
   } catch (e) {
+    if (req !== changesReq) return;
     setChanges(null);
     setError(String(e));
   }

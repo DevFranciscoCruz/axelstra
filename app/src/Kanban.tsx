@@ -53,12 +53,17 @@ export function Kanban(props: { project: string }) {
     }
   };
 
+  // only the newest answer counts: the 3s poll and a manual reload can overlap
+  let reloadReq = 0;
   const reload = async () => {
+    const r = ++reloadReq;
     try {
-      setBoard(await kanbanList(props.project));
+      const b = await kanbanList(props.project);
+      if (r !== reloadReq) return;
+      setBoard(b);
       setErr("");
     } catch (e) {
-      setErr(String(e));
+      if (r === reloadReq) setErr(String(e));
     }
   };
   onMount(() => {
