@@ -1,0 +1,79 @@
+import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { DispatchMeta, dispatchMeta } from "./api";
+import { Icon } from "./Icon";
+import { Modal } from "./Modal";
+import { norm, projects, selectWorktree, sessionState, sessionsOf, setShowDispatcher } from "./store";
+
+/** Live view of what the main session dispatched: one card per topic (worktree) with its latest requests. */
+export function Dispatcher() {
+  const [meta, setMeta] = createSignal<DispatchMeta>({});
+  const load = () => void dispatchMeta().then(setMeta, () => {});
+  load();
+  const timer = setInterval(load, 3000);
+  onCleanup(() => clearInterval(timer));
+
+  const topics = createMemo(() => {
+    const out: { project: string; path: string; branch: string; title: string; requests: string[]; archived: boolean; updated: number }[] = [];
+    for (const p of projects()) {
+      for (const w of p.worktrees) {
+        const m = meta()[norm(w.path)];
+        if (!m || w.is_main) continue;
+        out.push({ project: p.name, path: w.path, branch: w.branch ?? "(detached)", title: m.title ?? w.branch ?? w.path, requests: m.requests ?? [], archived: !!m.archived, updated: m.updated ?? 0 });
+      }
+    }
+    return out.sort((a, b) => Number(a.archived) - Number(b.archived) || b.updated - a.updated);
+  });
+
+  const stateOf = (path: string) => {
+    const agents = sessionsOf(path).filter((s) => s.meta?.kind === "agent");
+    if (agents.some((s) => sessionState(s) === "waiting")) return { cls: "wait", text: "à espera de resposta" };
+    if (agents.some((s) => sessionState(s) === "working")) return { cls: "work", text: "a trabalhar" };
+    if (agents.some((s) => s.running)) return { cls: "on", text: "parado" };
+    return { cls: "", text: "sem agente" };
+  };
+
+  return (
+    <Modal label="Despachante" class="modal settings" onClose={() => setShowDispatcher(false)}>
+      <div class="auto-head">
+        <strong>Despachante</strong>
+        <span class="grow" />
+        <button onClick={() => setShowDispatcher(false)}>Fechar</button>
+      </div>
+      <p class="auto-note">Cada pedido feito na main vai para o worktree do seu tópico. Aqui vê para onde foi cada um.</p>
+      <div class="disp-list">
+        <For each={topics()} fallback={<div class="auto-note">Ainda não há pedidos despachados. Peça algo ao agente da main.</div>}>
+          {(t) => {
+            const st = () => stateOf(t.path);
+            return (
+              <div class="disp-card" classList={{ archived: t.archived }}>
+                <div class="disp-head">
+                  <span class="dot" classList={{ on: st().cls === "on", work: st().cls === "work", wait: st().cls === "wait" }} />
+                  <strong class="disp-title">{t.title}</strong>
+                  <span class="auto-note">{t.archived ? "arquivado" : st().text}</span>
+                  <span class="grow" />
+                  <button
+                    class="icon"
+                    title="Abrir este worktree"
+                    aria-label="Abrir este worktree"
+                    onClick={() => {
+                      selectWorktree(t.path);
+                      setShowDispatcher(false);
+                    }}
+                  >
+                    <Icon name="external" />
+                  </button>
+                </div>
+                <div class="auto-note">{t.project} · {t.branch}</div>
+                <Show when={t.requests.length > 0}>
+                  <ol class="disp-reqs">
+                    <For each={t.requests.slice(-3).reverse()}>{(r) => <li>{r}</li>}</For>
+                  </ol>
+                </Show>
+              </div>
+            );
+          }}
+        </For>
+      </div>
+    </Modal>
+  );
+}

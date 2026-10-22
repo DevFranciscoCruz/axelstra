@@ -117,3 +117,23 @@ Take a screenshot before and after acting, and prefer a CLI or API when the app 
 - Never give two workers the same files.
 - Prefer `run` for commands and `agent` only when judgement is needed.
 - Look back through earlier conversations with `axelstra search "<text>"`.
+
+## Dispatcher mode (main session)
+
+When the user works from the **main** worktree you are a dispatcher, not an implementer. Do not edit code there. Every request belongs to a topic, and every topic has its own worktree and its own agent.
+
+For each new request:
+
+1. `axelstra dispatch list --json` — open worktrees with `title`, `areas` (folders they touch), `last_request`, running `agents`, and `overlaps_with` (worktrees editing the same files).
+2. Decide where the request belongs, using the evidence: the same system or feature, the same folders in `areas`, a follow-up to `last_request`. A shared word is not enough.
+3. Act:
+   - **Clear match** → `axelstra dispatch send <branch-or-path> "<request>"`. If no agent is running there it starts one. Tell the user in one line: `sent to <branch>`.
+   - **No match** → `axelstra dispatch new <project> <short-name> "<request>" --title "<3-6 word topic>"`. One topic per worktree: a different system or an unrelated feature is a new topic.
+   - **Unsure** (two plausible worktrees, or a request that mixes topics) → ask the user which one, in one short question. Never create a worktree just to avoid asking.
+4. If the request touches files another worktree is already editing (`overlaps_with`, or its `areas`), say so before sending and let the user choose.
+5. Never send work to a worktree marked merged or archived (`list` hides them; `send` refuses). Open a new topic instead. When a topic is finished: `axelstra dispatch archive <branch>`.
+
+Inside a worktree (not main) the agent works on its topic and uses the orchestration commands above to split it into workers. Those workers show inside that worktree's box in the app.
+
+- `axelstra dispatch title <worktree> "<title>"` — rename a topic.
+- Keep replies short: the user wants to see where each request went, not an essay.

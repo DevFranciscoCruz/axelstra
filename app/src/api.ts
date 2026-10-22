@@ -21,11 +21,17 @@ export const callBg = <T = unknown>(method: string, params: Record<string, unkno
   invoke<T>("daemon_call_bg", { method, params });
 
 import { Channel, invoke as tauriInvoke } from "@tauri-apps/api/core";
+export type Terse = "off" | "short" | "tiny";
+export type Settings = { terse: Terse; rules: string | null; pm: string | null; installed: string[]; auto_install: boolean };
+export const getSettings = () => call<Settings>("settings.get");
+export const setSettings = (patch: { terse?: Terse; pm?: string | null; auto_install?: boolean }) => call("settings.set", patch);
 export const defaultShell = () => tauriInvoke<[string, string[]]>("default_shell");
 
 /** Command line for an agent. On restore it resumes the earlier conversation, falling back to a fresh start. */
-const agentLine = (cli: string, resume: string | undefined, restoring: boolean, ps: boolean, hooks: string) => {
-  const claude = (flags: string) => `claude --settings '${hooks}' ${flags}`;
+const agentLine = (cli: string, resume: string | undefined, restoring: boolean, ps: boolean, hooks: string, rules?: string | null) => {
+  // the rules are plain ASCII without quotes (see skill::terse_rules), so single quotes are safe in both shells
+  const style = rules ? ` --append-system-prompt '${rules}'` : "";
+  const claude = (flags: string) => `claude --settings '${hooks}'${style} ${flags}`;
   const fresh = cli === "claude" && resume ? claude(`--session-id ${resume}`) : cli;
   if (!restoring) return fresh;
   const back = cli === "claude" && resume ? claude(`--resume ${resume}`) : cli === "codex" ? "codex resume --last" : cli;
@@ -40,10 +46,13 @@ export const launchDefaultAgent = async (project: string, worktree: string, agen
   const key = restore ? restore.key : cli === "claude" ? crypto.randomUUID() : undefined;
   const resume = restore ? restore.resume ?? key : key;
   const { dir } = await call<{ dir: string }>("app.dir");
-  const line = agentLine(cli, resume, !!restore, ps, `${dir}/hooks.json`);
+  const rules = await getSettings().then((x) => x.rules, () => null);
+  const line = agentLine(cli, resume, !!restore, ps, `${dir}/hooks.json`, rules);
   const run = ps ? [...args, "-NoExit", "-Command", line] : [...args, "-c", `${line}; exec "${program}" -l`];
   const env = key ? { AXELSTRA_KEY: key, AXELSTRA_DIR: dir } : undefined;
   const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent", agent: cli, resume, key }, env);
+  // only claude takes the rules as a system prompt: type them into the others once they have booted
+  if (rules && cli !== "claude" && !restore) void nudge(id, rules);
   return id;
 };
 
@@ -162,7 +171,9 @@ export const listProjects = () => call<Project[]>("project.list");
 export const addProject = (path: string) => call<Project>("project.add", { path });
 export const projectLogo = (id: string) => call<{ data_url: string | null }>("project.logo", { id }).then((r) => r.data_url);
 export const setProjectSetup = (id: string, setup: string) => call("project.setup", { id, setup });
-export const detectPackageManagers = (id: string) => call<{ installed: string[]; suggested: string | null }>("pm.detect", { id });
+export const detectPackageManagers = (id: string) => call<{ installed: string[]; suggested: string | null; package_json?: boolean }>("pm.detect", { id });
+export type DispatchMeta = Record<string, { title?: string; archived?: boolean; requests?: string[]; updated?: number }>;
+export const dispatchMeta = () => call<DispatchMeta>("dispatch.meta");
 export const removeProject = (id: string) => call("project.remove", { id });
 export const createWorktree = (project: string, name: string) => call<Worktree>("worktree.create", { project, name });
 export type GhItem = { number: number; title: string; author: string; url: string; state: string; draft: boolean; branch: string; checks: string; review: string };

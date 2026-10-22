@@ -13,6 +13,16 @@ pub fn guide() -> &'static str {
     GUIDE
 }
 
+/// Reply-style rules handed to agents when the "short answers" setting is on. They ship inside the binary so
+/// nothing needs to be installed. ASCII and no quotes: the text is passed on a shell command line.
+pub fn terse_rules(level: &str) -> Option<&'static str> {
+    match level {
+        "short" => Some("Reply style: answer first, then the reason. No greetings, no recap, no offers of more help, no filler words. Short sentences. Keep code, commands, paths, numbers and error messages exact. Ask questions and give warnings in full sentences. Never shorten anything written to files, commits or pull requests."),
+        "tiny" => Some("Reply style: be extremely brief. Answer first. Fragments are fine, drop articles when the meaning stays clear, one idea per sentence, at most three sentences unless code is needed. No greetings, no recap, no offers of more help. Keep code, commands, paths, numbers and error messages exact. Ask questions and give warnings in full sentences. Never shorten anything written to files, commits or pull requests."),
+        _ => None,
+    }
+}
+
 fn home() -> Result<PathBuf> {
     std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).ok_or_else(|| anyhow!("no home directory"))
 }

@@ -1,4 +1,5 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import { Icon, hasIcon } from "./Icon";
 
 export type MenuItem =
   | { separator: true }
@@ -55,10 +56,10 @@ function Items(props: { items: MenuItem[]; sub?: boolean; flip?: boolean }) {
                   void it.run?.();
                 }}
               >
-                <span class="ctx-icon">{it.icon ?? ""}</span>
+                <span class="ctx-icon">{hasIcon(it.icon) ? <Icon name={it.icon!} size={13} /> : (it.icon ?? "")}</span>
                 <span class="ctx-label">{it.label}</span>
                 <Show when={it.children}>
-                  <span class="ctx-arrow">›</span>
+                  <span class="ctx-arrow"><Icon name="chevRight" size={11} /></span>
                 </Show>
               </button>
               <Show when={it.children && openSub() === i()}>

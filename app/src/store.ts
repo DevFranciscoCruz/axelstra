@@ -169,6 +169,8 @@ export const [ports, setPorts] = createSignal<number[]>([]);
 
 /** the automations dialog */
 export const [showAutomations, setShowAutomations] = createSignal(false);
+export const [showSettings, setShowSettings] = createSignal(false);
+export const [showDispatcher, setShowDispatcher] = createSignal(false);
 export const [showAgentSearch, setShowAgentSearch] = createSignal(false);
 export const [showOrchestra, setShowOrchestra] = createSignal(false);
 /** agents may look at the screen and drive the mouse and keyboard (held by the daemon, off at every start) */

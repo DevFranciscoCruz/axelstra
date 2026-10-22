@@ -1,4 +1,5 @@
 import { Show, createEffect, createSignal, onCleanup } from "solid-js";
+import { Icon } from "./Icon";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { writeSession } from "./api";
@@ -261,7 +262,7 @@ export const VoiceDraft = (props: { target: number | null }) => {
           <span class="voice-err">{voiceError()}</span>
         </Show>
         <button class="icon" title="Fechar (Esc)" onClick={close}>
-          ×
+          <Icon name="x" />
         </button>
       </div>
     </Show>

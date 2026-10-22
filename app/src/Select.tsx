@@ -1,4 +1,5 @@
 import { For } from "solid-js";
+import { Icon } from "./Icon";
 import { showMenuAt } from "./ContextMenu";
 
 export type Option = { value: string; label: string };
@@ -16,13 +17,13 @@ export function Select(props: { value: string; options: Option[]; onChange: (v: 
         showMenuAt(
           r.left,
           r.bottom + 4,
-          props.options.map((o) => ({ label: o.label, icon: o.value === props.value ? "✓" : "", run: () => props.onChange(o.value) })),
+          props.options.map((o) => ({ label: o.label, icon: o.value === props.value ? "check" : "", run: () => props.onChange(o.value) })),
           Math.max(r.width, 140),
         );
       }}
     >
       <span class="select-label">{label()}</span>
-      <span class="chev">▾</span>
+      <span class="chev"><Icon name="chevDown" size={11} /></span>
     </button>
   );
 }

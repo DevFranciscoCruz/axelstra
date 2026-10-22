@@ -1,4 +1,5 @@
 import { RightTabs } from "./RightTabs";
+import { Icon } from "./Icon";
 import { ask } from "./Confirm";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { Commit, FileChange, gitCommit, gitLog, gitPr, gitPush } from "./api";
@@ -128,7 +129,7 @@ export function ChangesPanel() {
 
       <div class="sc-head">
         <button class="pill" disabled={busy()} onClick={() => setPrOpen(!prOpen())}>
-          ⑂ Criar PR
+          <Icon name="branch" size={13} /> Criar PR
         </button>
         <span class="grow" />
         <button
@@ -139,7 +140,7 @@ export function ChangesPanel() {
             void refetchLog();
           }}
         >
-          ↻
+          <Icon name="refresh" />
         </button>
         <button
           class="icon"
@@ -148,7 +149,7 @@ export function ChangesPanel() {
             showMenu(e, [
               {
                 label: "Por consolidar (vs HEAD)",
-                icon: changesMode() === "head" ? "✓" : "",
+                icon: changesMode() === "head" ? "check" : "",
                 run: () => {
                   setChangesMode("head");
                   void refreshChanges();
@@ -156,23 +157,23 @@ export function ChangesPanel() {
               },
               {
                 label: "Todo o branch (vs principal)",
-                icon: changesMode() === "main" ? "✓" : "",
+                icon: changesMode() === "main" ? "check" : "",
                 run: () => {
                   setChangesMode("main");
                   void refreshChanges();
                 },
               },
               { separator: true },
-              { label: "Push", icon: "↑", run: () => doPush() },
+              { label: "Push", icon: "arrowUp", run: () => doPush() },
             ])
           }
         >
-          ⋯
+          <Icon name="more" />
         </button>
       </div>
       <div class="sc-branch" title={branch()}>
         <div class="sc-name">{branch() || "(detached)"}</div>
-        <div class="sc-base">→ {base()}</div>
+        <div class="sc-base"><Icon name="arrowRight" size={11} /> {base()}</div>
       </div>
 
       <Show when={prOpen()}>
@@ -202,7 +203,7 @@ export function ChangesPanel() {
         />
         <div class="sc-split">
           <button class="sc-main" disabled={!canCommit()} title={canCommit() ? "Commit (Ctrl+Enter)" : files().length === 0 ? "Sem alterações para commit" : message().trim() ? "A trabalhar…" : "Escreva uma mensagem"} onClick={() => void doCommit()}>
-            ✓ Commit
+            <Icon name="check" /> Commit
           </button>
           <button
             class="sc-drop"
@@ -210,13 +211,13 @@ export function ChangesPanel() {
             title="Mais opções de commit"
             onClick={(e) =>
               showMenu(e, [
-                { label: "Commit", icon: "✓", disabled: !canCommit(), run: () => doCommit() },
-                { label: "Commit e Push", icon: "↑", disabled: !canCommit(), run: () => doCommitPush() },
-                { label: "Push", icon: "↑", run: () => doPush() },
+                { label: "Commit", icon: "check", disabled: !canCommit(), run: () => doCommit() },
+                { label: "Commit e Push", icon: "arrowUp", disabled: !canCommit(), run: () => doCommitPush() },
+                { label: "Push", icon: "arrowUp", run: () => doPush() },
               ])
             }
           >
-            ⌄
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
           </button>
         </div>
         <Show when={note()}>
@@ -230,7 +231,7 @@ export function ChangesPanel() {
 
       <div class="sc-body">
         <div class="sc-title" {...press(() => setShowChanges(!showChanges()))} aria-expanded={showChanges()}>
-          <span class="chev">{showChanges() ? "⌄" : "›"}</span>
+          <span class="chev"><Icon name={showChanges() ? "chevDown" : "chevRight"} /></span>
           <span>ALTERAÇÕES</span>
           <span class="sc-count">{files().length}</span>
         </div>
@@ -241,7 +242,7 @@ export function ChangesPanel() {
                 const [dir, name] = split(f.path);
                 return (
                   <div class="file" classList={{ active: openDiff() === f.path }} {...press(() => openFileDiff(f))} title={`${f.path} (${LABEL[f.status] ?? f.status})`}>
-                    <span class="ficon">▤</span>
+                    <span class="ficon"><Icon name="file" size={12} /></span>
                     <span class="fname2">
                       <span class="fn">{name}</span>
                       <span class="fd">{dir}</span>
@@ -265,7 +266,7 @@ export function ChangesPanel() {
         </Show>
 
         <div class="sc-title" {...press(() => setShowCommits(!showCommits()))} aria-expanded={showCommits()}>
-          <span class="chev">{showCommits() ? "⌄" : "›"}</span>
+          <span class="chev"><Icon name={showCommits() ? "chevDown" : "chevRight"} /></span>
           <span>COMMITS</span>
           <span class="sc-count">{log()?.length ?? 0}</span>
         </div>
