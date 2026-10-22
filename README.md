@@ -79,7 +79,7 @@ powershell -File scripts/build-installer.ps1
 sh scripts/prepare-sidecar.sh && cd app && npx tauri build --bundles dmg --config src-tauri/tauri.release.conf.json
 ```
 
-Local builds are not signed for the updater, so they never produce update artifacts. Engine tests: `cargo test -p axelstra-core -p axelstra-daemon -p axelstra`.
+Local builds are not signed for the updater, so they never produce update artifacts. Engine tests: `cargo test -p axelstra-core -p axelstra-daemon -p axelstra`. Desktop host tests (`app/src-tauri`) need `cargo test --release -p axelstra-app` on Windows: the prebuilt static sherpa libs import `ucrtbased.dll`, so the debug test exe aborts at startup.
 
 ## Releasing
 
