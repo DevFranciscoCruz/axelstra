@@ -36,9 +36,70 @@ pub fn last_lines(bytes: &[u8], cols: u16, rows: u16, lines: usize) -> Vec<Strin
     kept[kept.len().saturating_sub(lines)..].to_vec()
 }
 
+/// The agent's last reply as plain text, out of a screen full of TUI chrome (banner, tool-run lines, prompt box,
+/// status bar). Looks for the last `●` message block and stops at the first piece of chrome after it. `None` when
+/// the screen has no such block (not a Claude-style TUI), so the caller can fall back to the raw lines.
+pub fn last_reply(lines: &[String]) -> Option<String> {
+    let is_chrome = |l: &str| {
+        let t = l.trim_start();
+        t.starts_with('─') || t.starts_with('✻') || t.starts_with('✢') || t.starts_with('✶') || t.starts_with('*') && t.contains("for ")
+            || t.starts_with('>') || t.starts_with('❯') || t.starts_with('⏵') || t.starts_with("Model:") || t.starts_with("? for shortcuts")
+    };
+    let is_tool_call = |t: &str| {
+        let name = t.split('(').next().unwrap_or("");
+        t.ends_with(')') && !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
+    };
+    let start = lines.iter().rposition(|l| {
+        l.trim_start().strip_prefix('●').is_some_and(|rest| {
+            let rest = rest.trim();
+            !rest.is_empty() && !is_tool_call(rest)
+        })
+    })?;
+    let mut out: Vec<String> = Vec::new();
+    for (i, l) in lines[start..].iter().enumerate() {
+        if i > 0 && is_chrome(l) {
+            break;
+        }
+        let t = l.trim_end();
+        out.push(if i == 0 { t.trim_start().trim_start_matches('●').trim_start().to_string() } else { t.to_string() });
+    }
+    // continuation lines are indented by the bullet width; drop that uniform indent
+    let indent = out.iter().skip(1).filter(|l| !l.trim().is_empty()).map(|l| l.len() - l.trim_start().len()).min().unwrap_or(0).min(2);
+    let text: Vec<String> = out.into_iter().enumerate().map(|(i, l)| if i == 0 { l } else { l.chars().skip(indent).collect() }).collect();
+    Some(text.join("\n"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::last_lines;
+    use super::{last_lines, last_reply};
+
+    #[test]
+    fn reply_is_the_last_message_block_only() {
+        let l: Vec<String> = [
+            "Claude Code v2.1.308",
+            "● Splitting the handlers.",
+            "Ran 4 shell commands",
+            "● Both gate failures are fixed.",
+            "  - Test assertions: done.",
+            "  To finish, allow the amend.",
+            "✻ Brewed for 2m 43s · done",
+            "──────────",
+            "> amend the commit",
+            "Model: Sonnet 5.5",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(
+            last_reply(&l).unwrap(),
+            "Both gate failures are fixed.\n- Test assertions: done.\nTo finish, allow the amend."
+        );
+    }
+
+    #[test]
+    fn no_bullet_means_no_reply() {
+        assert!(last_reply(&["plain shell output".to_string()]).is_none());
+    }
 
     #[test]
     fn cursor_moves_do_not_glue_words() {

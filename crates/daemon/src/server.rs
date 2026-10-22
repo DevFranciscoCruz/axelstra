@@ -120,6 +120,7 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
     std::thread::spawn(move || {
         let mut worked = false;
         let mut done_by_idle = false;
+        let mut nudged = false;
         loop {
             std::thread::sleep(Duration::from_millis(500));
             let Some(s) = reg.get(id) else { return };
@@ -137,13 +138,20 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
                     // it is waiting for an answer, not finished: keep it and tell the parent once (until it works again)
                     if let Some((pid, ps)) = parent.and_then(|p| reg.get(p).map(|s| (p, s))) {
                         let label = reg.labels.lock().unwrap().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
-                        let text = format!("parou à espera de uma resposta. Últimas linhas:\n{}", screen.join("\n"));
+                        let shown = axelstra_core::screen::last_reply(&s.screen_lines(200)).unwrap_or_else(|| screen.join("\n"));
+                        let text = format!("parou à espera de uma resposta. Última mensagem:\n{shown}");
                         let m = reg.bus.send(Some(id), pid, "escalate", &text, None, None);
                         let agent = reg.metas.lock().unwrap().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
                         if agent {
                             crate::msgbus::deliver(ps, crate::msgbus::paste(&crate::msgbus::notice(&m, &format!("{label} (sessão {id})"))));
                         }
                     }
+                    worked = false;
+                } else if !nudged && reg.metas.lock().unwrap().get(&id).map(|m| m["kind"] == "agent").unwrap_or(false) {
+                    // first quiet spell: ask the worker to report through the bus instead of scraping its screen
+                    let text = "[axelstra] você parou sem reportar. Se terminou, rode `axelstra done \"<relatório>\"` com o resultado (o que mudou, o que falhou, o que falta). Se está bloqueado ou tem uma dúvida, rode `axelstra escalate \"<motivo>\"`.";
+                    crate::msgbus::deliver(s.clone(), crate::msgbus::paste(text));
+                    nudged = true;
                     worked = false;
                 } else {
                     done_by_idle = true;
@@ -157,7 +165,8 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
         let code = s.try_wait();
         let done_msg = reg.bus.finished(id);
         // what the terminal shows, not the escape-code soup of a TUI redrawing itself
-        let tail = s.screen_lines(lines).join("\n");
+        // for an agent TUI only its last reply, not the banner, tool-run lines and status bar around it
+        let tail = axelstra_core::screen::last_reply(&s.screen_lines(200)).unwrap_or_else(|| s.screen_lines(lines).join("\n"));
         let label = reg.labels.lock().unwrap().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
         let status = match (done_by_idle, code) {
             _ if done_msg.is_some() => "terminou (chamou `axelstra done`)".to_string(),
