@@ -1,0 +1,28 @@
+/* find bar inside a terminal, and the extra Settings sections (terminal, diagnostics) */
+.term-host { position: relative; }
+.term-find {
+  position: absolute;
+  top: 6px;
+  right: 18px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--panel);
+  border: 1px solid var(--line-3);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
+}
+.term-find input { width: 180px; font: inherit; font-size: 12px; padding: 2px 6px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 4px; }
+.term-find button { font: inherit; font-size: 12px; padding: 1px 7px; }
+.term-find .flip { display: inline-flex; transform: rotate(180deg); }
+.set-fields { display: flex; flex-wrap: wrap; gap: 10px; }
+.set-fields label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text); }
+.set-fields input { font: inherit; font-size: 12px; padding: 3px 6px; background: var(--bg); color: var(--text); border: 1px solid var(--line-3); border-radius: 4px; }
+.set-fields input[type="text"] { width: 260px; }
+.set-fields input[type="number"] { width: 70px; }
+.set-diag { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; font-size: 12px; }
+.set-diag dt { color: var(--muted, #8b8f9a); }
+.set-diag dd { margin: 0; word-break: break-all; user-select: text; }
+.set-error { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }

@@ -2,39 +2,45 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { createEffect, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { Icon } from "./Icon";
 import { fsStat, rememberTermSize, resizeSession, writeSession } from "./api";
-import { createSizeSync } from "./termsize";
-import { guarded, norm, selectedWorktree, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban } from "./store";
+import { findPathLinks, resolvePathLink, type PathLink } from "./pathlinks";
+import { S } from "./strings";
+import { attachWithRetry, createSizeSync, createWriteBatcher } from "./termsize";
+import { THEMES, setTermPrefs, termPrefs, zoomFont } from "./termprefs";
+import * as store from "./store";
+import { guarded, selectedWorktree, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban, showNotice } from "./store";
+import "./termui.css";
 
-/** file paths in terminal output: absolute Windows paths or relative ones with an extension, optionally followed by :line[:col] */
-const PATH_RE = /(?:[A-Za-z]:[\\/][^\s"'`<>|*?()]+|(?:\.{1,2}[\\/])?[\w@.-]+(?:[\\/][\w@.-]+)*\.[A-Za-z][\w]{0,7})(?::\d+(?::\d+)?)?/g;
+/** a terminal that starts out of sight keeps less history until it is shown; the visible one keeps the full amount */
+const SCROLLBACK = 5000;
+const SCROLLBACK_HIDDEN = 2000;
 
-/** opens a clicked path: inside the selected worktree in the editor, elsewhere in the file manager */
-async function openPathLink(raw: string) {
-  const path = raw.replace(/:\d+(?::\d+)?$/, "").replace(/[.,;:]+$/, "");
+/** opens a clicked path: inside the selected worktree in the editor (at its line when the link has one), elsewhere in the file manager */
+async function openPathLink(link: PathLink) {
   const wt = selectedWorktree();
   if (!wt) return;
-  const slashed = path.replace(/\\/g, "/");
-  const abs = /^[A-Za-z]:\//.test(slashed);
-  let rel = slashed.replace(/^\.\//, "");
-  if (abs) {
-    if (!norm(slashed).startsWith(norm(wt) + "/")) return void revealItemInDir(path).catch(() => 0);
-    rel = slashed.slice(wt.replace(/\\/g, "/").replace(/\/$/, "").length + 1);
-  }
+  const r = resolvePathLink(link.path, wt);
+  if ("outside" in r) return void revealItemInDir(r.outside).catch(() => showNotice(S.fileMissing(r.outside)));
   try {
-    await fsStat(wt, rel); // throws when the file does not exist
+    await fsStat(wt, r.rel); // throws when the file does not exist
   } catch {
+    showNotice(S.fileMissing(r.rel));
     return;
   }
   guarded(() => {
     setOpenDiff(null);
     setShowKanban(false);
     setOpenCommit(null);
-    setOpenFile(rel);
+    // the store opens a file at a line when it can (openFileAt); older stores only know the path
+    const at = (store as unknown as { openFileAt?: (path: string, line?: number) => void }).openFileAt;
+    if (typeof at === "function") at(r.rel, link.line);
+    else setOpenFile(r.rel);
   });
 }
 
@@ -44,54 +50,84 @@ async function openPathLink(raw: string) {
  */
 export function TerminalView(props: { id: number; focus?: boolean; active?: () => boolean; onExit?: (code: number | null) => void }) {
   let host!: HTMLDivElement;
+  let findInput: HTMLInputElement | undefined;
+  const [finding, setFinding] = createSignal(false);
 
   onMount(() => {
+    const isActive = () => props.active?.() ?? true;
+    const prefs = termPrefs();
     const term = new Terminal({
-      fontFamily: '"Cascadia Mono", Consolas, monospace',
-      fontSize: 13,
-      scrollback: 5000,
+      fontFamily: prefs.fontFamily,
+      fontSize: prefs.fontSize,
+      scrollback: isActive() ? SCROLLBACK : SCROLLBACK_HIDDEN,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: { background: "#1e1f23", foreground: "#d7dae0", cursor: "#a78bfa" },
+      theme: THEMES[prefs.theme],
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    const search = new SearchAddon();
+    term.loadAddon(search);
     term.loadAddon(new WebLinksAddon((_e, url) => void openUrl(url)));
     term.registerLinkProvider({
       provideLinks(y, cb) {
         const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
-        const out: { range: { start: { x: number; y: number }; end: { x: number; y: number } }; text: string; activate: () => void }[] = [];
-        for (const m of line.matchAll(PATH_RE)) {
-          const at = m.index ?? 0;
-          // a match that starts mid-token (inside a URL, say) is not a path
-          if (at > 0 && /[\w:/@.-]/.test(line[at - 1])) continue;
-          const text = m[0].replace(/[.,;:)]+$/, "");
-          out.push({ text, range: { start: { x: at + 1, y }, end: { x: at + text.length, y } }, activate: () => void openPathLink(text) });
-        }
+        const out = findPathLinks(line).map((l) => ({
+          text: l.text,
+          range: { start: { x: l.start + 1, y }, end: { x: l.start + l.text.length, y } },
+          activate: () => void openPathLink(l),
+        }));
         cb(out.length ? out : undefined);
       },
     });
     term.open(host);
-    try {
-      const gl = new WebglAddon();
-      gl.onContextLoss(() => gl.dispose());
-      term.loadAddon(gl);
-    } catch {
-      /* canvas renderer fallback */
-    }
+    // The GPU renderer costs memory per terminal and the browser allows only a few contexts: only the visible terminal has one.
+    let gl: WebglAddon | null = null;
+    const loadGl = () => {
+      if (gl) return;
+      try {
+        const g = new WebglAddon();
+        g.onContextLoss(() => {
+          g.dispose();
+          if (gl === g) gl = null;
+        });
+        term.loadAddon(g);
+        gl = g;
+      } catch {
+        /* canvas renderer fallback */
+      }
+    };
+    const dropGl = () => {
+      gl?.dispose();
+      gl = null;
+    };
+    if (isActive()) loadGl();
     fit.fit();
 
+    // output arrives in many small chunks: one write per frame (a hidden terminal can wait longer)
+    const batch = createWriteBatcher((d) => term.write(d), { delay: () => (isActive() ? 8 : 120) });
     const channel = new Channel<ArrayBuffer | { event: string; code: number | null }>();
     channel.onmessage = (m) => {
-      if (m instanceof ArrayBuffer) term.write(new Uint8Array(m));
-      else if (m && (m as { event?: string }).event === "session.exit") props.onExit?.((m as { code: number | null }).code);
+      if (m instanceof ArrayBuffer) batch.push(new Uint8Array(m));
+      else if (m && (m as { event?: string }).event === "session.exit") {
+        batch.flush();
+        props.onExit?.((m as { code: number | null }).code);
+      }
     };
-    const attach = (retry: boolean) =>
-      invoke("session_attach", { id: props.id, onData: channel }).catch((e) => {
-        if (retry) setTimeout(() => void attach(false), 600);
-        else term.write(`\r\n\x1b[31m[axelstra] não foi possível ligar a esta sessão: ${String(e)}\x1b[0m\r\n`);
-      });
-    void attach(true).then(() => {
+    // a per-attach token (when the backend hands one out) tells session_detach which attach to end
+    let token: unknown;
+    const detach = () => void invoke("session_detach", { id: props.id, token: token ?? undefined }).catch(() => 0);
+    void attachWithRetry(() => invoke<unknown>("session_attach", { id: props.id, onData: channel }), 600, {
+      gone: () => gone,
+      onFail: (e) => term.write(`\r\n\x1b[31m[axelstra] ${S.attachFailed}${String(e)}\x1b[0m\r\n`),
+    }).then((r) => {
+      // only a terminal that really attached tells the PTY its size
+      if (!r.ok) return;
+      token = r.value ?? undefined;
+      if (gone) {
+        if (token !== undefined) detach();
+        return;
+      }
       sizeSync.forget();
       pushSize();
     });
@@ -109,6 +145,28 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       }
     };
     const copySelection = () => void invoke("clipboard_write", { text: term.getSelection() }).catch(() => 0);
+
+    const openFind = () => {
+      setFinding(true);
+      const sel = term.getSelection();
+      queueMicrotask(() => {
+        if (sel && findInput) findInput.value = sel.split("\n")[0];
+        findInput?.focus();
+        findInput?.select();
+      });
+    };
+    const closeFind = () => {
+      setFinding(false);
+      search.clearDecorations();
+      term.focus();
+    };
+    const runFind = (back: boolean, incremental = false) => {
+      const q = findInput?.value ?? "";
+      if (!q) return void search.clearDecorations();
+      if (back) search.findPrevious(q);
+      else search.findNext(q, { incremental });
+    };
+
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
       const k = e.key.toLowerCase();
@@ -121,6 +179,20 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
         copySelection();
         term.clearSelection();
         return false;
+      }
+      if (e.ctrlKey && !e.altKey && !e.shiftKey && k === "f") {
+        e.preventDefault();
+        openFind();
+        return false;
+      }
+      // font zoom: Ctrl+= / Ctrl++ bigger, Ctrl+- smaller, Ctrl+0 back to the default; kept in the preferences
+      if (e.ctrlKey && !e.altKey) {
+        const delta = k === "=" || k === "+" ? 1 : k === "-" || k === "_" ? -1 : k === "0" ? 0 : null;
+        if (delta !== null) {
+          e.preventDefault();
+          setTermPrefs({ fontSize: zoomFont(term.options.fontSize ?? termPrefs().fontSize, delta) });
+          return false;
+        }
       }
       return true;
     });
@@ -167,6 +239,22 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
     const ro = new ResizeObserver(refit);
     ro.observe(host);
 
+    // look and font from Settings (and the zoom keys): applied live, then the grid is fitted again
+    createEffect(() => {
+      const p = termPrefs();
+      term.options.theme = THEMES[p.theme];
+      term.options.fontFamily = p.fontFamily;
+      term.options.fontSize = p.fontSize;
+      requestAnimationFrame(() => {
+        try {
+          term.clearTextureAtlas();
+        } catch {
+          /* canvas renderer has no atlas */
+        }
+        refit();
+      });
+    });
+
     // Moving the window to a screen with another scale leaves the WebGL glyph atlas at the old size (garbled,
     // overlapping text): rebuild it and refit whenever the pixel ratio changes.
     let dpr: MediaQueryList | null = null;
@@ -186,11 +274,18 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       dpr.addEventListener("change", onDprChange, { once: true });
     };
     watchDpr();
-    if (props.focus !== false && (props.active?.() ?? true)) term.focus();
-    // a terminal that was hidden (another tab in front) is fitted and focused again when it comes back
+    if (props.focus !== false && isActive()) term.focus();
+    // a terminal that was hidden (another tab in front) is fitted and focused again when it comes back;
+    // while hidden it gives up its GPU context
     createEffect(() => {
-      if (!(props.active?.() ?? true)) return;
+      if (!isActive()) {
+        dropGl();
+        return;
+      }
+      if (term.options.scrollback !== SCROLLBACK) term.options.scrollback = SCROLLBACK;
       requestAnimationFrame(() => {
+        if (gone) return;
+        loadGl();
         refit();
         term.refresh(0, term.rows - 1);
         if (props.focus !== false) term.focus();
@@ -199,15 +294,56 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
 
     onCleanup(() => {
       gone = true;
+      batch.cancel();
       sizeSync.cancel();
       unDrop?.();
       host.removeEventListener("contextmenu", onCtx);
       ro.disconnect();
       dpr?.removeEventListener("change", onDprChange);
-      void invoke("session_detach", { id: props.id });
+      detach();
       term.dispose();
     });
+
+    // the find bar's handlers need the addon: kept on the host element for the JSX below
+    findHandlers = { run: runFind, close: closeFind };
   });
 
-  return <div class="term-host" ref={host} />;
+  let findHandlers: { run: (back: boolean, incremental?: boolean) => void; close: () => void } | undefined;
+
+  return (
+    <div class="term-host" ref={host}>
+      <Show when={finding()}>
+        <div class="term-find" role="search" on:contextmenu={(e) => e.stopPropagation()}>
+          <input
+            ref={findInput}
+            type="text"
+            placeholder={S.findPlaceholder}
+            aria-label={S.findPlaceholder}
+            spellcheck={false}
+            onInput={() => findHandlers?.run(false, true)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                findHandlers?.run(e.shiftKey);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                findHandlers?.close();
+              }
+            }}
+          />
+          <button title={S.findPrev} onClick={() => findHandlers?.run(true)}>
+            <span class="flip">
+              <Icon name="chevDown" />
+            </span>
+          </button>
+          <button title={S.findNext} onClick={() => findHandlers?.run(false)}>
+            <Icon name="chevDown" />
+          </button>
+          <button title={S.findClose} onClick={() => findHandlers?.close()}>
+            <Icon name="x" />
+          </button>
+        </div>
+      </Show>
+    </div>
+  );
 }

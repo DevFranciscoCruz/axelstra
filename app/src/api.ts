@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 export type SessionMeta = { project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; parent?: number; worker?: boolean };
 export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
@@ -22,33 +23,79 @@ export const callBg = <T = unknown>(method: string, params: Record<string, unkno
 
 import { Channel, invoke as tauriInvoke } from "@tauri-apps/api/core";
 export type Terse = "off" | "short" | "tiny";
-export type Settings = { terse: Terse; rules: string | null; pm: string | null; installed: string[]; auto_install: boolean };
+export type NotifyMode = "all" | "waiting" | "off";
+export type ShellChoice = "auto" | "pwsh" | "powershell" | "bash" | "wsl" | "cmd";
+export type Settings = {
+  terse: Terse; rules: string | null; pm: string | null; installed: string[]; auto_install: boolean;
+  /** absent on a daemon from before these keys existed */
+  notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice;
+};
+export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice };
 export const getSettings = () => call<Settings>("settings.get");
-export const setSettings = (patch: { terse?: Terse; pm?: string | null; auto_install?: boolean }) => call("settings.set", patch);
-export const defaultShell = () => tauriInvoke<[string, string[]]>("default_shell");
+export const setSettings = (patch: SettingsPatch) => call("settings.set", patch);
+
+/** Result of `fn`, remembered once it succeeded; a failure is not remembered, so the next call tries again. */
+const once = <T>(fn: () => Promise<T>) => {
+  let p: Promise<T> | null = null;
+  const get = () => (p ??= fn().catch((e) => ((p = null), Promise.reject(e))));
+  get.reset = () => {
+    p = null;
+  };
+  return get;
+};
+const shellOnce = once(() => tauriInvoke<[string, string[]]>("default_shell"));
+const dirOnce = once(() => call<{ dir: string }>("app.dir").then((r) => r.dir));
+export const defaultShell = shellOnce;
+/** the shell choice in Settings changed: the next terminal asks again */
+export const resetShellCache = () => shellOnce.reset();
+export const daemonShutdown = () => call("daemon.shutdown");
+
+/** What the Rust side reports for the Diagnostics section; every field may be missing. */
+export type Diagnostics = {
+  daemon?: { version?: string; proto?: number | string };
+  paths?: Record<string, string>;
+  lag_log?: string;
+  missing_tools?: string[];
+  lag?: unknown;
+};
+export const diagnostics = () => tauriInvoke<Diagnostics>("diagnostics");
+
+/** Single-quotes `s` for the shell that will read the line: PowerShell doubles a quote (the typographic ones count too),
+ * sh closes the string, escapes the quote and opens it again. */
+export const shQuote = (s: string, ps: boolean) =>
+  ps ? `'${s.replace(/['‘’‚‛]/g, (q) => q + q)}'` : `'${s.replace(/'/g, "'\\''")}'`;
 
 /** Command line for an agent. On restore it resumes the earlier conversation, falling back to a fresh start. */
-const agentLine = (cli: string, resume: string | undefined, restoring: boolean, ps: boolean, hooks: string, rules?: string | null) => {
-  // the rules are plain ASCII without quotes (see skill::terse_rules), so single quotes are safe in both shells
-  const style = rules ? ` --append-system-prompt '${rules}'` : "";
-  const claude = (flags: string) => `claude --settings '${hooks}'${style} ${flags}`;
+export const agentLine = (cli: string, resume: string | undefined, restoring: boolean, ps: boolean, hooks: string, rules?: string | null) => {
+  const style = rules ? ` --append-system-prompt ${shQuote(rules, ps)}` : "";
+  const claude = (flags: string) => `claude --settings ${shQuote(hooks, ps)}${style} ${flags}`;
   const fresh = cli === "claude" && resume ? claude(`--session-id ${resume}`) : cli;
   if (!restoring) return fresh;
   const back = cli === "claude" && resume ? claude(`--resume ${resume}`) : cli === "codex" ? "codex resume --last" : cli;
   return ps ? `${back}; if (!$?) { ${fresh} }` : `${back} || ${fresh}`;
 };
 
-/** Opens the chosen agent CLI straight away in a worktree. The shell stays alive after the agent exits. */
-export const launchDefaultAgent = async (project: string, worktree: string, agent: string, cli: string, restore?: { key?: string; resume?: string }) => {
-  const [program, args] = await defaultShell();
+/** Opens the chosen agent CLI straight away in a worktree. The shell stays alive after the agent exits.
+ * `pre.rules` lets a batch (restore) read the settings once instead of once per session. */
+export const launchDefaultAgent = async (
+  project: string,
+  worktree: string,
+  agent: string,
+  cli: string,
+  restore?: { key?: string; resume?: string },
+  pre?: { rules: string | null },
+) => {
+  const [[program, args], dir, rules] = await Promise.all([
+    defaultShell(),
+    dirOnce(),
+    pre ? pre.rules : getSettings().then((x) => x.rules, () => null),
+  ]);
   const ps = /powershell|pwsh/i.test(program);
   // key is stable for the life of the tab; resume is the conversation id, which /clear replaces
   const key = restore ? restore.key : cli === "claude" ? crypto.randomUUID() : undefined;
   const resume = restore ? restore.resume ?? key : key;
-  const { dir } = await call<{ dir: string }>("app.dir");
-  const rules = await getSettings().then((x) => x.rules, () => null);
   const line = agentLine(cli, resume, !!restore, ps, `${dir}/hooks.json`, rules);
-  const run = ps ? [...args, "-NoExit", "-Command", line] : [...args, "-c", `${line}; exec "${program}" -l`];
+  const run = ps ? [...args, "-NoExit", "-Command", line] : [...args, "-c", `${line}; exec ${shQuote(program, false)} -l`];
   const env = key ? { AXELSTRA_KEY: key, AXELSTRA_DIR: dir } : undefined;
   const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent", agent: cli, resume, key }, env);
   // only claude takes the rules as a system prompt: type them into the others once they have booted
@@ -56,12 +103,20 @@ export const launchDefaultAgent = async (project: string, worktree: string, agen
   return id;
 };
 
+/** One session.list on the second connection shared by everyone who asks within a second: restoring N agents polls once, not N times. */
+let sharedList: { at: number; p: Promise<SessionInfo[]> } | null = null;
+const sessionsShared = () => {
+  const now = Date.now();
+  if (!sharedList || now - sharedList.at > 900) sharedList = { at: now, p: callBg<SessionInfo[]>("session.list") };
+  return sharedList.p;
+};
+
 /** Types a note into a resumed agent once its screen has settled after booting. Fire and forget. */
 const nudge = async (id: number, text: string) => {
   const start = Date.now();
   await new Promise((r) => setTimeout(r, 4000));
   while (Date.now() - start < 90000) {
-    const s = (await listSessions()).find((x) => x.id === id);
+    const s = (await sessionsShared().catch(() => null))?.find((x) => x.id === id);
     if (!s || !s.running) return;
     if ((s.idle_ms ?? 0) >= 2500) break;
     await new Promise((r) => setTimeout(r, 1000));
@@ -89,6 +144,8 @@ export const restoreSessions = async (): Promise<{ restored: number; skipped: nu
   let restored = 0;
   let skipped = 0;
   const failed: string[] = [];
+  // the same for every session: read once for the whole batch
+  const rules = pending.some((r) => r.meta?.kind === "agent") ? await getSettings().then((x) => x.rules, () => null) : null;
   for (const r of pending) {
     const m = r.meta;
     try {
@@ -97,7 +154,7 @@ export const restoreSessions = async (): Promise<{ restored: number; skipped: nu
         if ((m as { blank?: boolean }).blank) {
           skipped++;
         } else {
-          const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume });
+          const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume }, { rules });
           const x = m as { interrupted?: boolean; lost_workers?: string[] };
           const note = restartNote(!!x.interrupted, x.lost_workers ?? []);
           if (note) void nudge(id, note).catch(() => 0);
@@ -119,6 +176,9 @@ export const restoreSessions = async (): Promise<{ restored: number; skipped: nu
 
 /** Change events for the selected worktree: the daemon watches the files and tells us, so git runs only when needed. */
 let watchReady: Promise<void> | null = null;
+type WatchArgs = { worktree: string | null; onChanged: (worktree: string) => void; onSessions?: () => void };
+let lastWatch: WatchArgs | null = null;
+let watchListening = false;
 const startWatch = (onChanged: (worktree: string) => void, onSessions?: () => void) => {
   const ch = new Channel<{ event?: string; worktree?: string }>();
   ch.onmessage = (m) => {
@@ -127,7 +187,18 @@ const startWatch = (onChanged: (worktree: string) => void, onSessions?: () => vo
   };
   return tauriInvoke<void>("watch_start", { onEvent: ch });
 };
+/** The watch connection died (Rust: "watch-ended") or the whole daemon was replaced ("daemon-restarted"): connect again for the same worktree. */
+const rewatch = () => {
+  watchReady = null;
+  const w = lastWatch;
+  if (w) void watchWorktree(w.worktree, w.onChanged, w.onSessions);
+};
 export const watchWorktree = async (worktree: string | null, onChanged: (worktree: string) => void, onSessions?: () => void) => {
+  lastWatch = { worktree, onChanged, onSessions };
+  if (!watchListening) {
+    watchListening = true;
+    for (const ev of ["watch-ended", "daemon-restarted"]) void listen(ev, rewatch).catch(() => (watchListening = false));
+  }
   watchReady ??= startWatch(onChanged, onSessions);
   try {
     await watchReady;
