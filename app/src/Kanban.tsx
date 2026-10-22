@@ -1,4 +1,5 @@
 import { Select } from "./Select";
+import { Icon } from "./Icon";
 import { ask } from "./Confirm";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Board, KCard, OrchRun, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchStart, orchStatus } from "./api";
@@ -148,7 +149,7 @@ export function Kanban(props: { project: string }) {
       <Show when={run().state !== "idle"}>
         <div class="krun" classList={{ bad: run().state === "error" || (run().failed?.length ?? 0) > 0 }}>
           <Show when={run().state === "running"}>
-            A executar {run().name} → branch {run().integ_branch}. Os agentes aparecem como terminais nos worktrees task.
+            A executar {run().name} – branch {run().integ_branch}. Os agentes aparecem como terminais nos worktrees task.
           </Show>
           <Show when={run().state === "done"}>
             Terminou: {run().merged?.length ?? 0} integrados em {run().integ_branch}
@@ -182,7 +183,7 @@ export function Kanban(props: { project: string }) {
                 <span>{col.label}</span>
                 <span class="kcount">{colCards(col.id).length}</span>
                 <button class="icon" title="Novo cartão" aria-label="Novo cartão" onClick={() => edit(undefined, col.id)}>
-                  +
+                  <Icon name="plus" />
                 </button>
               </div>
               <div class="kcards">
@@ -207,12 +208,12 @@ export function Kanban(props: { project: string }) {
                         <span class="chip agent" title="Agente">{c.meta.agent}</span>
                         <Show when={c.meta.priority !== 0}>
                           <span class="chip prio" classList={{ high: c.meta.priority > 0 }} title="Prioridade">
-                            {c.meta.priority > 0 ? "▲" : "▼"} {Math.abs(c.meta.priority)}
+                            <Icon name={c.meta.priority > 0 ? "triUp" : "triDown"} size={9} inline /> {Math.abs(c.meta.priority)}
                           </span>
                         </Show>
                         <Show when={c.meta.depends_on.length > 0}>
                           <span class="chip dep" title={`Depende de ${c.meta.depends_on.join(", ")}`}>
-                            ⛓ {c.meta.depends_on.length}
+                            <Icon name="link" size={11} inline /> {c.meta.depends_on.length}
                           </span>
                         </Show>
                         <span class="chip id" title="Id do ficheiro .kanban">{c.meta.id}</span>

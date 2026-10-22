@@ -1,4 +1,5 @@
 import { Compartment, EditorState, Extension } from "@codemirror/state";
+import { Icon } from "./Icon";
 import { EditorView, drawSelection, highlightActiveLine, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { bracketMatching, indentOnInput, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
@@ -148,7 +149,7 @@ export function Editor(props: { wt: string; path: string }) {
         <span class="epath">{props.path}</span>
         <Show when={dirty()}>
           <span class="edirty" title="Alterações por guardar">
-            ●
+            <i class="bdot" />
           </span>
         </Show>
         <span class="emsg">{msg()}</span>
@@ -156,7 +157,7 @@ export function Editor(props: { wt: string; path: string }) {
           Guardar
         </button>
         <button class="icon" title="Fechar" onClick={() => guarded(() => setOpenFile(null))}>
-          ×
+          <Icon name="x" />
         </button>
       </div>
       <Show when={conflict()}>

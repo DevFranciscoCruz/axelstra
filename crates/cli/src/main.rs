@@ -130,6 +130,11 @@ enum Cmd {
         #[arg(long, default_value_t = 5)]
         secs: u64,
     },
+    /// Dispatcher (for the main session): route each request to the worktree of its topic, or open a new one
+    Dispatch {
+        #[command(subcommand)]
+        cmd: DispCmd,
+    },
     /// Manage worktrees of registered projects
     Worktree {
         #[command(subcommand)]
@@ -294,7 +299,43 @@ enum CompCmd {
 }
 
 #[derive(clap::Subcommand)]
+enum DispCmd {
+    /// Open worktrees with title, areas touched, running agents and overlaps (decide where a request belongs)
+    List {
+        #[arg(long)]
+        project: Option<String>,
+        /// include merged and archived worktrees
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Send a request to the agent of a worktree (path, branch or title); starts one if none is running
+    Send {
+        worktree: String,
+        request: String,
+        #[arg(long, default_value = "claude")]
+        agent: String,
+    },
+    /// New topic: create a worktree and start an agent in it with the request
+    New {
+        project: String,
+        name: String,
+        request: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long, default_value = "claude")]
+        agent: String,
+    },
+    /// Stop sending requests to a worktree (its work is done)
+    Archive { worktree: String },
+    /// Set the title shown for a worktree
+    Title { worktree: String, title: String },
+}
+
+#[derive(Subcommand)]
 enum WtCmd {
+
     /// Create a worktree; prints its path
     Create { project: String, name: String },
     /// Remove a worktree
@@ -314,6 +355,7 @@ mod computer;
 mod lock;
 mod statusline;
 mod ctl;
+mod dispatch;
 mod orchcmd;
 
 fn main() -> Result<()> {
@@ -366,6 +408,11 @@ fn main() -> Result<()> {
             use axelstra_daemon::{client::Client, proto};
             let c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
             ctl::run(cmd, c)?;
+        }
+        Cmd::Dispatch { cmd } => {
+            use axelstra_daemon::{client::Client, proto};
+            let c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
+            dispatch::run(cmd, c)?;
         }
         Cmd::Lock { name, slots, timeout, command } => std::process::exit(lock::run(&name, slots, timeout, &command)?),
         Cmd::StatuslineTee => statusline::tee()?,

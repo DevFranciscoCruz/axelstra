@@ -236,6 +236,19 @@ pub(crate) fn spawn_agent(c: &mut Client, worktree: &Path, agent: &str, prompt: 
         }
         line.push_str(&format!(" --session-id {k}"));
     }
+    // "short answers" setting: claude takes the rules as an appended system prompt, other agents get them in the prompt
+    let rules = c.call("settings.get", json!({})).ok().and_then(|r| r["rules"].as_str().map(String::from));
+    if let (Some(r), true) = (&rules, agent == "claude") {
+        line.push_str(&format!(" --append-system-prompt {}", if ps { ps_quote(r) } else { sh_quote(r) }));
+    }
+    let prompt_owned = match (&rules, prompt) {
+        (Some(r), Some(p)) if agent != "claude" => Some(format!("{r}
+
+{p}")),
+        (_, Some(p)) => Some(p.to_string()),
+        _ => None,
+    };
+    let prompt = prompt_owned.as_deref();
     if let Some(pr) = prompt {
         // an ephemeral worker must know how to report: without it the daemon can only scrape its screen
         let full = if reap.is_some() && !pr.contains("axelstra done") {
@@ -294,7 +307,7 @@ fn print_ls(v: &Value) {
     }
 }
 
-fn norm(p: &str) -> String {
+pub(crate) fn norm(p: &str) -> String {
     p.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase()
 }
 
@@ -304,7 +317,7 @@ fn abs_norm(p: &Path) -> String {
 }
 
 /// Project whose id, name or path equals `r`.
-fn find_project_by_ref<'a>(projects: &'a Value, r: &str) -> Option<&'a Value> {
+pub(crate) fn find_project_by_ref<'a>(projects: &'a Value, r: &str) -> Option<&'a Value> {
     let want = abs_norm(Path::new(r));
     projects.as_array()?.iter().find(|p| {
         p["id"].as_str() == Some(r) || p["name"].as_str() == Some(r) || norm(p["path"].as_str().unwrap_or_default()) == want

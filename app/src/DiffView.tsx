@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createResource, createSignal } from "solid-js";
+import { Icon } from "./Icon";
 import { gitDiff, writeSession } from "./api";
 import { activeSession, baseRef, changes, openDiff, selectedWorktree, sessionsOf, setActiveSession, setOpenDiff } from "./store";
 
@@ -52,7 +53,7 @@ export function DiffView() {
     const agents = sessionsOf(selectedWorktree()).filter((s) => s.running && s.meta?.kind === "agent");
     const target = agents.find((s) => s.id === activeSession()) ?? agents[0];
     if (!target) {
-      setSendMsg("Nenhum agente a correr neste worktree. Abra um com ✦.");
+      setSendMsg("Nenhum agente a correr neste worktree. Abra um agente primeiro.");
       return;
     }
     const line = r.neu ?? r.old;
@@ -81,7 +82,7 @@ export function DiffView() {
           )}
         </Show>
         <button class="icon" title="Recarregar" onClick={() => void refetch()}>
-          ↻
+          <Icon name="refresh" />
         </button>
       </div>
       <div class="diff-body">

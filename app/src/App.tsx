@@ -1,4 +1,5 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { Icon } from "./Icon";
 import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { SessionInfo, restoreSessions, listPorts, watchWorktree, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
@@ -11,6 +12,8 @@ import { Sidebar } from "./Sidebar";
 import { Palette } from "./Palette";
 import { ContextMenu } from "./ContextMenu";
 import { Automations } from "./Automations";
+import { Dispatcher } from "./Dispatcher";
+import { Settings } from "./Settings";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
 import { PanelIcon } from "./PanelIcon";
@@ -38,6 +41,8 @@ import {
   setDefaultAgent,
   changesMode,
   showAutomations,
+  showDispatcher,
+  showSettings,
   showAgentSearch,
   setShowAgentSearch,
   showOrchestra,
@@ -439,6 +444,12 @@ export function App() {
       <Show when={showOrchestra()}>
         <Orchestra />
       </Show>
+      <Show when={showSettings()}>
+        <Settings />
+      </Show>
+      <Show when={showDispatcher()}>
+        <Dispatcher />
+      </Show>
       <Show when={showAutomations()}>
         <Automations />
       </Show>
@@ -470,7 +481,7 @@ export function App() {
             </button>
             <div class="tabs">
             <div class="tab" classList={{ active: showKanban() }} {...press(() => guarded(() => setShowKanban(true)), "tab")}>
-              <span class="dtag">▦</span>
+              <span class="dtag"><Icon name="grid" size={11} /></span>
               <span>Kanban</span>
             </div>
             <For each={tabs()}>
@@ -491,7 +502,7 @@ export function App() {
                   )}
                 >
                   <span class="dot" classList={{ on: s.running, work: sessionState(s) === "working" && s.meta?.kind === "agent", wait: sessionState(s) === "waiting" }} />
-                  <span>{s.meta?.worker ? "↳ " : ""}{s.label ?? `Sessão ${s.id}`}</span>
+                  <span>{s.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{s.label ?? `Sessão ${s.id}`}</span>
                   <button
                     class="x"
                     title="Fechar"
@@ -500,7 +511,7 @@ export function App() {
                       void close(s);
                     }}
                   >
-                    ×
+                    <Icon name="x" />
                   </button>
                 </div>
               )}
@@ -508,10 +519,10 @@ export function App() {
             <Show when={openCommit()}>
               {(c) => (
                 <div class="tab diff-tab" classList={{ active: !showKanban() }} title={c().subject} {...press(() => setShowKanban(false), "tab")}>
-                  <span class="dtag">⎇</span>
+                  <span class="dtag"><Icon name="branch" size={11} /></span>
                   <span>{c().short}</span>
                   <button class="x" title="Fechar commit" onClick={() => setOpenCommit(null)}>
-                    ×
+                    <Icon name="x" />
                   </button>
                 </div>
               )}
@@ -519,10 +530,10 @@ export function App() {
             <Show when={openFile()}>
               {(p) => (
                 <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} {...press(() => setShowKanban(false), "tab")}>
-                  <span class="dtag">✎</span>
+                  <span class="dtag"><Icon name="pencil" size={11} /></span>
                   <span>{baseName(p())}</span>
                   <button class="x" title="Fechar ficheiro" onClick={(e) => { e.stopPropagation(); guarded(() => setOpenFile(null)); }}>
-                    ×
+                    <Icon name="x" />
                   </button>
                 </div>
               )}
@@ -533,7 +544,7 @@ export function App() {
                   <span class="dtag">Δ</span>
                   <span>{baseName(p())}</span>
                   <button class="x" title="Fechar diff" onClick={() => setOpenDiff(null)}>
-                    ×
+                    <Icon name="x" />
                   </button>
                 </div>
               )}
@@ -542,12 +553,12 @@ export function App() {
             <span class="grow" />
             <UsageChip />
             <Show when={computerOn()}>
-              <span class="computer-on" title="Os agentes podem ver o ecrã e controlar o rato e o teclado. Desligue em: paleta de comandos, «Controlo do ecrã»">● ecrã</span>
+              <span class="computer-on" title="Os agentes podem ver o ecrã e controlar o rato e o teclado. Desligue em: paleta de comandos, «Controlo do ecrã»"><i class="bdot" /> ecrã</span>
             </Show>
             <For each={ports()}>
               {(port) => (
                 <button class="port" title={`Abrir http://localhost:${port} no navegador`} onClick={() => void openUrl(`http://localhost:${port}`)}>
-                  :{port} ↗
+                  :{port} <Icon name="external" size={11} inline />
                 </button>
               )}
             </For>
@@ -598,7 +609,7 @@ export function App() {
                     <div>Sem terminais neste worktree.</div>
                     <div class="empty-actions">
                       <button class="primary" onClick={() => void newAgent()}>
-                        ✦ Abrir agente
+                        <Icon name="sparkle" size={12} inline /> Abrir agente
                       </button>
                       <button onClick={() => void newTerminal()}>+ Terminal</button>
                     </div>
@@ -634,7 +645,7 @@ export function App() {
                   />
                   <div class="split-pane" style={{ flex: `0 0 ${splitFrac() * 100}%` }}>
                     <button class="split-x" title="Fechar divisão" onClick={() => setSplitSession(null)}>
-                      ×
+                      <Icon name="x" />
                     </button>
                     <Show when={splitSession()} keyed>
                       {(id) => <TerminalView id={id} focus={false} onExit={() => void refreshSessions()} />}

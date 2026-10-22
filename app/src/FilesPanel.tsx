@@ -1,12 +1,13 @@
 import { ask } from "./Confirm";
+import { Icon } from "./Icon";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { For, Show, createEffect, createResource, createSignal, on } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, on } from "solid-js";
 import { press } from "./a11y";
 import { FsEntry, GrepHit, fsCreate, fsDelete, fsGrep, fsList, fsRename, fsSearch } from "./api";
 import { MenuItem, showMenu } from "./ContextMenu";
 import { RightTabs } from "./RightTabs";
-import { findWorktree, fsTick, guarded, openFile, selectedWorktree, setError, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban } from "./store";
+import { changes, findWorktree, fsTick, guarded, openFile, selectedWorktree, setError, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban } from "./store";
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf("/")));
@@ -142,18 +143,18 @@ function fileMenu(wt: string, path: string, dir: boolean): MenuItem[] {
   const copy = (text: string) => invoke("clipboard_write", { text }).catch((e) => setError(String(e)));
   const here = dir ? path : parentOf(path);
   return [
-    ...(dir ? [] : [{ label: "Abrir", icon: "↗", run: () => openPath(path) } as MenuItem]),
-    { label: "Novo ficheiro", icon: "+", run: () => (expand(here), setEditing({ mode: "file", parent: here })) },
-    { label: "Nova pasta", icon: "▭", run: () => (expand(here), setEditing({ mode: "dir", parent: here })) },
+    ...(dir ? [] : [{ label: "Abrir", icon: "external", run: () => openPath(path) } as MenuItem]),
+    { label: "Novo ficheiro", icon: "plus", run: () => (expand(here), setEditing({ mode: "file", parent: here })) },
+    { label: "Nova pasta", icon: "folder", run: () => (expand(here), setEditing({ mode: "dir", parent: here })) },
     { separator: true },
-    { label: "Copiar caminho", icon: "⧉", run: () => copy(abs.replace(/\//g, "\\")) },
-    { label: "Copiar caminho relativo", icon: "⧉", run: () => copy(path) },
-    { label: "Mostrar no explorador", icon: "▭", run: () => revealItemInDir(abs.replace(/\//g, "\\")).catch((e) => setError(String(e))) },
+    { label: "Copiar caminho", icon: "copy", run: () => copy(abs.replace(/\//g, "\\")) },
+    { label: "Copiar caminho relativo", icon: "copy", run: () => copy(path) },
+    { label: "Mostrar no explorador", icon: "folder", run: () => revealItemInDir(abs.replace(/\//g, "\\")).catch((e) => setError(String(e))) },
     { separator: true },
-    { label: "Mudar o nome", icon: "✎", run: () => setEditing({ mode: "rename", parent: parentOf(path), target: path }) },
+    { label: "Mudar o nome", icon: "pencil", run: () => setEditing({ mode: "rename", parent: parentOf(path), target: path }) },
     {
       label: "Apagar",
-      icon: "×",
+      icon: "x",
       danger: true,
       run: async () => {
         const ok = await ask(`Apagar "${baseOf(path)}"?\n\n${dir ? "A pasta e tudo o que tem dentro são apagados" : "O ficheiro é apagado"} do disco e não vão para o lixo.`, {
@@ -173,6 +174,50 @@ function fileMenu(wt: string, path: string, dir: boolean): MenuItem[] {
       },
     },
   ];
+}
+
+type Tally = { files?: number; added: number; removed: number };
+/** what git says changed: per file, and per folder (every ancestor, "" = the whole tree) */
+const changeIndex = createMemo(() => {
+  const byFile = new Map<string, { status: string; added: number; removed: number; binary: boolean }>();
+  const byDir = new Map<string, Tally>();
+  for (const f of changes()?.files ?? []) {
+    byFile.set(f.path, f);
+    const parts = f.path.split("/");
+    for (let i = 0; i < parts.length; i++) {
+      const dir = parts.slice(0, i).join("/");
+      const t: Required<Tally> = (byDir.get(dir) as Required<Tally> | undefined) ?? { files: 0, added: 0, removed: 0 };
+      t.files += 1;
+      t.added += f.added;
+      t.removed += f.removed;
+      byDir.set(dir, t);
+    }
+  }
+  return { byFile, byDir };
+});
+
+/** +added −removed, green and red; with a file count for folders */
+function Delta(props: { t: Tally | undefined; folder?: boolean; binary?: boolean }) {
+  return (
+    <Show when={props.t}>
+      {(t) => (
+        <span class="nums">
+          <Show when={props.folder}>
+            <span class="fcount" title={`${t().files} ficheiro(s) alterado(s)`}>{t().files}</span>
+          </Show>
+          <Show when={props.binary}>
+            <span class="fbin">bin</span>
+          </Show>
+          <Show when={t().added > 0}>
+            <span class="add">+{t().added}</span>
+          </Show>
+          <Show when={t().removed > 0}>
+            <span class="del">−{t().removed}</span>
+          </Show>
+        </span>
+      )}
+    </Show>
+  );
 }
 
 function Node(props: { wt: string; dir: string; e: FsEntry; depth: number }) {
@@ -214,7 +259,10 @@ function Node(props: { wt: string; dir: string; e: FsEntry; depth: number }) {
         >
           <span class="twisty">{props.e.dir ? <Chevron open={open()} /> : ""}</span>
           {props.e.dir ? <Folder open={open()} /> : <FileGlyph />}
-          <span class="fname">{props.e.name}</span>
+          <span class="fname" classList={{ [`ch-${changeIndex().byFile.get(path())?.status}`]: !props.e.dir && changeIndex().byFile.has(path()), "ch-dir": props.e.dir && changeIndex().byDir.has(path()) }}>{props.e.name}</span>
+          <Show when={props.e.dir} fallback={<Delta t={changeIndex().byFile.get(path())} binary={changeIndex().byFile.get(path())?.binary} />}>
+            <Delta t={changeIndex().byDir.get(path())} folder />
+          </Show>
         </div>
       </Show>
       <Show when={open()}>
@@ -270,7 +318,7 @@ export function FilesPanel() {
           </svg>
         </button>
         <button class="icon" title="Atualizar" onClick={() => setGen(gen() + 1)}>
-          ↻
+          <Icon name="refresh" />
         </button>
       </div>
       <div class="fp-search">
@@ -359,6 +407,7 @@ export function FilesPanel() {
                   </span>
                   <Folder open={isOpen("")} />
                   <span class="fname">{rootName()}</span>
+                  <Delta t={changeIndex().byDir.get("")} folder />
                 </div>
                 <Show when={isOpen("")}>
                   <div class="kids" style={{ "--gx": "14px" }}>

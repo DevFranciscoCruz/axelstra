@@ -1,10 +1,11 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Icon } from "./Icon";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { GhItem, ghList, worktreeFromPr } from "./api";
 import { RightTabs } from "./RightTabs";
 import { findWorktree, refreshProjects, selectWorktree, selectedWorktree, setError } from "./store";
 
-const CHECK: Record<string, [string, string]> = { pass: ["✓", "Checks a passar"], fail: ["✗", "Checks a falhar"], pending: ["…", "Checks a correr"] };
+const CHECK: Record<string, [string, string]> = { pass: ["check", "Checks a passar"], fail: ["x", "Checks a falhar"], pending: ["ellipsis", "Checks a correr"] };
 const REVIEW: Record<string, string> = { approved: "aprovado", changes: "alterações pedidas", review: "falta revisão" };
 
 /** Open pull requests and issues of the selected project, read through the GitHub CLI. */
@@ -53,7 +54,7 @@ export function PullsPanel() {
         </button>
         <span class="grow" />
         <button class="icon" title="Atualizar" onClick={() => void refetch()}>
-          ↻
+          <Icon name="refresh" />
         </button>
       </div>
       <div class="rlist">
@@ -65,7 +66,7 @@ export function PullsPanel() {
                   <div class="pr-title">
                     <Show when={i.checks}>
                       <span class={`chk ${i.checks}`} title={CHECK[i.checks][1]}>
-                        {CHECK[i.checks][0]}
+                        <Icon name={CHECK[i.checks][0]} size={12} />
                       </span>
                     </Show>
                     <span class="pr-num">#{i.number}</span>
@@ -91,7 +92,7 @@ export function PullsPanel() {
                       </button>
                     </Show>
                     <button class="icon" title="Abrir no navegador" onClick={() => void open(i.url)}>
-                      ↗
+                      <Icon name="external" />
                     </button>
                   </div>
                 </div>

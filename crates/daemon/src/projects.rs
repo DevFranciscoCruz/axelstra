@@ -101,12 +101,13 @@ fn on_path(name: &str) -> bool {
 }
 
 /// Package managers installed on this machine, and the one to suggest for the project at `path`: the manager
-/// whose lockfile the project has, else the first installed one (bun, pnpm, yarn, npm in that order).
-pub fn package_managers(path: Option<&Path>) -> (Vec<&'static str>, Option<&'static str>) {
+/// whose lockfile the project has, else the user's preferred one, else the first installed (bun, pnpm, yarn, npm).
+pub fn package_managers(path: Option<&Path>, preferred: Option<&str>) -> (Vec<&'static str>, Option<&'static str>) {
     let installed: Vec<&'static str> = PACKAGE_MANAGERS.iter().copied().filter(|n| on_path(n)).collect();
     let locks = [("bun", "bun.lock"), ("bun", "bun.lockb"), ("pnpm", "pnpm-lock.yaml"), ("yarn", "yarn.lock"), ("npm", "package-lock.json")];
     let from_lock = path.and_then(|p| locks.iter().find(|(m, f)| installed.contains(m) && p.join(f).is_file()).map(|(m, _)| *m));
-    (installed.clone(), from_lock.or_else(|| installed.first().copied()))
+    let chosen = preferred.and_then(|m| installed.iter().copied().find(|i| *i == m));
+    (installed.clone(), from_lock.or(chosen).or_else(|| installed.first().copied()))
 }
 
 pub fn set_setup(store: &Path, id: &str, setup: Option<String>) -> Result<()> {
@@ -257,7 +258,7 @@ mod package_manager_tests {
         let dir = std::env::temp_dir().join(format!("axl-pm-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("package-lock.json"), "{}").unwrap();
-        let (installed, suggested) = package_managers(Some(&dir));
+        let (installed, suggested) = package_managers(Some(&dir), None);
         if let Some(s) = suggested {
             assert!(installed.contains(&s));
         }

@@ -1,4 +1,5 @@
 import { For, Show, createResource, createSignal } from "solid-js";
+import { Icon } from "./Icon";
 import { Automation, deleteAutomation, listAutomations, runAutomation, saveAutomation } from "./api";
 import { Select } from "./Select";
 import { Modal } from "./Modal";
@@ -106,16 +107,16 @@ export function Automations() {
                         </div>
                       </div>
                       <button class="icon" title="Executar agora" onClick={() => void runNow(a)}>
-                        ▶
+                        <Icon name="play" />
                       </button>
                       <button class="icon" title={a.enabled ? "Desativar" : "Ativar"} onClick={() => void toggle(a)}>
-                        {a.enabled ? "⏸" : "⏵"}
+                        <Icon name={a.enabled ? "pause" : "play"} />
                       </button>
                       <button class="icon" title="Editar" onClick={() => setDraft({ ...a })}>
-                        ✎
+                        <Icon name="pencil" />
                       </button>
                       <button class="icon danger" title="Apagar automatização" onClick={() => void remove(a)}>
-                        ×
+                        <Icon name="x" />
                       </button>
                     </div>
                   )}

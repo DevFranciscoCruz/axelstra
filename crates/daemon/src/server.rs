@@ -113,6 +113,11 @@ impl Registry {
     }
 }
 
+/// The app-wide settings file next to the daemon state (missing or broken = no settings).
+fn read_settings(saved: &std::path::Path) -> Value {
+    std::fs::read_to_string(saved.with_file_name("settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({}))
+}
+
 /// Ephemeral worker: when it finishes (process exit, or quiet for `idle_secs` in "idle" mode) its last
 /// output goes to the parent session as if typed, and the worker is closed so it stops using memory.
 /// Typical use: a test run or a helper agent that reports back to the main agent and disappears.
@@ -818,6 +823,40 @@ fn dispatch(
             Ok(json!({"max_workers": reg.bus.limit(), "workers": reg.bus.live_workers(alive)}))
         }
         "app.dir" => Ok(json!({"dir": reg.saved.parent().unwrap_or(std::path::Path::new("")).to_string_lossy().replace('\\', "/")})),
+        "settings.get" => {
+            let saved = read_settings(&reg.saved);
+            let terse = saved["terse"].as_str().filter(|l| ["off", "short", "tiny"].contains(l)).unwrap_or("off");
+            let installed = tokio::task::block_in_place(|| crate::projects::package_managers(None, None).0);
+            let pm = saved["pm"].as_str().filter(|m| installed.contains(m)).map(String::from);
+            Ok(json!({"terse": terse, "rules": crate::skill::terse_rules(terse), "pm": pm, "installed": installed, "auto_install": saved["auto_install"] == json!(true)}))
+        }
+        "settings.set" => {
+            // partial update: only the keys present are changed
+            let mut saved = read_settings(&reg.saved);
+            if let Some(level) = p["terse"].as_str() {
+                if !["off", "short", "tiny"].contains(&level) {
+                    return Err(anyhow::anyhow!("terse must be off, short or tiny"));
+                }
+                saved["terse"] = json!(level);
+            }
+            if p.get("pm").is_some() {
+                saved["pm"] = match p["pm"].as_str() {
+                    Some(m) if ["bun", "pnpm", "yarn", "npm"].contains(&m) => json!(m),
+                    Some(_) => return Err(anyhow::anyhow!("pm must be bun, pnpm, yarn or npm")),
+                    None => Value::Null,
+                };
+            }
+            if let Some(b) = p["auto_install"].as_bool() {
+                saved["auto_install"] = json!(b);
+            }
+            std::fs::write(reg.saved.with_file_name("settings.json"), serde_json::to_vec_pretty(&saved)?)?;
+            Ok(json!({}))
+        }
+        "dispatch.meta" => {
+            // titles and archive flags the dispatcher keeps per worktree (see `axelstra dispatch`)
+            let f = reg.saved.with_file_name("dispatch.json");
+            Ok(std::fs::read_to_string(f).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).unwrap_or_else(|| json!({})))
+        }
         "session.pending" => {
             let sid_dir = reg.saved.with_file_name("sid");
             let mut v = reg.pending.lock().unwrap().clone();
@@ -1105,8 +1144,10 @@ fn dispatch(
         }
         "pm.detect" => {
             let path = p["id"].as_str().and_then(|id| crate::projects::find(&reg.store, id).ok()).map(|pr| std::path::PathBuf::from(pr.path));
-            let (installed, suggested) = tokio::task::block_in_place(|| crate::projects::package_managers(path.as_deref()));
-            Ok(json!({"installed": installed, "suggested": suggested}))
+            let preferred = read_settings(&reg.saved)["pm"].as_str().map(String::from);
+            let (installed, suggested) = tokio::task::block_in_place(|| crate::projects::package_managers(path.as_deref(), preferred.as_deref()));
+            let has_package_json = path.as_ref().map(|p| p.join("package.json").is_file()).unwrap_or(false);
+            Ok(json!({"installed": installed, "suggested": suggested, "package_json": has_package_json}))
         }
         "project.remove" => {
             crate::projects::remove(&reg.store, p["id"].as_str().unwrap_or_default())?;

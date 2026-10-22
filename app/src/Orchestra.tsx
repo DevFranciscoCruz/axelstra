@@ -1,4 +1,5 @@
 import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import { Icon } from "./Icon";
 import { SessionInfo, SessionRes, killSession, removeSession, sessionResources, workerLimits } from "./api";
 import { ask } from "./Confirm";
 import { Modal } from "./Modal";
@@ -78,7 +79,7 @@ export function Orchestra() {
         <div class="orch-row" style={{ "padding-left": `${props.depth * 18}px` }}>
           <span class="dot" classList={{ work: st() === "working", wait: st() === "waiting", on: st() === "idle" }} />
           <span class="orch-name">
-            {props.depth > 0 ? "↳ " : ""}
+            {props.depth > 0 ? <Icon name="subArrow" size={11} inline /> : null}
             {props.s.label ?? `Sessão ${props.s.id}`}
           </span>
           <span class="auto-note">
@@ -92,7 +93,7 @@ export function Orchestra() {
             </span>
           </Show>
           <Show when={(props.s.unread ?? 0) > 0}>
-            <span class="wt-badge" title="Mensagens por ler">✉ {props.s.unread}</span>
+            <span class="wt-badge" title="Mensagens por ler"><Icon name="mail" size={11} inline /> {props.s.unread}</span>
           </Show>
           <span class="grow" />
           <button onClick={() => open(props.s)} disabled={!props.s.meta?.worktree}>
