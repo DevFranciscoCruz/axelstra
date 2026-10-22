@@ -1,4 +1,5 @@
 import type { Diagnostics } from "./api";
+import { S } from "./strings";
 
 /** What went wrong loading the settings: a daemon from before the settings existed answers "unknown method"; anything else is a real error. */
 export const classifySettingsError = (e: unknown): "old-daemon" | "other" => (/unknown method/i.test(String((e as { message?: unknown })?.message ?? e)) ? "old-daemon" : "other");
@@ -19,15 +20,17 @@ export const waitUntil = async (probe: () => Promise<unknown>, tries: number, de
   return false;
 };
 
-/** Rows for the Diagnostics section from whatever the backend reported; missing parts are left out. */
+/** Rows for the Diagnostics section from what the backend reported. */
 export const diagnosticRows = (d: Diagnostics | null | undefined): { label: string; value: string }[] => {
   if (!d) return [];
-  const rows: { label: string; value: string }[] = [];
-  if (d.daemon?.version !== undefined || d.daemon?.proto !== undefined) {
-    rows.push({ label: "daemon", value: [d.daemon?.version, d.daemon?.proto !== undefined ? `proto ${d.daemon.proto}` : ""].filter(Boolean).join(" · ") });
-  }
-  for (const [k, v] of Object.entries(d.paths ?? {})) rows.push({ label: k, value: String(v) });
-  if (d.lag_log) rows.push({ label: "lag.log", value: d.lag_log });
-  if (d.lag !== undefined && d.lag !== null) rows.push({ label: "lag", value: typeof d.lag === "string" ? d.lag : JSON.stringify(d.lag) });
-  return rows;
+  const lag = d.lag_log_bytes ? `${d.lag_log} (${d.lag_log_bytes < 1024 ? `${d.lag_log_bytes} B` : `${Math.round(d.lag_log_bytes / 1024)} KB`})` : d.lag_log;
+  return [
+    { label: S.diagApp, value: `${d.app_version} · ${S.diagProto} ${d.app_proto}` },
+    {
+      label: S.diagDaemon,
+      value: d.daemon_connected ? `${S.diagProto} ${d.daemon_proto ?? "?"}${d.daemon_instance != null ? ` · ${S.diagInstance} ${d.daemon_instance}` : ""}` : S.diagOffline,
+    },
+    { label: S.diagData, value: d.data_dir },
+    { label: S.diagLag, value: lag },
+  ];
 };

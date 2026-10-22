@@ -13,8 +13,7 @@ import { findPathLinks, resolvePathLink, type PathLink } from "./pathlinks";
 import { S } from "./strings";
 import { attachWithRetry, createSizeSync, createWriteBatcher } from "./termsize";
 import { THEMES, setTermPrefs, termPrefs, zoomFont } from "./termprefs";
-import * as store from "./store";
-import { guarded, selectedWorktree, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban, showNotice } from "./store";
+import { openFileAt, selectedWorktree, showNotice } from "./store";
 import "./termui.css";
 
 /** a terminal that starts out of sight keeps less history until it is shown; the visible one keeps the full amount */
@@ -33,15 +32,7 @@ async function openPathLink(link: PathLink) {
     showNotice(S.fileMissing(r.rel));
     return;
   }
-  guarded(() => {
-    setOpenDiff(null);
-    setShowKanban(false);
-    setOpenCommit(null);
-    // the store opens a file at a line when it can (openFileAt); older stores only know the path
-    const at = (store as unknown as { openFileAt?: (path: string, line?: number) => void }).openFileAt;
-    if (typeof at === "function") at(r.rel, link.line);
-    else setOpenFile(r.rel);
-  });
+  openFileAt(r.rel, link.line);
 }
 
 /**

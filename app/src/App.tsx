@@ -40,6 +40,9 @@ import {
   addAgents,
   agentPrompt,
   defaultAgent,
+  fileLine,
+  setDaemonReconnecting,
+  projectTerse,
   setDefaultAgent,
   changesMode,
   showAutomations,
@@ -173,6 +176,15 @@ export function App() {
         void restore("Após o reinício do daemon");
       }).then((u) => (unlistenRestart = u)),
     );
+    // the host reconnects to the daemon on its own: show it meanwhile, and say so when it did not work
+    const unlistenLink: (() => void)[] = [];
+    void import("@tauri-apps/api/event").then(({ listen }) => {
+      void listen("daemon-reconnecting", () => setDaemonReconnecting(true)).then((u) => unlistenLink.push(u));
+      void listen<{ ok: boolean }>("daemon-reconnected", (e) => {
+        setDaemonReconnecting(false);
+        if (!e.payload?.ok) setError("Não foi possível reconectar ao daemon. Reinicia o Axelstra se persistir.");
+      }).then((u) => unlistenLink.push(u));
+    });
     // the daemon pushes `session.changed` (see watchWorktree below); this poll is only the safety net
     const fast = setInterval(() => !document.hidden && void refreshSessions(), 10000);
     // git is the costly part: the change list only matters for the selected worktree, and the project
@@ -267,6 +279,7 @@ export function App() {
       window.removeEventListener("focus", onFocus);
       unlistenClick?.();
       unlistenRestart?.();
+      unlistenLink.forEach((u) => u());
     });
   });
 
@@ -395,7 +408,7 @@ export function App() {
     if (!c) return;
     const agent = projectAgent(c.project.id);
     try {
-      const id = await launchDefaultAgent(c.project.id, c.wt.path, agent, AGENTS[agent]);
+      const id = await launchDefaultAgent(c.project.id, c.wt.path, agent, AGENTS[agent], undefined, undefined, projectTerse(c.project.id));
       await refreshSessions();
       showView();
       activate(id);
@@ -429,7 +442,7 @@ export function App() {
     try {
       const id =
         m?.kind === "agent" && m.agent
-          ? await launchDefaultAgent(target.project.id, target.wt.path, t.label ?? m.agent, m.agent, { key: m.key, resume: m.resume })
+          ? await launchDefaultAgent(target.project.id, target.wt.path, t.label ?? m.agent, m.agent, { key: m.key, resume: m.resume }, undefined, projectTerse(target.project.id))
           : await spawnShell(target);
       await refreshSessions();
       openSession(target.wt.path, id);
@@ -715,7 +728,7 @@ export function App() {
               when={openFile() === null}
               fallback={
                 <Show when={openFile()} keyed>
-                  {(f) => <Editor wt={selectedWorktree()!} path={f} />}
+                  {(f) => <Editor wt={selectedWorktree()!} path={f} initialLine={fileLine() ?? undefined} />}
                 </Show>
               }
             >
