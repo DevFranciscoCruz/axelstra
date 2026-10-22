@@ -23,7 +23,8 @@ struct State {
     /// slow background polling (git status of every worktree, gh, transcript scans): its own connection,
     /// so creating a worktree or listing sessions never waits behind it
     bg: Mutex<Option<Client>>,
-    attachments: Mutex<std::collections::HashMap<u32, Arc<AtomicBool>>>,
+    /// per session id, one stop flag per attach token (a remounted view can attach again before the old one detaches)
+    attachments: Mutex<std::collections::HashMap<u32, std::collections::HashMap<u64, Arc<AtomicBool>>>>,
     /// write side of the change-event connection (see `watch_start`)
     watch: Mutex<Option<Client>>,
     /// an update already downloaded and verified, waiting for a restart (or for the app to be closed)
@@ -92,15 +93,32 @@ static LAST_INSTANCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU6
 /// `connect`, and tells the UI when the daemon behind it is a new run (it crashed or was replaced):
 /// its sessions are gone and the UI restores them from the saved list.
 fn reconnect() -> Result<Client> {
-    let c = connect()?;
+    use tauri::Emitter;
+    // the slot mutex is held meanwhile (a restart can take seconds): the UI shows a state instead of looking frozen
+    if let Some(app) = APP.get() {
+        let _ = app.emit("daemon-reconnecting", ());
+    }
+    let c = connect();
+    if let Some(app) = APP.get() {
+        let _ = app.emit("daemon-reconnected", json!({"ok": c.is_ok()}));
+    }
+    let c = c?;
     let prev = LAST_INSTANCE.swap(c.instance, Ordering::SeqCst);
     if prev != 0 && c.instance != prev {
         if let Some(app) = APP.get() {
-            use tauri::Emitter;
             let _ = app.emit("daemon-restarted", ());
         }
     }
     Ok(c)
+}
+
+/// One key of the daemon's `settings.json` (null when missing): the app reads it directly, like the daemon does.
+fn setting(key: &str) -> Value {
+    std::fs::read_to_string(proto::data_dir().join("settings.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .map(|v| v[key].clone())
+        .unwrap_or(Value::Null)
 }
 
 /// Calls that only read: safe to run twice if the connection broke after the daemon may have received them.
@@ -207,14 +225,26 @@ async fn session_attach(
     state: tauri::State<'_, Arc<State>>,
     id: u32,
     on_data: Channel<InvokeResponseBody>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
+    static NEXT_TOKEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let token = NEXT_TOKEN.fetch_add(1, Ordering::SeqCst);
     let stop = Arc::new(AtomicBool::new(false));
-    if let Some(old) = state.attachments.lock().unwrap().insert(id, stop.clone()) {
-        old.store(true, Ordering::SeqCst);
-    }
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let mut c = connect().map_err(|e| format!("{e:#}"))?;
-        c.call("session.subscribe", json!({"id": id})).map_err(|e| format!("{e:#}"))?;
+    state.attachments.lock().unwrap().entry(id).or_default().insert(token, stop.clone());
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<u64, String> {
+        let forget = || {
+            if let Some(m) = st.attachments.lock().unwrap().get_mut(&id) {
+                m.remove(&token);
+            }
+        };
+        let mut c = connect().map_err(|e| {
+            forget();
+            format!("{e:#}")
+        })?;
+        c.call("session.subscribe", json!({"id": id})).map_err(|e| {
+            forget();
+            format!("{e:#}")
+        })?;
         std::thread::spawn(move || {
             while let Ok(f) = c.read() {
                 if stop.load(Ordering::SeqCst) {
@@ -232,7 +262,7 @@ async fn session_attach(
                 }
             }
         });
-        Ok(())
+        Ok(token)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -241,7 +271,7 @@ async fn session_attach(
 /// Starts the one change-event stream of the window: `fs.changed` events arrive as JSON strings.
 /// The connection stays open; `watch_set` points it at a worktree.
 #[tauri::command]
-async fn watch_start(state: tauri::State<'_, Arc<State>>, on_event: Channel<InvokeResponseBody>) -> Result<(), String> {
+async fn watch_start(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, on_event: Channel<InvokeResponseBody>) -> Result<(), String> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let c = connect().map_err(|e| format!("{e:#}"))?;
@@ -255,6 +285,9 @@ async fn watch_start(state: tauri::State<'_, Arc<State>>, on_event: Channel<Invo
                     }
                 }
             }
+            // the connection dropped (daemon gone) or the channel closed: the UI starts the stream again
+            use tauri::Emitter;
+            let _ = app.emit("watch-ended", ());
         });
         Ok(())
     })
@@ -280,9 +313,20 @@ async fn watch_set(state: tauri::State<'_, Arc<State>>, worktree: Option<String>
 }
 
 #[tauri::command]
-fn session_detach(state: tauri::State<'_, Arc<State>>, id: u32) {
-    if let Some(stop) = state.attachments.lock().unwrap().remove(&id) {
-        stop.store(true, Ordering::SeqCst);
+/// Stops the attach `token` returned by `session_attach`; without a token, every attach of the session.
+fn session_detach(state: tauri::State<'_, Arc<State>>, id: u32, token: Option<u64>) {
+    let mut g = state.attachments.lock().unwrap();
+    let Some(m) = g.get_mut(&id) else { return };
+    match token {
+        Some(t) => {
+            if let Some(stop) = m.remove(&t) {
+                stop.store(true, Ordering::SeqCst);
+            }
+        }
+        None => m.drain().for_each(|(_, stop)| stop.store(true, Ordering::SeqCst)),
+    }
+    if m.is_empty() {
+        g.remove(&id);
     }
 }
 
@@ -290,7 +334,16 @@ fn session_detach(state: tauri::State<'_, Arc<State>>, id: u32) {
 /// Desktop toast whose click brings the window forward and tells the UI which session it came from.
 /// Returns false where the OS toast has no click callback (the UI then uses the plain notification plugin).
 #[tauri::command]
-fn notify_session(app: tauri::AppHandle, title: String, body: String, worktree: String, session: u32) -> bool {
+///
+/// Honors the settings `notify_mode` (all|waiting|off; `waiting` only notifies when the UI says the agent
+/// is waiting on the user, via `waiting: true`) and `notify_sound` (default true).
+fn notify_session(app: tauri::AppHandle, title: String, body: String, worktree: String, session: u32, waiting: Option<bool>) -> bool {
+    match setting("notify_mode").as_str().unwrap_or("all") {
+        "off" => return true,
+        "waiting" if waiting != Some(true) => return true,
+        _ => {}
+    }
+    let sound = setting("notify_sound") != json!(false);
     // the taskbar button flashes until the window is brought back, even when the toast was missed
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.request_user_attention(Some(tauri::UserAttentionType::Informational));
@@ -300,7 +353,9 @@ fn notify_session(app: tauri::AppHandle, title: String, body: String, worktree: 
         use tauri::Emitter;
         // Windows hides toasts (and their sound) while a game or presentation is fullscreen; a plain system
         // beep still gets through, so the toast stays silent and this one is the audible part.
-        unsafe { windows_sys::Win32::System::Diagnostics::Debug::MessageBeep(windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONASTERISK) };
+        if sound {
+            unsafe { windows_sys::Win32::System::Diagnostics::Debug::MessageBeep(windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONASTERISK) };
+        }
         let handle = app.clone();
         let shown = tauri_winrt_notification::Toast::new(&app.config().identifier)
             .sound(None)
@@ -320,30 +375,34 @@ fn notify_session(app: tauri::AppHandle, title: String, body: String, worktree: 
     }
     #[cfg(not(windows))]
     {
-        let _ = (app, title, body, worktree, session);
+        let _ = (app, title, body, worktree, session, sound);
         false
     }
 }
 
 /// The UI confirmed the close: exit for real (the exit hook still installs a downloaded update).
 #[tauri::command]
-fn app_quit(app: tauri::AppHandle, keep: Option<bool>) {
+async fn app_quit(app: tauri::AppHandle, keep: Option<bool>) {
     // by default nothing is left running: the daemon ends its terminals and agents and exits too. They come
     // back through session restore the next time the app opens. `keep` leaves them (and automations) running.
     if keep != Some(true) {
-        if let Ok(token) = proto::load_or_create_token() {
-            let pipe = proto::pipe_name();
-            if let Ok(mut c) = Client::connect(&pipe, &token) {
-                let _ = c.call("daemon.shutdown", json!({}));
-                drop(c);
-                for _ in 0..30 {
-                    std::thread::sleep(Duration::from_millis(100));
-                    if Client::connect(&pipe, &token).is_err() {
-                        break;
+        // waits up to 3s for the pipe to close: off the main thread
+        let _ = tauri::async_runtime::spawn_blocking(|| {
+            if let Ok(token) = proto::load_or_create_token() {
+                let pipe = proto::pipe_name();
+                if let Ok(mut c) = Client::connect(&pipe, &token) {
+                    let _ = c.call("daemon.shutdown", json!({}));
+                    drop(c);
+                    for _ in 0..30 {
+                        std::thread::sleep(Duration::from_millis(100));
+                        if Client::connect(&pipe, &token).is_err() {
+                            break;
+                        }
                     }
                 }
             }
-        }
+        })
+        .await;
     }
     app.exit(0);
 }
@@ -351,20 +410,74 @@ fn app_quit(app: tauri::AppHandle, keep: Option<bool>) {
 /// Which of the tools the app leans on are not on PATH (git, claude, codex, gh) plus other agent CLIs worth offering (opencode, gemini, aider).
 #[tauri::command]
 fn missing_tools() -> Vec<String> {
+    ["git", "claude", "codex", "gh", "opencode", "gemini", "aider"].into_iter().filter(|t| !on_path(t)).map(String::from).collect()
+}
+
+fn on_path(name: &str) -> bool {
     let dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
     let exts: Vec<String> = if cfg!(windows) {
         std::env::var("PATHEXT").unwrap_or_else(|_| ".EXE;.CMD;.BAT".into()).split(';').map(|e| e.to_lowercase()).collect()
     } else {
         vec![String::new()]
     };
-    let has = |name: &str| dirs.iter().any(|d| exts.iter().any(|e| d.join(format!("{name}{e}")).is_file()));
-    ["git", "claude", "codex", "gh", "opencode", "gemini", "aider"].into_iter().filter(|t| !has(t)).map(String::from).collect()
+    dirs.iter().any(|d| exts.iter().any(|e| d.join(format!("{name}{e}")).is_file()))
+}
+
+/// Windows shell for a new terminal from the `shell` setting (auto|pwsh|powershell|bash|wsl|cmd).
+/// `auto` and unknown values prefer PowerShell 7 when installed, else Windows PowerShell 5.1.
+fn windows_shell(setting: &str, has_pwsh: bool) -> (String, Vec<String>) {
+    let ps = |p: &str| (p.to_string(), vec!["-NoLogo".to_string()]);
+    match setting {
+        "pwsh" => ps("pwsh"),
+        "powershell" => ps("powershell"),
+        "bash" => ("bash".into(), vec!["-l".into()]),
+        "wsl" => ("wsl".into(), vec![]),
+        "cmd" => ("cmd".into(), vec![]),
+        _ if has_pwsh => ps("pwsh"),
+        _ => ps("powershell"),
+    }
+}
+
+/// What the UI shows in the diagnostics panel: versions, where the state lives, what is missing.
+#[tauri::command]
+async fn diagnostics(state: tauri::State<'_, Arc<State>>) -> Result<Value, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let daemon = with_client(&st.bg, true, |c| Ok((c.proto, c.instance))).ok();
+        let lag = proto::data_dir().join("lag.log");
+        json!({
+            "app_version": env!("CARGO_PKG_VERSION"),
+            "app_proto": proto::PROTO,
+            "daemon_connected": daemon.is_some(),
+            "daemon_proto": daemon.map(|d| d.0),
+            "daemon_instance": daemon.map(|d| d.1),
+            "data_dir": proto::data_dir().to_string_lossy(),
+            "lag_log": lag.to_string_lossy(),
+            "lag_log_bytes": std::fs::metadata(&lag).map(|m| m.len()).unwrap_or(0),
+            "missing_tools": missing_tools(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Deletes pasted clipboard images older than a day.
+fn clean_pastes() {
+    let dir = std::env::temp_dir().join("axelstra-paste");
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let cutoff = Duration::from_secs(24 * 3600);
+    for e in rd.flatten() {
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|age| age > cutoff).unwrap_or(false);
+        if old && e.path().extension().is_some_and(|x| x == "png") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
 }
 
 #[tauri::command]
-fn default_shell()-> (String, Vec<String>) {
+fn default_shell() -> (String, Vec<String>) {
     if cfg!(windows) {
-        ("powershell".into(), vec!["-NoLogo".into()])
+        windows_shell(setting("shell").as_str().unwrap_or("auto"), on_path("pwsh"))
     } else {
         let sh = std::env::var("SHELL").unwrap_or_else(|_| if cfg!(target_os = "macos") { "/bin/zsh".into() } else { "/bin/bash".into() });
         // a login shell loads the user's PATH (Homebrew, nvm...), which a GUI app does not inherit
@@ -467,6 +580,7 @@ fn main() {
         .manage(voice::Voice::default())
         .setup(|app| {
             let _ = APP.set(app.handle().clone());
+            std::thread::spawn(clean_pastes);
             Ok(())
         })
         // closing the window asks the UI first (it shows the confirmation, or quits when the user opted out)
@@ -479,7 +593,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![missing_tools, daemon_call, daemon_call_bg, session_write, lag_log, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write, notify_session, app_quit, stats::keep_awake, stats::mem_usage, voice::voice_status, voice::voice_download, voice::voice_transcribe])
+        .invoke_handler(tauri::generate_handler![missing_tools, daemon_call, daemon_call_bg, session_write, lag_log, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write, notify_session, app_quit, diagnostics, stats::keep_awake, stats::mem_usage, voice::voice_status, voice::voice_download, voice::voice_transcribe])
         .build(tauri::generate_context!())
         .expect("error while building axelstra")
         .run(|app, event| {
@@ -492,4 +606,24 @@ fn main() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::windows_shell;
+
+    #[test]
+    fn auto_prefers_pwsh() {
+        assert_eq!(windows_shell("auto", true).0, "pwsh");
+        assert_eq!(windows_shell("auto", false).0, "powershell");
+        assert_eq!(windows_shell("nonsense", true).0, "pwsh");
+    }
+
+    #[test]
+    fn explicit_choice_wins() {
+        assert_eq!(windows_shell("powershell", true).0, "powershell");
+        assert_eq!(windows_shell("cmd", true), ("cmd".into(), vec![]));
+        assert_eq!(windows_shell("wsl", false).0, "wsl");
+        assert_eq!(windows_shell("bash", false).1, vec!["-l".to_string()]);
+    }
 }
