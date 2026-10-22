@@ -94,10 +94,14 @@ function NameInput(props: { initial: string; depth: number; dir: boolean; onSubm
 function Dir(props: { wt: string; path: string; depth: number }) {
   const [entries, setEntries] = createSignal<FsEntry[] | null>(null);
   const [err, setErr] = createSignal("");
-  const load = () =>
+  // only the newest listing counts: a slow older answer must not overwrite a newer one
+  let req = 0;
+  const load = () => {
+    const r = ++req;
     void fsList(props.wt, props.path)
-      .then(setEntries)
-      .catch((e) => setErr(String(e)));
+      .then((list) => r === req && setEntries(list))
+      .catch((e) => r === req && setErr(String(e)));
+  };
   load();
   // the daemon reports file changes: keep the visible folders current
   createEffect(on([fsTick, gen], load, { defer: true }));

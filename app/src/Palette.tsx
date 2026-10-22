@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { projects, selectWorktree, setRightTab, setShowAutomations, setShowDispatcher, setShowKanban, setShowSettings } from "./store";
+import { findWorktree, projects, selectWorktree, selectedWorktree, setRightTab, setShowKanban } from "./store";
 
 export type PaletteAction = { label: string; hint?: string; run: () => void };
 
@@ -28,15 +28,15 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
 
   const items = createMemo<Item[]>(() => {
     const out: Item[] = props.actions().map((a) => ({ label: a.label, hint: a.hint ?? "ação", run: a.run }));
-    out.push(
-      { label: "Ficheiros", hint: "painel", run: () => setRightTab("files") },
-      { label: "Alterações", hint: "painel", run: () => setRightTab("changes") },
-      { label: "PRs e issues", hint: "painel", run: () => setRightTab("pulls") },
-      { label: "Kanban", hint: "vista", run: () => setShowKanban(true) },
-      { label: "Automatizações", hint: "agendamento", run: () => setShowAutomations(true) },
-      { label: "Definições", hint: "respostas dos agentes, gerenciador de pacotes", run: () => setShowSettings(true) },
-      { label: "Despachante", hint: "pedidos enviados a cada worktree", run: () => setShowDispatcher(true) },
-    );
+    // panels and the board belong to a worktree: offered only when one is open (global entries come from `actions`)
+    if (findWorktree(selectedWorktree())) {
+      out.push(
+        { label: "Ficheiros", hint: "painel", run: () => setRightTab("files") },
+        { label: "Alterações", hint: "painel", run: () => setRightTab("changes") },
+        { label: "PRs e issues", hint: "painel", run: () => setRightTab("pulls") },
+        { label: "Kanban", hint: "vista", run: () => setShowKanban(true) },
+      );
+    }
     for (const p of projects()) {
       for (const w of p.worktrees) {
         const branch = w.is_main ? (p.default_branch ?? "main") : (w.branch ?? "(detached)");
