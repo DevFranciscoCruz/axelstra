@@ -113,6 +113,37 @@ impl Registry {
     }
 }
 
+const SHELLS: [&str; 6] = ["auto", "pwsh", "powershell", "bash", "wsl", "cmd"];
+const NOTIFY_MODES: [&str; 3] = ["all", "waiting", "off"];
+
+/// `shell`, `notify_sound` and `notify_mode` as saved, each falling back to its default (auto, true, all) when missing or invalid.
+/// The app itself reads the same keys from settings.json.
+fn ui_settings(saved: &Value) -> (&str, bool, &str) {
+    let shell = saved["shell"].as_str().filter(|s| SHELLS.contains(s)).unwrap_or("auto");
+    let mode = saved["notify_mode"].as_str().filter(|m| NOTIFY_MODES.contains(m)).unwrap_or("all");
+    (shell, saved["notify_sound"] != json!(false), mode)
+}
+
+/// Copies the keys of a `settings.set` patch that are present into `saved`, rejecting invalid values.
+fn apply_ui_settings(saved: &mut Value, p: &Value) -> Result<()> {
+    if let Some(s) = p["shell"].as_str() {
+        if !SHELLS.contains(&s) {
+            return Err(anyhow::anyhow!("shell must be auto, pwsh, powershell, bash, wsl or cmd"));
+        }
+        saved["shell"] = json!(s);
+    }
+    if let Some(b) = p["notify_sound"].as_bool() {
+        saved["notify_sound"] = json!(b);
+    }
+    if let Some(m) = p["notify_mode"].as_str() {
+        if !NOTIFY_MODES.contains(&m) {
+            return Err(anyhow::anyhow!("notify_mode must be all, waiting or off"));
+        }
+        saved["notify_mode"] = json!(m);
+    }
+    Ok(())
+}
+
 /// The app-wide settings file next to the daemon state (missing or broken = no settings).
 fn read_settings(saved: &std::path::Path) -> Value {
     std::fs::read_to_string(saved.with_file_name("settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({}))
@@ -828,7 +859,9 @@ fn dispatch(
             let terse = saved["terse"].as_str().filter(|l| ["off", "short", "tiny"].contains(l)).unwrap_or("off");
             let installed = tokio::task::block_in_place(|| crate::projects::package_managers(None, None).0);
             let pm = saved["pm"].as_str().filter(|m| installed.contains(m)).map(String::from);
-            Ok(json!({"terse": terse, "rules": crate::skill::terse_rules(terse), "pm": pm, "installed": installed, "auto_install": saved["auto_install"] == json!(true)}))
+            let (shell, notify_sound, notify_mode) = ui_settings(&saved);
+            Ok(json!({"terse": terse, "rules": crate::skill::terse_rules(terse), "pm": pm, "installed": installed, "auto_install": saved["auto_install"] == json!(true),
+                "shell": shell, "notify_sound": notify_sound, "notify_mode": notify_mode}))
         }
         "settings.set" => {
             // partial update: only the keys present are changed
@@ -849,6 +882,7 @@ fn dispatch(
             if let Some(b) = p["auto_install"].as_bool() {
                 saved["auto_install"] = json!(b);
             }
+            apply_ui_settings(&mut saved, &p)?;
             std::fs::write(reg.saved.with_file_name("settings.json"), serde_json::to_vec_pretty(&saved)?)?;
             Ok(json!({}))
         }
@@ -1310,3 +1344,33 @@ fn dispatch(
     }
 }
 
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    #[test]
+    fn ui_settings_default_when_missing_or_invalid() {
+        assert_eq!(ui_settings(&json!({})), ("auto", true, "all"));
+        assert_eq!(ui_settings(&json!({"shell": "zsh", "notify_mode": "x", "notify_sound": "no"})), ("auto", true, "all"));
+    }
+
+    #[test]
+    fn ui_settings_patch_persists_valid_keys_and_leaves_others() {
+        let mut saved = json!({"terse": "short"});
+        apply_ui_settings(&mut saved, &json!({"shell": "wsl", "notify_sound": false, "notify_mode": "waiting"})).unwrap();
+        assert_eq!(ui_settings(&saved), ("wsl", false, "waiting"));
+        assert_eq!(saved["terse"], "short");
+        // a patch without these keys changes nothing
+        apply_ui_settings(&mut saved, &json!({"terse": "off"})).unwrap();
+        assert_eq!(ui_settings(&saved), ("wsl", false, "waiting"));
+    }
+
+    #[test]
+    fn ui_settings_patch_rejects_invalid_values() {
+        let mut saved = json!({});
+        assert!(apply_ui_settings(&mut saved, &json!({"shell": "zsh"})).is_err());
+        assert!(apply_ui_settings(&mut saved, &json!({"notify_mode": "loud"})).is_err());
+        assert_eq!(saved, json!({}));
+    }
+}
