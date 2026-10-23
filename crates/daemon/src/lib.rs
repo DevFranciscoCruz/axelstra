@@ -10,8 +10,8 @@ pub mod janitor;
 pub mod kanban;
 pub mod lag;
 pub mod msgbus;
-pub mod overlaps;
 pub mod notes;
+pub mod overlaps;
 pub mod overview;
 #[cfg(windows)]
 pub mod pipesec;
