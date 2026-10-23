@@ -31,7 +31,7 @@ export function ErrorToast() {
         <Show when={notice()}>
           <div class="error-toast notice" role="status" style={FLOW}>
             <span class="et-msg">{notice()}</span>
-            <button class="icon" title="Fechar" onClick={() => setNoticeSig("")}>
+            <button class="icon" title="Fechar" aria-label="Fechar" onClick={() => setNoticeSig("")}>
               <Icon name="x" />
             </button>
           </div>
@@ -39,7 +39,7 @@ export function ErrorToast() {
         <Show when={error()}>
           <div class="error-toast" role="alert" style={FLOW}>
             <span class="et-msg">{error()}</span>
-            <button class="icon" title="Fechar" onClick={() => setError("")}>
+            <button class="icon" title="Fechar" aria-label="Fechar" onClick={() => setError("")}>
               <Icon name="x" />
             </button>
           </div>

@@ -322,15 +322,15 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
               }
             }}
           />
-          <button title={S.findPrev} onClick={() => findHandlers?.run(true)}>
+          <button title={S.findPrev} aria-label={S.findPrev} onClick={() => findHandlers?.run(true)}>
             <span class="flip">
               <Icon name="chevDown" />
             </span>
           </button>
-          <button title={S.findNext} onClick={() => findHandlers?.run(false)}>
+          <button title={S.findNext} aria-label={S.findNext} onClick={() => findHandlers?.run(false)}>
             <Icon name="chevDown" />
           </button>
-          <button title={S.findClose} onClick={() => findHandlers?.close()}>
+          <button title={S.findClose} aria-label={S.findClose} onClick={() => findHandlers?.close()}>
             <Icon name="x" />
           </button>
         </div>

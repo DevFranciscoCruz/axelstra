@@ -53,7 +53,7 @@ export function PullsPanel() {
           Issues
         </button>
         <span class="grow" />
-        <button class="icon" title="Atualizar" onClick={() => void refetch()}>
+        <button class="icon" title="Atualizar" aria-label="Atualizar" onClick={() => void refetch()}>
           <Icon name="refresh" />
         </button>
       </div>
@@ -91,7 +91,7 @@ export function PullsPanel() {
                         {busy() === i.number ? "…" : "Worktree"}
                       </button>
                     </Show>
-                    <button class="icon" title="Abrir no navegador" onClick={() => void open(i.url)}>
+                    <button class="icon" title="Abrir no navegador" aria-label="Abrir no navegador" onClick={() => void open(i.url)}>
                       <Icon name="external" />
                     </button>
                   </div>
