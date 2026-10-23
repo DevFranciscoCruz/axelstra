@@ -8,7 +8,7 @@ import {
 import { ask } from "./Confirm";
 import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
 import { Icon } from "./Icon";
-import { Button, Checkbox, Input, cn } from "./ui";
+import { Badge, Button, Checkbox, Input, cn } from "./ui";
 import { TerminalView } from "./TerminalView";
 import { Filter, ago, filterContainers, groupByProject, imageUsers, isRunning, isSecretKey, joinPath, parseCreated, portChips, searchLog, stateInfo } from "./dockerLogic";
 import { findWorktree, keepSame, openSession, refreshSessions, selectedWorktree, sessions, setError, setShowDocker, showDocker, showNotice } from "./store";
@@ -337,7 +337,7 @@ export function DockerView() {
                 </For>
               </div>
             </Show>
-            <Button variant="ghost" size="icon" class="icon" aria-label="Atualizar" title="Atualizar" onClick={retry}>
+            <Button variant="icon" size="icon" aria-label="Atualizar" title="Atualizar" onClick={retry}>
               <Icon name="refresh" size={14} />
             </Button>
           </div>
@@ -450,7 +450,7 @@ function Unavailable(props: { status: DockerStatus | null; err: string; loaded: 
             <>
               <strong>O Docker não está instalado</strong>
               <span class="auto-note">Instale o Docker Desktop para ver e gerir contentores aqui. Depois de instalar, abra-o e volte a esta vista.</span>
-              <Button variant="ghost" size="sm" class="link h-auto px-0 text-primary underline hover:bg-transparent" onClick={() => void openUrl("https://docs.docker.com/get-started/get-docker/")}>
+              <Button variant="link" size="bare" class="text-primary underline hover:text-primary" onClick={() => void openUrl("https://docs.docker.com/get-started/get-docker/")}>
                 Como instalar o Docker Desktop
               </Button>
               <Button size="sm" onClick={props.retry}>Tentar de novo</Button>
@@ -478,9 +478,9 @@ function ComposeBar(props: { compose: DockerCompose | null; wt: string | null; b
           <span class="auto-note">{props.compose!.file} · projeto {props.compose!.project}</span>
           <For each={props.compose!.services}>
             {(s) => (
-              <span class="chip" title={s.status}>
+              <Badge class="[&_.dot.warn]:bg-[var(--warn)]" title={s.status}>
                 <span class="dot" classList={{ on: stateInfo(s.state).cls === "on", warn: stateInfo(s.state).cls === "warn" }} /> {s.service || s.name} · {stateInfo(s.state).text}
-              </span>
+              </Badge>
             )}
           </For>
           <Show when={!props.compose!.services.length}>
@@ -525,11 +525,11 @@ function Row(props: {
         <For each={chips()}>
           {(p) =>
             p.url ? (
-              <Button variant="outline" class="port h-auto px-1.5 py-0 text-xs" title={`Abrir ${p.url} no navegador`} aria-label={`Abrir ${p.url} no navegador`} onClick={(e) => { e.stopPropagation(); void openUrl(p.url!); }}>
+              <Button variant="outline" size="bare" class="px-1.5 text-xs" title={`Abrir ${p.url} no navegador`} aria-label={`Abrir ${p.url} no navegador`} onClick={(e) => { e.stopPropagation(); void openUrl(p.url!); }}>
                 {p.label}
               </Button>
             ) : (
-              <span class="chip" title="Porta exposta, não publicada">{p.label}</span>
+              <Badge title="Porta exposta, não publicada">{p.label}</Badge>
             )
           }
         </For>
@@ -539,15 +539,15 @@ function Row(props: {
       <span class="dk-num dk-age" title={props.c.created}>{ago(parseCreated(props.c.created))}</span>
       <span class="dk-acts" role="group" aria-label="Ações" onClick={(e) => e.stopPropagation()}>
         <Show when={!run()}>
-          <Button variant="ghost" size="icon" class="icon" aria-label={`Iniciar ${props.c.name}`} title="Iniciar" disabled={props.busy} onClick={props.onStart}><DIcon name="play" /></Button>
+          <Button variant="icon" size="icon" aria-label={`Iniciar ${props.c.name}`} title="Iniciar" disabled={props.busy} onClick={props.onStart}><DIcon name="play" /></Button>
         </Show>
         <Show when={run()}>
-          <Button variant="ghost" size="icon" class="icon" aria-label={`Parar ${props.c.name}`} title="Parar" disabled={props.busy} onClick={props.onStop}><DIcon name="stop" /></Button>
-          <Button variant="ghost" size="icon" class="icon" aria-label={`Reiniciar ${props.c.name}`} title="Reiniciar" disabled={props.busy} onClick={props.onRestart}><DIcon name="refresh" /></Button>
+          <Button variant="icon" size="icon" aria-label={`Parar ${props.c.name}`} title="Parar" disabled={props.busy} onClick={props.onStop}><DIcon name="stop" /></Button>
+          <Button variant="icon" size="icon" aria-label={`Reiniciar ${props.c.name}`} title="Reiniciar" disabled={props.busy} onClick={props.onRestart}><DIcon name="refresh" /></Button>
         </Show>
-        <Button variant="ghost" size="icon" class="icon" aria-label={`Logs de ${props.c.name}`} title="Logs" onClick={props.onLogs}><DIcon name="logs" /></Button>
-        <Button variant="ghost" size="icon" class="icon" aria-label={`Shell em ${props.c.name}`} title="Shell" disabled={!run()} onClick={props.onShell}><DIcon name="terminal" /></Button>
-        <Button variant="ghost" size="icon" class="icon danger hover:text-destructive" aria-label={`Remover ${props.c.name}`} title="Remover" disabled={props.busy} onClick={props.onRemove}><DIcon name="trash" /></Button>
+        <Button variant="icon" size="icon" aria-label={`Logs de ${props.c.name}`} title="Logs" onClick={props.onLogs}><DIcon name="logs" /></Button>
+        <Button variant="icon" size="icon" aria-label={`Shell em ${props.c.name}`} title="Shell" disabled={!run()} onClick={props.onShell}><DIcon name="terminal" /></Button>
+        <Button variant="icon" size="icon" class="text-destructive" aria-label={`Remover ${props.c.name}`} title="Remover" disabled={props.busy} onClick={props.onRemove}><DIcon name="trash" /></Button>
       </span>
     </div>
   );
@@ -571,12 +571,12 @@ function VolumesList(props: { list: DockerVolume[]; q: string; busy: boolean; on
                 <span class="auto-note" title={v.mountpoint}>{v.driver} · {v.mountpoint}</span>
               </span>
               <span class="dk-ports">
-                <Show when={v.used_by.length} fallback={<span class="chip warn">sem uso</span>}>
-                  <For each={v.used_by}>{(n) => <span class="chip">{n}</span>}</For>
+                <Show when={v.used_by.length} fallback={<Badge variant="warn">sem uso</Badge>}>
+                  <For each={v.used_by}>{(n) => <Badge>{n}</Badge>}</For>
                 </Show>
               </span>
               <span class="dk-acts show">
-                <Button variant="ghost" size="icon" class="icon danger hover:text-destructive" aria-label={`Remover volume ${v.name}`} title="Remover" disabled={props.busy || v.used_by.length > 0} onClick={() => props.onRemove(v)}><DIcon name="trash" /></Button>
+                <Button variant="icon" size="icon" class="text-destructive" aria-label={`Remover volume ${v.name}`} title="Remover" disabled={props.busy || v.used_by.length > 0} onClick={() => props.onRemove(v)}><DIcon name="trash" /></Button>
               </span>
             </div>
           )}
@@ -601,14 +601,14 @@ function ImagesList(props: { list: DockerImage[]; q: string; busy: boolean; onRe
                   <span class="auto-note">{i.id} · {ago(parseCreated(i.created))}</span>
                 </span>
                 <span class="dk-ports">
-                  <Show when={i.dangling}><span class="chip warn" title="Sem nome nem etiqueta: sobra de uma reconstrução">dangling</span></Show>
-                  <Show when={users().length} fallback={<span class="chip">sem contentores</span>}>
-                    <For each={users()}>{(c) => <span class="chip">{c.name}</span>}</For>
+                  <Show when={i.dangling}><Badge variant="warn" title="Sem nome nem etiqueta: sobra de uma reconstrução">dangling</Badge></Show>
+                  <Show when={users().length} fallback={<Badge>sem contentores</Badge>}>
+                    <For each={users()}>{(c) => <Badge>{c.name}</Badge>}</For>
                   </Show>
                 </span>
                 <span class="dk-num dk-size">{i.size}</span>
                 <span class="dk-acts show">
-                  <Button variant="ghost" size="icon" class="icon danger hover:text-destructive" aria-label={`Remover imagem ${i.tags[0] ?? i.id}`} title="Remover" disabled={props.busy || users().length > 0} onClick={() => props.onRemove(i)}><DIcon name="trash" /></Button>
+                  <Button variant="icon" size="icon" class="text-destructive" aria-label={`Remover imagem ${i.tags[0] ?? i.id}`} title="Remover" disabled={props.busy || users().length > 0} onClick={() => props.onRemove(i)}><DIcon name="trash" /></Button>
                 </span>
               </div>
             );
@@ -632,8 +632,8 @@ function NetworksList(props: { list: DockerNetwork[]; q: string }) {
                 <span class="auto-note">{n.driver} · {n.scope} · {n.id.slice(0, 12)}</span>
               </span>
               <span class="dk-ports">
-                <Show when={n.containers.length} fallback={<span class="chip">sem contentores</span>}>
-                  <For each={n.containers}>{(c) => <span class="chip">{c}</span>}</For>
+                <Show when={n.containers.length} fallback={<Badge>sem contentores</Badge>}>
+                  <For each={n.containers}>{(c) => <Badge>{c}</Badge>}</For>
                 </Show>
               </span>
             </div>
@@ -664,7 +664,7 @@ function Detail(props: { id: string; c: DockerContainer; stat?: DockerStat; tab:
         <strong class="dk-dtitle" title={props.c.name}>{props.c.name}</strong>
         <span class="auto-note">{stateInfo(props.c.state).text}</span>
         <span class="grow" />
-        <Button variant="ghost" size="icon" class="icon" aria-label="Fechar detalhes" title="Fechar (Esc)" onClick={props.onClose}><Icon name="x" size={14} /></Button>
+        <Button variant="icon" size="icon" aria-label="Fechar detalhes" title="Fechar (Esc)" onClick={props.onClose}><Icon name="x" size={14} /></Button>
       </div>
       <div class="dk-dtabs" role="tablist" aria-label="Detalhes" onKeyDown={onTabKey}>
         <For each={DTABS}>
@@ -710,7 +710,7 @@ function InfoTab(props: { c: DockerContainer; stat?: DockerStat }) {
       <Show when={chips().length}>
         <h4>Portas</h4>
         <div class="dk-ports">
-          <For each={chips()}>{(p) => (p.url ? <Button variant="outline" class="port h-auto px-1.5 py-0 text-xs" aria-label={`Abrir ${p.url} no navegador`} onClick={() => void openUrl(p.url!)}>{p.label}</Button> : <span class="chip">{p.label}</span>)}</For>
+          <For each={chips()}>{(p) => (p.url ? <Button variant="outline" size="bare" class="px-1.5 text-xs" aria-label={`Abrir ${p.url} no navegador`} onClick={() => void openUrl(p.url!)}>{p.label}</Button> : <Badge>{p.label}</Badge>)}</For>
         </div>
       </Show>
       <Show when={info()}>
@@ -735,7 +735,7 @@ function InfoTab(props: { c: DockerContainer; stat?: DockerStat }) {
                     <span class="mono dk-val">
                       {visible() ? v : "••••••••"}
                       <Show when={secret}>
-                        <Button variant="ghost" size="sm" class="link h-auto px-0 text-primary underline hover:bg-transparent" aria-label={`${visible() ? "Esconder" : "Mostrar"} ${k}`} onClick={() => setShown((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; })}>
+                        <Button variant="link" size="bare" class="text-primary underline hover:text-primary" aria-label={`${visible() ? "Esconder" : "Mostrar"} ${k}`} onClick={() => setShown((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; })}>
                           {visible() ? "esconder" : "mostrar"}
                         </Button>
                       </Show>
@@ -844,7 +844,7 @@ function FilesTab(props: { c: DockerContainer; run: boolean }) {
     <Show when={props.run} fallback={<Empty text="O contentor está parado: os ficheiros só se veem enquanto corre." />}>
       <div class="dk-files">
         <div class="dk-tools">
-          <Button variant="ghost" size="icon" class="icon" aria-label="Pasta acima" title="Pasta acima" disabled={path() === "/"} onClick={() => { setFile(null); setPath(joinPath(path(), "..")); }}><Icon name="arrowUp" size={14} /></Button>
+          <Button variant="icon" size="icon" aria-label="Pasta acima" title="Pasta acima" disabled={path() === "/"} onClick={() => { setFile(null); setPath(joinPath(path(), "..")); }}><Icon name="arrowUp" size={14} /></Button>
           <code class="dk-code grow">{path()}</code>
         </div>
         <Show when={err()}><div class="dk-err" role="alert">{err()}</div></Show>

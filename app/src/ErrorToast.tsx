@@ -1,7 +1,7 @@
 import { Show } from "solid-js";
 import { Icon } from "./Icon";
 import { daemonReconnecting, error, notice, setError, setNoticeSig } from "./store";
-import { PlainButton } from "./ui";
+import { Button } from "./ui";
 
 // .error-toast is position:fixed on its own; inside the stack the wrapper positions, the toasts flow
 const FLOW = { position: "static", transform: "none" } as const;
@@ -35,17 +35,17 @@ export function ErrorToast() {
         <Show when={notice()}>
           <div class="error-toast notice" role="status" style={FLOW}>
             <span class="et-msg">{notice()}</span>
-            <PlainButton class="icon" title="Fechar" aria-label="Fechar" onClick={() => setNoticeSig("")}>
+            <Button variant="icon" size="icon" class="size-6 flex-none" title="Fechar" aria-label="Fechar" onClick={() => setNoticeSig("")}>
               <Icon name="x" />
-            </PlainButton>
+            </Button>
           </div>
         </Show>
         <Show when={error()}>
           <div class="error-toast" role="alert" style={FLOW}>
             <span class="et-msg">{error()}</span>
-            <PlainButton class="icon" title="Fechar" aria-label="Fechar" onClick={() => setError("")}>
+            <Button variant="icon" size="icon" class="size-6 flex-none" title="Fechar" aria-label="Fechar" onClick={() => setError("")}>
               <Icon name="x" />
-            </PlainButton>
+            </Button>
           </div>
         </Show>
       </div>

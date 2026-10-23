@@ -3,7 +3,7 @@ import { Icon } from "./Icon";
 import { SessionInfo, SessionRes, killSession, removeSession, sessionResources, workerLimits } from "./api";
 import { ask } from "./Confirm";
 import { Modal } from "./Modal";
-import { Button, Input } from "./ui";
+import { Badge, Button, Input } from "./ui";
 import { openSession, refreshSessions, sessionState, sessions, setShowOrchestra } from "./store";
 
 const baseName = (p?: string) => (p ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
@@ -94,7 +94,7 @@ export function Orchestra() {
             </span>
           </Show>
           <Show when={(props.s.unread ?? 0) > 0}>
-            <span class="wt-badge" title="Mensagens por ler"><Icon name="mail" size={11} inline /> {props.s.unread}</span>
+            <Badge variant="quiet" title="Mensagens por ler"><Icon name="mail" size={11} inline /> {props.s.unread}</Badge>
           </Show>
           <span class="grow" />
           <Button size="sm" onClick={() => open(props.s)} disabled={!props.s.meta?.worktree}>

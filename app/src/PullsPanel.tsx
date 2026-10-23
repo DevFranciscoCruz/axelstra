@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Button } from "./ui";
+import { Badge, Button } from "./ui";
 import { Icon } from "./Icon";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { GhItem, ghList, worktreeFromPr } from "./api";
@@ -48,14 +48,14 @@ export function PullsPanel() {
     <aside class="rightbar" id="rpanel" role="tabpanel" aria-labelledby={`rtab-${rightTab()}`}>
       <RightTabs />
       <div class="rtools">
-        <Button variant="ghost" size="icon" class="icon" classList={{ on: kind() === "pr" }} aria-pressed={kind() === "pr"} onClick={() => setKind("pr")}>
+        <Button variant="icon" size="icon" class={kind() === "pr" ? "text-primary" : undefined} aria-pressed={kind() === "pr"} onClick={() => setKind("pr")}>
           PRs
         </Button>
-        <Button variant="ghost" size="icon" class="icon" classList={{ on: kind() === "issue" }} aria-pressed={kind() === "issue"} onClick={() => setKind("issue")}>
+        <Button variant="icon" size="icon" class={kind() === "issue" ? "text-primary" : undefined} aria-pressed={kind() === "issue"} onClick={() => setKind("issue")}>
           Problemas
         </Button>
         <span class="grow" />
-        <Button variant="ghost" size="icon" class="icon" title="Atualizar" aria-label="Atualizar" onClick={() => void refetch()}>
+        <Button variant="icon" size="icon" title="Atualizar" aria-label="Atualizar" onClick={() => void refetch()}>
           <Icon name="refresh" />
         </Button>
       </div>
@@ -79,21 +79,21 @@ export function PullsPanel() {
                   <div class="pr-meta">
                     <span>{i.author}</span>
                     <Show when={i.draft}>
-                      <span class="chip">rascunho</span>
+                      <Badge>rascunho</Badge>
                     </Show>
                     <Show when={i.review}>
-                      <span class="chip">{REVIEW[i.review]}</span>
+                      <Badge>{REVIEW[i.review]}</Badge>
                     </Show>
                     <Show when={i.branch}>
-                      <span class="chip mono">{i.branch}</span>
+                      <Badge class="mono">{i.branch}</Badge>
                     </Show>
                     <span class="grow" />
                     <Show when={kind() === "pr"}>
-                      <Button variant="ghost" size="icon" class="icon" disabled={busy() === i.number} title="Abrir num worktree novo" onClick={() => void work(i.number)}>
+                      <Button variant="icon" size="icon" disabled={busy() === i.number} title="Abrir num worktree novo" onClick={() => void work(i.number)}>
                         {busy() === i.number ? "…" : "Worktree"}
                       </Button>
                     </Show>
-                    <Button variant="ghost" size="icon" class="icon" title="Abrir no navegador" aria-label="Abrir no navegador" onClick={() => void open(i.url)}>
+                    <Button variant="icon" size="icon" title="Abrir no navegador" aria-label="Abrir no navegador" onClick={() => void open(i.url)}>
                       <Icon name="external" />
                     </Button>
                   </div>
