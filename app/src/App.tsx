@@ -1,7 +1,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { Icon, hasIcon } from "./Icon";
 import { Select } from "./Select";
-import { Button, Field, Input, cn } from "./ui";
+import { Button, Field, Input, Tabs, TabsList, cn } from "./ui";
 import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { SessionInfo, restoreSessions, listPorts, watchWorktree, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
@@ -39,7 +39,6 @@ import { Tab } from "./Tab";
 import { pickProject } from "./projectActions";
 import { StateDot } from "./StateDot";
 import { dotOfSession } from "./agentState";
-import { tabKeys } from "./a11y";
 import { ask } from "./Confirm";
 import { PullsPanel } from "./PullsPanel";
 import { TerminalView } from "./TerminalView";
@@ -511,7 +510,9 @@ export function App() {
     set(to);
   };
 
-  const anyTabSelected = () => showKanban() || showDocker() || openDiff() !== null || openFile() !== null || openCommit() !== null || activeSession() !== null;
+  // the one tab Kobalte treats as selected (it keeps the roving tabindex there); each Tab also states its own `selected`
+  const stripValue = () =>
+    showKanban() ? "kanban" : showDocker() ? "docker" : openCommit() !== null ? "commit" : openFile() !== null ? "file" : openDiff() !== null ? "diff" : activeSession() !== null ? `tab-${activeSession()}` : "";
   // renaming ends with the new name (null = cancelled); focus goes back to the tab, not to the page
   const finishRename = (id: number, name: string | null, refocus = true) => {
     if (name !== null) renameTab(id, name);
@@ -666,12 +667,13 @@ export function App() {
             <Button variant="icon" size="tool" class={cn("ml-1 self-center", showSidebar() && "text-foreground")} title={K("Projetos (Ctrl+B)")} aria-label={K("Projetos (Ctrl+B)")} onClick={toggleSidebar}>
               <PanelIcon side="left" on={showSidebar()} />
             </Button>
-            <div class="tabs" role="tablist" aria-label="Separadores" onKeyDown={(e) => tabKeys(e)}>
-            <Tab selected={showKanban()} tabbable={!anyTabSelected()} onSelect={() => guarded(() => { setShowDocker(false); setShowKanban(true); })}>
+            <Tabs value={stripValue()} onChange={() => {}} activationMode="manual" class="flex min-w-0">
+            <TabsList aria-label="Separadores" class="min-w-0 overflow-x-auto [scrollbar-width:none]">
+            <Tab value="kanban" selected={showKanban()} onSelect={() => guarded(() => { setShowDocker(false); setShowKanban(true); })}>
               <span class="dtag"><Icon name="grid" size={11} /></span>
               <span>Kanban</span>
             </Tab>
-            <Tab selected={showDocker()} tabbable={false} onSelect={() => guarded(() => { setShowKanban(false); setShowDocker(true); })}>
+            <Tab value="docker" selected={showDocker()} onSelect={() => guarded(() => { setShowKanban(false); setShowDocker(true); })}>
               <span class="dtag"><Icon name="box" size={11} /></span>
               <span>Docker</span>
             </Tab>
@@ -679,12 +681,13 @@ export function App() {
               {(s) => (
                 <Tab
                   id={`tab-${s.id}`}
+                  value={`tab-${s.id}`}
                   selected={!showKanban() && !showDocker() && openDiff() === null && openFile() === null && openCommit() === null && activeSession() === s.id}
                   onSelect={() => showTab(s)}
                   onClose={() => void close(s)}
                   onRename={() => setRenaming(s.id)}
+                  dropBefore={dropOn() === s.id && dragTab() !== s.id}
                   wrap={{
-                    style: dropOn() === s.id && dragTab() !== s.id ? { "box-shadow": "inset 2px 0 0 var(--accent, #7aa2f7)" } : undefined,
                     draggable: renaming() !== s.id,
                     onDragStart: (e) => {
                       setDragTab(s.id);
@@ -742,7 +745,7 @@ export function App() {
             </For>
             <Show when={openCommit()}>
               {(c) => (
-                <Tab class="diff-tab" selected={!showKanban() && !showDocker()} title={c().subject} onSelect={() => { setShowKanban(false); setShowDocker(false); }} onClose={() => setOpenCommit(null)} closeLabel="Fechar commit">
+                <Tab value="commit" class="diff-tab" selected={!showKanban() && !showDocker()} title={c().subject} onSelect={() => { setShowKanban(false); setShowDocker(false); }} onClose={() => setOpenCommit(null)} closeLabel="Fechar commit">
                   <span class="dtag"><Icon name="branch" size={11} /></span>
                   <span>{c().short}</span>
                 </Tab>
@@ -750,7 +753,7 @@ export function App() {
             </Show>
             <Show when={openFile()}>
               {(p) => (
-                <Tab class="diff-tab" selected={!showKanban() && !showDocker()} title={p()} onSelect={() => { setShowKanban(false); setShowDocker(false); }} onClose={() => guarded(() => setOpenFile(null))} closeLabel="Fechar ficheiro">
+                <Tab value="file" class="diff-tab" selected={!showKanban() && !showDocker()} title={p()} onSelect={() => { setShowKanban(false); setShowDocker(false); }} onClose={() => guarded(() => setOpenFile(null))} closeLabel="Fechar ficheiro">
                   <span class="dtag"><Icon name="pencil" size={11} /></span>
                   <span>{baseName(p())}</span>
                 </Tab>
@@ -758,13 +761,14 @@ export function App() {
             </Show>
             <Show when={openDiff()}>
               {(p) => (
-                <Tab class="diff-tab" selected={!showKanban() && !showDocker()} title={p()} onSelect={() => { setShowKanban(false); setShowDocker(false); }} onClose={() => setOpenDiff(null)} closeLabel="Fechar diff">
+                <Tab value="diff" class="diff-tab" selected={!showKanban() && !showDocker()} title={p()} onSelect={() => { setShowKanban(false); setShowDocker(false); }} onClose={() => setOpenDiff(null)} closeLabel="Fechar diff">
                   <span class="dtag">Δ</span>
                   <span>{baseName(p())}</span>
                 </Tab>
               )}
             </Show>
-            </div>
+            </TabsList>
+            </Tabs>
             <span class="grow" />
             <UsageChip />
             <Show when={computerOn()}>
