@@ -68,7 +68,20 @@ fn line_text(v: &Value) -> String {
             Value::Object(o) => {
                 for (k, x) in o {
                     // skip ids, signatures and other machine fields
-                    if matches!(k.as_str(), "id" | "uuid" | "parentUuid" | "sessionId" | "signature" | "type" | "role" | "model" | "cwd" | "timestamp" | "version" | "usage") {
+                    if matches!(
+                        k.as_str(),
+                        "id" | "uuid"
+                            | "parentUuid"
+                            | "sessionId"
+                            | "signature"
+                            | "type"
+                            | "role"
+                            | "model"
+                            | "cwd"
+                            | "timestamp"
+                            | "version"
+                            | "usage"
+                    ) {
                         continue;
                     }
                     walk(x, out, depth + 1);
@@ -381,7 +394,14 @@ pub fn codex_totals(lines: impl Iterator<Item = String>) -> (Option<String>, Usa
         let n = |k: &str| t[k].as_u64().unwrap_or(0);
         // Codex counts the cached part inside input_tokens
         let cached = n("cached_input_tokens");
-        u = Usage { input: n("input_tokens").saturating_sub(cached), output: n("output_tokens"), cache_read: cached, cache_write: 0, messages: 1, context: 0 };
+        u = Usage {
+            input: n("input_tokens").saturating_sub(cached),
+            output: n("output_tokens"),
+            cache_read: cached,
+            cache_write: 0,
+            messages: 1,
+            context: 0,
+        };
     }
     (cwd, u)
 }
@@ -470,7 +490,8 @@ mod tests {
             std::fs::create_dir_all(root.join(d)).unwrap();
             std::fs::write(root.join(d).join(f), "{}").unwrap();
         }
-        let names: Vec<String> = newest_codex_files(&root, 2).iter().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).collect();
+        let names: Vec<String> =
+            newest_codex_files(&root, 2).iter().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).collect();
         assert_eq!(names, ["rollout-b.jsonl", "rollout-a.jsonl"]);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -543,7 +564,18 @@ mod tests {
                 (r"D:\elsewhere".into(), codex),
             ],
         );
-        assert_eq!(out[0], WorktreeUsage { worktree: r"C:\wt\a".into(), input: 6, output: 8, cache_read: 10, cache_write: 8, claude_sessions: 1, codex_sessions: 1 });
+        assert_eq!(
+            out[0],
+            WorktreeUsage {
+                worktree: r"C:\wt\a".into(),
+                input: 6,
+                output: 8,
+                cache_read: 10,
+                cache_write: 8,
+                claude_sessions: 1,
+                codex_sessions: 1
+            }
+        );
         assert_eq!((out[1].input, out[1].codex_sessions), (1, 1));
         assert_eq!(out[2].codex_sessions, 0, "a sibling folder with the same prefix is not this worktree");
     }

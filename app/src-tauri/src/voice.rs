@@ -1,8 +1,8 @@
 //! Local speech to text: Whisper (base, int8) through sherpa-onnx. Audio never leaves the machine.
 //! The webview records 16 kHz mono PCM and sends it as raw little-endian i16 bytes.
 use serde::Serialize;
-use sherpa_rs::whisper::{WhisperConfig, WhisperRecognizer};
 use sha2::Digest;
+use sherpa_rs::whisper::{WhisperConfig, WhisperRecognizer};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -150,7 +150,8 @@ pub async fn voice_transcribe(app: AppHandle, request: Request<'_>) -> Result<St
             *cur = lang;
         }
         let r = rec.as_mut().unwrap();
-        let text: Vec<String> = samples.chunks(CHUNK).filter(|c| c.len() > 1600).map(|c| r.transcribe(16_000, c).text.trim().to_string()).collect();
+        let text: Vec<String> =
+            samples.chunks(CHUNK).filter(|c| c.len() > 1600).map(|c| r.transcribe(16_000, c).text.trim().to_string()).collect();
         Ok(text.join(" ").trim().to_string())
     })
     .await

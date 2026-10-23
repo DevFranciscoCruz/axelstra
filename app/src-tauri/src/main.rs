@@ -126,22 +126,100 @@ fn setting(key: &str) -> Value {
 /// Calls that only read: safe to run twice if the connection broke after the daemon may have received them.
 fn read_only(method: &str) -> bool {
     let tail = method.rsplit('.').next().unwrap_or(method);
-    matches!(tail, "list" | "status" | "get" | "read" | "screen" | "usage" | "ports" | "pending" | "info" | "stats" | "log" | "inbox" | "thread" | "search" | "logo" | "dir" | "limits" | "diff" | "changes" | "suggest")
+    matches!(
+        tail,
+        "list"
+            | "status"
+            | "get"
+            | "read"
+            | "screen"
+            | "usage"
+            | "ports"
+            | "pending"
+            | "info"
+            | "stats"
+            | "log"
+            | "inbox"
+            | "thread"
+            | "search"
+            | "logo"
+            | "dir"
+            | "limits"
+            | "diff"
+            | "changes"
+            | "suggest"
+    )
 }
 
 /// Daemon methods the webview may forward through `daemon_call` / `daemon_call_bg`: exactly the ones the frontend
 /// calls (a unit test reads `app/src` and fails when this list and the sources drift apart). Anything else is refused,
 /// so a compromised page cannot reach what the UI never uses (`session.pending_clear`, `msg.send`, `flow.set`...).
 const ALLOWED_METHODS: &[&str] = &[
-    "agent.search", "agent.status", "agent.usage", "agent.worktree_usage", "app.dir", "automation.delete", "automation.list", "automation.run", "automation.save",
-    "codex.limits", "computer.enable", "computer.status", "daemon.shutdown", "dispatch.meta", "flow.list",
-    "fs.create", "fs.delete", "fs.grep", "fs.list", "fs.read", "fs.rename", "fs.search", "fs.stat", "fs.write",
-    "gh.list", "git.changes", "git.commit", "git.diff", "git.log", "git.pr", "git.push", "git.show", "git.suggest",
-    "kanban.delete", "kanban.list", "kanban.move", "kanban.save", "open.editor", "orch.limits", "orch.retry", "orch.start", "orch.status",
-    "ping", "pm.detect", "ports.list", "project.add", "project.list", "project.logo", "project.remove", "project.setup",
-    "session.kill", "session.list", "session.pending", "session.pending_remove", "session.remove", "session.rename", "session.resize",
-    "session.resources", "session.spawn", "settings.get", "settings.set",
-    "worktree.create", "worktree.from_pr", "worktree.remove", "worktree.status",
+    "agent.search",
+    "agent.status",
+    "agent.usage",
+    "agent.worktree_usage",
+    "app.dir",
+    "automation.delete",
+    "automation.list",
+    "automation.run",
+    "automation.save",
+    "codex.limits",
+    "computer.enable",
+    "computer.status",
+    "daemon.shutdown",
+    "dispatch.meta",
+    "flow.list",
+    "fs.create",
+    "fs.delete",
+    "fs.grep",
+    "fs.list",
+    "fs.read",
+    "fs.rename",
+    "fs.search",
+    "fs.stat",
+    "fs.write",
+    "gh.list",
+    "git.changes",
+    "git.commit",
+    "git.diff",
+    "git.log",
+    "git.pr",
+    "git.push",
+    "git.show",
+    "git.suggest",
+    "kanban.delete",
+    "kanban.list",
+    "kanban.move",
+    "kanban.save",
+    "open.editor",
+    "orch.limits",
+    "orch.retry",
+    "orch.start",
+    "orch.status",
+    "ping",
+    "pm.detect",
+    "ports.list",
+    "project.add",
+    "project.list",
+    "project.logo",
+    "project.remove",
+    "project.setup",
+    "session.kill",
+    "session.list",
+    "session.pending",
+    "session.pending_remove",
+    "session.remove",
+    "session.rename",
+    "session.resize",
+    "session.resources",
+    "session.spawn",
+    "settings.get",
+    "settings.set",
+    "worktree.create",
+    "worktree.from_pr",
+    "worktree.remove",
+    "worktree.status",
 ];
 
 fn check_allowed(method: &str) -> Result<(), String> {
@@ -154,7 +232,8 @@ fn check_allowed(method: &str) -> Result<(), String> {
 
 /// Programs a webview-requested terminal may start: shells only (agents run inside one). The name is compared
 /// without directory, extension and case, so `C:\Program Files\PowerShell\7\pwsh.exe` and `/bin/zsh` pass.
-const SHELLS: &[&str] = &["pwsh", "powershell", "cmd", "bash", "zsh", "sh", "dash", "fish", "ksh", "tcsh", "csh", "nu", "wsl", "xonsh", "elvish"];
+const SHELLS: &[&str] =
+    &["pwsh", "powershell", "cmd", "bash", "zsh", "sh", "dash", "fish", "ksh", "tcsh", "csh", "nu", "wsl", "xonsh", "elvish"];
 
 fn is_shell(program: &str) -> bool {
     let name = program.rsplit(['/', '\\']).next().unwrap_or(program).to_ascii_lowercase();
@@ -185,7 +264,11 @@ fn check_params(method: &str, params: &Value) -> Result<(), String> {
                 && !p.is_absolute()
                 && p.components().all(|c| matches!(c, std::path::Component::Normal(_)))
                 && !path.split(['/', '\\']).any(|c| c.trim_end_matches(['.', ' ']).eq_ignore_ascii_case(".git"));
-            if plain { Ok(()) } else { Err(format!("caminho não permitido: {path}")) }
+            if plain {
+                Ok(())
+            } else {
+                Err(format!("caminho não permitido: {path}"))
+            }
         }
         _ => Ok(()),
     }
@@ -333,11 +416,7 @@ fn session_write(state: tauri::State<'_, Arc<State>>, id: u32, data: String) -> 
 
 /// Streams a session to the webview: raw bytes for output, a JSON string for events.
 #[tauri::command]
-async fn session_attach(
-    state: tauri::State<'_, Arc<State>>,
-    id: u32,
-    on_data: Channel<InvokeResponseBody>,
-) -> Result<u64, String> {
+async fn session_attach(state: tauri::State<'_, Arc<State>>, id: u32, on_data: Channel<InvokeResponseBody>) -> Result<u64, String> {
     static NEXT_TOKEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let token = NEXT_TOKEN.fetch_add(1, Ordering::SeqCst);
     let stop = Arc::new(AtomicBool::new(false));
@@ -383,7 +462,11 @@ async fn session_attach(
 /// Starts the one change-event stream of the window: `fs.changed` events arrive as JSON strings.
 /// The connection stays open; `watch_set` points it at a worktree.
 #[tauri::command]
-async fn watch_start(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, on_event: Channel<InvokeResponseBody>) -> Result<(), String> {
+async fn watch_start(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<State>>,
+    on_event: Channel<InvokeResponseBody>,
+) -> Result<(), String> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let c = connect().map_err(|e| format!("{e:#}"))?;
@@ -466,7 +549,9 @@ fn notify_session(app: tauri::AppHandle, title: String, body: String, worktree: 
         // Windows hides toasts (and their sound) while a game or presentation is fullscreen; a plain system
         // beep still gets through, so the toast stays silent and this one is the audible part.
         if sound {
-            unsafe { windows_sys::Win32::System::Diagnostics::Debug::MessageBeep(windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONASTERISK) };
+            unsafe {
+                windows_sys::Win32::System::Diagnostics::Debug::MessageBeep(windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONASTERISK)
+            };
         }
         let handle = app.clone();
         let shown = tauri_winrt_notification::Toast::new(&app.config().identifier)
@@ -659,11 +744,7 @@ async fn update_download(app: tauri::AppHandle, state: tauri::State<'_, Arc<Stat
         }
     }
     let updater = app.updater().map_err(|_| "updater unavailable".to_string())?;
-    let update = updater
-        .check()
-        .await
-        .map_err(|_| "update check failed".to_string())?
-        .ok_or("already up to date")?;
+    let update = updater.check().await.map_err(|_| "update check failed".to_string())?.ok_or("already up to date")?;
     if update.version != expected {
         return Err(format!("a newer release ({}) appeared; check again", update.version));
     }
@@ -705,7 +786,31 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![missing_tools, daemon_call, daemon_call_bg, session_write, lag_log, session_attach, session_detach, watch_start, watch_set, default_shell, update_check, update_download, update_apply, clipboard_read, clipboard_write, notify_session, app_quit, diagnostics, stats::keep_awake, stats::mem_usage, voice::voice_status, voice::voice_download, voice::voice_transcribe])
+        .invoke_handler(tauri::generate_handler![
+            missing_tools,
+            daemon_call,
+            daemon_call_bg,
+            session_write,
+            lag_log,
+            session_attach,
+            session_detach,
+            watch_start,
+            watch_set,
+            default_shell,
+            update_check,
+            update_download,
+            update_apply,
+            clipboard_read,
+            clipboard_write,
+            notify_session,
+            app_quit,
+            diagnostics,
+            stats::keep_awake,
+            stats::mem_usage,
+            voice::voice_status,
+            voice::voice_download,
+            voice::voice_transcribe
+        ])
         .build(tauri::generate_context!())
         .expect("error while building axelstra")
         .run(|app, event| {
@@ -746,7 +851,8 @@ mod tests {
             let p = e.path();
             if p.is_dir() {
                 sources(&p, out);
-            } else if p.extension().is_some_and(|x| x == "ts" || x == "tsx") && !p.file_name().unwrap().to_string_lossy().contains(".test.") {
+            } else if p.extension().is_some_and(|x| x == "ts" || x == "tsx") && !p.file_name().unwrap().to_string_lossy().contains(".test.")
+            {
                 out.push(p);
             }
         }

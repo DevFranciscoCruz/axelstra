@@ -1,4 +1,3 @@
-
 use axelstra_daemon::client::{Client, Frame};
 use axelstra_daemon::server;
 use serde_json::json;
@@ -33,13 +32,7 @@ fn start() -> (String, String) {
     let token = "t".repeat(32);
     let (p, t) = (pipe.clone(), token.clone());
     std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(server::serve(p, t))
-            .unwrap();
+        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap().block_on(server::serve(p, t)).unwrap();
     });
     std::thread::sleep(Duration::from_millis(300));
     (pipe, token)
@@ -72,11 +65,8 @@ fn session_survives_disconnect_and_replays_to_new_client() {
     let (pipe, token) = start();
 
     let mut a = Client::connect(&pipe, &token).unwrap();
-    let id = a
-        .call("session.spawn", json!({"program": SHELL, "args": SHELL_ARGS, "cols": 80, "rows": 24}))
-        .unwrap()["id"]
-        .as_u64()
-        .unwrap() as u32;
+    let id = a.call("session.spawn", json!({"program": SHELL, "args": SHELL_ARGS, "cols": 80, "rows": 24})).unwrap()["id"].as_u64().unwrap()
+        as u32;
     a.call("session.subscribe", json!({"id": id})).unwrap();
     a.send_input(id, &two_echoes("first", "-marker")).unwrap();
     assert!(collect(&mut a, id, "first"));

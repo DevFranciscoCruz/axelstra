@@ -1,4 +1,3 @@
-
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::{json, Value};

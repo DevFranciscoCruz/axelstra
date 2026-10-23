@@ -52,10 +52,18 @@ pub fn merged_reason(repo: &Path, branch: &str, default: &str) -> Option<String>
         return Some(format!("already in {upstream}"));
     }
     let o = output_within(
-        git::quiet(&mut Command::new("gh"))
-            .current_dir(repo)
-            .env("GH_PROMPT_DISABLED", "1")
-            .args(["pr", "list", "--state", "merged", "--head", branch, "--limit", "1", "--json", "number,headRefOid"]),
+        git::quiet(&mut Command::new("gh")).current_dir(repo).env("GH_PROMPT_DISABLED", "1").args([
+            "pr",
+            "list",
+            "--state",
+            "merged",
+            "--head",
+            branch,
+            "--limit",
+            "1",
+            "--json",
+            "number,headRefOid",
+        ]),
         NET_TIMEOUT,
     )
     .filter(|o| o.status.success())?;
@@ -70,7 +78,9 @@ pub fn merged_reason(repo: &Path, branch: &str, default: &str) -> Option<String>
 
 /// True when the branch's reflog records a commit made on it (a fresh branch only has its creation).
 pub fn has_own_commits(repo: &Path, branch: &str) -> bool {
-    git::run(repo, &["reflog", "show", "--format=%gs", branch]).map(|o| o.ok && o.stdout.lines().any(|l| l.starts_with("commit"))).unwrap_or(false)
+    git::run(repo, &["reflog", "show", "--format=%gs", branch])
+        .map(|o| o.ok && o.stdout.lines().any(|l| l.starts_with("commit")))
+        .unwrap_or(false)
 }
 
 fn sweep_project(p: &Project, busy: &dyn Fn(&str) -> bool, dry: bool, out: &mut Vec<Value>) -> Result<()> {

@@ -93,10 +93,7 @@ mod imp {
                     std::mem::size_of_val(&acc) as u32,
                     std::ptr::null_mut(),
                 );
-                (
-                    ext.PeakJobMemoryUsed as u64,
-                    (acc.TotalUserTime + acc.TotalKernelTime) as u64,
-                )
+                (ext.PeakJobMemoryUsed as u64, (acc.TotalUserTime + acc.TotalKernelTime) as u64)
             }
         }
     }
@@ -109,7 +106,13 @@ mod imp {
             unsafe {
                 // JOBOBJECT_BASIC_PROCESS_ID_LIST: two counts, then the ids (room for 1000 here)
                 let mut buf = vec![0u64; 2 + 1000];
-                let ok = QueryInformationJobObject(self.0, JobObjectBasicProcessIdList, buf.as_mut_ptr() as *mut _, (buf.len() * 8) as u32, std::ptr::null_mut());
+                let ok = QueryInformationJobObject(
+                    self.0,
+                    JobObjectBasicProcessIdList,
+                    buf.as_mut_ptr() as *mut _,
+                    (buf.len() * 8) as u32,
+                    std::ptr::null_mut(),
+                );
                 if ok == 0 {
                     return 0;
                 }

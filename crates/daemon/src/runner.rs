@@ -17,11 +17,7 @@ pub struct DaemonRunner {
 
 impl DaemonRunner {
     pub fn connect(pipe: &str, token: &str) -> Result<DaemonRunner> {
-        Ok(DaemonRunner {
-            client: Arc::new(Mutex::new(Client::connect(pipe, token)?)),
-            pipe: pipe.to_string(),
-            token: token.to_string(),
-        })
+        Ok(DaemonRunner { client: Arc::new(Mutex::new(Client::connect(pipe, token)?)), pipe: pipe.to_string(), token: token.to_string() })
     }
 
     pub fn connect_default() -> Result<DaemonRunner> {
@@ -36,8 +32,7 @@ struct SessionHandle {
 
 impl Runner for DaemonRunner {
     fn spawn(&self, s: &AgentSpawn) -> Result<Box<dyn Handle>> {
-        let env: serde_json::Map<String, serde_json::Value> =
-            s.env.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
+        let env: serde_json::Map<String, serde_json::Value> = s.env.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
         let r = self.client.lock().unwrap().call(
             "session.spawn",
             json!({

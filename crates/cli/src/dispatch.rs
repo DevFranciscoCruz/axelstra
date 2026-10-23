@@ -36,7 +36,9 @@ fn git(dir: &str, args: &[&str]) -> Option<String> {
 
 /// true when GitHub says a pull request from this branch was merged (needs `gh`; any failure counts as no)
 fn pr_merged(wt: &str, branch: &str) -> bool {
-    git_like("gh", wt, &["pr", "list", "--head", branch, "--state", "merged", "--json", "number", "--limit", "1"]).map(|o| o.contains("number")).unwrap_or(false)
+    git_like("gh", wt, &["pr", "list", "--head", branch, "--state", "merged", "--json", "number", "--limit", "1"])
+        .map(|o| o.contains("number"))
+        .unwrap_or(false)
 }
 
 fn git_like(program: &str, dir: &str, args: &[&str]) -> Option<String> {
@@ -107,7 +109,8 @@ fn rows(c: &mut Client, meta: &Value, project: Option<&str>) -> Result<Vec<Row>>
             let tip = git(&path, &["rev-parse", "HEAD"]);
             let base_tip = git(&path, &["rev-parse", &base]);
             // merged = the branch moved on from where the default branch is now and is contained in it
-            let merged = (tip.is_some() && tip != base_tip && git(&path, &["merge-base", "--is-ancestor", "HEAD", &base]).is_some()) || pr_merged(&path, &branch);
+            let merged = (tip.is_some() && tip != base_tip && git(&path, &["merge-base", "--is-ancestor", "HEAD", &base]).is_some())
+                || pr_merged(&path, &branch);
             let agents = sessions
                 .as_array()
                 .map(|a| a.as_slice())
@@ -179,7 +182,10 @@ pub fn run(cmd: DispCmd, mut c: Client) -> Result<()> {
         DispCmd::List { project, all, json } => {
             let rs = rows(&mut c, &meta, project.as_deref())?;
             let overlap = |r: &Row| -> Vec<String> {
-                rs.iter().filter(|o| o.path != r.path && !o.archived && !o.merged && o.files.intersection(&r.files).next().is_some()).map(|o| o.branch.clone()).collect()
+                rs.iter()
+                    .filter(|o| o.path != r.path && !o.archived && !o.merged && o.files.intersection(&r.files).next().is_some())
+                    .map(|o| o.branch.clone())
+                    .collect()
             };
             let shown: Vec<&Row> = rs.iter().filter(|r| all || (!r.archived && !r.merged)).collect();
             if json {
@@ -195,7 +201,15 @@ pub fn run(cmd: DispCmd, mut c: Client) -> Result<()> {
                 println!("no open worktrees: create one with `axelstra dispatch new`");
             } else {
                 for r in shown {
-                    let state = if r.merged { "merged" } else if r.archived { "archived" } else if r.agents.is_empty() { "no agent" } else { "agent running" };
+                    let state = if r.merged {
+                        "merged"
+                    } else if r.archived {
+                        "archived"
+                    } else if r.agents.is_empty() {
+                        "no agent"
+                    } else {
+                        "agent running"
+                    };
                     println!("{}  [{}]  {}", r.branch, state, r.title);
                     println!("    path: {}", r.path);
                     if !r.areas.is_empty() {
@@ -215,7 +229,11 @@ pub fn run(cmd: DispCmd, mut c: Client) -> Result<()> {
             let rs = rows(&mut c, &meta, None)?;
             let r = resolve(&rs, &worktree)?;
             if r.merged || r.archived {
-                bail!("{} is {}: do not send new work to it. Use `axelstra dispatch new`", r.branch, if r.merged { "merged" } else { "archived" });
+                bail!(
+                    "{} is {}: do not send new work to it. Use `axelstra dispatch new`",
+                    r.branch,
+                    if r.merged { "merged" } else { "archived" }
+                );
             }
             let (path, branch) = (r.path.clone(), r.branch.clone());
             let live = c.call("session.list", json!({}))?;
@@ -272,7 +290,8 @@ mod tests {
 
     #[test]
     fn areas_group_files_by_top_folders() {
-        let f: BTreeSet<String> = ["app/src/a.ts", "app/src/b.ts", "crates/daemon/src/x.rs", "README.md", "docs/x.md"].iter().map(|s| s.to_string()).collect();
+        let f: BTreeSet<String> =
+            ["app/src/a.ts", "app/src/b.ts", "crates/daemon/src/x.rs", "README.md", "docs/x.md"].iter().map(|s| s.to_string()).collect();
         assert_eq!(areas(&f), vec!["README.md", "app/src/", "crates/daemon/", "docs/"]);
     }
 

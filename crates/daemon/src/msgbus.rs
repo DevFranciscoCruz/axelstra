@@ -191,7 +191,8 @@ impl Bus {
 
     /// Every message of a thread, in the order they were sent.
     pub fn thread(&self, name: &str) -> Vec<Msg> {
-        let mut v: Vec<Msg> = self.inbox.lock().unwrap().values().flatten().filter(|m| m.thread.as_deref() == Some(name)).cloned().collect();
+        let mut v: Vec<Msg> =
+            self.inbox.lock().unwrap().values().flatten().filter(|m| m.thread.as_deref() == Some(name)).cloned().collect();
         v.sort_by_key(|m| m.id);
         v
     }

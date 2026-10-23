@@ -1,6 +1,6 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
 use axelstra_core::{card, orch};
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -338,7 +338,6 @@ enum DispCmd {
 
 #[derive(Subcommand)]
 enum WtCmd {
-
     /// Create a worktree; prints its path
     Create { project: String, name: String },
     /// Remove a worktree
@@ -355,11 +354,11 @@ enum WtCmd {
 }
 
 mod computer;
-mod lock;
-mod statusline;
 mod ctl;
 mod dispatch;
+mod lock;
 mod orchcmd;
+mod statusline;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -371,8 +370,15 @@ fn main() -> Result<()> {
             let _ = axelstra_daemon::skill::install();
             // a panic anywhere leaves a trace (the daemon's stderr goes nowhere)
             std::panic::set_hook(Box::new(|info| {
-                let line = format!("{} panic: {info}\n", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
-                let _ = std::fs::OpenOptions::new().create(true).append(true).open(proto::data_dir().join("crash.log")).and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+                let line = format!(
+                    "{} panic: {info}\n",
+                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+                );
+                let _ = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(proto::data_dir().join("crash.log"))
+                    .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
             }));
             let token = proto::load_or_create_token()?;
             // two workers is plenty: the heavy lifting is blocking PTY threads
@@ -427,10 +433,7 @@ fn main() -> Result<()> {
             println!("use it as /axelstration in Claude Code or Codex");
         }
         Cmd::Plan { repo } => {
-            let cards: Vec<_> = card::load_dir(&repo.join(".kanban"))?
-                .into_iter()
-                .filter(|c| c.meta.status == "todo")
-                .collect();
+            let cards: Vec<_> = card::load_dir(&repo.join(".kanban"))?.into_iter().filter(|c| c.meta.status == "todo").collect();
             for id in card::topo_order(&cards)? {
                 let c = cards.iter().find(|c| c.meta.id == id).unwrap();
                 println!("{id}  agent={} deps={:?}", c.meta.agent, c.meta.depends_on);
@@ -446,11 +449,7 @@ fn main() -> Result<()> {
                 wt_root,
                 agent_override: if agent.is_empty() { None } else { Some(agent) },
                 poll_ms: 500,
-                runner: if daemon {
-                    Some(std::sync::Arc::new(axelstra_daemon::runner::DaemonRunner::connect_default()?))
-                } else {
-                    None
-                },
+                runner: if daemon { Some(std::sync::Arc::new(axelstra_daemon::runner::DaemonRunner::connect_default()?)) } else { None },
             };
             let r = if trust_acceptance { orch::run_trusted(&opts)? } else { orch::run(&opts)? };
             println!("integration: {} ({})", r.integ_branch, r.integ_wt.display());

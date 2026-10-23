@@ -70,8 +70,7 @@ pub struct Session {
 
 impl Session {
     pub fn spawn(s: &Spawn) -> Result<Session> {
-        let pair = native_pty_system()
-            .openpty(PtySize { rows: s.rows, cols: s.cols, pixel_width: 0, pixel_height: 0 })?;
+        let pair = native_pty_system().openpty(PtySize { rows: s.rows, cols: s.cols, pixel_width: 0, pixel_height: 0 })?;
         let mut cmd = CommandBuilder::new(&s.program);
         cmd.args(&s.args);
         if let Some(c) = &s.cwd {
@@ -162,14 +161,7 @@ impl Session {
             }
         });
 
-        Ok(Session {
-            master: Mutex::new(pair.master),
-            input,
-            child: Mutex::new(child),
-            job,
-            shared,
-            size: Mutex::new((s.cols, s.rows)),
-        })
+        Ok(Session { master: Mutex::new(pair.master), input, child: Mutex::new(child), job, shared, size: Mutex::new((s.cols, s.rows)) })
     }
 
     /// Replay of recent output plus a live stream; no byte is lost or duplicated.
@@ -242,9 +234,7 @@ impl Session {
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<()> {
         *self.size.lock_recover() = (cols, rows);
-        self.master
-            .lock_recover()
-            .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })?;
+        self.master.lock_recover().resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })?;
         Ok(())
     }
 
@@ -280,11 +270,8 @@ mod tests {
 
     /// Runs one command line in the platform shell.
     fn spawn_cmd(line: &str) -> Session {
-        let (program, args): (&str, Vec<String>) = if cfg!(windows) {
-            ("cmd", vec!["/c".into(), line.into()])
-        } else {
-            ("sh", vec!["-c".into(), line.into()])
-        };
+        let (program, args): (&str, Vec<String>) =
+            if cfg!(windows) { ("cmd", vec!["/c".into(), line.into()]) } else { ("sh", vec!["-c".into(), line.into()]) };
         Session::spawn(&Spawn { program: program.into(), args, cwd: None, env: vec![], cols: 80, rows: 24 }).unwrap()
     }
 
@@ -343,7 +330,11 @@ mod tests {
 
     #[test]
     fn a_stalled_subscriber_cannot_grow_the_queue_without_bound() {
-        let s = spawn_cmd(if cfg!(windows) { "for /l %i in (1,1,30000) do @echo line-%i" } else { "i=0; while [ $i -lt 30000 ]; do echo line-$i; i=$((i+1)); done" });
+        let s = spawn_cmd(if cfg!(windows) {
+            "for /l %i in (1,1,30000) do @echo line-%i"
+        } else {
+            "i=0; while [ $i -lt 30000 ]; do echo line-$i; i=$((i+1)); done"
+        });
         // subscribed but never read: the producer must still finish and the session stay usable
         let (_snap, rx) = s.subscribe();
         let end = Instant::now() + Duration::from_secs(30);

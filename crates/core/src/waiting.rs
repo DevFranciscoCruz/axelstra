@@ -88,7 +88,8 @@ mod tests {
 
     #[test]
     fn claude_permission_prompt() {
-        let screen = "\x1b[1mBash command\x1b[0m\n  npm install\n\n Do you want to proceed?\n \x1b[36m❯ 1. Yes\x1b[0m\n   2. No\n\n Esc to cancel";
+        let screen =
+            "\x1b[1mBash command\x1b[0m\n  npm install\n\n Do you want to proceed?\n \x1b[36m❯ 1. Yes\x1b[0m\n   2. No\n\n Esc to cancel";
         assert!(needs_input(screen.as_bytes()));
     }
 

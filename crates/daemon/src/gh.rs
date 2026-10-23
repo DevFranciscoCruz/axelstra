@@ -32,14 +32,20 @@ pub fn summarize_checks(rollup: &Value) -> &'static str {
         let status = c["status"].as_str().unwrap_or("");
         let concl = c["conclusion"].as_str().unwrap_or("");
         let state = c["state"].as_str().unwrap_or("");
-        if matches!(concl, "FAILURE" | "TIMED_OUT" | "CANCELLED" | "STARTUP_FAILURE" | "ACTION_REQUIRED") || matches!(state, "FAILURE" | "ERROR") {
+        if matches!(concl, "FAILURE" | "TIMED_OUT" | "CANCELLED" | "STARTUP_FAILURE" | "ACTION_REQUIRED")
+            || matches!(state, "FAILURE" | "ERROR")
+        {
             return "fail";
         }
         if (!status.is_empty() && status != "COMPLETED") || matches!(state, "PENDING" | "EXPECTED") {
             pending = true;
         }
     }
-    if pending { "pending" } else { "pass" }
+    if pending {
+        "pending"
+    } else {
+        "pass"
+    }
 }
 
 pub fn parse(json: &str) -> Result<Vec<Item>> {
@@ -95,7 +101,10 @@ mod tests {
     fn checks_summary() {
         assert_eq!(summarize_checks(&json!([])), "");
         assert_eq!(summarize_checks(&json!([{"status":"COMPLETED","conclusion":"SUCCESS"}])), "pass");
-        assert_eq!(summarize_checks(&json!([{"status":"COMPLETED","conclusion":"SUCCESS"},{"status":"IN_PROGRESS","conclusion":""}])), "pending");
+        assert_eq!(
+            summarize_checks(&json!([{"status":"COMPLETED","conclusion":"SUCCESS"},{"status":"IN_PROGRESS","conclusion":""}])),
+            "pending"
+        );
         assert_eq!(summarize_checks(&json!([{"status":"IN_PROGRESS"},{"status":"COMPLETED","conclusion":"FAILURE"}])), "fail");
         assert_eq!(summarize_checks(&json!([{"state":"SUCCESS"}])), "pass");
         assert_eq!(summarize_checks(&json!([{"state":"PENDING"}])), "pending");

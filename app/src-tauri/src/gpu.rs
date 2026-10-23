@@ -25,7 +25,17 @@ mod imp {
             for i in 0..32u32 {
                 let mut name = [0u16; 16];
                 let mut len = name.len() as u32;
-                if RegEnumKeyExW(class, i, name.as_mut_ptr(), &mut len, std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) != ERROR_SUCCESS {
+                if RegEnumKeyExW(
+                    class,
+                    i,
+                    name.as_mut_ptr(),
+                    &mut len,
+                    std::ptr::null(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                ) != ERROR_SUCCESS
+                {
                     break;
                 }
                 let mut sub: HKEY = std::ptr::null_mut();
@@ -35,7 +45,8 @@ mod imp {
                 let mut mem: u64 = 0;
                 let mut size = 8u32;
                 let q = wide("HardwareInformation.qwMemorySize");
-                let ok = RegQueryValueExW(sub, q.as_ptr(), std::ptr::null(), std::ptr::null_mut(), &mut mem as *mut u64 as *mut u8, &mut size);
+                let ok =
+                    RegQueryValueExW(sub, q.as_ptr(), std::ptr::null(), std::ptr::null_mut(), &mut mem as *mut u64 as *mut u8, &mut size);
                 let mut buf = [0u16; 256];
                 let mut bsize = (buf.len() * 2) as u32;
                 let d = wide("DriverDesc");
@@ -68,7 +79,10 @@ mod imp {
     }
 
     fn already_set(key: HKEY, name: &[u16]) -> bool {
-        unsafe { RegQueryValueExW(key, name.as_ptr(), std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) == ERROR_SUCCESS }
+        unsafe {
+            RegQueryValueExW(key, name.as_ptr(), std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut())
+                == ERROR_SUCCESS
+        }
     }
 
     pub fn prefer_best() {
@@ -86,7 +100,18 @@ mod imp {
         unsafe {
             let mut key: HKEY = std::ptr::null_mut();
             let path = wide(r"Software\Microsoft\DirectX\UserGpuPreferences");
-            if RegCreateKeyExW(HKEY_CURRENT_USER, path.as_ptr(), 0, std::ptr::null(), 0, KEY_READ | KEY_WRITE, std::ptr::null(), &mut key, std::ptr::null_mut()) != ERROR_SUCCESS {
+            if RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                path.as_ptr(),
+                0,
+                std::ptr::null(),
+                0,
+                KEY_READ | KEY_WRITE,
+                std::ptr::null(),
+                &mut key,
+                std::ptr::null_mut(),
+            ) != ERROR_SUCCESS
+            {
                 return;
             }
             let data = wide("GpuPreference=2;");

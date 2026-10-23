@@ -1,10 +1,10 @@
 //! Projects (git repos the user added) and their worktrees. State is one small
 //! JSON file; git itself is the source of truth for worktrees.
 
+use crate::store::{read_json, write_atomic, LockRecover};
 use anyhow::{bail, Context, Result};
 use axelstra_core::git;
 use serde::{Deserialize, Serialize};
-use crate::store::{read_json, write_atomic, LockRecover};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -113,7 +113,8 @@ fn on_path(name: &str) -> bool {
 /// whose lockfile the project has, else the user's preferred one, else the first installed (bun, pnpm, yarn, npm).
 pub fn package_managers(path: Option<&Path>, preferred: Option<&str>) -> (Vec<&'static str>, Option<&'static str>) {
     let installed: Vec<&'static str> = PACKAGE_MANAGERS.iter().copied().filter(|n| on_path(n)).collect();
-    let locks = [("bun", "bun.lock"), ("bun", "bun.lockb"), ("pnpm", "pnpm-lock.yaml"), ("yarn", "yarn.lock"), ("npm", "package-lock.json")];
+    let locks =
+        [("bun", "bun.lock"), ("bun", "bun.lockb"), ("pnpm", "pnpm-lock.yaml"), ("yarn", "yarn.lock"), ("npm", "package-lock.json")];
     let from_lock = path.and_then(|p| locks.iter().find(|(m, f)| installed.contains(m) && p.join(f).is_file()).map(|(m, _)| *m));
     let chosen = preferred.and_then(|m| installed.iter().copied().find(|i| *i == m));
     (installed.clone(), from_lock.or(chosen).or_else(|| installed.first().copied()))
@@ -176,11 +177,7 @@ fn create_at(p: &Project, name: &str, base: &str) -> Result<git::Worktree> {
     if !git::is_repo(repo) {
         bail!("este projeto ainda não é um repositório git: corre `git init` na pasta para poderes criar worktrees");
     }
-    let dir = repo
-        .parent()
-        .context("repo has no parent directory")?
-        .join(".axelstra-wt")
-        .join(format!("{}-{}", slug(&p.name), n));
+    let dir = repo.parent().context("repo has no parent directory")?.join(".axelstra-wt").join(format!("{}-{}", slug(&p.name), n));
     if dir.exists() {
         bail!("{} already exists", dir.display());
     }
@@ -194,10 +191,7 @@ fn create_at(p: &Project, name: &str, base: &str) -> Result<git::Worktree> {
 
 pub fn worktree_remove(p: &Project, path: &str) -> Result<()> {
     let repo = Path::new(&p.path);
-    let wt = git::worktree_list(repo)?
-        .into_iter()
-        .find(|w| w.path.eq_ignore_ascii_case(path))
-        .context("not a worktree of this project")?;
+    let wt = git::worktree_list(repo)?.into_iter().find(|w| w.path.eq_ignore_ascii_case(path)).context("not a worktree of this project")?;
     if wt.is_main {
         bail!("cannot remove the main worktree");
     }
@@ -208,9 +202,8 @@ pub fn worktree_remove(p: &Project, path: &str) -> Result<()> {
     Ok(())
 }
 
-const LOGO_CANDIDATES: [&str; 8] = [
-    "logo.png", "logo.svg", "assets/logo.png", "assets/logo.svg", "docs/logo.png", ".github/logo.png", "icon.png", "assets/icon.png",
-];
+const LOGO_CANDIDATES: [&str; 8] =
+    ["logo.png", "logo.svg", "assets/logo.png", "assets/logo.svg", "docs/logo.png", ".github/logo.png", "icon.png", "assets/icon.png"];
 
 /// A logo shipped in the repo itself, as a data URL. None when there is none
 /// (the UI then falls back to the git host's avatar).

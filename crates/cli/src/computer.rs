@@ -7,7 +7,6 @@ use anyhow::{bail, Result};
 use axelstra_daemon::client::Client;
 use serde_json::json;
 
-
 pub struct Win {
     pub id: u64,
     pub title: String,
@@ -194,7 +193,13 @@ mod sys {
                     let r = rect_of(hw);
                     (r.left, r.top, r.right - r.left, r.bottom - r.top, Some(hw))
                 }
-                None => (GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN), None),
+                None => (
+                    GetSystemMetrics(SM_XVIRTUALSCREEN),
+                    GetSystemMetrics(SM_YVIRTUALSCREEN),
+                    GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                    GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                    None,
+                ),
             };
             if w <= 0 || h <= 0 {
                 bail!("nothing to capture (is the window minimized?)");
@@ -308,7 +313,9 @@ mod sys {
             "end" => VK_END,
             "pageup" => VK_PRIOR,
             "pagedown" => VK_NEXT,
-            n if n.len() >= 2 && n.starts_with('f') && n[1..].parse::<u16>().map_or(false, |k| (1..=12).contains(&k)) => VK_F1 + n[1..].parse::<u16>().unwrap() - 1,
+            n if n.len() >= 2 && n.starts_with('f') && n[1..].parse::<u16>().map_or(false, |k| (1..=12).contains(&k)) => {
+                VK_F1 + n[1..].parse::<u16>().unwrap() - 1
+            }
             n if n.len() == 1 && n.as_bytes()[0].is_ascii_alphanumeric() => n.as_bytes()[0].to_ascii_uppercase() as u16,
             n => bail!("unknown key {n:?}"),
         })
@@ -352,7 +359,10 @@ mod sys {
     fn osa(script: &str) -> Result<String> {
         let o = Command::new("osascript").args(["-e", script]).output()?;
         if !o.status.success() {
-            bail!("{} (macOS asks for Accessibility and Screen Recording permission for the terminal app)", String::from_utf8_lossy(&o.stderr).trim());
+            bail!(
+                "{} (macOS asks for Accessibility and Screen Recording permission for the terminal app)",
+                String::from_utf8_lossy(&o.stderr).trim()
+            );
         }
         Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
     }
@@ -374,7 +384,15 @@ end tell"#)?;
             let f: Vec<&str> = l.splitn(7, '|').collect();
             if f.len() == 7 {
                 let n = |i: usize| f[i].trim().parse::<i32>().unwrap_or(0);
-                list.push(Win { id: f[0].parse().unwrap_or(0), title: f[6].to_string(), process: f[1].to_string(), x: n(2), y: n(3), w: n(4), h: n(5) });
+                list.push(Win {
+                    id: f[0].parse().unwrap_or(0),
+                    title: f[6].to_string(),
+                    process: f[1].to_string(),
+                    x: n(2),
+                    y: n(3),
+                    w: n(4),
+                    h: n(5),
+                });
             }
         }
         Ok(list)
@@ -478,16 +496,28 @@ mod sys {
     fn no<T>() -> Result<T> {
         bail!("screen control is only available on Windows and macOS")
     }
-    pub fn windows() -> Result<Vec<Win>> { no() }
-    pub fn capture(_: Option<u64>) -> Result<(i32, i32, Vec<u8>)> { no() }
-    pub fn click(_: i32, _: i32, _: &str, _: bool) -> Result<()> { no() }
-    pub fn scroll(_: i32, _: i32, _: i32, _: i32) -> Result<()> { no() }
-    pub fn type_text(_: &str) -> Result<()> { no() }
-    pub fn key(_: &str) -> Result<()> { no() }
-    pub fn focus(_: u64) -> Result<()> { no() }
+    pub fn windows() -> Result<Vec<Win>> {
+        no()
+    }
+    pub fn capture(_: Option<u64>) -> Result<(i32, i32, Vec<u8>)> {
+        no()
+    }
+    pub fn click(_: i32, _: i32, _: &str, _: bool) -> Result<()> {
+        no()
+    }
+    pub fn scroll(_: i32, _: i32, _: i32, _: i32) -> Result<()> {
+        no()
+    }
+    pub fn type_text(_: &str) -> Result<()> {
+        no()
+    }
+    pub fn key(_: &str) -> Result<()> {
+        no()
+    }
+    pub fn focus(_: u64) -> Result<()> {
+        no()
+    }
 }
-
-
 
 #[cfg(test)]
 mod tests {

@@ -13,8 +13,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 /// Identifies this daemon run: a client that sees it change knows the daemon restarted (its sessions are gone).
-static INSTANCE: std::sync::LazyLock<u64> =
-    std::sync::LazyLock::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0));
+static INSTANCE: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+});
 
 /// Frames queued for one connection's writer task. Bounded: a client that stops reading slows its own senders
 /// down (they block) instead of growing the daemon's memory.
@@ -102,7 +103,14 @@ impl Registry {
         let want = norm(path);
         // a worktree a running flow plan still has to use (queued or running) is not finished, whatever its branch says
         let in_flow = self.flows.lock_recover().values().any(|t| {
-            t.as_array().map(|a| a.iter().any(|x| x["worktree"].as_str().map(|w| norm(w) == want).unwrap_or(false) && matches!(x["state"].as_str(), Some("queued") | Some("running")))).unwrap_or(false)
+            t.as_array()
+                .map(|a| {
+                    a.iter().any(|x| {
+                        x["worktree"].as_str().map(|w| norm(w) == want).unwrap_or(false)
+                            && matches!(x["state"].as_str(), Some("queued") | Some("running"))
+                    })
+                })
+                .unwrap_or(false)
         });
         if in_flow {
             return true;
@@ -419,7 +427,9 @@ async fn accept_loop(pipe: &str, reg: Arc<Registry>, token: String) -> Result<()
 /// A fresh pipe instance to accept on (same DACL as the first one), retrying with a short backoff while the system
 /// refuses to make one.
 #[cfg(windows)]
-async fn next_instance(make: &impl Fn(bool) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer>) -> tokio::net::windows::named_pipe::NamedPipeServer {
+async fn next_instance(
+    make: &impl Fn(bool) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer>,
+) -> tokio::net::windows::named_pipe::NamedPipeServer {
     loop {
         match make(false) {
             Ok(s) => return s,
@@ -546,8 +556,10 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
                 let t0 = std::time::Instant::now();
                 // a bug in one handler must not take every terminal down with the daemon
                 let res = tokio::task::block_in_place(|| {
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dispatch(&req, &reg, &tx, &mut subs, &mut authed, &mut cli, &token, &mut after)))
-                        .unwrap_or_else(|_| Err(anyhow::anyhow!("erro interno do daemon em {} (ver crash.log)", req.method)))
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        dispatch(&req, &reg, &tx, &mut subs, &mut authed, &mut cli, &token, &mut after)
+                    }))
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("erro interno do daemon em {} (ver crash.log)", req.method)))
                 });
                 // calls that wait on purpose are not slow
                 if !matches!(req.method.as_str(), "ask" | "msg.ask" | "session.wait" | "hello") {
@@ -627,7 +639,15 @@ fn ensure_session_notifier(reg: &Arc<Registry>, tx: &Tx, subs: &mut HashMap<u32,
             ids.sort();
             for id in ids {
                 let s = &sessions[&id];
-                (id, s.try_wait().is_none(), s.idle_ms() >= 1500, reg.bus.is_escalated(id), reg.bus.unread(id), reg.bus.finished(id).is_some()).hash(&mut h);
+                (
+                    id,
+                    s.try_wait().is_none(),
+                    s.idle_ms() >= 1500,
+                    reg.bus.is_escalated(id),
+                    reg.bus.unread(id),
+                    reg.bus.finished(id).is_some(),
+                )
+                    .hash(&mut h);
             }
             h.finish()
         };
@@ -690,15 +710,13 @@ fn dispatch(
 ) -> Result<Value> {
     let p = &req.params;
     // anything that changes projects or worktrees makes the cached project list stale
-    if (req.method.starts_with("worktree.") && req.method != "worktree.status") || (req.method.starts_with("project.") && !matches!(req.method.as_str(), "project.list" | "project.logo" | "project.log")) {
+    if (req.method.starts_with("worktree.") && req.method != "worktree.status")
+        || (req.method.starts_with("project.") && !matches!(req.method.as_str(), "project.list" | "project.logo" | "project.log"))
+    {
         *reg.plist.lock_recover() = None;
     }
-    let sid = || -> Result<u32> {
-        Ok(p.get("id").and_then(Value::as_u64).ok_or_else(|| anyhow::anyhow!("missing id"))? as u32)
-    };
-    let session = || -> Result<Arc<Session>> {
-        reg.get(sid()?).ok_or_else(|| anyhow::anyhow!("no such session"))
-    };
+    let sid = || -> Result<u32> { Ok(p.get("id").and_then(Value::as_u64).ok_or_else(|| anyhow::anyhow!("missing id"))? as u32) };
+    let session = || -> Result<Arc<Session>> { reg.get(sid()?).ok_or_else(|| anyhow::anyhow!("no such session")) };
     match req.method.as_str() {
         "hello" => {
             if p.get("token").and_then(Value::as_str) != Some(token) {
@@ -711,10 +729,7 @@ fn dispatch(
         "session.spawn" => {
             let mut s = Spawn {
                 program: p["program"].as_str().ok_or_else(|| anyhow::anyhow!("missing program"))?.into(),
-                args: p["args"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
-                    .unwrap_or_default(),
+                args: p["args"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
                 cwd: p["cwd"].as_str().map(Into::into),
                 env: p["env"]
                     .as_object()
@@ -731,7 +746,9 @@ fn dispatch(
                 let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
                 let (live, max) = (reg.bus.live_workers(alive), reg.bus.limit());
                 if live >= max {
-                    anyhow::bail!("worker limit reached ({live} running, max {max}): wait for one to finish or raise it with `axelstra limit N`");
+                    anyhow::bail!(
+                        "worker limit reached ({live} running, max {max}): wait for one to finish or raise it with `axelstra limit N`"
+                    );
                 }
             }
             if let Some(par) = parent {
@@ -786,52 +803,52 @@ fn dispatch(
             // plain thread: the PTY side is blocking std channels
             after.push(Box::new(move || {
                 std::thread::spawn(move || {
-                if !snap.is_empty() {
-                    let _ = tx.blocking_send(session_frame(OUTPUT, id, &snap));
-                }
-                let mut quiet_ticks = 0u32;
-                loop {
-                    if stop.load(Ordering::SeqCst) {
-                        return;
+                    if !snap.is_empty() {
+                        let _ = tx.blocking_send(session_frame(OUTPUT, id, &snap));
                     }
-                    match rx.recv_timeout(Duration::from_millis(200)) {
-                        Ok(d) => {
-                            quiet_ticks = 0;
-                            if tx.blocking_send(session_frame(OUTPUT, id, &d)).is_err() {
-                                return;
-                            }
+                    let mut quiet_ticks = 0u32;
+                    loop {
+                        if stop.load(Ordering::SeqCst) {
+                            return;
                         }
-                        Err(RecvTimeoutError::Timeout) => {
-                            // an empty frame every 5 quiet seconds: a client that stopped listening (its tab closed) wakes up,
-                            // sees it is detached and hangs up, instead of staying blocked until this session prints again
-                            quiet_ticks += 1;
-                            if quiet_ticks >= 25 {
+                        match rx.recv_timeout(Duration::from_millis(200)) {
+                            Ok(d) => {
                                 quiet_ticks = 0;
-                                if tx.blocking_send(session_frame(OUTPUT, id, &[])).is_err() {
+                                if tx.blocking_send(session_frame(OUTPUT, id, &d)).is_err() {
                                     return;
                                 }
                             }
-                            // ConPTY may keep the output pipe open after the process is gone
-                            if s.try_wait().is_some() {
-                                while let Ok(d) = rx.recv_timeout(Duration::from_millis(150)) {
-                                    let _ = tx.blocking_send(session_frame(OUTPUT, id, &d));
+                            Err(RecvTimeoutError::Timeout) => {
+                                // an empty frame every 5 quiet seconds: a client that stopped listening (its tab closed) wakes up,
+                                // sees it is detached and hangs up, instead of staying blocked until this session prints again
+                                quiet_ticks += 1;
+                                if quiet_ticks >= 25 {
+                                    quiet_ticks = 0;
+                                    if tx.blocking_send(session_frame(OUTPUT, id, &[])).is_err() {
+                                        return;
+                                    }
                                 }
-                                break;
+                                // ConPTY may keep the output pipe open after the process is gone
+                                if s.try_wait().is_some() {
+                                    while let Ok(d) = rx.recv_timeout(Duration::from_millis(150)) {
+                                        let _ = tx.blocking_send(session_frame(OUTPUT, id, &d));
+                                    }
+                                    break;
+                                }
                             }
+                            Err(RecvTimeoutError::Disconnected) => break,
                         }
-                        Err(RecvTimeoutError::Disconnected) => break,
                     }
-                }
-                let mut code = None;
-                for _ in 0..40 {
-                    code = s.try_wait();
-                    if code.is_some() {
-                        break;
+                    let mut code = None;
+                    for _ in 0..40 {
+                        code = s.try_wait();
+                        if code.is_some() {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(50));
                     }
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                let ev = json!({"event": "session.exit", "id": id, "code": code});
-                let _ = tx.blocking_send(encode(EVENT, ev.to_string().as_bytes()));
+                    let ev = json!({"event": "session.exit", "id": id, "code": code});
+                    let _ = tx.blocking_send(encode(EVENT, ev.to_string().as_bytes()));
                 });
             }));
             Ok(json!({}))
@@ -1000,8 +1017,10 @@ fn dispatch(
             let installed = tokio::task::block_in_place(|| crate::projects::package_managers(None, None).0);
             let pm = saved["pm"].as_str().filter(|m| installed.contains(m)).map(String::from);
             let (shell, notify_sound, notify_mode) = ui_settings(&saved);
-            Ok(json!({"terse": terse, "rules": crate::skill::terse_rules(terse), "pm": pm, "installed": installed, "auto_install": saved["auto_install"] == json!(true),
-                "shell": shell, "notify_sound": notify_sound, "notify_mode": notify_mode}))
+            Ok(
+                json!({"terse": terse, "rules": crate::skill::terse_rules(terse), "pm": pm, "installed": installed, "auto_install": saved["auto_install"] == json!(true),
+                "shell": shell, "notify_sound": notify_sound, "notify_mode": notify_mode}),
+            )
         }
         "settings.set" => {
             // partial update: only the keys present are changed
@@ -1087,7 +1106,13 @@ fn dispatch(
         }
         "session.resources" => {
             // memory now and total CPU time of every live session (the caller turns CPU time into a percentage)
-            let l = reg.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, s)| (*id, s.clone())).collect::<Vec<_>>();
+            let l = reg
+                .sessions
+                .lock_recover()
+                .iter()
+                .filter(|(_, s)| s.try_wait().is_none())
+                .map(|(id, s)| (*id, s.clone()))
+                .collect::<Vec<_>>();
             let v: Vec<Value> = l.iter().map(|(id, s)| json!({"id": id, "mem": s.memory_now(), "cpu_100ns": s.job_usage().1})).collect();
             Ok(json!({"sessions": v, "cores": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)}))
         }
@@ -1097,7 +1122,8 @@ fn dispatch(
         }
         "worktree.status" => {
             // only paths the daemon knows; the list comes from the UI and git runs in each
-            let list: Vec<String> = p["paths"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+            let list: Vec<String> =
+                p["paths"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
             let norm = |s: &str| s.replace('\\', "/").to_ascii_lowercase();
             let out = tokio::task::block_in_place(|| {
                 let mut allowed = std::collections::HashSet::new();
@@ -1122,7 +1148,8 @@ fn dispatch(
             Ok(json!({"usage": u}))
         }
         "agent.worktree_usage" => {
-            let paths: Vec<String> = p["worktrees"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            let paths: Vec<String> =
+                p["worktrees"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
             let usage = tokio::task::block_in_place(|| crate::agentlog::worktree_usage(&paths));
             Ok(json!({"usage": usage}))
         }
@@ -1181,17 +1208,12 @@ fn dispatch(
                 anyhow::bail!("an orchestration is already running for this project");
             }
             let repo = axelstra_core::git::canon(std::path::Path::new(&pr.path))?;
-            let name = format!(
-                "ui-{}",
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs()
-            );
+            let name = format!("ui-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs());
             let max = p["max"].as_u64().unwrap_or(3).clamp(1, 8) as usize;
             let trust = p["trust_acceptance"].as_bool().unwrap_or(false);
             // overriding the agent command is for tests and custom agents; the same
             // client can already spawn any process, so this grants nothing new
-            let agent: Option<Vec<String>> = p["agent"]
-                .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+            let agent: Option<Vec<String>> = p["agent"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
             // connects back to this same daemon: must not hold an async worker
             let runner = tokio::task::block_in_place(|| crate::runner::DaemonRunner::connect(&reg.pipe, &reg.token))?;
             let started = json!({"state": "running", "name": name, "integ_branch": format!("orch/{name}")});
@@ -1247,7 +1269,9 @@ fn dispatch(
                 use crate::kanban;
                 Ok(match req.method.as_str() {
                     "kanban.list" => serde_json::to_value(kanban::list(&repo)?)?,
-                    "kanban.save" => serde_json::to_value(kanban::save(&repo, p["id"].as_str(), &s("title"), &s("body"), p["status"].as_str(), &p)?)?,
+                    "kanban.save" => {
+                        serde_json::to_value(kanban::save(&repo, p["id"].as_str(), &s("title"), &s("body"), p["status"].as_str(), &p)?)?
+                    }
                     "kanban.move" => {
                         kanban::set_status(&repo, &s("id"), &s("status"))?;
                         json!({})
@@ -1342,9 +1366,11 @@ fn dispatch(
             Ok(json!({}))
         }
         "pm.detect" => {
-            let path = p["id"].as_str().and_then(|id| crate::projects::find(&reg.store, id).ok()).map(|pr| std::path::PathBuf::from(pr.path));
+            let path =
+                p["id"].as_str().and_then(|id| crate::projects::find(&reg.store, id).ok()).map(|pr| std::path::PathBuf::from(pr.path));
             let preferred = read_settings(&reg.saved)["pm"].as_str().map(String::from);
-            let (installed, suggested) = tokio::task::block_in_place(|| crate::projects::package_managers(path.as_deref(), preferred.as_deref()));
+            let (installed, suggested) =
+                tokio::task::block_in_place(|| crate::projects::package_managers(path.as_deref(), preferred.as_deref()));
             let has_package_json = path.as_ref().map(|p| p.join("package.json").is_file()).unwrap_or(false);
             Ok(json!({"installed": installed, "suggested": suggested, "package_json": has_package_json}))
         }
@@ -1363,11 +1389,7 @@ fn dispatch(
             let key = norm(&wt.to_string_lossy());
             let ids: Vec<u32> = {
                 let metas = reg.metas.lock_recover();
-                metas
-                    .iter()
-                    .filter(|(_, m)| m["worktree"].as_str().map(|w| norm(w)) == Some(key.clone()))
-                    .map(|(id, _)| *id)
-                    .collect()
+                metas.iter().filter(|(_, m)| m["worktree"].as_str().map(|w| norm(w)) == Some(key.clone())).map(|(id, _)| *id).collect()
             };
             let pids: Vec<u32> =
                 ids.iter().filter_map(|id| reg.get(*id)).filter(|s| s.try_wait().is_none()).filter_map(|s| s.pid()).collect();
@@ -1380,8 +1402,8 @@ fn dispatch(
         "automation.save" => {
             let _g = reg.auto_lock.lock_recover();
             let path = crate::automations::store_path(&reg.store);
-            let mut a: crate::automations::Automation = serde_json::from_value(p.clone())
-                .map_err(|e| anyhow::anyhow!("invalid automation: {e}"))?;
+            let mut a: crate::automations::Automation =
+                serde_json::from_value(p.clone()).map_err(|e| anyhow::anyhow!("invalid automation: {e}"))?;
             crate::automations::validate(&a)?;
             crate::projects::find(&reg.store, &a.project)?;
             let mut list = crate::automations::load(&path);
@@ -1456,7 +1478,13 @@ fn dispatch(
         "daemon.shutdown" => {
             // remember what was going on, so the next start can pick it up: agents that were working, and the
             // ephemeral workers that die with this daemon (they are not restored) per coordinator
-            let live: Vec<(u32, bool)> = reg.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, s)| (*id, s.idle_ms() < 5000)).collect();
+            let live: Vec<(u32, bool)> = reg
+                .sessions
+                .lock_recover()
+                .iter()
+                .filter(|(_, s)| s.try_wait().is_none())
+                .map(|(id, s)| (*id, s.idle_ms() < 5000))
+                .collect();
             let mut working: Vec<u32> = vec![];
             let mut lost: HashMap<u32, Vec<String>> = HashMap::new();
             {
@@ -1500,7 +1528,6 @@ fn dispatch(
         m => anyhow::bail!("unknown method {m}"),
     }
 }
-
 
 #[cfg(test)]
 mod settings_tests {

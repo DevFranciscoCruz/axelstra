@@ -88,12 +88,20 @@ fn latest_slot(s: &Schedule, now: NaiveDateTime, last: NaiveDateTime) -> Result<
         Schedule::Interval { minutes } => last + Duration::minutes(*minutes as i64),
         Schedule::Daily { time } => {
             let today = now.date().and_time(parse_time(time)?);
-            if today <= now { today } else { today - Duration::days(1) }
+            if today <= now {
+                today
+            } else {
+                today - Duration::days(1)
+            }
         }
         Schedule::Weekly { day, time } => {
             let back = (now.date().weekday().num_days_from_monday() + 7 - *day) % 7;
             let this = (now.date() - Duration::days(back as i64)).and_time(parse_time(time)?);
-            if this <= now { this } else { this - Duration::days(7) }
+            if this <= now {
+                this
+            } else {
+                this - Duration::days(7)
+            }
         }
     })
 }
@@ -146,10 +154,7 @@ pub fn sh_quote(s: &str) -> String {
 /// Program and args that run `cli "<prompt>"` in a shell and leave that shell open afterwards.
 pub fn agent_command(cli: &str, prompt: &str) -> (String, Vec<String>) {
     if cfg!(windows) {
-        (
-            "powershell".into(),
-            vec!["-NoLogo".into(), "-NoExit".into(), "-Command".into(), format!("{cli} {}", ps_quote(prompt))],
-        )
+        ("powershell".into(), vec!["-NoLogo".into(), "-NoExit".into(), "-Command".into(), format!("{cli} {}", ps_quote(prompt))])
     } else {
         let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
         let line = format!("{cli} {}; exec {} -l", sh_quote(prompt), sh_quote(&sh));
@@ -167,7 +172,16 @@ mod tests {
     }
 
     fn auto(s: Schedule) -> Automation {
-        Automation { id: "a".into(), name: "n".into(), project: "p".into(), agent: "claude".into(), prompt: "x".into(), schedule: s, enabled: true, last_run: 0 }
+        Automation {
+            id: "a".into(),
+            name: "n".into(),
+            project: "p".into(),
+            agent: "claude".into(),
+            prompt: "x".into(),
+            schedule: s,
+            enabled: true,
+            last_run: 0,
+        }
     }
 
     #[test]

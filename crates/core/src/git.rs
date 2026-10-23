@@ -70,7 +70,8 @@ pub fn current_branch(repo: &Path) -> Result<String> {
 
 /// `git worktree list` is asked many times a second by the UI and the daemon (every folder check starts a process):
 /// the answer is reused for a moment and dropped whenever a worktree is added or removed here.
-static WT_CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, (std::time::Instant, Vec<Worktree>)>>> = std::sync::Mutex::new(None);
+static WT_CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, (std::time::Instant, Vec<Worktree>)>>> =
+    std::sync::Mutex::new(None);
 
 pub fn forget_worktree_lists() {
     *WT_CACHE.lock().unwrap() = None;
@@ -92,10 +93,8 @@ pub fn worktree_remove(repo: &Path, path: &Path) -> Result<()> {
     // wait for the files to be deleted. git forgets the worktree, and the folder is emptied in the background.
     if path.exists() {
         let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-        let trash = path.with_file_name(format!(
-            ".axelstra-trash-{}-{stamp}",
-            path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()
-        ));
+        let trash =
+            path.with_file_name(format!(".axelstra-trash-{}-{stamp}", path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()));
         if std::fs::rename(path, &trash).is_ok() {
             must(repo, &["worktree", "prune"])?;
             if let Some(dir) = trash.parent().map(Path::to_path_buf) {
@@ -117,10 +116,7 @@ pub fn worktree_remove(repo: &Path, path: &Path) -> Result<()> {
         sleep(Duration::from_millis(ms));
     }
     if path.exists() {
-        let trash = path.with_file_name(format!(
-            ".axelstra-trash-{}",
-            path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()
-        ));
+        let trash = path.with_file_name(format!(".axelstra-trash-{}", path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()));
         std::fs::rename(path, &trash).with_context(|| format!("park {}", path.display()))?;
         // the parked folder (node_modules and all) is deleted in the background once whatever held it lets go
         if let Some(dir) = trash.parent().map(Path::to_path_buf) {
@@ -160,10 +156,7 @@ pub fn commit_all(wt: &Path, msg: &str) -> Result<bool> {
         return Ok(false);
     }
     must(wt, &["add", "-A"])?;
-    must(
-        wt,
-        &["-c", "user.name=axelstra", "-c", "user.email=axelstra@localhost", "commit", "--no-verify", "-m", msg],
-    )?;
+    must(wt, &["-c", "user.name=axelstra", "-c", "user.email=axelstra@localhost", "commit", "--no-verify", "-m", msg])?;
     Ok(true)
 }
 
@@ -176,10 +169,7 @@ pub enum Merge {
 pub fn merge(wt: &Path, branch: &str, msg: &str) -> Result<Merge> {
     let o = run(
         wt,
-        &[
-            "-c", "user.name=axelstra", "-c", "user.email=axelstra@localhost",
-            "merge", "--no-ff", "--no-verify", "-m", msg, branch,
-        ],
+        &["-c", "user.name=axelstra", "-c", "user.email=axelstra@localhost", "merge", "--no-ff", "--no-verify", "-m", msg, branch],
     )?;
     if o.ok {
         return Ok(Merge::Clean);

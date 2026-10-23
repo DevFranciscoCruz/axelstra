@@ -46,7 +46,8 @@ fn measure() -> Usage {
     // the GPU counters are the costliest query here and move slowly: sampled every 15 s, the chip keeps the last value
     type GpuSample = (std::time::Instant, Option<f64>, Vec<(String, f64)>);
     static LAST_GPU: std::sync::Mutex<Option<GpuSample>> = std::sync::Mutex::new(None);
-    let cached = LAST_GPU.lock().ok().and_then(|g| g.as_ref().filter(|(at, ..)| at.elapsed().as_secs() < 15).map(|(_, v, a)| (*v, a.clone())));
+    let cached =
+        LAST_GPU.lock().ok().and_then(|g| g.as_ref().filter(|(at, ..)| at.elapsed().as_secs() < 15).map(|(_, v, a)| (*v, a.clone())));
     let (gpu, gpu_adapters) = cached.unwrap_or_else(|| {
         let fresh = imp::gpu(&all);
         if let Ok(mut g) = LAST_GPU.lock() {
@@ -79,8 +80,8 @@ fn daemon_pid() -> u32 {
 
 #[cfg(windows)]
 mod imp {
-    use std::os::windows::io::AsRawHandle;
     use std::collections::HashMap;
+    use std::os::windows::io::AsRawHandle;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
     use std::time::Instant;
@@ -204,7 +205,8 @@ mod imp {
             }
             let top = |m: &HashMap<String, f64>| m.values().cloned().fold(0.0, f64::max).min(100.0);
             let names = adapter_names();
-            let mut adapters: Vec<(String, f64)> = by_gpu.iter().map(|(l, m)| (names.get(l).cloned().unwrap_or_else(|| format!("GPU {l}")), top(m))).collect();
+            let mut adapters: Vec<(String, f64)> =
+                by_gpu.iter().map(|(l, m)| (names.get(l).cloned().unwrap_or_else(|| format!("GPU {l}")), top(m))).collect();
             adapters.sort_by(|a, b| b.1.total_cmp(&a.1));
             (Some(top(&by_type)), adapters)
         }
@@ -345,11 +347,7 @@ mod imp {
 
     /// The process started as `axelstra daemon` (by this user; ps lists the command line).
     pub fn daemon_pid() -> u32 {
-        table()
-            .into_iter()
-            .find(|(_, _, c)| c.ends_with(" daemon") && c.contains("axelstra"))
-            .map(|r| r.0)
-            .unwrap_or(0)
+        table().into_iter().find(|(_, _, c)| c.ends_with(" daemon") && c.contains("axelstra")).map(|r| r.0).unwrap_or(0)
     }
 }
 
@@ -425,7 +423,16 @@ pub fn keep_awake(on: bool) -> bool {
 fn linux_inhibit_command(pid: u32) -> Option<std::process::Command> {
     let exe = std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join("systemd-inhibit")).find(|f| f.is_file()))?;
     let mut c = std::process::Command::new(exe);
-    c.args(["--what=idle:sleep", "--who=Axelstra", "--why=Keep awake is on", "--mode=block", "tail", &format!("--pid={pid}"), "-f", "/dev/null"]);
+    c.args([
+        "--what=idle:sleep",
+        "--who=Axelstra",
+        "--why=Keep awake is on",
+        "--mode=block",
+        "tail",
+        &format!("--pid={pid}"),
+        "-f",
+        "/dev/null",
+    ]);
     c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     Some(c)
 }

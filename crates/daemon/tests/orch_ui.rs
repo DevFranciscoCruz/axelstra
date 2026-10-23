@@ -1,4 +1,3 @@
-
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::json;
@@ -34,8 +33,13 @@ fn ui_flow_cards_to_merged_branch() {
     let token = "o".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()
-            .block_on(server::serve_with_store(p, t, s)).unwrap();
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(server::serve_with_store(p, t, s))
+            .unwrap();
     });
     std::thread::sleep(Duration::from_millis(300));
     let mut c = Client::connect(&pipe, &token).unwrap();
@@ -55,12 +59,7 @@ fn ui_flow_cards_to_merged_branch() {
         let script = axelstra_core::git::canon(&tools.join("fake-agent.sh")).unwrap();
         ["sh", &script.to_string_lossy()].map(String::from).to_vec()
     };
-    let r = c
-        .call(
-            "orch.start",
-            json!({"project": pid, "agent": agent}),
-        )
-        .unwrap();
+    let r = c.call("orch.start", json!({"project": pid, "agent": agent})).unwrap();
     assert_eq!(r["state"], "running");
     assert!(c.call("orch.start", json!({"project": pid})).is_err(), "second run while one is active");
 
