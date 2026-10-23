@@ -1,16 +1,12 @@
 import { For, Show, createResource, createSignal } from "solid-js";
 import { Icon } from "./Icon";
-import { Automation, deleteAutomation, listAutomations, runAutomation, saveAutomation } from "./api";
+import { Automation, agentOptions, agentWarning, agentsList, deleteAutomation, listAutomations, runAutomation, saveAutomation } from "./api";
 import { Select } from "./Select";
 import { Modal } from "./Modal";
 import { ask, askDiscard } from "./Confirm";
 import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations } from "./store";
 
 const DAYS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
-const AGENT_CLI = [
-  ["claude", "claude"],
-  ["codex", "chatgpt (codex)"],
-] as const;
 
 const describe = (a: Automation) => {
   const s = a.schedule;
@@ -33,6 +29,7 @@ const blank = (project: string): Automation => ({
 /** Scheduled agent runs: each one gets its own worktree and an agent started with the prompt. */
 export function Automations() {
   const [list, { refetch }] = createResource(listAutomations);
+  const [agents] = createResource(agentsList);
   const [draft, setDraft] = createSignal<Automation | null>(null);
   // the draft as it was when the editor opened: leaving with anything different asks first
   const [base, setBase] = createSignal("");
@@ -181,9 +178,10 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
                   Agente
                   <Select
                     value={d().agent}
-                    options={AGENT_CLI.map(([v, l]) => ({ value: v, label: l }))}
+                    options={agentOptions(agents() ?? [], d().agent)}
                     onChange={(v) => setDraft({ ...d(), agent: v })}
                   />
+                  <Show when={agentWarning(agents() ?? [], d().agent)}>{(w) => <span class="auto-note">{w()}</span>}</Show>
                 </label>
               </div>
               <div class="m-row">

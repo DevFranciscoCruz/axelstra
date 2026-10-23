@@ -72,13 +72,20 @@ export const diagnostics = () => tauriInvoke<Diagnostics>("diagnostics");
 export const shQuote = (s: string, ps: boolean) =>
   ps ? `'${s.replace(/['‘’‚‛]/g, (q) => q + q)}'` : `'${s.replace(/'/g, "'\\''")}'`;
 
+/** How each non-claude agent continues its latest conversation (mirrors the resume column of crates/core/src/agents.rs). */
+const RESUME_LINE: Record<string, string> = {
+  codex: "codex resume --last",
+  gemini: "gemini --resume latest",
+  opencode: "opencode --continue",
+};
+
 /** Command line for an agent. On restore it resumes the earlier conversation, falling back to a fresh start. */
 export const agentLine = (cli: string, resume: string | undefined, restoring: boolean, ps: boolean, hooks: string, rules?: string | null) => {
   const style = rules ? ` --append-system-prompt ${shQuote(rules, ps)}` : "";
   const claude = (flags: string) => `claude --settings ${shQuote(hooks, ps)}${style} ${flags}`;
   const fresh = cli === "claude" && resume ? claude(`--session-id ${resume}`) : cli;
   if (!restoring) return fresh;
-  const back = cli === "claude" && resume ? claude(`--resume ${resume}`) : cli === "codex" ? "codex resume --last" : cli;
+  const back = cli === "claude" && resume ? claude(`--resume ${resume}`) : RESUME_LINE[cli] ?? cli;
   return ps ? `${back}; if (!$?) { ${fresh} }` : `${back} || ${fresh}`;
 };
 
@@ -393,6 +400,28 @@ export type ClaudeStatus = {
   rate_limits?: { five_hour?: { used_percentage?: number; resets_at?: number }; seven_day?: { used_percentage?: number; resets_at?: number } };
 };
 export const agentStatus = (key: string) => callBg<{ status: ClaudeStatus | null }>("agent.status", { key }).then((r) => r.status);
+
+/** One entry of the daemon's agents table; `installed` says whether its executable is on the PATH. */
+export type AgentInfo = { id: string; name: string; installed: boolean; path: string | null; install: string; can_resume: boolean; interactive_prompt: boolean };
+/** Every agent the app knows (claude, codex, gemini, opencode, aider) with its installed state. */
+export const agentsList = () => callBg<{ agents: AgentInfo[] }>("agents.list").then((r) => r.agents);
+
+/** Select options for the agent pickers: the installed agents, plus `current` when it is not (so a saved choice never vanishes). */
+export const agentOptions = (list: AgentInfo[], current?: string) => {
+  const out = list.filter((a) => a.installed).map((a) => ({ value: a.id, label: a.name }));
+  const cur = current && list.find((a) => a.id === current || (current === "chatgpt" && a.id === "codex"));
+  if (current && !out.some((o) => o.value === current || (current === "chatgpt" && o.value === "codex"))) {
+    out.push({ value: current, label: cur ? `${cur.name} (não instalado)` : `${current} (desconhecido)` });
+  }
+  return out;
+};
+
+/** pt-PT warning for a chosen agent that cannot run, with the official install command; empty when it is fine. */
+export const agentWarning = (list: AgentInfo[], id: string) => {
+  const a = list.find((x) => x.id === id || (id === "chatgpt" && x.id === "codex"));
+  if (!a) return list.length ? `Agente desconhecido: ${id}` : "";
+  return a.installed ? "" : `${a.name} não encontrado: instala com ${a.install}`;
+};
 
 export type CodexWindow = { used_percent?: number; window_minutes?: number; resets_at?: number; resets_in_seconds?: number };
 export type CodexLimits = { primary?: CodexWindow; secondary?: CodexWindow; as_of?: number };

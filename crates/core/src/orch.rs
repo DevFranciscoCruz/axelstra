@@ -1,3 +1,4 @@
+use crate::agents;
 use crate::card::{self, Card};
 use crate::git::{self, Merge};
 use crate::runner::{AgentSpawn, Handle, ProcessRunner, Runner};
@@ -338,7 +339,13 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
     let runner: Arc<dyn Runner> = o.runner.clone().unwrap_or_else(|| Arc::new(ProcessRunner));
     let spec: Vec<String> = match &o.agent_override {
         Some(v) => v.clone(),
-        None => agent_command(&t.card.meta.agent, &t.card.meta.permission_mode, runner.interactive())?,
+        None => {
+            let a = agents::require(&t.card.meta.agent)?;
+            if a.locate().is_none() {
+                bail!("{}", a.missing_message());
+            }
+            agents::resolve_argv(a, agent_command(a.id, &t.card.meta.permission_mode, runner.interactive())?)
+        }
     };
     let pf = prompt.to_string_lossy().to_string();
     let spec: Vec<String> = spec.into_iter().map(|a| a.replace("{prompt_file}", &pf)).collect();
@@ -354,28 +361,25 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
     Ok(Live { handle, wt, branch, started: Instant::now() })
 }
 
-/// Command line for a card's agent. Only agents with a non-interactive mode are supported.
+/// Command line for a card's agent, from the agents table. An agent with no way to take a prompt in its TUI
+/// runs one-shot even under an interactive runner.
 fn agent_command(agent: &str, permission_mode: &str, interactive: bool) -> Result<Vec<String>> {
     if !card::PERMISSION_MODES.contains(&permission_mode) {
         bail!("unknown permission_mode '{permission_mode}'");
     }
-    let ask = "Read .axelstra/prompt.md and do the task described there.".to_string();
-    let mut v: Vec<String> = match agent {
-        "claude" => vec!["claude".into(), "--permission-mode".into(), permission_mode.into()],
-        "codex" | "chatgpt" => vec!["codex".into()],
-        other => bail!("agent '{other}' cannot run unattended; use claude or codex"),
-    };
-    if agent == "claude" {
-        if !interactive {
-            v.push("-p".into());
-        }
+    let a = agents::require(agent)?;
+    let ask = "Read .axelstra/prompt.md and do the task described there.";
+    let mut v = if interactive && a.interactive_prompt.is_some() {
+        let mut v = a.interactive_argv(Some(ask), false);
+        // the safe unattended flags go right after the program, before the prompt
+        v.splice(1..1, a.unattended.iter().map(|s| s.to_string()));
+        v
     } else {
-        if !interactive {
-            v.push("exec".into());
-        }
-        v.push("--full-auto".into());
+        a.headless_argv(ask, true, false)
+    };
+    if a.id == "claude" {
+        v.splice(1..1, ["--permission-mode".to_string(), permission_mode.to_string()]);
     }
-    v.push(ask);
     Ok(v)
 }
 
@@ -528,13 +532,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn agent_command_supports_claude_and_codex_only() {
+    fn agent_command_follows_the_agents_table() {
+        let p = "Read .axelstra/prompt.md and do the task described there.";
         let c = agent_command("claude", "plan", false).unwrap();
-        assert_eq!(c[..4], ["claude", "--permission-mode", "plan", "-p"]);
+        assert_eq!(c, ["claude", "--permission-mode", "plan", "-p", p]);
+        assert_eq!(agent_command("claude", "plan", true).unwrap(), ["claude", "--permission-mode", "plan", p]);
         let x = agent_command("chatgpt", "auto", false).unwrap();
-        assert_eq!(x[..3], ["codex", "exec", "--full-auto"]);
-        assert_eq!(agent_command("codex", "auto", true).unwrap()[..2], ["codex", "--full-auto"]);
-        assert!(agent_command("gemini", "auto", false).is_err());
+        assert_eq!(x, ["codex", "exec", "--sandbox", "workspace-write", p]);
+        assert_eq!(agent_command("codex", "auto", true).unwrap(), ["codex", "--sandbox", "workspace-write", p]);
+        assert_eq!(agent_command("gemini", "auto", false).unwrap(), ["gemini", "--approval-mode", "auto_edit", "-p", p]);
+        assert_eq!(agent_command("gemini", "auto", true).unwrap(), ["gemini", "--approval-mode", "auto_edit", "-i", p]);
+        assert_eq!(agent_command("opencode", "auto", false).unwrap(), ["opencode", "run", p]);
+        assert_eq!(agent_command("aider", "auto", false).unwrap(), ["aider", "--message", p]);
+        // aider cannot take a prompt in its TUI: one-shot even when interactive
+        assert_eq!(agent_command("aider", "auto", true).unwrap(), ["aider", "--message", p]);
+        assert!(agent_command("rm", "auto", false).unwrap_err().to_string().contains("desconhecido"));
         assert!(agent_command("claude", "--evil", false).is_err());
     }
 }

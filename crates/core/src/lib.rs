@@ -1,3 +1,4 @@
+pub mod agents;
 pub mod card;
 pub mod git;
 pub mod job;

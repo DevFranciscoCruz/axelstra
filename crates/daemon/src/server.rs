@@ -354,8 +354,16 @@ fn run_automation(reg: &Registry, path: &std::path::Path, id: &str) -> Result<Va
     let stamp = chrono::Local::now().format("%m%d-%H%M").to_string();
     let wt = crate::projects::worktree_create(&pr, &format!("auto-{}-{stamp}", a.name))?;
     // AXELSTRA_AGENT_CLI swaps the agent binary (a wrapper script, or a harmless stand-in in tests)
-    let cli = std::env::var("AXELSTRA_AGENT_CLI").unwrap_or_else(|_| a.agent.clone());
-    let (program, args) = crate::automations::agent_command(&cli, &a.prompt);
+    let (program, args) = match std::env::var("AXELSTRA_AGENT_CLI") {
+        Ok(cli) => crate::automations::raw_command(&cli, &a.prompt),
+        Err(_) => {
+            let ag = axelstra_core::agents::require(&a.agent)?;
+            if ag.locate().is_none() {
+                anyhow::bail!("{}", ag.missing_message());
+            }
+            crate::automations::agent_command(&a.agent, &a.prompt)?
+        }
+    };
     let spawn = Spawn { program, args, cwd: Some(wt.path.clone().into()), env: vec![], cols: 120, rows: 30 };
     let meta = json!({"project": pr.id, "worktree": wt.path, "kind": "agent", "automation": a.id});
     let sid = reg.spawn(&spawn, Some(&a.name), Some(meta))?;
@@ -958,6 +966,7 @@ fn dispatch(
             let all: Vec<Value> = reg.flows.lock_recover().values().flat_map(|t| t.as_array().cloned().unwrap_or_default()).collect();
             Ok(json!({"tasks": all}))
         }
+        "agents.list" => Ok(json!({"agents": tokio::task::block_in_place(axelstra_core::agents::list)})),
         "codex.limits" => Ok(json!({"limits": tokio::task::block_in_place(crate::agentlog::codex_limits)})),
         "computer.status" => Ok(json!({"enabled": reg.computer.load(Ordering::SeqCst)})),
         "computer.enable" => {
