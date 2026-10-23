@@ -214,6 +214,8 @@ const ALLOWED_METHODS: &[&str] = &[
     "notes.read_file",
     "notes.worktree",
     "worktree.set_parent",
+    "hooks.install",
+    "hooks.status",
     "kanban.delete",
     "kanban.list",
     "kanban.move",
