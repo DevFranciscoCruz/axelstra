@@ -10,6 +10,7 @@ pub mod janitor;
 pub mod kanban;
 pub mod lag;
 pub mod msgbus;
+pub mod overlaps;
 #[cfg(windows)]
 pub mod pipesec;
 pub mod ports;
@@ -21,4 +22,5 @@ pub mod server;
 pub mod skill;
 pub mod store;
 pub mod watcher;
+pub mod wtenv;
 pub mod wtstatus;
