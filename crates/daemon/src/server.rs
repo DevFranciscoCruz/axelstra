@@ -1181,6 +1181,7 @@ fn dispatch(
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs()
             );
             let max = p["max"].as_u64().unwrap_or(3).clamp(1, 8) as usize;
+            let trust = p["trust_acceptance"].as_bool().unwrap_or(false);
             // overriding the agent command is for tests and custom agents; the same
             // client can already spawn any process, so this grants nothing new
             let agent: Option<Vec<String>> = p["agent"]
@@ -1192,7 +1193,7 @@ fn dispatch(
             reg.runs.lock_recover().insert(pr.id.clone(), started.clone());
             let (reg2, pid, n2) = (reg.clone(), pr.id.clone(), name.clone());
             std::thread::spawn(move || {
-                let res = axelstra_core::orch::run(&axelstra_core::orch::Options {
+                let opts = axelstra_core::orch::Options {
                     wt_root: repo.parent().unwrap_or(&repo).join(".axelstra-wt"),
                     repo,
                     name: n2.clone(),
@@ -1200,7 +1201,9 @@ fn dispatch(
                     agent_override: agent,
                     poll_ms: 500,
                     runner: Some(Arc::new(runner)),
-                });
+                };
+                // the UI sets this only after the user confirmed the acceptance commands
+                let res = if trust { axelstra_core::orch::run_trusted(&opts) } else { axelstra_core::orch::run(&opts) };
                 let v = match res {
                     Ok(r) => json!({"state": "done", "name": n2, "integ_branch": r.integ_branch,
                         "integ_wt": r.integ_wt, "merged": r.merged, "failed": r.failed,
@@ -1210,6 +1213,22 @@ fn dispatch(
                 reg2.runs.lock_recover().insert(pid, v);
             });
             Ok(started)
+        }
+        "orch.retry" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let id = p["id"].as_str().unwrap_or_default().to_string();
+            let name = reg.runs.lock().unwrap().get(&pr.id).and_then(|r| r["name"].as_str().map(String::from));
+            let name = name.ok_or_else(|| anyhow::anyhow!("no orchestration run to retry"))?;
+            let trust = p["trust_acceptance"].as_bool().unwrap_or(false);
+            let repo = axelstra_core::git::canon(std::path::Path::new(&pr.path))?;
+            let wt_root = repo.parent().unwrap_or(&repo).join(".axelstra-wt");
+            tokio::task::block_in_place(|| axelstra_core::orch::retry_merge(&repo, &wt_root, &name, &id, trust))?;
+            if let Some(r) = reg.runs.lock().unwrap().get_mut(&pr.id) {
+                if let Some(v) = r["needs_review"].as_array_mut() {
+                    v.retain(|e| e[0] != id.as_str());
+                }
+            }
+            Ok(json!({}))
         }
         "orch.status" => {
             let id = p["project"].as_str().unwrap_or_default();
