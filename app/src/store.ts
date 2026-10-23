@@ -1,4 +1,4 @@
-import { ask } from "./Confirm";
+import { ask, askSave } from "./Confirm";
 import { pushNotification } from "./notifications";
 import { LEFT, RIGHT, fitPanel } from "./layout";
 import { createSignal } from "solid-js";
@@ -25,16 +25,22 @@ const save = (k: string, v: string | null) => {
 };
 
 /** CLI agents that can be launched; the key is what the UI shows and stores */
-export const AGENTS: Record<string, string> = { claude: "claude", chatgpt: "codex" };
-/** names of the agents the pickers list: the built-in two plus any other agent CLI found on the PATH */
-export const [agentKeys, setAgentKeys] = createSignal<string[]>(Object.keys(AGENTS));
+export const AGENTS: Record<string, string> = { claude: "claude", codex: "codex", chatgpt: "codex" };
+/** "chatgpt" was this agent's name in earlier versions: saved choices still say it */
+export const canonAgent = (a: string) => (a === "chatgpt" ? "codex" : a);
+/** names of the agents the pickers list: only the agent CLIs found on the PATH (empty until the daemon answers) */
+export const [agentKeys, setAgentKeys] = createSignal<string[]>([]);
 /** project whose settings dialog (worktree env files, setup command) is open */
 export const [showProjectSettings, setShowProjectSettings] = createSignal<string | null>(null);
-export const addAgents = (names: string[]) => {
-  for (const n of names) AGENTS[n] = n;
-  setAgentKeys(Object.keys(AGENTS));
+/** `ids` are the daemon's ids of the installed agents; without the list, the two built-ins */
+export const setInstalledAgents = (ids: string[] | null) => {
+  const keys = ids ?? ["claude", "codex"];
+  for (const k of keys) AGENTS[k] ??= k;
+  setAgentKeys(keys);
+  // the saved default may not be installed here
+  if (keys.length && !keys.includes(agent())) setAgentSig(keys[0]);
 };
-const [agent, setAgentSig] = createSignal<string>(load("axelstra.agent") && AGENTS[load("axelstra.agent")!] ? load("axelstra.agent")! : "claude");
+const [agent, setAgentSig] = createSignal<string>(load("axelstra.agent") && AGENTS[load("axelstra.agent")!] ? canonAgent(load("axelstra.agent")!) : "claude");
 export const defaultAgent = agent;
 export const setDefaultAgent = (a: string) => {
   if (!AGENTS[a]) return;
@@ -56,7 +62,7 @@ const [projectPrefs, setProjectPrefsSig] = createSignal<Record<string, ProjectPr
 /** the agent a project opens by default: its own choice, else the global one */
 export const projectAgent = (id?: string | null) => {
   const a = id ? projectPrefs()[id]?.agent : undefined;
-  return a && AGENTS[a] ? a : defaultAgent();
+  return a && AGENTS[a] ? canonAgent(a) : defaultAgent();
 };
 export const projectPrefsOf = (id: string): ProjectPrefs => projectPrefs()[id] ?? {};
 /** reply style chosen for one project; undefined = follow the global setting */
@@ -123,9 +129,26 @@ export const setRightW = (w: number) => {
 
 /** unsaved text in the open editor; anything that would close it asks first */
 export const [editorDirty, setEditorDirty] = createSignal(false);
-export const confirmDiscard = async () =>
-  !editorDirty() ||
-  (await ask("Há alterações por guardar neste ficheiro. Descartá-las?", { title: "Editor", kind: "warning", okLabel: "Descartar", cancelLabel: "Cancelar" }));
+/** App registers how a session tab closes (with its confirmation), so the sidebar can close an agent the same way */
+let sessionCloser: ((s: SessionInfo) => Promise<void>) | null = null;
+export const setSessionCloser = (f: typeof sessionCloser) => {
+  sessionCloser = f;
+};
+export const closeSessionTab = (s: SessionInfo) => sessionCloser?.(s);
+
+/** the open editor registers how to save itself, so closing can offer "Guardar" */
+let editorSaver: (() => Promise<boolean>) | null = null;
+export const setEditorSaver = (f: (() => Promise<boolean>) | null) => {
+  editorSaver = f;
+};
+/** true when the editor has nothing unsaved or the user chose to save it or drop it; false on cancel or a failed save */
+export const confirmDiscard = async () => {
+  if (!editorDirty()) return true;
+  const r = await askSave("Há alterações por guardar neste ficheiro.", "Editor");
+  if (r === "discard") return true;
+  if (r === "cancel") return false;
+  return (await editorSaver?.()) === true;
+};
 /** runs `fn` now, or after the user agrees to drop unsaved editor text */
 export const guarded = (fn: () => void) => {
   if (!editorDirty()) return fn();

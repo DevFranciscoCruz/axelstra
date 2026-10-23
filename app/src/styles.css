@@ -737,6 +737,8 @@ tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: v
 .select-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line-ctl); border-radius: 7px; padding: 5px 8px 5px 10px; font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
 .select-btn:hover { border-color: var(--accent); }
 .select-btn .chev { color: var(--muted); font-size: 10px; }
+.select-btn .select-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-btn > .svg-icon { flex: none; }
 .select-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ctx-root { min-width: 0; }
 

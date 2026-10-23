@@ -8,7 +8,7 @@ import { searchKeymap } from "@codemirror/search";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { Opened, fsRead, fsStat, fsWrite } from "./api";
-import { fsTick, guarded, setEditorDirty, setOpenFile } from "./store";
+import { fsTick, guarded, setEditorDirty, setEditorSaver, setOpenFile } from "./store";
 import { clampLine, describeReadError, docDiffers, isLarge, sizeLabel } from "./editorLogic";
 
 /** Language packs load on demand so the editor itself stays small. */
@@ -103,15 +103,15 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
     }
   };
 
-  const save = async (force = false) => {
-    if (!view || !meta || saving()) return;
+  const save = async (force = false): Promise<boolean> => {
+    if (!view || !meta || saving()) return false;
     setSaving(true);
     try {
       const text = view.state.doc.toString();
       const r = await fsWrite(props.wt, props.path, text, meta.eol, meta.bom, force ? undefined : meta.hash);
       if (r.conflict) {
         setConflict(true);
-        return;
+        return false;
       }
       meta = { ...meta, hash: r.hash! };
       base = text;
@@ -119,8 +119,10 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
       setConflict(false);
       setMsg("Guardado");
       setTimeout(() => setMsg(""), 1500);
+      return true;
     } catch (e) {
       setMsg(String(e));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -186,7 +188,9 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
   createEffect(on(() => props.initialLine, () => meta && gotoLine(), { defer: true }));
   createEffect(on(fsTick, () => checkNow?.(), { defer: true }));
   createEffect(() => setEditorDirty(dirty()));
+  setEditorSaver(() => save());
   onCleanup(() => {
+    setEditorSaver(null);
     setEditorDirty(false);
     view?.destroy();
   });
