@@ -199,6 +199,8 @@ export const [fileLine, setFileLine] = createSignal<number | null>(null);
 
 /** the project's kanban board replaces the terminal area when true */
 export const [showKanban, setShowKanban] = createSignal(false);
+/** the Docker screen replaces the terminal area when true; excludes the kanban */
+export const [showDocker, setShowDocker] = createSignal(false);
 
 /** One place that picks what fills the main area: no argument = the terminal; the views exclude each other. */
 export const showView = (v: { diff?: string; file?: string; commit?: Commit; kanban?: boolean } = {}) => {
@@ -207,6 +209,7 @@ export const showView = (v: { diff?: string; file?: string; commit?: Commit; kan
   setFileLine(null);
   setOpenCommit(v.commit ?? null);
   setShowKanban(v.kanban ?? false);
+  setShowDocker(false);
 };
 /** opens a file (relative to the worktree) in the editor, at `line` when given; asks first if the editor has unsaved text */
 export const openFileAt = (path: string, line?: number) =>

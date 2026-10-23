@@ -6,6 +6,7 @@ import { ChangesPanel } from "./ChangesPanel";
 import { CommitView } from "./CommitView";
 import { Editor } from "./Editor";
 import { FilesPanel } from "./FilesPanel";
+import { DockerView } from "./Docker";
 import { Kanban } from "./Kanban";
 import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
@@ -89,7 +90,9 @@ import {
   setOpenCommit,
   setOpenFile,
   setOpenDiff,
+  setShowDocker,
   setShowKanban,
+  showDocker,
   showKanban,
   refreshChanges,
   refreshProjects,
@@ -491,7 +494,7 @@ export function App() {
     set(to);
   };
 
-  const anyTabSelected = () => showKanban() || openDiff() !== null || openFile() !== null || openCommit() !== null || activeSession() !== null;
+  const anyTabSelected = () => showKanban() || showDocker() || openDiff() !== null || openFile() !== null || openCommit() !== null || activeSession() !== null;
   // renaming ends with the new name (null = cancelled); focus goes back to the tab, not to the page
   const finishRename = (id: number, name: string | null, refocus = true) => {
     if (name !== null) renameTab(id, name);
@@ -636,15 +639,19 @@ export function App() {
               <PanelIcon side="left" on={showSidebar()} />
             </button>
             <div class="tabs" role="tablist" aria-label="Separadores" onKeyDown={(e) => tabKeys(e)}>
-            <Tab selected={showKanban()} tabbable={!anyTabSelected()} onSelect={() => guarded(() => setShowKanban(true))}>
+            <Tab selected={showKanban()} tabbable={!anyTabSelected()} onSelect={() => guarded(() => { setShowDocker(false); setShowKanban(true); })}>
               <span class="dtag"><Icon name="grid" size={11} /></span>
               <span>Kanban</span>
+            </Tab>
+            <Tab selected={showDocker()} tabbable={false} onSelect={() => guarded(() => { setShowKanban(false); setShowDocker(true); })}>
+              <span class="dtag"><Icon name="box" size={11} /></span>
+              <span>Docker</span>
             </Tab>
             <For each={tabs()}>
               {(s) => (
                 <Tab
                   id={`tab-${s.id}`}
-                  selected={!showKanban() && openDiff() === null && openFile() === null && openCommit() === null && activeSession() === s.id}
+                  selected={!showKanban() && !showDocker() && openDiff() === null && openFile() === null && openCommit() === null && activeSession() === s.id}
                   onSelect={() => showTab(s)}
                   onClose={() => void close(s)}
                   onRename={() => setRenaming(s.id)}
@@ -707,7 +714,7 @@ export function App() {
             </For>
             <Show when={openCommit()}>
               {(c) => (
-                <Tab class="diff-tab" selected={!showKanban()} title={c().subject} onSelect={() => setShowKanban(false)} onClose={() => setOpenCommit(null)} closeLabel="Fechar commit">
+                <Tab class="diff-tab" selected={!showKanban() && !showDocker()} title={c().subject} onSelect={() => { setShowKanban(false); setShowDocker(false); }} onClose={() => setOpenCommit(null)} closeLabel="Fechar commit">
                   <span class="dtag"><Icon name="branch" size={11} /></span>
                   <span>{c().short}</span>
                 </Tab>
@@ -715,7 +722,7 @@ export function App() {
             </Show>
             <Show when={openFile()}>
               {(p) => (
-                <Tab class="diff-tab" selected={!showKanban()} title={p()} onSelect={() => setShowKanban(false)} onClose={() => guarded(() => setOpenFile(null))} closeLabel="Fechar ficheiro">
+                <Tab class="diff-tab" selected={!showKanban() && !showDocker()} title={p()} onSelect={() => { setShowKanban(false); setShowDocker(false); }} onClose={() => guarded(() => setOpenFile(null))} closeLabel="Fechar ficheiro">
                   <span class="dtag"><Icon name="pencil" size={11} /></span>
                   <span>{baseName(p())}</span>
                 </Tab>
@@ -723,7 +730,7 @@ export function App() {
             </Show>
             <Show when={openDiff()}>
               {(p) => (
-                <Tab class="diff-tab" selected={!showKanban()} title={p()} onSelect={() => setShowKanban(false)} onClose={() => setOpenDiff(null)} closeLabel="Fechar diff">
+                <Tab class="diff-tab" selected={!showKanban() && !showDocker()} title={p()} onSelect={() => { setShowKanban(false); setShowDocker(false); }} onClose={() => setOpenDiff(null)} closeLabel="Fechar diff">
                   <span class="dtag">Δ</span>
                   <span>{baseName(p())}</span>
                 </Tab>
@@ -768,6 +775,7 @@ export function App() {
           </div>
           <VoiceDraft target={activeSession()} />
           <div class="term-area">
+            <Show when={!showDocker()} fallback={<DockerView />}>
             <Show when={!showKanban()} fallback={<Kanban project={current()!.project.id} />}>
             <Show when={openCommit() === null} fallback={<CommitView />}>
             <Show
@@ -846,6 +854,7 @@ export function App() {
                   </div>
                 </Show>
               </Show>
+            </Show>
             </Show>
             </Show>
             </Show>
