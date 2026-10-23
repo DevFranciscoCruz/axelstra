@@ -9,32 +9,51 @@ export type MenuItem =
       run?: () => unknown;
       danger?: boolean;
       disabled?: boolean;
+      /** the chosen entry of a dropdown (listbox menus only) */
+      selected?: boolean;
       /** submenu; opens on hover */
       children?: MenuItem[];
     };
 
-type Open = { x: number; y: number; items: MenuItem[]; minWidth?: number };
+type Open = { x: number; y: number; items: MenuItem[]; minWidth?: number; listbox?: boolean; onClose?: () => void };
 const [menu, setMenu] = createSignal<Open | null>(null);
+/** a menu or dropdown is open: it is the topmost layer, so Esc and Tab belong to it and not to a dialog underneath */
+export const menuOpen = () => menu() !== null;
+/** where focus was when the menu opened; it goes back there when the menu closes from the keyboard */
+let opener: HTMLElement | null = null;
+const openMenu = (m: Open) => {
+  menu()?.onClose?.();
+  opener = document.activeElement as HTMLElement | null;
+  setMenu(m);
+};
+const closeMenu = () => {
+  const m = menu();
+  setMenu(null);
+  m?.onClose?.();
+};
 
 /** Right-click menu at the pointer. */
 export const showMenu = (e: MouseEvent, items: MenuItem[]) => {
   e.preventDefault();
   e.stopPropagation();
-  setMenu({ x: e.clientX, y: e.clientY, items });
+  openMenu({ x: e.clientX, y: e.clientY, items });
 };
 
 /** Menu at a fixed point (dropdowns open under their button). */
-export const showMenuAt = (x: number, y: number, items: MenuItem[], minWidth?: number) => setMenu({ x, y, items, minWidth });
+export const showMenuAt = (x: number, y: number, items: MenuItem[], minWidth?: number) => openMenu({ x, y, items, minWidth });
 
-function Items(props: { items: MenuItem[]; sub?: boolean; flip?: boolean }) {
+/** Dropdown list under a button (a Select): same menu, announced as a listbox of options; `onClose` runs however it ends. */
+export const showListboxAt = (x: number, y: number, items: MenuItem[], minWidth: number, onClose: () => void) => openMenu({ x, y, items, minWidth, listbox: true, onClose });
+
+function Items(props: { items: MenuItem[]; sub?: boolean; flip?: boolean; listbox?: boolean }) {
   const [openSub, setOpenSub] = createSignal<number | null>(null);
   const [flip, setFlip] = createSignal(false);
   return (
-    <div class="ctx" role="menu" classList={{ sub: props.sub, flip: props.sub && props.flip }} style={{ "min-width": "inherit" }}>
+    <div class="ctx" role={props.listbox ? "listbox" : "menu"} classList={{ sub: props.sub, flip: props.sub && props.flip }} style={{ "min-width": "inherit" }}>
       <For each={props.items}>
         {(it, i) =>
           "separator" in it ? (
-            <div class="ctx-sep" />
+            <div class="ctx-sep" role="separator" />
           ) : (
             <div
               class="ctx-wrap"
@@ -45,14 +64,15 @@ function Items(props: { items: MenuItem[]; sub?: boolean; flip?: boolean }) {
             >
               <button
                 class="ctx-item"
-                role="menuitem"
+                role={props.listbox ? "option" : "menuitem"}
+                aria-selected={props.listbox ? !!it.selected : undefined}
                 aria-haspopup={it.children ? "menu" : undefined}
                 classList={{ danger: it.danger, off: it.disabled }}
                 disabled={it.disabled}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (it.children) return;
-                  setMenu(null);
+                  closeMenu();
                   void it.run?.();
                 }}
               >
@@ -76,10 +96,16 @@ function Items(props: { items: MenuItem[]; sub?: boolean; flip?: boolean }) {
 /** Mount once near the app root. */
 export function ContextMenu() {
   onMount(() => {
-    const close = () => setMenu(null);
+    const close = closeMenu;
     const key = (e: KeyboardEvent) => {
       if (!menu()) return;
-      if (e.key === "Escape") return close();
+      if (e.key === "Escape" || e.key === "Tab") {
+        // handled here, so the dialog under the menu keeps its own Esc and Tab for later
+        e.preventDefault();
+        close();
+        opener?.focus?.();
+        return;
+      }
       const act = document.activeElement as HTMLElement | null;
       const list = act?.closest(".ctx") ?? document.querySelector(".ctx-root > .ctx");
       const btns = [...(list?.querySelectorAll<HTMLElement>(":scope > .ctx-wrap > .ctx-item:not(:disabled)") ?? [])];
@@ -119,7 +145,7 @@ export function ContextMenu() {
         const top = () => Math.min(m().y, Math.max(8, window.innerHeight - 40 - m().items.length * 30));
         return (
           <div class="ctx-root" ref={(el) => queueMicrotask(() => el.querySelector<HTMLElement>(".ctx-item:not(:disabled)")?.focus())} style={{ left: `${left()}px`, top: `${top()}px`, "min-width": m().minWidth ? `${m().minWidth}px` : undefined }} onContextMenu={(e) => e.preventDefault()}>
-            <Items items={m().items} />
+            <Items items={m().items} listbox={m().listbox} />
           </div>
         );
       }}

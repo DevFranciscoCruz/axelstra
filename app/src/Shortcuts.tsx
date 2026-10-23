@@ -1,6 +1,6 @@
 import { For } from "solid-js";
 import { Modal } from "./Modal";
-import { SHORTCUTS } from "./keyboard";
+import { K, SHORTCUTS } from "./keyboard";
 import { setShowShortcuts } from "./store";
 
 /** Cheat sheet with every keyboard shortcut (opened with ?) */
@@ -17,7 +17,7 @@ export function Shortcuts() {
         <For each={SHORTCUTS}>
           {([keys, what]) => (
             <div class="disp-head">
-              <kbd>{keys}</kbd>
+              <kbd>{K(keys)}</kbd>
               <span class="auto-note">{what}</span>
             </div>
           )}

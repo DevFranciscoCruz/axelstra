@@ -1,9 +1,12 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { Icon } from "./Icon";
-import { ask } from "./Confirm";
+import { ask, askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
-import { addProject, getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
+import { getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
 import { Modal } from "./Modal";
+import { pickProject } from "./projectActions";
+import { StateDot } from "./StateDot";
+import { ago } from "./time";
+import { dotOfSession, dotOfWorktree } from "./agentState";
 import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
 import { invoke } from "@tauri-apps/api/core";
 import { press } from "./a11y";
@@ -29,6 +32,10 @@ import {
   watchDispatch,
   dispatchTopics,
   confirmDiscard,
+  creatingWorktree,
+  setCreatingWorktree,
+  removeRequest,
+  setRemoveRequest,
   editorDirty,
   flowState,
   setEditorDirty,
@@ -64,8 +71,9 @@ function ProjectIcon(props: { id: string; name: string; url?: string | null }) {
 }
 
 export function Sidebar() {
-  // project id currently showing the "new worktree" input
-  const [creating, setCreating] = createSignal<string | null>(null);
+  // project id currently showing the "new worktree" dialog (in the store: the command palette opens it too)
+  const creating = creatingWorktree;
+  const setCreating = setCreatingWorktree;
   const [newName, setNewName] = createSignal("");
   // agent started in a new worktree: "none" or an AGENTS key, remembered between runs
   const NEWWT_KEY = "axelstra.newwt.agent";
@@ -132,11 +140,7 @@ export function Sidebar() {
     }
     return out;
   });
-  const idleLabel = (ms?: number) => {
-    if (ms === undefined) return "";
-    const m = Math.floor(ms / 60000);
-    return m < 1 ? "agora" : m < 60 ? m + "m" : m < 1440 ? Math.floor(m / 60) + "h" : Math.floor(m / 1440) + "d";
-  };
+  const idleLabel = (ms?: number) => (ms === undefined ? "" : ago(ms / 1000));
   const [editSetup, setEditSetup] = createSignal<string | null>(null);
   const [setupText, setSetupText] = createSignal("");
   // package managers installed on this machine, offered as one-click setup commands
@@ -165,16 +169,6 @@ export function Sidebar() {
     await refreshProjects();
     await refreshSessions();
   };
-
-  const pickProject = () =>
-    run(async () => {
-      const dir = await open({ directory: true, multiple: false, title: "Escolha a pasta do projeto" });
-      if (typeof dir !== "string") return;
-      const added = await addProject(dir);
-      await refreshProjects();
-      const main = projects().find((p) => p.id === added.id)?.worktrees.find((w) => w.is_main);
-      if (main) selectWorktree(main.path);
-    });
 
   // a project with its own default agent starts new worktrees with it
   createEffect(() => {
@@ -212,6 +206,17 @@ export function Sidebar() {
         setTimeout(() => void writeSession(id, setup + "\r"), 600);
       }
     });
+
+  // leaving the new-worktree dialog with a name typed in asks first
+  const closeNewWorktree = async () => {
+    if (newName().trim() && !(await askDiscard("O nome do worktree ainda não foi criado."))) return;
+    setCreating(null);
+    setNewName("");
+  };
+  const closeSetup = async (setup?: string | null) => {
+    if (setupText() !== (setup ?? "") && !(await askDiscard("O comando de setup tem alterações por guardar."))) return;
+    setEditSetup(null);
+  };
 
   const saveSetup = (projectId: string) =>
     run(async () => {
@@ -339,18 +344,33 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
     }
   };
 
+  createEffect(() => {
+    const r = removeRequest();
+    if (!r) return;
+    setRemoveRequest(null);
+    void dropWorktree(r.project, r.path, r.name);
+  });
+
   return (
     <aside class="sidebar">
       <div class="brand">
         <img src={logo} alt="" />
         Axelstra
       </div>
-      <button class="primary" onClick={pickProject}>
+      <button class="primary" onClick={() => void pickProject()}>
         + Adicionar projeto
       </button>
 
       <div class="section">Projetos</div>
-      <For each={projects()} fallback={<div class="empty">Nenhum projeto</div>}>
+      <For
+        each={projects()}
+        fallback={
+          <div class="empty">
+            <div>Nenhum projeto</div>
+            <button class="primary" onClick={() => void pickProject()}>Adicionar o primeiro projeto</button>
+          </div>
+        }
+      >
         {(p) => (
           <div class="project">
             <div class="project-head" title={p.path} onContextMenu={(e) => showMenu(e, projectMenu(p))}>
@@ -381,7 +401,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 onInput={(e) => setSetupText(e.currentTarget.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void saveSetup(p.id);
-                  if (e.key === "Escape") setEditSetup(null);
+                  if (e.key === "Escape") void closeSetup(p.setup);
                 }}
                 ref={(el) => queueMicrotask(() => el.focus())}
               />
@@ -411,7 +431,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
             </Show>
             <For each={[...p.worktrees].filter((w) => !nested().has(norm(w.path))).sort((a, b) => Number(b.is_main) - Number(a.is_main) || Number(isPinned(b.path)) - Number(isPinned(a.path)))}>
               {(w) => {
-                const label = () => w.branch ?? "(detached)";
+                const label = () => w.branch ?? "(destacado)";
                 const live = () => sessionsOf(w.path).filter((s) => s.running).length;
                 const working = () => sessionsOf(w.path).some((s) => sessionState(s) === "working");
                 const waiting = () => sessionsOf(w.path).some((s) => sessionState(s) === "waiting");
@@ -431,16 +451,18 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                   <div
                     class="item wt"
                     classList={{ active: norm(selectedWorktree()) === norm(w.path) }}
-                    {...press(() => void openWorktree(p.id, w.path, w.is_main))}
-                    onKeyUp={(e) => e.key === "ContextMenu" && showMenuAt(e.currentTarget.getBoundingClientRect().left + 24, e.currentTarget.getBoundingClientRect().bottom, worktreeMenu(p, w, label()))}
+                    onKeyDown={(e) => {
+                      // the menu key and Shift+F10 open the row menu from the keyboard
+                      if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
+                      e.preventDefault();
+                      const r = e.currentTarget.getBoundingClientRect();
+                      showMenuAt(r.left + 24, r.bottom, worktreeMenu(p, w, label()));
+                    }}
                     onContextMenu={(e) => showMenu(e, worktreeMenu(p, w, label()))}
                     title={w.path}
                   >
-                    <span
-                      class="dot"
-                      classList={{ on: live() > 0, work: working() && !waiting(), attn: needs() && !working() && !waiting(), wait: waiting(), queued: queued() }}
-                      title={queued() ? "Na fila: o flow ainda não chegou a esta tarefa" : waiting() ? "O agente espera pela tua resposta" : needs() ? "O agente parou: precisa de atenção" : working() ? "A trabalhar" : live() > 0 ? "Parado" : ""}
-                    />
+                    <button type="button" class="wt-open" aria-current={norm(selectedWorktree()) === norm(w.path) ? "true" : undefined} onClick={() => void openWorktree(p.id, w.path, w.is_main)}>
+                    <StateDot state={dotOfWorktree({ queued: queued(), waiting: waiting(), working: working(), needs: needs(), live: live() })} />
                     <span class="name">{w.is_main ? (p.default_branch ?? "main") : label()}</span>
                     <Show when={!w.is_main && topic(w.path)?.title && topic(w.path)!.title !== label()}>
                       <span class="wt-topic" title={topic(w.path)!.title}>{topic(w.path)!.title}</span>
@@ -476,6 +498,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                     <Show when={isPinned(w.path)}>
                       <span class="pin" title="Fixado"><Icon name="pin" size={11} /></span>
                     </Show>
+                    </button>
                     <button
                       class="x"
                       title="Mais ações" aria-label="Mais ações"
@@ -515,7 +538,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                               {...press(() => openSession(a.meta?.worktree ?? w.path, a.id))}
                               title={a.label ?? `Sessão ${a.id}`}
                             >
-                              <span class="dot" classList={{ on: a.running, work: sessionState(a) === "working", wait: sessionState(a) === "waiting" }} />
+                              <StateDot state={dotOfSession(a)} />
                               <span class="wt-agent-name">{a.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{a.label ?? `Sessão ${a.id}`}</span>
                               <span class="wt-agent-time">{a.running ? idleLabel(a.idle_ms) : "fim"}</span>
                             </div>
@@ -546,7 +569,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
         {(pid) => {
           const proj = () => projects().find((x) => x.id === pid());
           return (
-            <Modal label="Novo worktree" onClose={() => setCreating(null)}>
+            <Modal label="Novo worktree" dirty={!!newName().trim()} onClose={() => void closeNewWorktree()}>
               <div class="m-title" style={{ "font-weight": "600" }}>Novo worktree</div>
               <label class="m-full">
                 Projeto
@@ -570,7 +593,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 </select>
               </label>
               <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-                <button onClick={() => setCreating(null)}>Cancelar</button>
+                <button onClick={() => void closeNewWorktree()}>Cancelar</button>
                 <button class="primary" disabled={!newName().trim()} onClick={() => void submitWorktree(pid())}>
                   Criar worktree
                 </button>

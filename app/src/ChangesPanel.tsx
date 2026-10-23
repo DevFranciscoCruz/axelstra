@@ -1,3 +1,4 @@
+import { K } from "./keyboard";
 import { RightTabs } from "./RightTabs";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
@@ -20,6 +21,7 @@ import {
   setOpenDiff,
   setOpenFile,
   setShowKanban,
+  rightTab,
 } from "./store";
 
 const LABEL: Record<string, string> = { M: "alterado", A: "novo", D: "apagado", U: "conflito" };
@@ -141,7 +143,7 @@ export function ChangesPanel() {
     });
 
   return (
-    <aside class="rightbar">
+    <aside class="rightbar" id="rpanel" role="tabpanel" aria-labelledby={`rtab-${rightTab()}`}>
       <RightTabs />
 
       <div class="sc-head">
@@ -189,7 +191,7 @@ export function ChangesPanel() {
         </button>
       </div>
       <div class="sc-branch" title={branch()}>
-        <div class="sc-name">{branch() || "(detached)"}</div>
+        <div class="sc-name">{branch() || "(destacado)"}</div>
         <div class="sc-base"><Icon name="arrowRight" size={11} /> {base()}</div>
       </div>
 
@@ -211,12 +213,12 @@ export function ChangesPanel() {
       <div class="sc-commit">
         <div class="sc-msg">
           <textarea
-            placeholder={suggesting() ? "A gerar mensagem…" : "Mensagem (Ctrl+Enter para fazer commit)"}
+            placeholder={suggesting() ? "A gerar mensagem…" : K("Mensagem (Ctrl+Enter para fazer commit)")}
             rows={3}
             value={message()}
             onInput={(e) => setMessage(e.currentTarget.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && e.ctrlKey && canCommit()) void doCommit();
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && canCommit()) void doCommit();
             }}
           />
           <button
@@ -231,7 +233,7 @@ export function ChangesPanel() {
           </button>
         </div>
         <div class="sc-split">
-          <button class="sc-main" disabled={!canCommit()} title={canCommit() ? "Commit (Ctrl+Enter)" : files().length === 0 ? "Sem alterações para commit" : message().trim() ? "A trabalhar…" : "Escreva uma mensagem"} onClick={() => void doCommit()}>
+          <button class="sc-main" disabled={!canCommit()} title={canCommit() ? K("Commit (Ctrl+Enter)") : files().length === 0 ? "Sem alterações para commit" : message().trim() ? "A trabalhar…" : "Escreve uma mensagem"} onClick={() => void doCommit()}>
             <Icon name="check" /> Commit
           </button>
           <button
@@ -251,7 +253,7 @@ export function ChangesPanel() {
         </div>
         <Show when={note()}>
           {(n) => (
-            <div class="pnote" classList={{ bad: !n().ok }} title={n().text}>
+            <div class="pnote" role="status" aria-live="polite" classList={{ bad: !n().ok }} title={n().text}>
               {n().text}
             </div>
           )}

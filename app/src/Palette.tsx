@@ -1,9 +1,14 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { moveIndex } from "./a11y";
+import { Modal } from "./Modal";
 import { findWorktree, projects, selectWorktree, selectedWorktree, setRightTab, setShowKanban } from "./store";
 
 export type PaletteAction = { label: string; hint?: string; run: () => void };
 
 type Item = { label: string; hint: string; run: () => void };
+
+/** more than this many matches is noise; typing narrows it */
+const MAX_SHOWN = 200;
 
 /** Ctrl/Cmd+K: jump to any worktree or run an action from one search box */
 export function Palette(props: { actions: () => PaletteAction[] }) {
@@ -33,13 +38,13 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
       out.push(
         { label: "Ficheiros", hint: "painel", run: () => setRightTab("files") },
         { label: "Alterações", hint: "painel", run: () => setRightTab("changes") },
-        { label: "PRs e issues", hint: "painel", run: () => setRightTab("pulls") },
+        { label: "PRs e problemas", hint: "painel", run: () => setRightTab("pulls") },
         { label: "Kanban", hint: "vista", run: () => setShowKanban(true) },
       );
     }
     for (const p of projects()) {
       for (const w of p.worktrees) {
-        const branch = w.is_main ? (p.default_branch ?? "main") : (w.branch ?? "(detached)");
+        const branch = w.is_main ? (p.default_branch ?? "main") : (w.branch ?? "(destacado)");
         out.push({ label: `${p.name} / ${branch}`, hint: "worktree", run: () => selectWorktree(w.path) });
       }
     }
@@ -48,7 +53,7 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
 
   const shown = createMemo(() => {
     const words = q().toLowerCase().split(/\s+/).filter(Boolean);
-    return items().filter((i) => words.every((w) => i.label.toLowerCase().includes(w))).slice(0, 12);
+    return items().filter((i) => words.every((w) => i.label.toLowerCase().includes(w))).slice(0, MAX_SHOWN);
   });
 
   createEffect(() => {
@@ -66,44 +71,41 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
     i?.run();
   };
 
+  // a modal dialog: Esc closes only this one (the dialog underneath stays), Tab stays inside, focus goes back on close
   return (
     <Show when={open()}>
-      <div class="pal-back" onClick={() => setOpen(false)}>
-        <div class="pal" onClick={(e) => e.stopPropagation()}>
-          <input
-            class="pal-input"
-            role="combobox"
-            aria-expanded="true"
-            aria-controls="pal-list"
-            aria-activedescendant={`pal-${sel()}`}
-            aria-label="Paleta de comandos"
-            placeholder="Ir para worktree ou executar ação…"
-            value={q()}
-            onInput={(e) => setQ(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setOpen(false);
-              else if (e.key === "ArrowDown") {
-                e.preventDefault();
-                setSel(Math.min(sel() + 1, shown().length - 1));
-              } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                setSel(Math.max(sel() - 1, 0));
-              } else if (e.key === "Enter") choose(shown()[sel()]);
-            }}
-            ref={(el) => queueMicrotask(() => el.focus())}
-          />
-          <div class="pal-list" id="pal-list" role="listbox">
-            <For each={shown()} fallback={<div class="pal-empty">Nada encontrado</div>}>
-              {(i, idx) => (
-                <div class="pal-item" id={`pal-${idx()}`} role="option" aria-selected={idx() === sel()} classList={{ on: idx() === sel() }} onMouseEnter={() => setSel(idx())} onClick={() => choose(i)}>
-                  <span>{i.label}</span>
-                  <span class="pal-hint">{i.hint}</span>
-                </div>
-              )}
-            </For>
-          </div>
+      <Modal label="Paleta de comandos" onClose={() => setOpen(false)} backClass="pal-back" class="pal">
+        <input
+          class="pal-input"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="pal-list"
+          aria-activedescendant={shown().length ? `pal-${sel()}` : undefined}
+          aria-label="Paleta de comandos"
+          placeholder="Ir para worktree ou executar ação…"
+          value={q()}
+          onInput={(e) => setQ(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            // Home and End stay with the text field (cursor)
+            const to = e.key.startsWith("Arrow") ? moveIndex(sel(), shown().length, e.key) : null;
+            if (to !== null) {
+              e.preventDefault();
+              setSel(to);
+            } else if (e.key === "Enter") choose(shown()[sel()]);
+          }}
+          ref={(el) => queueMicrotask(() => el.focus())}
+        />
+        <div class="pal-list" id="pal-list" role="listbox" aria-label="Resultados">
+          <For each={shown()} fallback={<div class="pal-empty">Nada encontrado</div>}>
+            {(i, idx) => (
+              <div class="pal-item" id={`pal-${idx()}`} role="option" aria-selected={idx() === sel()} classList={{ on: idx() === sel() }} onMouseEnter={() => setSel(idx())} onClick={() => choose(i)}>
+                <span>{i.label}</span>
+                <span class="pal-hint">{i.hint}</span>
+              </div>
+            )}
+          </For>
         </div>
-      </div>
+      </Modal>
     </Show>
   );
 }

@@ -3,7 +3,7 @@ import { Icon } from "./Icon";
 import { Automation, deleteAutomation, listAutomations, runAutomation, saveAutomation } from "./api";
 import { Select } from "./Select";
 import { Modal } from "./Modal";
-import { ask } from "./Confirm";
+import { ask, askDiscard } from "./Confirm";
 import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations } from "./store";
 
 const DAYS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
@@ -34,6 +34,17 @@ const blank = (project: string): Automation => ({
 export function Automations() {
   const [list, { refetch }] = createResource(listAutomations);
   const [draft, setDraft] = createSignal<Automation | null>(null);
+  // the draft as it was when the editor opened: leaving with anything different asks first
+  const [base, setBase] = createSignal("");
+  const edit = (a: Automation) => {
+    setBase(JSON.stringify(a));
+    setDraft(a);
+  };
+  const dirty = () => draft() !== null && JSON.stringify(draft()) !== base();
+  const leaveDraft = async () => {
+    if (dirty() && !(await askDiscard("O rascunho tem alterações por guardar."))) return;
+    setDraft(null);
+  };
   const [msg, setMsg] = createSignal("");
 
   const projectName = (id: string) => projects().find((p) => p.id === id)?.name ?? id;
@@ -54,7 +65,13 @@ export function Automations() {
       await refetch();
     });
 
-  const runNow = (a: Automation) =>
+  const runNow = async (a: Automation) => {
+    const ok = await ask(`Executar "${a.name}" agora?
+
+Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horário (${describe(a)}).`, { title: "Executar agora", kind: "info", okLabel: "Executar", cancelLabel: "Cancelar" });
+    if (ok) await doRun(a);
+  };
+  const doRun = (a: Automation) =>
     guard(async () => {
       const r = await runAutomation(a.id);
       await refreshProjects();
@@ -79,7 +96,7 @@ export function Automations() {
   };
 
   return (
-    <Modal label="Automatizações" class="modal auto" dirty={draft() !== null} onClose={() => (draft() ? setDraft(null) : setShowAutomations(false))}>
+    <Modal label="Automatizações" class="modal auto" dirty={dirty()} onClose={() => (draft() ? void leaveDraft() : setShowAutomations(false))}>
         <Show
           when={draft()}
           fallback={
@@ -87,7 +104,7 @@ export function Automations() {
               <div class="auto-head">
                 <strong>Automatizações</strong>
                 <span class="grow" />
-                <button class="primary" disabled={projects().length === 0} title={projects().length === 0 ? "Adicione um projeto primeiro" : undefined} onClick={() => setDraft(blank(projects()[0].id))}>
+                <button class="primary" disabled={projects().length === 0} title={projects().length === 0 ? "Adiciona um projeto primeiro" : undefined} onClick={() => edit(blank(projects()[0].id))}>
                   + Nova
                 </button>
                 <button onClick={() => setShowAutomations(false)}>Fechar</button>
@@ -97,7 +114,14 @@ export function Automations() {
                 (o daemon); execuções perdidas são ignoradas.
               </div>
               <div class="auto-list">
-                <For each={list() ?? []} fallback={<div class="placeholder">Nenhuma automatização</div>}>
+                <For each={list() ?? []} fallback={
+                  <div class="placeholder empty">
+                    <div>Nenhuma automatização</div>
+                    <Show when={projects().length > 0}>
+                      <button class="primary" onClick={() => edit(blank(projects()[0].id))}>+ Criar a primeira</button>
+                    </Show>
+                  </div>
+                }>
                   {(a) => (
                     <div class="auto-item" classList={{ off: !a.enabled }}>
                       <div class="auto-main">
@@ -106,13 +130,13 @@ export function Automations() {
                           {projectName(a.project)} · {a.agent} · {describe(a)}
                         </div>
                       </div>
-                      <button class="icon" title="Executar agora" aria-label="Executar agora" onClick={() => void runNow(a)}>
-                        <Icon name="play" />
+                      <button class="icon" title="Executar agora (fora do horário)" aria-label={`Executar agora: ${a.name}`} onClick={() => void runNow(a)}>
+                        <Icon name="bolt" />
                       </button>
-                      <button class="icon" title={a.enabled ? "Desativar" : "Ativar"} aria-label={a.enabled ? "Desativar" : "Ativar"} onClick={() => void toggle(a)}>
+                      <button class="icon" title={a.enabled ? "Desativar o agendamento" : "Ativar o agendamento"} aria-label={`${a.enabled ? "Desativar" : "Ativar"} o agendamento: ${a.name}`} onClick={() => void toggle(a)}>
                         <Icon name={a.enabled ? "pause" : "play"} />
                       </button>
-                      <button class="icon" title="Editar" aria-label="Editar" onClick={() => setDraft({ ...a })}>
+                      <button class="icon" title="Editar" aria-label="Editar" onClick={() => edit({ ...a })}>
                         <Icon name="pencil" />
                       </button>
                       <button class="icon danger" title="Apagar automatização" aria-label="Apagar automatização" onClick={() => void remove(a)}>
@@ -122,7 +146,7 @@ export function Automations() {
                   )}
                 </For>
               </div>
-              <span class="cmt-msg">{msg()}</span>
+              <span class="cmt-msg" role="status" aria-live="polite">{msg()}</span>
             </>
           }
         >
@@ -220,8 +244,8 @@ export function Automations() {
                 })()}
               </div>
               <div class="m-actions">
-                <span class="cmt-msg grow">{msg()}</span>
-                <button onClick={() => setDraft(null)}>Cancelar</button>
+                <span class="cmt-msg grow" role="status" aria-live="polite">{msg()}</span>
+                <button onClick={() => void leaveDraft()}>Cancelar</button>
                 <button class="primary" disabled={!d().name.trim() || !d().prompt.trim()} onClick={() => void save()}>
                   Guardar
                 </button>

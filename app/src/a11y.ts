@@ -44,3 +44,33 @@ export const radioKeys = (e: KeyboardEvent & { currentTarget: HTMLElement }) => 
   radios[to].focus();
   radios[to].click();
 };
+
+/** Row a listbox moves to for an arrow / Home / End key (stays at the ends), or null when the key does nothing. */
+export const moveIndex = (current: number, count: number, key: string): number | null => {
+  if (count <= 0) return null;
+  switch (key) {
+    case "ArrowDown":
+      return Math.min(current + 1, count - 1);
+    case "ArrowUp":
+      return Math.max(current - 1, 0);
+    case "Home":
+      return 0;
+    case "End":
+      return count - 1;
+    default:
+      return null;
+  }
+};
+
+/** Roving focus for a `role=tablist`: arrows, Home and End move focus between the tabs (wrapping), Enter or Space then picks one.
+ * Spread on the list (`onKeyDown`); give each tab `tabindex={selected ? 0 : -1}`. Pass `select` for tabs that switch as you arrow. */
+export const tabKeys = (e: KeyboardEvent & { currentTarget: HTMLElement }, select = false) => {
+  const tabs = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]'));
+  const at = tabs.indexOf(document.activeElement as HTMLElement);
+  if (at < 0) return;
+  const to = nextRadio(at, tabs.length, e.key === "ArrowUp" || e.key === "ArrowDown" ? "" : e.key);
+  if (to === null) return;
+  e.preventDefault();
+  tabs[to].focus();
+  if (select) tabs[to].click();
+};
