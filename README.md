@@ -89,7 +89,7 @@ The command palette entry *Orquestração* shows coordinators and their workers,
 
 ### Agent status hooks
 
-Settings has a button that installs these hooks for you in one click. To do it by hand:
+Settings has a button that installs these hooks for you in one click (or run `axelstra hook install claude`; a backup of the file is made). To do it by hand:
 
 The red "waiting" dot comes from what the terminal shows (permission prompts, questions). Claude Code can also say it directly, which works in auto mode too: add this to `~/.claude/settings.json`. The hooks only run inside Axelstra sessions (they need `AXELSTRA_SESSION`), print nothing and exit 0 at once when the daemon is not running.
 
