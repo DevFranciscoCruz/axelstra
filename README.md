@@ -19,10 +19,10 @@ Lightweight desktop workbench for parallel coding agents on git worktrees (Windo
 - **Automations:** scheduled agent runs in fresh worktrees (interval, daily, weekly).
 - **Voice:** dictate a prompt with `Ctrl+Shift+M`. Speech is recognized locally (Whisper, downloaded once, about 160 MB), stops by itself when you pause and goes straight to the active terminal.
 - **Orchestration:** a coordinator agent splits work across worktrees and ephemeral workers that report back and disappear. Agents learn it from the `/axelstration` skill (installed for Claude Code and Codex); see below.
-- **Search and usage:** `Ctrl+Shift+F` searches past Claude and Codex conversations and resumes one; tokens spent by the active Claude conversation are shown next to the tabs.
-- **Status bar:** keep-awake switch, memory used by Axelstra and its terminals, number of terminals and listening dev-server ports.
+- **Search and usage:** `Ctrl+Shift+F` searches past Claude and Codex conversations and resumes one; tokens spent by the active Claude conversation are shown next to the tabs, and a `Σ` chip lists the tokens (input, output, cache) each worktree has spent across its Claude and Codex conversations, read from their logs. Tokens only: no cost is estimated.
+- **Status bar:** keep-awake switch, memory used by Axelstra and its terminals, number of terminals, listening dev-server ports and the total agent tokens (hover for the per-worktree breakdown).
 - **Links:** URLs and file paths in terminal output are clickable (a path opens in the editor).
-- **Notifications:** when an agent finishes, stops or needs an answer; clicking one opens that session.
+- **Notifications:** when an agent finishes, stops or needs an answer. On Windows, clicking the toast opens that session. On macOS and Linux the notification is shown but clicking it does not select the session (the notification plugin has no click callback there); the worktree gets its attention dot instead.
 - **Layout:** `Ctrl+B` hides the project list, `Ctrl+Shift+B` the right panel (or use the panel buttons in the tab bar).
 
 ## Install
@@ -38,11 +38,19 @@ Requirements: `git`, plus the agent CLI you want to use (`claude` or `codex`) on
 
 ### Updates (Windows)
 
-Axelstra checks GitHub Releases at launch, every 6 hours and when the window regains focus. A newer version is downloaded and verified in the background; when it is ready a card appears in the corner: **Reiniciar agora** installs it and reopens the app, **Mais tarde** hides the card. A downloaded update is also installed when you close the app.
+Axelstra checks GitHub Releases at launch, every 6 hours and when the window regains focus. A newer version is downloaded and verified in the background; when it is ready a card appears in the corner: **Reiniciar agora** installs it and reopens the app, **Mais tarde** hides the card. A downloaded update is also installed when you close the app: quitting goes through the exit hook in `app/src-tauri/src/main.rs`, which installs the pending update without relaunching.
 
 Terminals and agents are not interrupted: they belong to the background daemon, and the installer moves the running daemon aside instead of stopping it. The new window reconnects to it. The daemon only picks up new code the next time it starts (reboot, or when the app finds it too old to talk to, in which case its terminals are restored).
 
 The first install is manual. Versions older than the first release with the updater do not update themselves: install the new one once over the old one.
+
+### Linux (experimental)
+
+Linux is not a supported platform yet. The release workflow builds a `.deb` and an AppImage in an experimental job that never blocks a release, and CI checks that the desktop host compiles on Ubuntu. Nobody has run the result on a Linux desktop, so expect rough edges. Known state:
+
+- The files are not signed for the updater: a Linux install does not update itself, and `latest.json` has no Linux entry. Install each new release by hand.
+- Keep-awake uses `systemd-inhibit` when it is on `PATH`. Without it the switch shows `n/d` and does nothing.
+- Notification clicks do not open the session (see *Notifications*).
 
 ### macOS
 
@@ -75,7 +83,7 @@ The command palette entry *Orquestração* shows coordinators and their workers,
 
 ## Build from source
 
-Needs Rust (stable), LLVM/libclang (for the speech engine; set `LIBCLANG_PATH` on Windows), Node 22 and, on Windows, the Tauri prerequisites (WebView2, MSVC build tools).
+Needs Rust (stable), LLVM/libclang (for the speech engine; set `LIBCLANG_PATH` on Windows), Node 22 and, on Windows, the Tauri prerequisites (WebView2, MSVC build tools). On Linux (experimental) install the Tauri 2 system packages first: `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf`.
 
 ```sh
 # Windows: daemon sidecar + frontend + NSIS installer; prints the installer path
@@ -83,13 +91,16 @@ powershell -File scripts/build-installer.ps1
 
 # macOS
 sh scripts/prepare-sidecar.sh && cd app && npx tauri build --bundles dmg --config src-tauri/tauri.release.conf.json
+
+# Linux (experimental)
+sh scripts/prepare-sidecar.sh && cd app && npx tauri build --config src-tauri/tauri.release.linux.conf.json
 ```
 
 Local builds are not signed for the updater, so they never produce update artifacts. Engine tests: `cargo test -p axelstra-core -p axelstra-daemon -p axelstra`. Desktop host tests (`app/src-tauri`): `cargo test -p axelstra-app`. On Windows the prebuilt static sherpa libs import the debug CRT (`ucrtbased.dll`), so `app/src-tauri/build.rs` drops the debug CRT libs from debug builds and `src/debugcrt.rs` stands in for the two debug heap functions that leaves unresolved; if that ever breaks, `cargo test --release -p axelstra-app` still works.
 
 ## Releasing
 
-`git tag vX.Y.Z && git push --tags` runs `.github/workflows/release.yml`. It tests, builds the Windows installer and the macOS app and `.dmg` (daemon as sidecar, both signed for the updater), and attaches them to the GitHub Release. A last job merges the platform entries into `latest.json`, the manifest the app reads from `releases/latest/download/latest.json`. The version comes from the tag. The release notes are the commit subjects since the previous tag, so write them for the people who read the release; the same text shows in the update card.
+`git tag vX.Y.Z && git push --tags` runs `.github/workflows/release.yml`. It runs the engine tests, the type check and the frontend tests, builds the Windows installer and the macOS app and `.dmg` (daemon as sidecar, both signed for the updater), and attaches them to the GitHub Release. An experimental Linux job (`.deb` and AppImage, unsigned for the updater, allowed to fail) adds its files afterwards. A last job merges the platform entries into `latest.json`, the manifest the app reads from `releases/latest/download/latest.json`. The version comes from the tag. The release notes are the commit subjects since the previous tag, so write them for the people who read the release; the same text shows in the update card.
 
 The updater verifies every download against the public key in `app/src-tauri/tauri.conf.json`. The matching private key lives in the repo secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; losing it means existing installs can no longer update and must be reinstalled by hand.
 

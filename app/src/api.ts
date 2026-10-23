@@ -1,3 +1,4 @@
+import type { WtUsage } from "./usageFormat";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { projectTerse } from "./store";
@@ -371,6 +372,7 @@ export const agentSearch = (query: string, max = 30) => callBg<{ hits: AgentHit[
 
 export type TokenUsage = { input: number; output: number; cache_read: number; cache_write: number; messages: number; context: number };
 export const agentUsage = (cwd: string, session?: string) => callBg<{ usage: TokenUsage | null }>("agent.usage", { cwd, session }).then((r) => r.usage);
+export const worktreeUsage = (worktrees: string[]) => callBg<{ usage: WtUsage[] }>("agent.worktree_usage", { worktrees }).then((r) => r.usage);
 
 export const computerStatus = () => call<{ enabled: boolean }>("computer.status").then((r) => r.enabled);
 export const computerEnable = (on: boolean) => call<{ enabled: boolean }>("computer.enable", { on }).then((r) => r.enabled);
