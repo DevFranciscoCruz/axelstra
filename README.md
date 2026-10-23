@@ -81,6 +81,22 @@ axelstra limit 4                                      # at most 4 workers at onc
 
 The command palette entry *Orquestração* shows coordinators and their workers, with state and unread messages.
 
+### Agent status hooks
+
+The red "waiting" dot comes from what the terminal shows (permission prompts, questions). Claude Code can also say it directly, which works in auto mode too: add this to `~/.claude/settings.json`. The hooks only run inside Axelstra sessions (they need `AXELSTRA_SESSION`), print nothing and exit 0 at once when the daemon is not running.
+
+```json
+{
+  "hooks": {
+    "Notification": [{ "hooks": [{ "type": "command", "command": "axelstra hook claude Notification" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "axelstra hook claude Stop" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "axelstra hook claude UserPromptSubmit" }] }]
+  }
+}
+```
+
+The dot stays red until you type or the agent prints something new, and a hint older than two hours is ignored.
+
 ## Build from source
 
 Needs Rust (stable), LLVM/libclang (for the speech engine; set `LIBCLANG_PATH` on Windows), Node 22 and, on Windows, the Tauri prerequisites (WebView2, MSVC build tools). On Linux (experimental) install the Tauri 2 system packages first: `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf`.

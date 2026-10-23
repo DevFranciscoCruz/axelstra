@@ -55,6 +55,8 @@ struct Registry {
     clients: std::sync::atomic::AtomicUsize,
     /// agents may look at the screen and drive mouse and keyboard (`axelstra computer`); off at every start
     computer: AtomicBool,
+    /// what agents' own hooks said they are doing (`session.hint`)
+    hints: axelstra_core::waiting::Hints,
 }
 
 impl Registry {
@@ -94,6 +96,7 @@ impl Registry {
             bus: crate::msgbus::Bus::new(),
             clients: Default::default(),
             computer: AtomicBool::new(false),
+            hints: Default::default(),
         }
     }
 
@@ -677,7 +680,13 @@ fn session_list(reg: &Registry) -> Vec<Value> {
             let running = s.try_wait().is_none();
             let idle = s.idle_ms();
             // quiet for a moment and the screen ends in a question: the agent waits for the user
-            let waiting = running && (reg.bus.is_escalated(*id) || (idle >= 1500 && axelstra_core::waiting::needs_input(&s.tail(4096))));
+            let agent = metas.get(id).map(|m| m["kind"] == "agent").unwrap_or(false);
+            let waiting = running
+                && (reg.bus.is_escalated(*id)
+                    || (idle >= 1500
+                        && (axelstra_core::waiting::needs_input(&s.tail(4096))
+                            || (agent && axelstra_core::waiting::asks_question(&s.screen_lines(12)))))
+                    || reg.hints.waiting(*id, s.since_input_ms(), idle));
             json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "escalated": reg.bus.is_escalated(*id), "unread": reg.bus.unread(*id), "finished": reg.bus.finished(*id).is_some(), "label": labels.get(id), "meta": metas.get(id)})
         })
         .collect();
@@ -710,10 +719,11 @@ fn dispatch(
 ) -> Result<Value> {
     let p = &req.params;
     // anything that changes projects or worktrees makes the cached project list stale
-    if (req.method.starts_with("worktree.") && req.method != "worktree.status")
+    if (req.method.starts_with("worktree.") && !matches!(req.method.as_str(), "worktree.status" | "worktree.overview"))
         || (req.method.starts_with("project.") && !matches!(req.method.as_str(), "project.list" | "project.logo" | "project.log"))
     {
         *reg.plist.lock_recover() = None;
+        crate::overview::invalidate();
     }
     let sid = || -> Result<u32> { Ok(p.get("id").and_then(Value::as_u64).ok_or_else(|| anyhow::anyhow!("missing id"))? as u32) };
     let session = || -> Result<Arc<Session>> { reg.get(sid()?).ok_or_else(|| anyhow::anyhow!("no such session")) };
@@ -790,6 +800,15 @@ fn dispatch(
             Ok(json!({"id": id}))
         }
         "session.list" => Ok(Value::Array(session_list(reg))),
+        // an agent's hook (`axelstra hook`) says what it is doing: waiting, idle or working
+        "session.hint" => {
+            let state = axelstra_core::waiting::HintState::parse(p["state"].as_str().unwrap_or_default())
+                .ok_or_else(|| anyhow::anyhow!("state must be waiting, idle or working"))?;
+            session()?;
+            reg.hints.set(sid()?, state);
+            Ok(json!({}))
+        }
+        "worktree.overview" => Ok(tokio::task::block_in_place(|| crate::overview::cached(&reg.store, &|path| reg.worktree_busy(path)))),
         "session.subscribe" => {
             let id = sid()?;
             let s = session()?;

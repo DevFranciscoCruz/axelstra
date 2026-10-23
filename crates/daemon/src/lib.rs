@@ -9,6 +9,7 @@ pub mod janitor;
 pub mod kanban;
 pub mod lag;
 pub mod msgbus;
+pub mod overview;
 #[cfg(windows)]
 pub mod pipesec;
 pub mod ports;
