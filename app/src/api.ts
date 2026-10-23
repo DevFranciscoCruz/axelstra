@@ -326,6 +326,17 @@ export const gitSuggest = (worktree: string) => call<{ message: string }>("git.s
 export const gitPush = (worktree: string) => call<{ output: string }>("git.push", { worktree });
 export const gitPr = (worktree: string, title: string, body: string, base?: string) =>
   call<{ url: string }>("git.pr", { worktree, title, body, base }).then((r) => r.url);
+export type CheckItem = { name: string; state: "pass" | "fail" | "pending" | "skipped"; link: string };
+/** CI and merge state of the PR behind a worktree's branch; `problem` is set when there is none or gh is unusable. */
+export type ShipStatus = {
+  problem: "" | "nopr" | "missing" | "auth" | "error"; detail: string;
+  number: number; title: string; url: string; pr_state: "open" | "merged" | "closed"; draft: boolean;
+  ci: "pass" | "fail" | "pending" | "none"; checks: CheckItem[];
+  review: "approved" | "changes" | "review" | ""; mergeable: "yes" | "no" | "unknown"; merge_state: string; can_merge: boolean;
+};
+export const gitChecks = (worktree: string) => callBg<ShipStatus>("git.checks", { worktree });
+export const gitMerge = (worktree: string, auto: boolean, deleteBranch: boolean) =>
+  call<{ output: string }>("git.merge", { worktree, auto, delete_branch: deleteBranch }).then((r) => r.output);
 
 export type KCard = {
   meta: { id: string; title: string; status: string; agent: string; depends_on: string[]; priority: number; acceptance?: string | null };
