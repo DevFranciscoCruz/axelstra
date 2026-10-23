@@ -191,7 +191,7 @@ export function ChangesPanel() {
         </button>
       </div>
       <div class="sc-branch" title={branch()}>
-        <div class="sc-name">{branch() || "(detached)"}</div>
+        <div class="sc-name">{branch() || "(destacado)"}</div>
         <div class="sc-base"><Icon name="arrowRight" size={11} /> {base()}</div>
       </div>
 
@@ -233,7 +233,7 @@ export function ChangesPanel() {
           </button>
         </div>
         <div class="sc-split">
-          <button class="sc-main" disabled={!canCommit()} title={canCommit() ? K("Commit (Ctrl+Enter)") : files().length === 0 ? "Sem alterações para commit" : message().trim() ? "A trabalhar…" : "Escreva uma mensagem"} onClick={() => void doCommit()}>
+          <button class="sc-main" disabled={!canCommit()} title={canCommit() ? K("Commit (Ctrl+Enter)") : files().length === 0 ? "Sem alterações para commit" : message().trim() ? "A trabalhar…" : "Escreve uma mensagem"} onClick={() => void doCommit()}>
             <Icon name="check" /> Commit
           </button>
           <button

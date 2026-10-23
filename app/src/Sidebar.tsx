@@ -5,6 +5,7 @@ import { getSettings, detectPackageManagers, projectLogo, createWorktree, launch
 import { Modal } from "./Modal";
 import { pickProject } from "./projectActions";
 import { StateDot } from "./StateDot";
+import { ago } from "./time";
 import { dotOfSession, dotOfWorktree } from "./agentState";
 import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
 import { invoke } from "@tauri-apps/api/core";
@@ -139,11 +140,7 @@ export function Sidebar() {
     }
     return out;
   });
-  const idleLabel = (ms?: number) => {
-    if (ms === undefined) return "";
-    const m = Math.floor(ms / 60000);
-    return m < 1 ? "agora" : m < 60 ? m + "m" : m < 1440 ? Math.floor(m / 60) + "h" : Math.floor(m / 1440) + "d";
-  };
+  const idleLabel = (ms?: number) => (ms === undefined ? "" : ago(ms / 1000));
   const [editSetup, setEditSetup] = createSignal<string | null>(null);
   const [setupText, setSetupText] = createSignal("");
   // package managers installed on this machine, offered as one-click setup commands
@@ -434,7 +431,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
             </Show>
             <For each={[...p.worktrees].filter((w) => !nested().has(norm(w.path))).sort((a, b) => Number(b.is_main) - Number(a.is_main) || Number(isPinned(b.path)) - Number(isPinned(a.path)))}>
               {(w) => {
-                const label = () => w.branch ?? "(detached)";
+                const label = () => w.branch ?? "(destacado)";
                 const live = () => sessionsOf(w.path).filter((s) => s.running).length;
                 const working = () => sessionsOf(w.path).some((s) => sessionState(s) === "working");
                 const waiting = () => sessionsOf(w.path).some((s) => sessionState(s) === "waiting");

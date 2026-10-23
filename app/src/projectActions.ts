@@ -5,7 +5,7 @@ import { projects, refreshProjects, refreshSessions, selectWorktree, setError } 
 /** Asks for a folder, adds it as a project and opens its main worktree. Shared by the sidebar and the empty states. */
 export const pickProject = async () => {
   try {
-    const dir = await open({ directory: true, multiple: false, title: "Escolha a pasta do projeto" });
+    const dir = await open({ directory: true, multiple: false, title: "Escolhe a pasta do projeto" });
     if (typeof dir !== "string") return;
     const added = await addProject(dir);
     await refreshProjects();

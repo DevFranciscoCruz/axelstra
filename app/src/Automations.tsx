@@ -104,7 +104,7 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
               <div class="auto-head">
                 <strong>Automatizações</strong>
                 <span class="grow" />
-                <button class="primary" disabled={projects().length === 0} title={projects().length === 0 ? "Adicione um projeto primeiro" : undefined} onClick={() => edit(blank(projects()[0].id))}>
+                <button class="primary" disabled={projects().length === 0} title={projects().length === 0 ? "Adiciona um projeto primeiro" : undefined} onClick={() => edit(blank(projects()[0].id))}>
                   + Nova
                 </button>
                 <button onClick={() => setShowAutomations(false)}>Fechar</button>

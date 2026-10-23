@@ -9,7 +9,7 @@ export const S = {
   restartConfirm: "Reiniciar o daemon fecha os terminais abertos; os agentes são retomados depois do reinício. Continuar?",
   restartTitle: "Reiniciar o daemon",
   restartFailed: "Não foi possível reiniciar o daemon: ",
-  oldDaemon: "O daemon em execução é de uma versão anterior e não conhece este pedido. Reinicie-o para carregar as definições.",
+  oldDaemon: "O daemon em execução é de uma versão anterior e não conhece este pedido. Reinicia-o para carregar as definições.",
   loadFailed: "Não foi possível carregar as definições: ",
 
   replies: "Respostas dos agentes",
@@ -27,7 +27,7 @@ export const S = {
   autoInstall: "Instalar dependências ao criar um worktree (projetos com package.json e sem comando de setup)",
 
   notify: "Notificações",
-  notifyNote: "Avisos do sistema quando um agente termina ou precisa de si.",
+  notifyNote: "Avisos do sistema quando um agente termina ou precisa de ti.",
   notifySound: "Tocar um som com a notificação",
   notifyMode: {
     all: { label: "Todas", hint: "Avisa quando um agente termina ou fica à espera." },

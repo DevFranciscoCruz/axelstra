@@ -10,7 +10,7 @@ export const DOT_LABEL: Record<DotState, string> = {
   waiting: "À espera de resposta",
   done: "Terminado",
   attention: "Parou: precisa de atenção",
-  queued: "Na fila: o flow ainda não chegou a esta tarefa",
+  queued: "Na fila: o plano ainda não chegou a esta tarefa",
   running: "Terminal ativo",
   none: "",
 };

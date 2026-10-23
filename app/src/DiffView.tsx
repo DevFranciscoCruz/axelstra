@@ -61,7 +61,7 @@ export function DiffView() {
     const agents = sessionsOf(selectedWorktree()).filter((s) => s.running && s.meta?.kind === "agent");
     const target = agents.find((s) => s.id === activeSession()) ?? agents[0];
     if (!target) {
-      setSendMsg("Nenhum agente a correr neste worktree. Abra um agente primeiro.");
+      setSendMsg("Nenhum agente a correr neste worktree. Abre um agente primeiro.");
       return;
     }
     const line = r.neu ?? r.old;
