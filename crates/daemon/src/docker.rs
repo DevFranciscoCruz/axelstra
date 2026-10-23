@@ -758,4 +758,40 @@ mod tests {
         assert!(valid_name(&compose_project(&dir)));
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
+
+    /// Needs docker and an image that is already present: `cargo test -p axelstra-daemon real_docker -- --ignored --nocapture`.
+    /// Only touches a container it creates itself.
+    #[test]
+    #[ignore]
+    fn real_docker() {
+        let st = status();
+        println!("status: {st:?}");
+        if !st.running {
+            return;
+        }
+        let list = containers().unwrap();
+        println!("containers: {}, projects: {}", list.len(), group_projects(&list).len());
+        println!("stats: {}, images: {}, volumes: {}, networks: {}", stats().unwrap().len(), images().unwrap().len(), volumes().unwrap().len(), networks().unwrap().len());
+        let image = std::env::var("AXELSTRA_TEST_IMAGE").unwrap_or_else(|_| "redis:8-alpine".into());
+        let name = format!("axelstra-test-{}", std::process::id());
+        let made = Command::new("docker").args(["run", "-d", "--name", &name, &image]).output().unwrap();
+        assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+        let r = (|| -> Result<()> {
+            println!("inspect: {:?}", inspect(&name)?.command);
+            println!("logs: {} bytes", logs(&name, 20)?.len());
+            println!("fs_list /: {:?}", fs_list(&name, "/")?.iter().take(5).map(|e| e.name.clone()).collect::<Vec<_>>());
+            println!("fs_read /etc/hostname: {:?}", fs_read(&name, "/etc/hostname")?.trim());
+            assert!(fs_read(&name, "/etc").is_err());
+            action("container.pause", &name, false, false, None)?;
+            action("container.unpause", &name, false, false, None)?;
+            action("container.restart", &name, false, false, None)?;
+            action("container.stop", &name, false, false, None)?;
+            action("container.start", &name, false, false, None)?;
+            Ok(())
+        })();
+        let removed = action("container.remove", &name, true, false, None);
+        r.unwrap();
+        println!("removed: {removed:?}");
+        removed.unwrap();
+    }
 }
