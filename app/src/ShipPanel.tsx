@@ -1,4 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Button, Checkbox } from "./ui";
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { press } from "./a11y";
 import { ask } from "./Confirm";
@@ -166,17 +167,17 @@ export function ShipPanel() {
                 <div class="ship-line">Este worktree já foi integrado: o janitor pode removê-lo.</div>
               </Show>
               <div class="ship-actions">
-                <button disabled={!s().url} onClick={() => void openLink(s().url)}>Abrir no browser</button>
+                <Button size="sm" disabled={!s().url} onClick={() => void openLink(s().url)}>Abrir no browser</Button>
                 <Show when={canAutoMerge(s())}>
-                  <button disabled={busy()} onClick={() => void merge(true)}>Ativar auto-merge</button>
+                  <Button size="sm" disabled={busy()} onClick={() => void merge(true)}>Ativar auto-merge</Button>
                 </Show>
                 <Show when={s().can_merge}>
-                  <button class="primary" disabled={busy()} onClick={() => void merge(false)}>Fazer merge</button>
+                  <Button variant="default" size="sm" disabled={busy()} onClick={() => void merge(false)}>Fazer merge</Button>
                 </Show>
               </div>
               <Show when={s().can_merge}>
                 <label class="ship-opt">
-                  <input type="checkbox" checked={delBranch()} onChange={(e) => setDelBranch(e.currentTarget.checked)} /> Apagar o branch depois do merge
+                  <Checkbox checked={delBranch()} onChange={(e) => setDelBranch(e.currentTarget.checked)} /> Apagar o branch depois do merge
                 </label>
               </Show>
             </Show>

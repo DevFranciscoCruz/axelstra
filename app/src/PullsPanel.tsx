@@ -1,4 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Button } from "./ui";
 import { Icon } from "./Icon";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { GhItem, ghList, worktreeFromPr } from "./api";
@@ -47,16 +48,16 @@ export function PullsPanel() {
     <aside class="rightbar" id="rpanel" role="tabpanel" aria-labelledby={`rtab-${rightTab()}`}>
       <RightTabs />
       <div class="rtools">
-        <button class="icon" classList={{ on: kind() === "pr" }} aria-pressed={kind() === "pr"} onClick={() => setKind("pr")}>
+        <Button variant="ghost" size="icon" class="icon" classList={{ on: kind() === "pr" }} aria-pressed={kind() === "pr"} onClick={() => setKind("pr")}>
           PRs
-        </button>
-        <button class="icon" classList={{ on: kind() === "issue" }} aria-pressed={kind() === "issue"} onClick={() => setKind("issue")}>
+        </Button>
+        <Button variant="ghost" size="icon" class="icon" classList={{ on: kind() === "issue" }} aria-pressed={kind() === "issue"} onClick={() => setKind("issue")}>
           Problemas
-        </button>
+        </Button>
         <span class="grow" />
-        <button class="icon" title="Atualizar" aria-label="Atualizar" onClick={() => void refetch()}>
+        <Button variant="ghost" size="icon" class="icon" title="Atualizar" aria-label="Atualizar" onClick={() => void refetch()}>
           <Icon name="refresh" />
-        </button>
+        </Button>
       </div>
       <div class="rlist">
         <Show when={!items.loading} fallback={<div class="placeholder">A carregar…</div>}>
@@ -88,13 +89,13 @@ export function PullsPanel() {
                     </Show>
                     <span class="grow" />
                     <Show when={kind() === "pr"}>
-                      <button class="icon" disabled={busy() === i.number} title="Abrir num worktree novo" onClick={() => void work(i.number)}>
+                      <Button variant="ghost" size="icon" class="icon" disabled={busy() === i.number} title="Abrir num worktree novo" onClick={() => void work(i.number)}>
                         {busy() === i.number ? "…" : "Worktree"}
-                      </button>
+                      </Button>
                     </Show>
-                    <button class="icon" title="Abrir no navegador" aria-label="Abrir no navegador" onClick={() => void open(i.url)}>
+                    <Button variant="ghost" size="icon" class="icon" title="Abrir no navegador" aria-label="Abrir no navegador" onClick={() => void open(i.url)}>
                       <Icon name="external" />
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
