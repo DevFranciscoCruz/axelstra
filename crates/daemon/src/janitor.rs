@@ -51,6 +51,10 @@ pub fn merged_reason(repo: &Path, branch: &str, default: &str) -> Option<String>
     if git::run(repo, &["merge-base", "--is-ancestor", branch, &upstream]).map(|o| o.ok).unwrap_or(false) {
         return Some(format!("already in {upstream}"));
     }
+    // merged into the local default branch but not pushed yet: the commits stay reachable from it, so removing the branch loses nothing
+    if git::run(repo, &["merge-base", "--is-ancestor", branch, default]).map(|o| o.ok).unwrap_or(false) {
+        return Some(format!("already in local {default}"));
+    }
     let o = output_within(
         git::quiet(&mut Command::new("gh")).current_dir(repo).env("GH_PROMPT_DISABLED", "1").args([
             "pr",
@@ -154,6 +158,13 @@ mod tests {
         g(&commit);
         assert_eq!(merged_reason(&dir, "ax/done", "main").as_deref(), Some("already in origin/main"));
         assert!(merged_reason(&dir, "ax/new", "main").is_none() || std::process::Command::new("gh").arg("--version").output().is_ok());
+        // merged into main locally, origin/main still behind: also counts
+        g(&["checkout", "-q", "main"]);
+        g(&["checkout", "-q", "-b", "ax/local"]);
+        g(&commit);
+        g(&["checkout", "-q", "main"]);
+        g(&["merge", "-q", "--ff-only", "ax/local"]);
+        assert_eq!(merged_reason(&dir, "ax/local", "main").as_deref(), Some("already in local main"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
