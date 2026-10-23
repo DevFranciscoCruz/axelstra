@@ -19,6 +19,7 @@ vi.mock("./api", () => ({
   ghListBg: async () => [],
   gitChanges: (wt: string) => changesNow.answer(wt),
   flowTasks: async () => [],
+  call: async () => ({}),
   callBg: async () => ({}),
 }));
 
