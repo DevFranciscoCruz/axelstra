@@ -378,8 +378,10 @@ export function App() {
     const t = tabs();
     const a = activeSession();
     if (t.length > 0 && (a === null || !t.some((s) => s.id === a))) {
-      // a worktree opens on its agent first (the main worktree's agent included), else on its first terminal
-      setActiveSession((t.find((s) => s.meta?.kind === "agent" && s.running) ?? t[0]).id);
+      // the main worktree is not a task: opening it never jumps into its agent, only into a terminal
+      const pool = current()?.wt.is_main ? t.filter((s) => s.meta?.kind !== "agent") : t;
+      if (pool.length > 0) setActiveSession(pool[0].id);
+      else if (a !== null) setActiveSession(null);
     }
     if (t.length === 0 && a !== null) setActiveSession(null);
   });
