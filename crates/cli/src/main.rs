@@ -345,7 +345,7 @@ enum WtCmd {
         /// only list what would be removed
         #[arg(long)]
         dry_run: bool,
-        /// keep doing it in the background every 10 minutes: on or off (no value: show)
+        /// background sweep every 10 minutes, on by default: on or off (no value: show)
         #[arg(long)]
         auto: Option<String>,
     },
