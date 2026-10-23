@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createResource, createSignal } from "solid-js";
 import { Icon } from "./Icon";
+import { PAGE, capList } from "./listing";
 import { gitDiff, writeSession } from "./api";
 import { activeSession, baseRef, changes, openDiff, selectedWorktree, sessionsOf, setActiveSession, setOpenDiff } from "./store";
 
@@ -44,6 +45,13 @@ export function DiffView() {
   );
   createEffect(() => key() && void 0);
   const rows = () => parseDiff(text() ?? "");
+  // a very long diff draws a page of rows at a time
+  const [limit, setLimit] = createSignal(PAGE);
+  createEffect(() => {
+    key();
+    setLimit(PAGE);
+  });
+  const page = () => capList(rows(), limit());
 
   // comment on a line and send it to a running agent of this worktree
   const [commenting, setCommenting] = createSignal<number | null>(null);
@@ -90,7 +98,7 @@ export function DiffView() {
           <Show when={rows().length > 0} fallback={<div class="placeholder">Sem diferenças de texto para mostrar</div>}>
             <table>
               <tbody>
-                <For each={rows()}>
+                <For each={page().shown}>
                   {(r, i) => (
                     <>
                       <tr class={`row ${r.kind}`}>
@@ -132,6 +140,11 @@ export function DiffView() {
                 </For>
               </tbody>
             </table>
+            <Show when={page().hidden > 0}>
+              <button class="show-more" onClick={() => setLimit(limit() + PAGE)}>
+                Mostrar mais linhas ({page().hidden})
+              </button>
+            </Show>
           </Show>
         </Show>
       </div>
