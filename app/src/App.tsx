@@ -10,6 +10,7 @@ import { DockerView } from "./Docker";
 import { Kanban } from "./Kanban";
 import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
+import { WorktreeReports } from "./WorktreeReports";
 import { Palette } from "./Palette";
 import { ContextMenu } from "./ContextMenu";
 import { Automations } from "./Automations";
@@ -801,6 +802,7 @@ export function App() {
                 fallback={
                   <div class="placeholder empty">
                     <div>Sem terminais neste worktree.</div>
+                    <Show when={current()}>{(c) => <WorktreeReports project={c().project.id} worktree={c().wt.path} />}</Show>
                     <div class="empty-actions">
                       <button class="primary" onClick={() => void newAgent()}>
                         <Icon name="sparkle" size={12} inline /> Abrir agente
