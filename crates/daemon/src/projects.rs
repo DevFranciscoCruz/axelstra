@@ -266,7 +266,10 @@ pub fn worktree_remove(p: &Project, path: &str) -> Result<()> {
 /// The non-main worktree `path` of project `p`, as git lists it.
 fn plain_worktree(p: &Project, path: &str) -> Result<git::Worktree> {
     let want = norm_path(path);
-    let wt = git::worktree_list(Path::new(&p.path))?.into_iter().find(|w| norm_path(&w.path) == want).context("not a worktree of this project")?;
+    let wt = git::worktree_list(Path::new(&p.path))?
+        .into_iter()
+        .find(|w| norm_path(&w.path) == want)
+        .context("not a worktree of this project")?;
     if wt.is_main {
         bail!("o worktree principal não pode fazer parte de um grupo");
     }

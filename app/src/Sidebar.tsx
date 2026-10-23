@@ -1,7 +1,8 @@
 import { Icon } from "./Icon";
 import { ask, askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
-import { getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession, dispatchOverlaps, worktreeRename } from "./api";
+import { getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession, dispatchOverlaps, worktreeRename, worktreeOverview, worktreeSweep, worktreeSetParent } from "./api";
+import { groupRunning, isFinished, layout, wtKey } from "./wtGroups";
 import { Modal } from "./Modal";
 import { pickProject } from "./projectActions";
 import { StateDot } from "./StateDot";
@@ -145,6 +146,51 @@ export function Sidebar() {
     }
     return out;
   });
+  // worktrees whose branch is merged and clean, as the daemon's overview lists them (a few seconds old at most)
+  const [mergedWts, setMergedWts] = createSignal<ReadonlySet<string>>(new Set());
+  let overviewBusy = false;
+  const loadMerged = () => {
+    if (overviewBusy) return;
+    overviewBusy = true;
+    worktreeOverview()
+      .then((ov) => setMergedWts(new Set(ov.flatMap((x) => x.merged.map((m) => wtKey(m.path))))), () => 0)
+      .finally(() => (overviewBusy = false));
+  };
+  createEffect(() => {
+    projects();
+    loadMerged();
+  });
+  const overviewTimer = setInterval(() => !document.hidden && loadMerged(), 15000);
+  onCleanup(() => clearInterval(overviewTimer));
+  // parents whose children are folded away, and the projects whose "Concluídos" group is open
+  const GROUPS_KEY = "axelstra.groupsFolded";
+  const [folded, setFolded] = createSignal<ReadonlySet<string>>(
+    (() => {
+      try {
+        return new Set<string>(JSON.parse(localStorage.getItem(GROUPS_KEY) ?? "[]"));
+      } catch {
+        return new Set<string>();
+      }
+    })(),
+  );
+  const toggleFold = (path: string) => {
+    const next = new Set(folded());
+    const k = wtKey(path);
+    if (!next.delete(k)) next.add(k);
+    setFolded(next);
+    try {
+      localStorage.setItem(GROUPS_KEY, JSON.stringify([...next]));
+    } catch {
+      /* preference only */
+    }
+  };
+  const [doneOpen, setDoneOpen] = createSignal<ReadonlySet<string>>(new Set());
+  const toggleDone = (project: string) => {
+    const next = new Set(doneOpen());
+    if (!next.delete(project)) next.add(project);
+    setDoneOpen(next);
+  };
+  const runningIn = (path: string) => sessionsOf(path).filter((s) => s.running).length;
   // worktrees that edit some of the same files (the daemon answers; until it can, the badge simply stays hidden)
   const [overlaps, setOverlaps] = createSignal<Record<string, string[]> | null>(null);
   const pollOverlaps = () => dispatchOverlaps().then(setOverlaps, () => setOverlaps(null));
@@ -229,8 +275,8 @@ export function Sidebar() {
         setPendingWt(null);
       }
       selectWorktree(w.path);
-      const copied = w.env_copied?.length ? ` � ${w.env_copied.length} ficheiro(s) de ambiente copiado(s)` : "";
-      const skipped = w.env_skipped?.length ? ` � ${w.env_skipped.length} ficou de fora` : "";
+      const copied = w.env_copied?.length ? ` · ${w.env_copied.length} ficheiro(s) de ambiente copiado(s)` : "";
+      const skipped = w.env_skipped?.length ? ` · ${w.env_skipped.length} ficou de fora` : "";
       showNotice(`Worktree "${name}" criado${copied}${skipped}.`);
       if (newAgent() !== "none") await launchDefaultAgent(projectId, w.path, newAgent(), AGENTS[newAgent()], undefined, undefined, projectTerse(projectId));
       let setup = projects().find((p) => p.id === projectId)?.setup;
@@ -289,7 +335,15 @@ export function Sidebar() {
     });
   };
 
-  const worktreeMenu = (p: { id: string; name: string }, w: { path: string; branch: string | null; is_main: boolean }, label: string): MenuItem[] => [
+    // "Mover para…": the other worktrees of the project, minus itself and what is already below it (that would loop)
+  const moveMenu = (p: { id: string; worktrees: { path: string; branch: string | null; is_main: boolean; parent?: string | null }[] }, w: { path: string; parent?: string | null }, below: string[]): MenuItem[] => [
+    { label: "Nenhum (nível superior)", icon: w.parent ? undefined : "check", run: () => run(() => worktreeSetParent(p.id, w.path, null)) },
+    ...p.worktrees
+      .filter((x) => !x.is_main && !below.includes(wtKey(x.path)))
+      .map((x) => ({ label: x.branch ?? x.path, icon: wtKey(w.parent) === wtKey(x.path) ? "check" : undefined, run: () => run(() => worktreeSetParent(p.id, w.path, x.path)) })),
+  ];
+
+  const worktreeMenu = (p: { id: string; name: string; worktrees?: { path: string; branch: string | null; is_main: boolean; parent?: string | null }[] }, w: { path: string; branch: string | null; is_main: boolean; parent?: string | null }, label: string, below: string[] = []): MenuItem[] => [
     { label: "Atualizar", icon: "refresh", run: async () => { await refreshProjects(); await refreshSessions(); } },
     {
       label: S.replies,
@@ -311,6 +365,7 @@ export function Sidebar() {
     { label: "Copiar caminho", icon: "copy", run: () => copy(w.path) },
     { label: "Mudar o nome do worktree…", icon: "pencil", disabled: w.is_main, run: () => { setWtNewName(w.branch ?? label); setWtRenameErr(""); setRenamingWt({ path: w.path, name: label }); } },
     { label: "Copiar nome do worktree", icon: "copy", run: () => copy(w.branch ?? label) },
+    { label: "Mover para…", icon: "branch", disabled: w.is_main || !p.worktrees || p.worktrees.filter((x) => !x.is_main).length < 2, children: p.worktrees ? moveMenu({ id: p.id, worktrees: p.worktrees }, w, below) : [] },
     { separator: true },
     { label: isPinned(w.path) ? "Desafixar" : "Fixar", icon: "pin", run: () => togglePin(w.path) },
     { label: "Marcar como não lido", icon: "circleHalf", run: () => setAttention((cur) => new Set(cur).add(norm(w.path))) },
@@ -318,6 +373,24 @@ export function Sidebar() {
     { label: "Dormir", icon: "moon", run: () => sleepWorktree(w.path, label) },
     { label: "Remover worktree", icon: "x", danger: true, disabled: w.is_main, run: () => dropWorktree(p.id, w.path, label) },
   ];
+
+  // the existing sweep removes every merged worktree, of all projects: the question says so
+  const cleanFinished = async (names: string[]) => {
+    const ok = await ask(
+      `Remover os worktrees concluídos (${names.length})?\n\n${names.join("\n")}\n\nA limpeza remove todos os worktrees já merged, de todos os projetos.`,
+      { title: "Limpar concluídos", kind: "warning", okLabel: "Remover", cancelLabel: "Cancelar" },
+    );
+    if (!ok) return;
+    try {
+      const done = (await worktreeSweep()).filter((x) => x.removed).length;
+      showNotice(done === 1 ? "1 worktree removida" : `${done} worktrees removidas`);
+    } catch (e) {
+      setError(String(e));
+    }
+    await refreshProjects();
+    await refreshSessions();
+    loadMerged();
+  };
 
   const dropProject = async (id: string, name: string) => {
     const ok = await ask(`Tirar "${name}" da lista?
@@ -411,7 +484,13 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
           </div>
         }
       >
-        {(p) => (
+        {(p) => {
+          // main first, then the tree of parents and children; the finished ones are listed apart
+          const lay = createMemo(() => {
+            const fin = new Set(p.worktrees.filter((w) => isFinished(w, mergedWts(), runningIn(w.path))).map((w) => wtKey(w.path)));
+            return layout(p.worktrees, { finished: fin, hidden: nested(), collapsed: folded(), pinned: isPinned });
+          });
+          return (
           <div class="project">
             <div class="project-head" title={p.path} onContextMenu={(e) => showMenu(e, projectMenu(p))}>
               <ProjectIcon id={p.id} name={p.name} url={p.icon_url} />
@@ -469,8 +548,14 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 <span class="name">A criar {pendingWt()!.name}…</span>
               </div>
             </Show>
-            <For each={[...p.worktrees].filter((w) => !nested().has(norm(w.path))).sort((a, b) => Number(b.is_main) - Number(a.is_main) || Number(isPinned(b.path)) - Number(isPinned(a.path)))}>
+            <For each={lay().rows.map((r) => r.wt)}>
               {(w) => {
+                const ri = () => lay().rows.find((r) => wtKey(r.wt.path) === wtKey(w.path));
+                const depth = () => ri()?.depth ?? 0;
+                const kids = () => ri()?.kids ?? 0;
+                const isFolded = () => kids() > 0 && folded().has(wtKey(w.path));
+                // running agents of the whole group, shown on the parent row while its children are folded away
+                const groupLive = () => groupRunning(ri()?.members ?? [], (k) => runningIn(k));
                 const label = () => w.branch ?? "(destacado)";
                 const live = () => sessionsOf(w.path).filter((s) => s.running).length;
                 const working = () => sessionsOf(w.path).some((s) => sessionState(s) === "working");
@@ -490,17 +575,40 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                   <>
                   <div
                     class="item wt"
-                    classList={{ active: norm(selectedWorktree()) === norm(w.path) }}
+                    classList={{ active: norm(selectedWorktree()) === norm(w.path), child: depth() > 0 }}
+                    style={depth() > 0 ? { "margin-left": `${depth() * 14}px` } : undefined}
                     onKeyDown={(e) => {
                       // the menu key and Shift+F10 open the row menu from the keyboard
-                      if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
-                      e.preventDefault();
-                      const r = e.currentTarget.getBoundingClientRect();
-                      showMenuAt(r.left + 24, r.bottom, worktreeMenu(p, w, label()));
+                      if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+                        e.preventDefault();
+                        const r = e.currentTarget.getBoundingClientRect();
+                        showMenuAt(r.left + 24, r.bottom, worktreeMenu(p, w, label(), ri()?.members));
+                        return;
+                      }
+                      // left folds a group, right opens it
+                      if (kids() > 0 && (e.target as HTMLElement).classList.contains("wt-open") && ((e.key === "ArrowLeft" && !isFolded()) || (e.key === "ArrowRight" && isFolded()))) {
+                        e.preventDefault();
+                        toggleFold(w.path);
+                      }
                     }}
-                    onContextMenu={(e) => showMenu(e, worktreeMenu(p, w, label()))}
+                    onContextMenu={(e) => showMenu(e, worktreeMenu(p, w, label(), ri()?.members))}
                     title={w.path}
                   >
+                    <Show when={kids() > 0}>
+                      <button
+                        type="button"
+                        class="wt-fold"
+                        aria-expanded={!isFolded()}
+                        aria-label={isFolded() ? `Abrir o grupo de ${label()}` : `Fechar o grupo de ${label()}`}
+                        title={isFolded() ? "Mostrar os worktrees do grupo" : "Esconder os worktrees do grupo"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFold(w.path);
+                        }}
+                      >
+                        <Icon name={isFolded() ? "chevRight" : "chevDown"} size={11} />
+                      </button>
+                    </Show>
                     <button type="button" class="wt-open" aria-current={norm(selectedWorktree()) === norm(w.path) ? "true" : undefined} onClick={() => void openWorktree(p.id, w.path, w.is_main)}>
                     <StateDot state={dotOfWorktree({ queued: queued(), waiting: waiting(), working: working(), needs: needs(), live: live() })} />
                     <span class="name">{w.is_main ? (p.default_branch ?? "main") : label()}</span>
@@ -537,8 +645,8 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                         {pr()!.checks === "pass" ? <Icon name="check" size={10} inline /> : pr()!.checks === "fail" ? <Icon name="x" size={10} inline /> : pr()!.checks === "pending" ? <Icon name="ellipsis" size={10} inline /> : null}
                       </span>
                     </Show>
-                    <Show when={live() > 0}>
-                      <span class="count">{live()}</span>
+                    <Show when={isFolded() && groupLive() > 0} fallback={<Show when={live() > 0}><span class="count">{live()}</span></Show>}>
+                      <span class="count group" title={`${groupLive()} a correr neste grupo (${kids()} ${kids() === 1 ? "worktree" : "worktrees"} dentro)`}>{groupLive()}</span>
                     </Show>
                     <Show when={isPinned(w.path)}>
                       <span class="pin" title="Fixado"><Icon name="pin" size={11} /></span>
@@ -550,7 +658,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                       onClick={(e) => {
                         e.stopPropagation();
                         const r = e.currentTarget.getBoundingClientRect();
-                        showMenuAt(r.left, r.bottom + 2, worktreeMenu(p, w, label()));
+                        showMenuAt(r.left, r.bottom + 2, worktreeMenu(p, w, label(), ri()?.members));
                       }}
                     >
                       <Icon name="more" />
@@ -569,7 +677,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                     </Show>
                   </div>
                   <Show when={agents().length > 0}>
-                    <div class="wt-agents">
+                    <div class="wt-agents" style={depth() > 0 ? { "margin-left": `${14 + depth() * 14}px` } : undefined}>
                       <button class="wt-agents-head" onClick={() => toggleAgents(w.path)} aria-expanded={!agentsHidden().has(norm(w.path))}>
                         <span>{agents().length} {agents().length === 1 ? "agente" : "agentes"}</span>
                         <Icon name={agentsHidden().has(norm(w.path)) ? "chevRight" : "chevDown"} size={11} />
@@ -640,8 +748,47 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 );
               }}
             </For>
+            <Show when={lay().finished.length > 0}>
+              <div class="wt-done">
+                <div class="wt-done-head">
+                  <button type="button" class="wt-done-toggle" aria-expanded={doneOpen().has(p.id)} onClick={() => toggleDone(p.id)}>
+                    <Icon name={doneOpen().has(p.id) ? "chevDown" : "chevRight"} size={11} />
+                    <span>Concluídos ({lay().finished.length})</span>
+                  </button>
+                  <button type="button" class="wt-done-clean" title="Remover os worktrees já merged" onClick={() => void cleanFinished(lay().finished.map((w) => `${p.name}: ${w.branch ?? w.path}`))}>
+                    Limpar
+                  </button>
+                </div>
+                <Show when={doneOpen().has(p.id)}>
+                  <For each={lay().finished}>
+                    {(w) => {
+                      const label = () => w.branch ?? "(destacado)";
+                      return (
+                        <div class="item wt finished" classList={{ active: norm(selectedWorktree()) === norm(w.path) }} onContextMenu={(e) => showMenu(e, worktreeMenu(p, w, label()))} title={w.path}>
+                          <button type="button" class="wt-open" aria-current={norm(selectedWorktree()) === norm(w.path) ? "true" : undefined} onClick={() => void openWorktree(p.id, w.path, w.is_main)}>
+                            <StateDot state="done" />
+                            <span class="name">{label()}</span>
+                          </button>
+                          <button
+                            class="x"
+                            title="Remover worktree" aria-label={`Remover ${label()}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void dropWorktree(p.id, w.path, label());
+                            }}
+                          >
+                            <Icon name="x" />
+                          </button>
+                        </div>
+                      );
+                    }}
+                  </For>
+                </Show>
+              </div>
+            </Show>
           </div>
-        )}
+          );
+        }}
       </For>
 
       <div class="grow" />

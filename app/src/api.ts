@@ -5,7 +5,7 @@ import { projectTerse } from "./store";
 
 export type SessionMeta = { project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; note?: string; parent?: number; worker?: boolean };
 export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
-export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean };
+export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean; /** worktree of the same project this one is grouped under */ parent?: string | null };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   /** false for a plain folder that is not a git repository (yet) */
   git?: boolean;
@@ -279,7 +279,13 @@ export const removeProject = (id: string) => call("project.remove", { id });
 export type EnvSkip = { path: string; reason: string };
 /** worktree.create also says what .worktreeinclude copied into the new worktree and what it left out */
 export type WorktreeCreated = Worktree & { env_copied?: string[]; env_skipped?: EnvSkip[] };
-export const createWorktree = (project: string, name: string) => call<WorktreeCreated>("worktree.create", { project, name });
+export const createWorktree = (project: string, name: string, parent?: string) => call<WorktreeCreated>("worktree.create", { project, name, parent });
+/** groups a worktree under another one of the same project; null puts it back at the top level */
+export const worktreeSetParent = (project: string, path: string, parent: string | null) => call("worktree.set_parent", { project, path, parent });
+/** a task file (report) of an agent that worked in a worktree */
+export type WorktreeNote = { name: string; status: "ok" | "nota" | "aberto"; excerpt: string; modified: number };
+export const notesWorktree = (project: string, worktree: string) => call<{ items: WorktreeNote[] }>("notes.worktree", { project, worktree }).then((r) => r.items);
+export const notesReadFile = (project: string, name: string) => call<{ text: string; path: string; name: string }>("notes.read_file", { project, name });
 /** the ignored files .worktreeinclude would copy into the next worktree of the project */
 export type EnvPreview = { has_file: boolean; files: string[]; skipped: EnvSkip[] };
 export const projectEnvPreview = (project: string) => call<EnvPreview>("project.env_preview", { project });
