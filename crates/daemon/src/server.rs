@@ -1142,6 +1142,13 @@ fn dispatch(
                 })
             })
         }
+        "docker.open_logs" | "docker.open_shell" => {
+            let (s, label, meta) = crate::docker::terminal(&reg.store, &req.method, p)?;
+            Ok(json!({"id": reg.spawn(&s, Some(&label), Some(meta))?}))
+        }
+        "docker.status" | "docker.containers" | "docker.stats" | "docker.images" | "docker.volumes" | "docker.action" => {
+            tokio::task::block_in_place(|| crate::docker::call(&reg.store, &req.method, p))
+        }
         "fs.list" | "fs.read" | "fs.stat" | "fs.write" | "fs.search" | "fs.grep" | "fs.create" | "fs.rename" | "fs.delete" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             let path = p["path"].as_str().unwrap_or_default();
