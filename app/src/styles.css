@@ -933,3 +933,4 @@ button.icon, button.x, button.split-x, button.cbtn { display: inline-flex; align
 
 /* a confirmation about something destructive: the button that proceeds says so, the safe one has the focus */
 .modal .m-actions button.primary.kind-warn { background: var(--danger); color: #1e1f23; }
+.search-hit.on { background: #2b2b35; border-color: var(--accent); }

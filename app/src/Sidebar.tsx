@@ -29,6 +29,10 @@ import {
   watchDispatch,
   dispatchTopics,
   confirmDiscard,
+  creatingWorktree,
+  setCreatingWorktree,
+  removeRequest,
+  setRemoveRequest,
   editorDirty,
   flowState,
   setEditorDirty,
@@ -64,8 +68,9 @@ function ProjectIcon(props: { id: string; name: string; url?: string | null }) {
 }
 
 export function Sidebar() {
-  // project id currently showing the "new worktree" input
-  const [creating, setCreating] = createSignal<string | null>(null);
+  // project id currently showing the "new worktree" dialog (in the store: the command palette opens it too)
+  const creating = creatingWorktree;
+  const setCreating = setCreatingWorktree;
   const [newName, setNewName] = createSignal("");
   // agent started in a new worktree: "none" or an AGENTS key, remembered between runs
   const NEWWT_KEY = "axelstra.newwt.agent";
@@ -349,6 +354,13 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
       removing.delete(norm(path));
     }
   };
+
+  createEffect(() => {
+    const r = removeRequest();
+    if (!r) return;
+    setRemoveRequest(null);
+    void dropWorktree(r.project, r.path, r.name);
+  });
 
   return (
     <aside class="sidebar">
