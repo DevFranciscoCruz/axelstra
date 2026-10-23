@@ -1662,6 +1662,20 @@ fn dispatch(
             let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
             tokio::task::block_in_place(|| crate::projects::worktree_remove(&pr, path))?;
             let _ = crate::projects::forget_parent(&reg.store, &pr.id, path);
+            // the sessions of a removed worktree have nowhere to be shown: they would only keep using memory
+            let gone = crate::projects::norm_path(path);
+            let doomed: Vec<_> = {
+                let sessions = reg.sessions.lock_recover();
+                let metas = reg.metas.lock_recover();
+                sessions
+                    .iter()
+                    .filter(|(id, _)| metas.get(id).and_then(|m| m["worktree"].as_str()).is_some_and(|w| crate::projects::norm_path(w) == gone))
+                    .map(|(_, s)| s.clone())
+                    .collect()
+            };
+            for s in doomed {
+                s.kill();
+            }
             Ok(json!({}))
         }
         "hooks.status" => Ok(crate::hooks::status()?),
