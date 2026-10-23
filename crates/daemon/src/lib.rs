@@ -6,6 +6,7 @@ pub mod client;
 pub mod docker;
 pub mod fsops;
 pub mod gh;
+pub mod hooks;
 pub mod janitor;
 pub mod kanban;
 pub mod lag;

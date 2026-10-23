@@ -1654,6 +1654,8 @@ fn dispatch(
             let _ = crate::projects::forget_parent(&reg.store, &pr.id, path);
             Ok(json!({}))
         }
+        "hooks.status" => Ok(crate::hooks::status()?),
+        "hooks.install" => tokio::task::block_in_place(crate::hooks::install),
         "ping" => Ok(json!({})),
         // used by the app updater: the installer cannot replace a running axelstra.exe.
         // Sessions die with the daemon (Job Objects), so the UI warns before calling this.

@@ -3,12 +3,11 @@
 //! touched) because cards are working notes, not project history.
 
 use anyhow::{bail, Context, Result};
+use axelstra_core::agents;
 use axelstra_core::card::{self, Card, Meta};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-/// Agents a card may name. A single list so it is easy to replace by the shared agent registry.
-pub const AGENTS: [&str; 3] = ["claude", "codex", "gemini"];
 pub const STATUSES: [&str; 5] = ["backlog", "todo", "in-progress", "needs-review", "done"];
 
 #[derive(Serialize)]
@@ -105,8 +104,8 @@ pub fn save(repo: &Path, id: Option<&str>, title: &str, body: &str, status: Opti
     }
     // checked before anything is written: a bad agent must not leave a card file that no longer parses
     if let Some(a) = extra["agent"].as_str() {
-        if !AGENTS.contains(&a) {
-            bail!("unknown agent {a:?} (expected one of: {})", AGENTS.join(", "));
+        if !agents::ids().contains(&a) {
+            bail!("unknown agent {a:?} (expected one of: {})", agents::ids().join(", "));
         }
     }
     let d = dir(repo);
@@ -185,7 +184,7 @@ mod tests {
         let e = save(&repo, None, "T", "b", None, &serde_json::json!({"agent": "rm -rf"})).unwrap_err().to_string();
         assert!(e.contains("unknown agent"), "{e}");
         assert!(!repo.join(".kanban").exists());
-        for a in AGENTS {
+        for a in agents::ids() {
             save(&repo, None, "T", "b", None, &serde_json::json!({"agent": a})).unwrap();
         }
         let _ = std::fs::remove_dir_all(&repo);

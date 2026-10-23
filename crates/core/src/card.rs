@@ -1,3 +1,4 @@
+use crate::agents;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -49,10 +50,9 @@ pub struct Card {
     pub path: PathBuf,
 }
 
-/// `--permission-mode` values of the claude CLI.
-pub const PERMISSION_MODES: [&str; 6] = ["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"];
-/// Agent keys the UI can offer; the orchestrator can run a subset of them.
-pub const AGENTS: [&str; 4] = ["claude", "codex", "chatgpt", "gemini"];
+/// `--permission-mode` values of the claude CLI (2.1.309 lists "manual"). "default" is what older claude versions
+/// called it: still accepted so cards saved before the rename keep loading.
+pub const PERMISSION_MODES: [&str; 7] = ["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "manual", "plan"];
 
 /// Ids and run names end up in worktree paths and branch names: `[A-Za-z0-9._-]`, no `..`.
 pub fn valid_slug(s: &str) -> bool {
@@ -67,7 +67,7 @@ fn validate(m: &Meta) -> Result<()> {
     if !valid_slug(&m.id) {
         bail!("invalid card id {:?}: use letters, digits, '.', '_' or '-' (no '..')", m.id);
     }
-    if !AGENTS.contains(&m.agent.as_str()) {
+    if agents::get(&m.agent).is_none() {
         bail!("card '{}': unknown agent {:?}", m.id, m.agent);
     }
     if !PERMISSION_MODES.contains(&m.permission_mode.as_str()) {
@@ -211,6 +211,43 @@ permission_mode: plan
 ---
 ";
         assert_eq!(parse(t, Path::new("x")).unwrap().meta.permission_mode, "plan");
+    }
+
+    #[test]
+    fn current_and_old_permission_modes_are_accepted() {
+        for mode in ["manual", "default", "acceptEdits"] {
+            let t = format!(
+                "---
+id: x
+permission_mode: {mode}
+---
+"
+            );
+            assert_eq!(parse(&t, Path::new("x")).unwrap().meta.permission_mode, mode);
+        }
+    }
+
+    #[test]
+    fn agent_check_follows_the_agents_table_including_aliases() {
+        for a in ["claude", "codex", "gemini", "chatgpt"] {
+            let t = format!(
+                "---
+id: x
+agent: {a}
+---
+"
+            );
+            assert!(parse(&t, Path::new("x")).is_ok(), "{a}");
+        }
+        assert!(parse(
+            "---
+id: x
+agent: nope
+---
+",
+            Path::new("x")
+        )
+        .is_err());
     }
 
     #[test]
