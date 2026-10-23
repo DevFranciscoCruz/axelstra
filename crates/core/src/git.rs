@@ -70,8 +70,8 @@ pub fn current_branch(repo: &Path) -> Result<String> {
 
 /// `git worktree list` is asked many times a second by the UI and the daemon (every folder check starts a process):
 /// the answer is reused for a moment and dropped whenever a worktree is added or removed here.
-static WT_CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, (std::time::Instant, Vec<Worktree>)>>> =
-    std::sync::Mutex::new(None);
+type WtCache = std::collections::HashMap<String, (std::time::Instant, Vec<Worktree>)>;
+static WT_CACHE: std::sync::Mutex<Option<WtCache>> = std::sync::Mutex::new(None);
 
 pub fn forget_worktree_lists() {
     *WT_CACHE.lock().unwrap() = None;

@@ -299,7 +299,7 @@ fn remove_worktree(c: &mut Client, projects: &Value, t: &Task) {
     let is_main = p["worktrees"]
         .as_array()
         .and_then(|a| a.iter().find(|w| w["path"].as_str() == Some(wp.as_str())))
-        .map_or(false, |w| w["is_main"] == json!(true));
+        .is_some_and(|w| w["is_main"] == json!(true));
     if let Some(why) = keep_reason(&wp, is_main) {
         println!("[flow] {}: worktree kept ({why})", t.id);
         return;
@@ -355,7 +355,7 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resu
             }
             let id = sess[&t.id];
             let s = list.iter().find(|s| s["id"].as_u64() == Some(id as u64));
-            if s.map_or(false, |s| s["idle_ms"].as_u64().unwrap_or(u64::MAX) < 3000) {
+            if s.is_some_and(|s| s["idle_ms"].as_u64().unwrap_or(u64::MAX) < 3000) {
                 worked.insert(t.id.clone(), true);
             }
             // outcome: Some(ok, why)

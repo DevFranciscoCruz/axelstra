@@ -126,7 +126,7 @@ pub async fn voice_transcribe(app: AppHandle, request: Request<'_>) -> Result<St
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("expected raw audio bytes".into());
     };
-    let samples: Vec<f32> = bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0).collect();
+    let samples: Vec<f32> = bytes.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b) as f32 / 32768.0).collect();
     let lang = request.headers().get("x-lang").and_then(|v| v.to_str().ok()).unwrap_or("auto").to_string();
     let dir = model_dir(&app)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {

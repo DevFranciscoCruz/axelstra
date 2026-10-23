@@ -606,7 +606,7 @@ mod parent_tests {
         let path = git::canon(&repo).unwrap().to_string_lossy().to_string();
         let p = Project { id: "p".into(), name: "proj".into(), path, setup: None, parents: BTreeMap::new() };
         let store = root.join("projects.json");
-        save(&store, &[p.clone()]).unwrap();
+        save(&store, std::slice::from_ref(&p)).unwrap();
         (root, p, store)
     }
 
