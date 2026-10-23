@@ -17,3 +17,5 @@ pub mod skill;
 pub mod watcher;
 pub mod wtstatus;
 pub mod runner;
+#[cfg(windows)]
+pub mod pipesec;
