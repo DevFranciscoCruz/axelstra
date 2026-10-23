@@ -976,7 +976,7 @@ button.icon, button.x, button.split-x, button.cbtn { display: inline-flex; align
 .wt-agent-edit { flex: 1; min-width: 0; margin: 2px 4px; background: var(--s-in); color: inherit; border: 1px solid var(--line-ctl); border-radius: var(--r-sm); padding: 3px 6px; font: inherit; font-size: var(--fs-md); }
 .wt-agent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wt-agent-kind, .wt-agent-wt { flex: none; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--line-3); border-radius: var(--r-lg); padding: 0 5px; color: var(--muted); font-size: var(--fs-sm); }
-.wt-agent-time { color: var(--muted); font-size: var(--fs-sm); flex: none; }
+.wt-agent-time { color: var(--muted); font-size: var(--fs-sm); flex: none; margin: 0 6px 0 2px; }
 .wt-agent-report { display: inline-flex; align-items: center; gap: 4px; flex: none; margin-right: 4px; padding: 2px 7px; background: none; border: 1px solid var(--line-3); border-radius: var(--r-lg); color: var(--muted); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
 .wt-agent-report:hover { border-color: var(--accent); color: var(--accent); }
 .wt-badge.overlap { color: var(--warn); display: inline-flex; align-items: center; }
