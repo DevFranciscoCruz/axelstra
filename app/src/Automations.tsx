@@ -5,6 +5,7 @@ import { Select } from "./Select";
 import { Modal } from "./Modal";
 import { ask, askDiscard } from "./Confirm";
 import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations } from "./store";
+import { Button, Field, Input, Textarea } from "./ui";
 
 const DAYS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
 
@@ -101,10 +102,10 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
               <div class="auto-head">
                 <strong>Automatizações</strong>
                 <span class="grow" />
-                <button class="primary" disabled={projects().length === 0} title={projects().length === 0 ? "Adiciona um projeto primeiro" : undefined} onClick={() => edit(blank(projects()[0].id))}>
+                <Button variant="default" disabled={projects().length === 0} title={projects().length === 0 ? "Adiciona um projeto primeiro" : undefined} onClick={() => edit(blank(projects()[0].id))}>
                   + Nova
-                </button>
-                <button onClick={() => setShowAutomations(false)}>Fechar</button>
+                </Button>
+                <Button onClick={() => setShowAutomations(false)}>Fechar</Button>
               </div>
               <div class="auto-note">
                 Cada execução abre um worktree novo com o agente já a trabalhar no pedido. Só corre com o Axelstra aberto
@@ -124,18 +125,18 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
                           {projectName(a.project)} · {a.agent} · {describe(a)}
                         </div>
                       </div>
-                      <button class="icon" title="Executar agora (fora do horário)" aria-label={`Executar agora: ${a.name}`} onClick={() => void runNow(a)}>
+                      <Button size="icon" variant="ghost" title="Executar agora (fora do horário)" aria-label={`Executar agora: ${a.name}`} onClick={() => void runNow(a)}>
                         <Icon name="bolt" />
-                      </button>
-                      <button class="icon" title={a.enabled ? "Desativar o agendamento" : "Ativar o agendamento"} aria-label={`${a.enabled ? "Desativar" : "Ativar"} o agendamento: ${a.name}`} onClick={() => void toggle(a)}>
+                      </Button>
+                      <Button size="icon" variant="ghost" title={a.enabled ? "Desativar o agendamento" : "Ativar o agendamento"} aria-label={`${a.enabled ? "Desativar" : "Ativar"} o agendamento: ${a.name}`} onClick={() => void toggle(a)}>
                         <Icon name={a.enabled ? "pause" : "play"} />
-                      </button>
-                      <button class="icon" title="Editar" aria-label="Editar" onClick={() => edit({ ...a })}>
+                      </Button>
+                      <Button size="icon" variant="ghost" title="Editar" aria-label="Editar" onClick={() => edit({ ...a })}>
                         <Icon name="pencil" />
-                      </button>
-                      <button class="icon danger" title="Apagar automatização" aria-label="Apagar automatização" onClick={() => void remove(a)}>
+                      </Button>
+                      <Button size="icon" variant="ghost" class="text-destructive" title="Apagar automatização" aria-label="Apagar automatização" onClick={() => void remove(a)}>
                         <Icon name="x" />
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </For>
@@ -149,41 +150,38 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
               <div class="auto-head">
                 <strong>{d().id ? "Editar automatização" : "Nova automatização"}</strong>
               </div>
-              <input
+              <Input
                 class="m-title"
                 placeholder="Nome (ex.: Revisão da manhã)"
                 value={d().name}
                 onInput={(e) => setDraft({ ...d(), name: e.currentTarget.value })}
                 ref={(el) => queueMicrotask(() => el.focus())}
               />
-              <textarea
+              <Textarea
                 class="m-body"
                 placeholder="O que o agente deve fazer em cada execução…"
                 value={d().prompt}
                 onInput={(e) => setDraft({ ...d(), prompt: e.currentTarget.value })}
               />
               <div class="m-row">
-                <label>
-                  Projeto
+                <Field label="Projeto">
                   <Select
                     value={d().project}
                     options={projects().map((p) => ({ value: p.id, label: p.name }))}
                     onChange={(v) => setDraft({ ...d(), project: v })}
                   />
-                </label>
-                <label>
-                  Agente
+                </Field>
+                <Field label="Agente">
                   <Select
                     value={d().agent}
                     options={agentOptions(agents() ?? [], d().agent)}
                     onChange={(v) => setDraft({ ...d(), agent: v })}
                   />
                   <Show when={agentWarning(agents() ?? [], d().agent)}>{(w) => <span class="auto-note">{w()}</span>}</Show>
-                </label>
+                </Field>
               </div>
               <div class="m-row">
-                <label>
-                  Repetição
+                <Field label="Repetição">
                   <Select
                     value={d().schedule.kind}
                     options={[
@@ -198,41 +196,38 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
                       })
                     }
                   />
-                </label>
+                </Field>
                 {(() => {
                   const s = () => d().schedule;
                   return (
                     <>
                       <Show when={s().kind === "interval"}>
-                        <label>
-                          Minutos
-                          <input
+                        <Field label="Minutos">
+                          <Input
                             type="number"
                             min="5"
                             value={(s() as { minutes: number }).minutes}
                             onInput={(e) => setDraft({ ...d(), schedule: { kind: "interval", minutes: Math.max(5, parseInt(e.currentTarget.value) || 5) } })}
                           />
-                        </label>
+                        </Field>
                       </Show>
                       <Show when={s().kind === "weekly"}>
-                        <label>
-                          Dia
+                        <Field label="Dia">
                           <Select
                             value={String((s() as { day: number }).day)}
                             options={DAYS.map((n, idx) => ({ value: String(idx), label: n }))}
                             onChange={(v) => setDraft({ ...d(), schedule: { ...(s() as { kind: "weekly"; day: number; time: string }), day: parseInt(v) } })}
                           />
-                        </label>
+                        </Field>
                       </Show>
                       <Show when={s().kind !== "interval"}>
-                        <label>
-                          Hora
-                          <input
+                        <Field label="Hora">
+                          <Input
                             type="time"
                             value={(s() as { time: string }).time}
                             onInput={(e) => setDraft({ ...d(), schedule: { ...(s() as { kind: "daily"; time: string }), time: e.currentTarget.value } })}
                           />
-                        </label>
+                        </Field>
                       </Show>
                     </>
                   );
@@ -240,10 +235,10 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
               </div>
               <div class="m-actions">
                 <span class="cmt-msg grow" role="status" aria-live="polite">{msg()}</span>
-                <button onClick={() => void leaveDraft()}>Cancelar</button>
-                <button class="primary" disabled={!d().name.trim() || !d().prompt.trim()} onClick={() => void save()}>
+                <Button onClick={() => void leaveDraft()}>Cancelar</Button>
+                <Button variant="default" disabled={!d().name.trim() || !d().prompt.trim()} onClick={() => void save()}>
                   Guardar
-                </button>
+                </Button>
               </div>
             </>
           )}

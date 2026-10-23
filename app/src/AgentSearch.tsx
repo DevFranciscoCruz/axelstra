@@ -4,6 +4,7 @@ import { moveIndex } from "./a11y";
 import { ago } from "./time";
 import { Modal } from "./Modal";
 import { findWorktree, projects, projectTerse, refreshSessions, setError, setShowAgentSearch, setActiveSession, selectWorktree } from "./store";
+import { Input } from "./ui";
 
 const sha256Hex = async (s: string) =>
   [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -90,7 +91,7 @@ export function AgentSearch() {
 
   return (
     <Modal label="Pesquisar conversas" onClose={() => setShowAgentSearch(false)} class="modal auto">
-      <input
+      <Input
         class="m-title"
         placeholder="Pesquisar nas conversas do Claude, Codex e Gemini…"
         role="combobox"

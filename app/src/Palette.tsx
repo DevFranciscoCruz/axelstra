@@ -2,6 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import { moveIndex } from "./a11y";
 import { Modal } from "./Modal";
 import { findWorktree, projects, selectWorktree, selectedWorktree, setRightTab, setShowKanban } from "./store";
+import { Input } from "./ui";
 
 export type PaletteAction = { label: string; hint?: string; run: () => void };
 
@@ -75,7 +76,7 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
   return (
     <Show when={open()}>
       <Modal label="Paleta de comandos" onClose={() => setOpen(false)} backClass="pal-back" class="pal">
-        <input
+        <Input
           class="pal-input"
           role="combobox"
           aria-expanded="true"

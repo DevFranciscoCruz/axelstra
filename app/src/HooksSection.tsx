@@ -2,6 +2,7 @@ import { Show, createResource, createSignal } from "solid-js";
 import { hooksInstall, hooksStatus } from "./api";
 import { errorText } from "./settingsLogic";
 import { showNotice } from "./store";
+import { Button } from "./ui";
 
 /** Settings block: whether Claude's hooks that report "waiting for an answer" are installed, and a button to install them. */
 export function HooksSection() {
@@ -31,9 +32,9 @@ export function HooksSection() {
           {(v) => <span>{v().installed ? "Hooks instalados" : "Hooks não instalados"}</span>}
         </Show>
         <Show when={!st()?.installed}>
-          <button disabled={busy()} onClick={() => void install()}>
+          <Button disabled={busy()} onClick={() => void install()}>
             {busy() ? "A instalar…" : "Instalar hooks do Claude"}
-          </button>
+          </Button>
         </Show>
       </div>
       <Show when={error()}>

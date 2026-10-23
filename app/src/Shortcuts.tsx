@@ -2,6 +2,7 @@ import { For } from "solid-js";
 import { Modal } from "./Modal";
 import { K, SHORTCUTS } from "./keyboard";
 import { setShowShortcuts } from "./store";
+import { Button } from "./ui";
 
 /** Cheat sheet with every keyboard shortcut (opened with ?) */
 export function Shortcuts() {
@@ -11,7 +12,7 @@ export function Shortcuts() {
       <div class="auto-head">
         <strong>Atalhos de teclado</strong>
         <span class="grow" />
-        <button onClick={close}>Fechar</button>
+        <Button onClick={close}>Fechar</Button>
       </div>
       <div class="disp-list">
         <For each={SHORTCUTS}>
