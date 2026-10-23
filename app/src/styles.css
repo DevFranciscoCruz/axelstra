@@ -886,10 +886,26 @@ button.icon, button.x, button.split-x, button.cbtn { display: inline-flex; align
 .chev { display: inline-flex; align-items: center; }
 .wt-agents { margin: 2px 4px 6px 14px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .wt-agents-head { display: flex; align-items: center; justify-content: space-between; width: 100%; background: none; border: 0; color: var(--muted); font: inherit; font-size: 11px; padding: 2px 6px 4px; cursor: pointer; }
-.wt-agent { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.wt-agent { display: flex; align-items: center; gap: 4px; border-radius: 6px; font-size: 12px; }
 .wt-agent:hover, .wt-agent.active { background: var(--line); }
+.wt-agent-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 4px 6px; background: none; border: 0; border-radius: 6px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.wt-agent-open:focus-visible, .wt-agent-report:focus-visible, .wt-agent-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.wt-agent-edit { flex: 1; min-width: 0; margin: 2px 4px; background: #22222a; color: inherit; border: 1px solid var(--line-ctl); border-radius: 4px; padding: 3px 6px; font: inherit; font-size: 12px; }
 .wt-agent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wt-agent-kind, .wt-agent-wt { flex: none; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--line-3); border-radius: 8px; padding: 0 5px; color: var(--muted); font-size: 10.5px; }
 .wt-agent-time { color: var(--muted); font-size: 11px; flex: none; }
+.wt-agent-report { display: inline-flex; align-items: center; gap: 4px; flex: none; margin-right: 4px; padding: 2px 7px; background: none; border: 1px solid var(--line-3); border-radius: 8px; color: var(--muted); font: inherit; font-size: 10.5px; cursor: pointer; }
+.wt-agent-report:hover { border-color: var(--accent); color: var(--accent); }
+.wt-badge.overlap { color: #e5c07b; display: inline-flex; align-items: center; }
+.modal.note-view { width: min(720px, 94vw); }
+.note-path { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-body { max-height: 56vh; overflow: auto; background: #22222a; border: 1px solid var(--line-ctl); border-radius: 6px; padding: 10px 12px; font-size: 13px; line-height: 1.5; }
+.note-h { font-weight: 600; margin: 10px 0 4px; }
+.note-h1 { font-size: 16px; margin-top: 0; } .note-h2 { font-size: 14px; } .note-h3 { font-size: 13px; color: var(--muted); }
+.note-p { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-li { margin: 2px 0 2px 14px; text-indent: -10px; padding-left: 10px; overflow-wrap: anywhere; } .note-li::before { content: "\2022\00a0"; color: var(--muted); }
+.note-code { margin: 6px 0; padding: 6px 8px; background: #1b1b21; border-radius: 4px; overflow: auto; font-size: 12px; }
+.note-status { font-size: 12px; color: var(--ok); overflow-wrap: anywhere; } .note-status.bad, .note-err { color: var(--danger); }
 .file .nums { margin-left: auto; display: inline-flex; align-items: baseline; gap: 5px; font-size: 11px; flex: none; padding-left: 8px; font-variant-numeric: tabular-nums; }
 .file .fcount { color: var(--muted); background: var(--line); border-radius: 8px; padding: 0 5px; }
 .fname.ch-M, .fname.ch-R { color: #e5c07b; }

@@ -103,6 +103,14 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             c.call("msg.send", json!({"from": me()?, "to": to, "text": body, "kind": "done"}))?;
             println!("reported to session {to}");
         }
+        Cmd::Note { text } => {
+            c.call("notes.append", json!({"session": me()?, "text": text}))?;
+            println!("note added");
+        }
+        Cmd::TaskFile => {
+            let r = c.call("notes.read", json!({"session": me()?}))?;
+            println!("{}", r["path"].as_str().unwrap_or_default());
+        }
         Cmd::Escalate { text, to } => {
             let to = parent(to)?;
             c.call("msg.send", json!({"from": me()?, "to": to, "text": text, "kind": "escalate"}))?;
