@@ -1,12 +1,13 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { findWorktree, openSession, refreshProjects, selectedWorktree, sessionState, sessions, showNotice, tabLabel } from "./store";
+import { findWorktree, openSession, refreshProjects, selectWorktree, selectedWorktree, sessionState, sessions, showNotice, tabLabel } from "./store";
 import { worktreeOverview, worktreeSweep } from "./api";
 import { ask } from "./Confirm";
 import { StateDot } from "./StateDot";
 import { Icon } from "./Icon";
 import { countsFor, groupAgents, mergedList, type AgentEntry, type OverviewProject } from "./statusGroups";
 import { LimitsBar } from "./LimitsBar";
+import { NotificationBell } from "./NotificationBell";
 import { pollWtUsage, wtUsageTip } from "./Usage";
 import { ranked, spentOf, totalOf, fmtTokens } from "./usageFormat";
 
@@ -290,6 +291,7 @@ export function StatusBar() {
         </svg>
         <span>{ports().length}</span>
       </span>
+      <NotificationBell onJump={(e) => { if (e.session != null && e.worktree) openSession(e.worktree, e.session); else if (e.worktree) selectWorktree(e.worktree); }} />
       <LimitsBar />
     </div>
   );

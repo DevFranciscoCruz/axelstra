@@ -15,3 +15,5 @@
 .notif-kind.waiting { color: var(--warn); }
 .notif-text { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .notif-meta { font-size: 11px; color: var(--muted); }
+
+.statusbar .notif-pop { top: auto; bottom: calc(100% + 6px); }
