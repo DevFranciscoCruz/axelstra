@@ -39,6 +39,11 @@ export const S = {
   shellNote: "Vale para terminais e agentes novos. «Automático» usa o shell predefinido do sistema.",
   shells: { auto: "Automático", pwsh: "PowerShell 7", powershell: "Windows PowerShell", bash: "Bash", wsl: "WSL", cmd: "CMD" },
 
+  appearance: "Aparência",
+  appearanceNote: "Tema da aplicação. Os terminais e o editor seguem-no.",
+  appTheme: "Tema da aplicação",
+  appThemes: { auto: "Sistema", dark: "Escuro", light: "Claro" },
+
   terminal: "Terminal",
   terminalNote: "Aparência dos terminais. Ctrl+= / Ctrl+- / Ctrl+0 ajustam o tamanho do texto dentro do terminal.",
   termTheme: "Tema",

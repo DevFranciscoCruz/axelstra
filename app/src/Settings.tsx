@@ -9,6 +9,7 @@ import { S } from "./strings";
 import { classifySettingsError, diagnosticRows, errorText, waitUntil } from "./settingsLogic";
 import { setShowSettings, showNotice } from "./store";
 import { DEFAULT_FONT, MAX_FONT, MIN_FONT, TermTheme, setTermPrefs, termPrefs } from "./termprefs";
+import { APP_THEMES, appTheme, setAppTheme } from "./theme";
 import "./termui.css";
 
 const TERSE: Terse[] = ["off", "short", "tiny"];
@@ -188,6 +189,10 @@ export function Settings() {
                   options={SHELLS.map((v) => ({ value: v, label: S.shells[v] }))}
                   onPick={(v) => void save({ shell: v })}
                 />
+              </Section>
+
+              <Section title={S.appearance} note={S.appearanceNote}>
+                <Choices label={S.appTheme} value={appTheme()} options={APP_THEMES.map((v) => ({ value: v, label: S.appThemes[v] }))} onPick={setAppTheme} />
               </Section>
 
               <Section title={S.terminal} note={S.terminalNote}>

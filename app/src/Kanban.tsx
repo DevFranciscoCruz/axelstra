@@ -1,3 +1,4 @@
+import { Button, Input, Textarea } from "./ui";
 import { Select } from "./Select";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
@@ -333,15 +334,16 @@ export function Kanban(props: { project: string }) {
       <Show when={draft()}>
         {(d) => (
           <Modal label={d().id ? "Editar cartão" : "Novo cartão"} dirty onClose={() => void closeDraft()}>
-              <input
-                class="m-title"
+              <div class="m-heading">{d().id ? "Editar cartão" : "Novo cartão"}</div>
+              <Input
+                class="text-lg"
                 placeholder="Título"
                 value={d().title}
                 onInput={(e) => setDraft({ ...d(), title: e.currentTarget.value })}
                 ref={(el) => queueMicrotask(() => el.focus())}
               />
-              <textarea
-                class="m-body"
+              <Textarea
+                class="min-h-40 flex-1 font-mono"
                 placeholder="Escreve livremente: o contexto, o que queres, critérios… O agente lê isto."
                 value={d().body}
                 onInput={(e) => setDraft({ ...d(), body: e.currentTarget.value })}
@@ -375,19 +377,19 @@ export function Kanban(props: { project: string }) {
               </div>
               <label class="m-full">
                 Depende de (ids separados por vírgula)
-                <input value={d().depends} onInput={(e) => setDraft({ ...d(), depends: e.currentTarget.value })} />
+                <Input value={d().depends} onInput={(e) => setDraft({ ...d(), depends: e.currentTarget.value })} />
               </label>
               <div class="m-actions">
                 <Show when={d().id}>
-                  <button class="danger" onClick={() => void remove()}>
+                  <Button variant="destructive" onClick={() => void remove()}>
                     Apagar
-                  </button>
+                  </Button>
                 </Show>
                 <span class="grow" />
-                <button onClick={() => void closeDraft()}>Cancelar</button>
-                <button class="primary" disabled={!d().title.trim()} onClick={() => void save()}>
+                <Button onClick={() => void closeDraft()}>Cancelar</Button>
+                <Button variant="default" disabled={!d().title.trim()} onClick={() => void save()}>
                   Guardar
-                </button>
+                </Button>
               </div>
           </Modal>
         )}

@@ -8,6 +8,7 @@ import { searchKeymap } from "@codemirror/search";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { Opened, fsRead, fsStat, fsWrite } from "./api";
+import { isLight } from "./theme";
 import { fsTick, guarded, setEditorDirty, setEditorSaver, setOpenFile } from "./store";
 import { clampLine, describeReadError, docDiffers, isLarge, sizeLabel } from "./editorLogic";
 
@@ -56,6 +57,7 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
   const [refused, setRefused] = createSignal(false); // unreadable (binary, not UTF-8, too big): nothing to edit
   const [bigSize, setBigSize] = createSignal(0); // chars of a large file waiting for the user's confirmation
   const lang = new Compartment();
+  const look = new Compartment();
   let pending: Opened | undefined; // large file read but not yet shown
   let allowBig = false;
 
@@ -144,7 +146,7 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
           indentOnInput(),
           bracketMatching(),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-          oneDark,
+          look.of(isLight() ? [] : oneDark),
           lang.of([]),
           keymap.of([
             { key: "Mod-s", preventDefault: true, run: () => (void save(), true) },
@@ -188,6 +190,7 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
   createEffect(on(() => props.initialLine, () => meta && gotoLine(), { defer: true }));
   createEffect(on(fsTick, () => checkNow?.(), { defer: true }));
   createEffect(() => setEditorDirty(dirty()));
+  createEffect(on(isLight, (l) => view?.dispatch({ effects: look.reconfigure(l ? [] : oneDark) }), { defer: true }));
   setEditorSaver(() => save());
   onCleanup(() => {
     setEditorSaver(null);
