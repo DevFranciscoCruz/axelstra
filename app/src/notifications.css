@@ -17,3 +17,6 @@
 .notif-meta { font-size: 11px; color: var(--muted); }
 
 .statusbar .notif-pop { top: auto; bottom: calc(100% + 6px); }
+.notif-head .link { background: transparent; border: 1px solid var(--line-ctl); color: var(--text); border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.notif-head .link:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.notif-head .link:disabled { opacity: .45; cursor: default; }

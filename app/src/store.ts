@@ -312,7 +312,7 @@ const trackAgents = (list: SessionInfo[]) => {
     const watching = viewing && document.hasFocus();
     if (!viewing) setAttention((cur) => new Set(cur).add(norm(wtPath)));
     if (watching) continue;
-    const name = wtPath.split(/[\/]/).pop() ?? wtPath;
+    const name = wtPath.split(/[\\/]/).pop() ?? wtPath;
     const who = s.label ?? "O agente";
     const [head, body] =
       state === "done"
@@ -321,7 +321,8 @@ const trackAgents = (list: SessionInfo[]) => {
           ? [`${who} precisa de ti · ${name}`, `${who} fez uma pergunta na worktree "${name}" e precisa da tua resposta para continuar.`]
           : [`${who} parou · ${name}`, `${who} ficou parado na worktree "${name}" sem terminar. Abre para ver o que aconteceu.`];
     void notify(head, body, wtPath, s.id, state === "waiting");
-    pushNotification({ kind: state === "done" ? "done" : state === "waiting" ? "waiting" : "error", worktree: wtPath, session: s.id, text: body });
+    // a session that merely went quiet is not worth a line in the centre (it is the common case, and not an error)
+    if (state === "done" || state === "waiting") pushNotification({ kind: state, worktree: wtPath, session: s.id, text: body });
   }
 };
 
