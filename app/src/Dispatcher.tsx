@@ -3,6 +3,7 @@ import { Icon } from "./Icon";
 import { Modal } from "./Modal";
 import { StateDot } from "./StateDot";
 import { dispatchTopics, norm, projects, selectWorktree, sessionState, sessionsOf, setShowDispatcher, watchDispatch } from "./store";
+import { Button } from "./ui";
 
 /** Live view of what the main session dispatched: one card per topic (worktree) with its latest requests. */
 export function Dispatcher() {
@@ -35,7 +36,7 @@ export function Dispatcher() {
       <div class="auto-head">
         <strong>Despachante</strong>
         <span class="grow" />
-        <button onClick={() => setShowDispatcher(false)}>Fechar</button>
+        <Button onClick={() => setShowDispatcher(false)}>Fechar</Button>
       </div>
       <p class="auto-note">Cada pedido feito na main vai para o worktree do seu tópico. Aqui vês para onde foi cada um.</p>
       <div class="disp-list">
@@ -49,8 +50,9 @@ export function Dispatcher() {
                   <strong class="disp-title">{t.title}</strong>
                   <span class="auto-note">{t.archived ? "arquivado" : st().text}</span>
                   <span class="grow" />
-                  <button
-                    class="icon"
+                  <Button
+                    size="icon"
+                    variant="ghost"
                     title="Abrir este worktree"
                     aria-label="Abrir este worktree"
                     onClick={() => {
@@ -59,7 +61,7 @@ export function Dispatcher() {
                     }}
                   >
                     <Icon name="external" />
-                  </button>
+                  </Button>
                 </div>
                 <div class="auto-note">{t.project} · {t.branch}</div>
                 <Show when={t.requests.length > 0}>

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Modal } from "./Modal";
 import { sessions } from "./store";
+import { Button, CheckboxField } from "./ui";
 
 const KEY = "axelstra.confirmClose";
 const wanted = () => {
@@ -57,17 +58,13 @@ export function CloseConfirm() {
               ? `${running()} ${running() === 1 ? "sessão continua" : "sessões continuam"} a correr em segundo plano (e consomem recursos) até voltar a abrir a aplicação.`
               : `${running()} ${running() === 1 ? "sessão é fechada" : "sessões são fechadas"} e nada fica a consumir. ${running() === 1 ? "Volta" : "Voltam"} quando abrir a aplicação outra vez; os agentes retomam a conversa.`}
         </div>
-        <label class="voice-auto" style={{ "align-self": "flex-start" }}>
-          <input type="checkbox" checked={keep()} onChange={(e) => setKeep(e.currentTarget.checked)} /> Manter sessões e automatizações a correr em segundo plano
-        </label>
-        <label class="voice-auto" style={{ "align-self": "flex-start" }}>
-          <input type="checkbox" checked={skip()} onChange={(e) => setSkip(e.currentTarget.checked)} /> Não perguntar novamente
-        </label>
+        <CheckboxField checked={keep()} onChange={setKeep}>Manter sessões e automatizações a correr em segundo plano</CheckboxField>
+        <CheckboxField checked={skip()} onChange={setSkip}>Não perguntar novamente</CheckboxField>
         <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-          <button onClick={() => setOpen(false)}>Cancelar</button>
-          <button class="primary" ref={(el) => queueMicrotask(() => el.focus())} onClick={confirm}>
+          <Button onClick={() => setOpen(false)}>Cancelar</Button>
+          <Button variant="default" ref={(el: HTMLButtonElement) => queueMicrotask(() => el.focus())} onClick={confirm}>
             Fechar
-          </button>
+          </Button>
         </div>
       </Modal>
     </Show>

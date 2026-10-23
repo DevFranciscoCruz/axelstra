@@ -11,6 +11,7 @@ import { setShowSettings, showNotice } from "./store";
 import { DEFAULT_FONT, MAX_FONT, MIN_FONT, TermTheme, setTermPrefs, termPrefs } from "./termprefs";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
 import "./termui.css";
+import { Button, CheckboxField, Field, Input, cn } from "./ui";
 
 const TERSE: Terse[] = ["off", "short", "tiny"];
 const NOTIFY: NotifyMode[] = ["all", "waiting", "off"];
@@ -23,16 +24,17 @@ function Choices<T extends string | null>(props: { label: string; value: T; opti
     <div class="set-choices" role="radiogroup" aria-label={props.label} onKeyDown={radioKeys}>
       <For each={props.options}>
         {(o) => (
-          <button
+          <Button
             role="radio"
             aria-checked={props.value === o.value}
             tabindex={props.value === o.value ? 0 : -1}
-            classList={{ on: props.value === o.value }}
+            size="sm"
+            class={cn("rounded-full", props.value === o.value && "border-primary bg-primary/10 text-primary")}
             title={o.hint}
             onClick={() => props.onPick(o.value)}
           >
             {o.label}
-          </button>
+          </Button>
         )}
       </For>
     </div>
@@ -82,7 +84,7 @@ function Diagnostics() {
         )}
       </Show>
       <div>
-        <button onClick={() => void refetch()}>{S.diagRun}</button>
+        <Button onClick={() => void refetch()}>{S.diagRun}</Button>
       </div>
     </Section>
   );
@@ -121,7 +123,7 @@ export function Settings() {
       <div class="auto-head">
         <strong>{S.settings}</strong>
         <span class="grow" />
-        <button onClick={() => setShowSettings(false)}>{S.close}</button>
+        <Button onClick={() => setShowSettings(false)}>{S.close}</Button>
       </div>
       <Show
         when={s.state !== "errored"}
@@ -130,13 +132,13 @@ export function Settings() {
             <div class="auto-note">{classifySettingsError(s.error) === "old-daemon" ? S.oldDaemon : S.loadFailed + errorText(s.error)}</div>
             <div class="m-actions">
               <Show when={classifySettingsError(s.error) === "old-daemon"}>
-                <button class="primary" disabled={restarting()} onClick={() => void restartDaemon()}>
+                <Button variant="default" disabled={restarting()} onClick={() => void restartDaemon()}>
                   {restarting() ? S.restartingDaemon : S.restartDaemon}
-                </button>
+                </Button>
               </Show>
-              <button disabled={restarting()} onClick={() => void refetch()}>
+              <Button disabled={restarting()} onClick={() => void refetch()}>
                 {S.retry}
-              </button>
+              </Button>
             </div>
           </div>
         }
@@ -163,10 +165,9 @@ export function Settings() {
                     onPick={(v) => void save({ pm: v })}
                   />
                 </Show>
-                <label class="set-check">
-                  <input type="checkbox" checked={cfg().auto_install} onChange={(e) => void save({ auto_install: e.currentTarget.checked })} />
+                <CheckboxField checked={cfg().auto_install} onChange={(v) => void save({ auto_install: v })}>
                   {S.autoInstall}
-                </label>
+                </CheckboxField>
               </Section>
 
               <Section title={S.notify} note={S.notifyNote}>
@@ -176,10 +177,9 @@ export function Settings() {
                   options={NOTIFY.map((v) => ({ value: v, label: S.notifyMode[v].label, hint: S.notifyMode[v].hint }))}
                   onPick={(v) => void save({ notify_mode: v })}
                 />
-                <label class="set-check">
-                  <input type="checkbox" checked={cfg().notify_sound ?? true} onChange={(e) => void save({ notify_sound: e.currentTarget.checked })} />
+                <CheckboxField checked={cfg().notify_sound ?? true} onChange={(v) => void save({ notify_sound: v })}>
                   {S.notifySound}
-                </label>
+                </CheckboxField>
               </Section>
 
               <Section title={S.shell} note={S.shellNote}>
@@ -203,26 +203,24 @@ export function Settings() {
                   onPick={(v) => setTermPrefs({ theme: v })}
                 />
                 <div class="set-fields">
-                  <label>
-                    {S.termFont}
-                    <input
+                  <Field label={S.termFont}>
+                    <Input
                       type="text"
                       value={termPrefs().fontFamily}
                       placeholder={DEFAULT_FONT}
                       spellcheck={false}
                       onChange={(e) => setTermPrefs({ fontFamily: e.currentTarget.value })}
                     />
-                  </label>
-                  <label>
-                    {S.termFontSize}
-                    <input
+                  </Field>
+                  <Field label={S.termFontSize}>
+                    <Input
                       type="number"
                       min={MIN_FONT}
                       max={MAX_FONT}
                       value={termPrefs().fontSize}
                       onChange={(e) => setTermPrefs({ fontSize: Number(e.currentTarget.value) })}
                     />
-                  </label>
+                  </Field>
                 </div>
               </Section>
 
