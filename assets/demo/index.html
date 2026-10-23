@@ -63,6 +63,37 @@ body{background:#14151a;display:grid;place-items:center;font:13px/1.4 "Inter Var
 .pal{width:520px;height:max-content;background:#2a2a32;border:1px solid var(--line-3);border-radius:10px;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,.5)}
 .pal .pin{padding:12px 14px;border-bottom:1px solid var(--line-3);min-height:44px}
 .pal .it{display:flex;gap:10px;padding:8px 14px}.pal .it.on{background:#383b4a}.pal .it .hint{margin-left:auto;color:var(--muted);font-size:12px}
+
+.cm .in{position:relative;padding-right:30px}.cm .ai{position:absolute;right:8px;bottom:6px;color:var(--accent);display:flex}.cm .ai.press{filter:brightness(1.6)}
+.tree .f{padding:3px 12px}.tree .tw{width:12px;color:var(--muted);font-size:10px}.tree .k{padding-left:12px}
+.ch-M{color:var(--warn)}.ch-A{color:var(--ok)}
+.ebar{display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--line);font-size:12px}
+.ebar .p{flex:1;color:var(--text)}.bd{width:8px;height:8px;border-radius:50%;background:var(--warn)}
+.code{padding:10px 0;font:12.5px/1.6 "Cascadia Mono",Consolas,monospace}
+.code div{display:flex;padding:0 14px}.code .ln{width:30px;color:#5a5f70;flex:none;user-select:none}
+.kw{color:#c792ea}.st{color:#a5e075}.cmt{color:#6b7184}.fn{color:#82aaff}
+.kan{position:absolute;left:250px;top:0;right:0;bottom:26px;background:var(--bg);display:flex;flex-direction:column}
+.kbar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.kbar b{font-size:14px}.kbtn{background:var(--accent);color:#1a1530;border-radius:6px;padding:6px 12px;font-weight:600}.kbtn.press{filter:brightness(1.3)}
+.krun{margin:10px 14px 0;padding:8px 12px;border-radius:8px;background:#2a2a32;border:1px solid var(--line-3);font-size:12px}
+.kcols{flex:1;display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:12px 14px;min-height:0}
+.kcol{background:#24242a;border:1px solid var(--line);border-radius:8px;padding:0 0 8px;display:flex;flex-direction:column;gap:8px}
+.kch{display:flex;gap:6px;padding:8px 10px;font-size:12px;font-weight:600;color:#b9b9c6}.kch i{font-style:normal;color:var(--muted);font-weight:400}
+.kcard{margin:0 8px;background:linear-gradient(180deg,#2f2f39,#2a2a32);border:1px solid #3c3c48;border-left:3px solid var(--st,#8a8aa0);border-radius:8px;padding:9px 10px;display:flex;flex-direction:column;gap:6px}
+.kt{font-weight:600;font-size:12.5px}.kb{color:var(--muted);font-size:11.5px}.chips{display:flex;gap:5px;flex-wrap:wrap}
+.chip{font-size:10.5px;padding:1px 7px;border-radius:9px;background:#383b46;color:#b9b9c6}.chip.hi{color:var(--warn)}
+.mback{position:absolute;inset:0;background:rgba(0,0,0,.5);display:grid;place-items:center}
+.modal{width:640px;background:#2a2a32;border:1px solid var(--line-3);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 16px 48px rgba(0,0,0,.5)}
+.mh{display:flex;align-items:center;gap:8px}.mh b{font-size:14px}.mh .sp{flex:1}
+.mbtn{border:1px solid var(--line-3);border-radius:6px;padding:6px 12px}.mbtn.pr2{background:var(--accent);color:#1a1530;border:0;font-weight:600}
+.note{color:var(--muted);font-size:12px}
+.ai-item{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:8px;padding:10px 12px}.ai-item.off{opacity:.5}
+.ai-item .nm{font-weight:600}.ai-item .sb2{color:var(--muted);font-size:12px}.ai-item .sp{flex:1}
+.ib{color:var(--muted);padding:2px 6px;border-radius:4px}.ib.press{background:#3a3d4a;color:var(--text)}
+.dcard{border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+.dcard .t{display:flex;gap:8px;align-items:center}.dcard ol{margin:2px 0 0 18px;padding:0;color:var(--muted);font-size:12px}
+.links div.on{background:#2f323b;color:var(--text);border-radius:6px}
+
 </style>
 </head>
 <body>
@@ -73,19 +104,21 @@ body{background:#14151a;display:grid;place-items:center;font:13px/1.4 "Inter Var
       <div class="addp">+ Adicionar projeto</div>
       <div class="sec">Projetos</div>
       <div id="projects"></div>
-      <div class="links"><div><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg> Automatizações</div><div><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 2.5-3 2.5-6.5 4"/></svg> Despachante</div><div><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M12.4 3.6l-1.2 1.2M4.8 11.2l-1.2 1.2"/></svg> Definições</div></div>
+      <div class="links"><div id="lk-auto"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg> Automatizações</div><div id="lk-disp"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 2.5-3 2.5-6.5 4"/></svg> Despachante</div><div id="lk-set"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M12.4 3.6l-1.2 1.2M4.8 11.2l-1.2 1.2"/></svg> Definições</div></div>
     </aside>
     <section class="main"><div class="tabs" id="tabs"></div><div class="term" id="term"></div></section>
     <section class="right"><div class="rtabs" id="rtabs"></div><div id="rbody" style="display:flex;flex-direction:column;flex:1;min-height:0"></div></section>
   </div>
   <div class="sb" id="sb"></div>
+  <div class="kan" id="kan" style="display:none"></div>
+  <div class="mback" id="modal" style="display:none"></div>
   <div class="toast" id="toast" style="display:none"><b>claude terminou</b><span>ax/dark-mode · 2 ficheiros alterados</span></div>
   <div class="back" id="pal" style="display:none"></div>
 </div>
 <script>
-const TOTAL = 21000;
+const TOTAL = 38500;
 const NEW = "promo-codes";
-const COMMIT_MSG = "Add dark mode toggle";
+const COMMIT_MSG = "feat(theme): add dark mode toggle to settings";
 const spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 const $ = (id) => document.getElementById(id);
 const typed = (s, t, start, speed) => s.slice(0, Math.max(0, Math.min(s.length, Math.floor((t - start) / speed))));
@@ -118,12 +151,86 @@ function row(name, state, sel) {
 const agent = (time) => `<div class="box"><div class="h">1 agente</div><div class="ag"><span class="dot work"></span>claude<span class="t">${time}</span></div></div>`;
 const proj = (c, name, body) => `<div class="proj"><div class="ph"><span class="pi" style="background:${c}">${name[0].toUpperCase()}</span>${name}<span class="sp"></span><span class="ic">+</span><span class="ic">⚙</span><span class="ic">×</span></div>${body}</div>`;
 
+const SVG = (b, s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${b}</svg>`;
+const SPARK = SVG('<path d="M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z"/>', 14);
+const FOLDER = SVG('<path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/>');
+const FILE = SVG('<path d="M4 2.5h5l3 3v8H4zM9 2.5v3h3"/>');
+const PLAY = SVG('<path d="M5 3.5v9l7-4.5z" fill="currentColor"/>');
+const PENCIL = SVG('<path d="M10.5 3l2.5 2.5L6 12.5 3 13l.5-3z"/>');
+const TRASH = SVG('<path d="M3.5 4.5h9M6 4.5V3h4v1.5M5 4.5l.5 8h5l.5-8"/>');
+const SAVE = SVG('<path d="M3 3h8l2 2v8H3zM5.5 3v3.5h4V3M5.5 13V9h5v4"/>');
+const NEWCODE = 'export const isDark = () => matchMedia("(prefers-color-scheme: dark)").matches;';
+const esc = (x) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function codeView(t) {
+  const typedLine = typed(NEWCODE, t, 22400, 25);
+  const saved = t >= 24300;
+  const dirty = typedLine.length > 0 && !saved;
+  const L = [
+    '<span class="cmt">// Theme switching for the whole app</span>',
+    '<span class="kw">export type</span> Theme = <span class="st">"light"</span> | <span class="st">"dark"</span>;',
+    "",
+    '<span class="kw">export const</span> <span class="fn">toggleTheme</span> = () =&gt;',
+    '  document.documentElement.classList.<span class="fn">toggle</span>(<span class="st">"dark"</span>);',
+    "",
+  ];
+  if (typedLine) L.push(esc(typedLine) + (pulseNow ? '<span class="caret"></span>' : ""));
+  return `<div class="ebar"><span class="p">src/theme.ts</span>${dirty ? '<span class="bd" title="Alterações por guardar"></span>' : ""}<span style="color:var(--muted)">${saved ? "guardado" : ""}</span><span class="ib">${SAVE}</span><span class="ib">×</span></div>
+          <div class="code">${L.map((l, i) => `<div><span class="ln">${i + 1}</span><span>${l || "&nbsp;"}</span></div>`).join("")}</div>`;
+}
+
+function kanbanView(t) {
+  const st = (a, b, c) => (t >= c ? "needs-review" : t >= b ? "in-progress" : a);
+  const cards = [
+    { id: "rate-limit", title: "Rate limit na API", body: "Limitar a 100 pedidos por minuto por chave e devolver 429 com Retry-After.", status: st("todo", 27000, 29000), pri: 1 },
+    { id: "invoices", title: "Página de faturas", body: "Lista paginada com download em PDF e filtro por estado.", status: st("todo", 27000, 29600), pri: 0 },
+    { id: "csv-export", title: "Exportar relatórios em CSV", body: "Botão no ecrã de relatórios, só colunas visíveis.", status: "backlog", pri: 0 },
+    { id: "welcome-mail", title: "Email de boas-vindas", body: "", status: "backlog", pri: 0 },
+    { id: "dark-mode", title: "Dark mode toggle", body: "", status: "done", pri: 0 },
+  ];
+  const cols = [["backlog", "Ideias", "#8a8aa0"], ["todo", "Para fazer", "#6aa3ff"], ["in-progress", "Em curso", "#e5c07b"], ["needs-review", "Rever", "#c792ea"], ["done", "Feito", "#4ade80"]];
+  const press = t >= 26600 && t < 26900;
+  const run = t >= 27000 ? (t >= 29800 ? "2 cartões fundidos em ax/integration" : "A executar: 2 agentes em paralelo") : "";
+  return `<div class="kbar"><b>Kanban</b><span style="flex:1"></span><span class="kbtn${press ? " press" : ""}">Executar “Para fazer”</span></div>
+    ${run ? `<div class="krun">${run}</div>` : ""}
+    <div class="kcols">${cols.map(([id, label, color]) => {
+      const cs = cards.filter((c) => c.status === id);
+      return `<div class="kcol"><div class="kch">${label} <i>${cs.length}</i></div>${cs.map((c) => `<div class="kcard" style="--st:${color}"><div class="kt">${c.title}</div>${c.body ? `<div class="kb">${c.body}</div>` : ""}<div class="chips"><span class="chip">claude</span>${c.pri ? '<span class="chip hi">prio 1</span>' : ""}<span class="chip">${c.id}</span></div></div>`).join("")}</div>`;
+    }).join("")}</div>`;
+}
+
+function autoModal(t) {
+  const ran = t >= 32400;
+  const press = t >= 32200 && t < 32500;
+  return `<div class="modal"><div class="mh"><b>Automatizações</b><span class="sp"></span><span class="mbtn pr2">+ Nova</span><span class="mbtn">Fechar</span></div>
+    <div class="note">Agentes que correm sozinhos num worktree novo, à hora marcada.</div>
+    <div class="ai-item"><div><div class="nm">Revisão da manhã</div><div class="sb2">acme-web · claude · todos os dias às 09:00</div></div><span class="sp"></span><span class="ib${press ? " press" : ""}">${PLAY}</span><span class="ib">${PENCIL}</span><span class="ib">${TRASH}</span></div>
+    <div class="ai-item off"><div><div class="nm">Limpeza de dependências</div><div class="sb2">acme-api · claude · todas as semanas (seg 08:00)</div></div><span class="sp"></span><span class="ib">${PLAY}</span><span class="ib">${PENCIL}</span><span class="ib">${TRASH}</span></div>
+    <div class="note" style="min-height:16px;color:var(--ok)">${ran ? "A executar “Revisão da manhã” em ax/auto-revisao-manha" : ""}</div></div>`;
+}
+
+function dispModal() {
+  const card = (dot, title, state, sub, reqs) => `<div class="dcard"><div class="t"><span class="dot ${dot}"></span><b>${title}</b><span class="note">${state}</span></div><div class="note">${sub}</div><ol>${reqs.map((r) => `<li>${r}</li>`).join("")}</ol></div>`;
+  return `<div class="modal"><div class="mh"><b>Despachante</b><span class="sp"></span><span class="mbtn">Fechar</span></div>
+    <div class="note">Cada pedido feito na main vai para o worktree do seu tópico. Aqui vê para onde foi cada um.</div>
+    ${card("done", "Dark mode toggle", "terminou", "acme-web · ax/dark-mode", ["Adiciona um interruptor de tema nas definições", "Guarda a escolha no localStorage"])}
+    ${card("work p", "Códigos promocionais EU", "agente a trabalhar", "acme-web · ax/promo-codes", ["Valida códigos promocionais da UE no checkout"])}
+    ${card("", "Correção do arredondamento", "arquivado", "acme-api · ax/invoice-fix", ["O total das faturas arredonda para baixo, corrigir"])}</div>`;
+}
+
+let pulseNow = true;
 function render(t) {
   const pulse = Math.floor(t / 500) % 2 === 0;
+  pulseNow = pulse;
   const palOpen = t >= 11000 && t < 12800;
   const sel = t < 3600 ? "dark" : t < 12800 ? "promo" : "dark"; // selected worktree
   const darkDone = t >= 9600;
-  const committed = t >= 15400;
+  const committed = t >= 16300;
+  const editorOpen = t >= 21400 && t < 25000;
+  const kanOpen = t >= 25400 && t < 30400;
+  const autoOpen = t >= 30800 && t < 34600;
+  const dispOpen = t >= 34600 && t < 38100;
+  const rtab = t < 18000 ? "changes" : t < 20000 ? "pulls" : t < 25000 ? "files" : "changes";
 
   // sidebar
   let web = row("main", "idle", false);
@@ -133,24 +240,32 @@ function render(t) {
   else if (t >= 3000 && t < 3600) web += `<div class="row"><span class="dot work"></span><span class="n" style="color:var(--muted)">A criar ${NEW}…</span></div>`;
   else if (t >= 3600) web += row("ax/" + NEW, "work", sel === "promo") + agent(t < 9000 ? "agora" : "1m");
   $("projects").innerHTML = proj("#6366f1", "acme-web", web) + proj("#0ea5e9", "acme-api", row("main", "idle", false));
+  $("lk-auto").classList.toggle("on", autoOpen);
+  $("lk-disp").classList.toggle("on", dispOpen);
 
-  // terminal
+  // terminal or editor
   const dev = t >= 4600;
   $("tabs").innerHTML = `<span class="tab on">claude</span>${dev ? '<span class="tab">pnpm dev</span>' : ""}<span class="sp"></span><span class="ic">⌕</span>`;
-  let out;
-  if (sel === "promo") {
-    out = `<span class="m">ax/${NEW} · claude</span><br>`;
-    for (const [at, h] of PROMO) if (t >= at) out += h + "<br>";
-    if (t >= 4400 && t < 8900) out += `<span class="a">${spin[Math.floor(t / 90) % spin.length]}</span> <span class="m">Thinking…</span>`;
+  const term = $("term");
+  if (editorOpen) {
+    term.style.padding = "0";
+    term.innerHTML = codeView(t);
   } else {
-    out = `<span class="m">ax/dark-mode · claude</span><br>`;
-    for (const [at, h] of DARK) if (t >= at) out += h + "<br>";
-    if (!darkDone) out += `<span class="a">${spin[Math.floor(t / 90) % spin.length]}</span> <span class="m">Thinking…</span>`;
+    term.style.padding = "";
+    let out;
+    if (sel === "promo") {
+      out = `<span class="m">ax/${NEW} · claude</span><br>`;
+      for (const [at, h] of PROMO) if (t >= at) out += h + "<br>";
+      if (t >= 4400 && t < 8900) out += `<span class="a">${spin[Math.floor(t / 90) % spin.length]}</span> <span class="m">Thinking…</span>`;
+    } else {
+      out = `<span class="m">ax/dark-mode · claude</span><br>`;
+      for (const [at, h] of DARK) if (t >= at) out += h + "<br>";
+      if (!darkDone) out += `<span class="a">${spin[Math.floor(t / 90) % spin.length]}</span> <span class="m">Thinking…</span>`;
+    }
+    term.innerHTML = out;
   }
-  $("term").innerHTML = out;
 
   // right panel
-  const showPulls = t >= 17200;
   let files;
   if (sel === "promo") {
     files = [];
@@ -158,20 +273,35 @@ function render(t) {
     if (t >= 8400) files.push(["A", "src/lib/promo.test.ts", "+60"]);
   } else files = committed ? [] : [["M", "src/theme.ts", "+18 −2"], ["M", "src/Settings.tsx", "+24 −1"]];
   const n = files.length;
-  $("rtabs").innerHTML = `<span class="rtab">Ficheiros</span><span class="rtab${showPulls ? "" : " on"}">Alterações${n ? " " + n : ""}</span><span class="rtab${showPulls ? " on" : ""}">PRs</span>`;
+  const cls = (id) => (rtab === id ? " on" : "");
+  $("rtabs").innerHTML = `<span class="rtab${cls("files")}">Ficheiros</span><span class="rtab${cls("changes")}">Alterações${n ? " " + n : ""}</span><span class="rtab${cls("pulls")}">PRs</span>`;
   let body;
-  if (showPulls) {
+  if (rtab === "pulls") {
     body = `<div class="pr"><b>#42 Add dark mode toggle</b><span>ax/dark-mode → main · <span class="ok">checks passed</span></span></div>
             <div class="pr"><b>#41 Fix invoice rounding</b><span>ax/invoice-fix → main · aberto há 2 dias</span></div>`;
+  } else if (rtab === "files") {
+    const hi = t >= 21000 ? ' style="background:#2f323b;border-radius:4px"' : "";
+    const tw = (o) => `<span class="tw">${o}</span>`;
+    body = `<div class="tree"><div class="rh">ACME-WEB · AX/DARK-MODE</div>
+      <div class="f">${tw("▾")}${FOLDER}<span class="nm">src</span></div>
+      <div class="f k">${tw("")}${FILE}<span class="nm">Settings.tsx</span></div>
+      <div class="f k"${hi}>${tw("")}${FILE}<span class="nm">theme.ts</span></div>
+      <div class="f k">${tw("")}${FILE}<span class="nm">main.tsx</span></div>
+      <div class="f">${tw("▸")}${FOLDER}<span class="nm">public</span></div>
+      <div class="f">${tw("")}${FILE}<span class="nm">package.json</span></div>
+      <div class="f">${tw("")}${FILE}<span class="nm">README.md</span></div></div>`;
   } else {
     body = `<div class="rh">ALTERAÇÕES</div>`;
-    body += n ? files.map((f) => `<div class="f"><span class="s ${f[0]}">${f[0]}</span><span class="nm">${f[1]}</span><span class="m" style="color:var(--muted)">${f[2]}</span></div>`).join("") : `<div class="empty">Sem alterações</div>`;
+    body += n ? files.map((f) => `<div class="f"><span class="s ${f[0]}">${f[0]}</span><span class="nm">${f[1]}</span><span style="color:var(--muted)">${f[2]}</span></div>`).join("") : `<div class="empty">Sem alterações</div>`;
     if (committed) body += `<div class="rh">COMMITS</div><div class="f"><span class="s" style="color:var(--accent)">●</span><span class="nm">${COMMIT_MSG}</span><span style="color:var(--muted)">agora</span></div>`;
     if (sel === "dark") {
-      const msg = typed(COMMIT_MSG, t, 13600, 60);
+      const gen = t >= 13300 && t < 14300;
+      const msg = committed ? "" : typed(COMMIT_MSG, t, 14300, 22);
       const ready = n > 0 && msg.length > 0;
-      const press = t >= 15200 && t < 15500;
-      body += `<div class="cm"><div class="in">${committed ? '<span style="color:var(--muted)">Mensagem do commit</span>' : msg + (pulse && !msg.length === false ? '<span class="caret"></span>' : "") || '<span style="color:var(--muted)">Mensagem do commit</span>'}</div><div class="bt${ready ? " on" : ""}${press ? " press" : ""}">Commit</div></div>`;
+      const press = t >= 16000 && t < 16300;
+      const sparkPress = t >= 13300 && t < 13600;
+      const inner = gen ? '<span style="color:var(--muted)">A gerar mensagem…</span>' : msg || '<span style="color:var(--muted)">Mensagem do commit</span>';
+      body += `<div class="cm"><div class="in">${inner}<span class="ai${sparkPress ? " press" : ""}">${SPARK}</span></div><div class="bt${ready ? " on" : ""}${press ? " press" : ""}">Commit</div></div>`;
     }
   }
   $("rbody").innerHTML = body;
@@ -186,6 +316,15 @@ function render(t) {
     <span class="lim"><span class="lim-bar"><i style="width:41%"></i></span>41% used · semana</span>`;
 
   $("toast").style.display = t >= 9800 && t < 12000 ? "block" : "none";
+
+  // overlays
+  const kan = $("kan");
+  kan.style.display = kanOpen ? "flex" : "none";
+  if (kanOpen) kan.innerHTML = kanbanView(t);
+  const modal = $("modal");
+  modal.style.display = autoOpen || dispOpen ? "grid" : "none";
+  if (autoOpen) modal.innerHTML = autoModal(t);
+  else if (dispOpen) modal.innerHTML = dispModal();
 
   // command palette
   const pal = $("pal");
