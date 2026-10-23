@@ -41,9 +41,23 @@ pub struct Bus {
     limit: AtomicUsize,
 }
 
+/// Text with every control character removed except newline and tab: no escape sequence, no bracketed-paste
+/// terminator and no carriage return survives to the terminal.
+pub fn clean(text: &str) -> String {
+    text.chars().filter(|c| matches!(c, '\n' | '\t') || !c.is_control()).collect()
+}
+
+/// Text safe to type after `echo` in an unknown shell: control characters and shell metacharacters become `_`.
+pub fn echo_safe(text: &str) -> String {
+    clean(text)
+        .chars()
+        .map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | ':' | ',' | '/' | '#' | '[' | ']') { c } else { '_' })
+        .collect()
+}
+
 /// What an agent TUI receives as one pasted block followed by Enter.
 pub fn paste(text: &str) -> Vec<u8> {
-    format!("\x1b[200~{text}\x1b[201~\r").into_bytes()
+    format!("\x1b[200~{}\x1b[201~\r", clean(text)).into_bytes()
 }
 
 /// Types a notice or report into a session without landing in the middle of what the user is typing:
@@ -220,6 +234,16 @@ mod tests {
         assert_eq!(b.inbox(1, false, true).len(), 1);
         assert_eq!(b.inbox(1, false, true).len(), 0);
         assert_eq!(b.inbox(1, true, false).len(), 1);
+    }
+
+    #[test]
+    fn pasted_text_cannot_end_the_paste() {
+        let evil = "hi\x1b[201~rm -rf /\r\x1b[200~ \u{9b}x\x07";
+        let out = String::from_utf8(paste(evil)).unwrap();
+        assert_eq!(out, "\x1b[200~hi[201~rm -rf /[200~ x\x1b[201~\r");
+        assert_eq!(out.matches('\x1b').count(), 2);
+        assert_eq!(clean("a\nb\tc"), "a\nb\tc");
+        assert_eq!(echo_safe("x\x1b[0m; calc `id` $(id)&"), "x[0m_ calc _id_ __id__");
     }
 
     #[test]
