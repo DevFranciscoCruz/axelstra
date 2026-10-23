@@ -152,6 +152,50 @@ fn check_allowed(method: &str) -> Result<(), String> {
     }
 }
 
+/// Programs a webview-requested terminal may start: shells only (agents run inside one). The name is compared
+/// without directory, extension and case, so `C:\Program Files\PowerShell\7\pwsh.exe` and `/bin/zsh` pass.
+const SHELLS: &[&str] = &["pwsh", "powershell", "cmd", "bash", "zsh", "sh", "dash", "fish", "ksh", "tcsh", "csh", "nu", "wsl", "xonsh", "elvish"];
+
+fn is_shell(program: &str) -> bool {
+    let name = program.rsplit(['/', '\\']).next().unwrap_or(program).to_ascii_lowercase();
+    let stem = name.strip_suffix(".exe").unwrap_or(&name);
+    SHELLS.contains(&stem)
+}
+
+/// Arguments of the calls that can run code or write files, beyond the method allow-list: `session.spawn` starts a
+/// shell only (and sets no environment but `AXELSTRA_*`), `fs.write` takes a relative path outside `.git`.
+fn check_params(method: &str, params: &Value) -> Result<(), String> {
+    match method {
+        "session.spawn" => {
+            let program = params["program"].as_str().unwrap_or_default();
+            if !is_shell(program) {
+                return Err(format!("programa não permitido: {program}"));
+            }
+            if let Some(env) = params["env"].as_object() {
+                if let Some(k) = env.keys().find(|k| !k.starts_with("AXELSTRA_")) {
+                    return Err(format!("variável de ambiente não permitida: {k}"));
+                }
+            }
+            Ok(())
+        }
+        "fs.write" => {
+            let path = params["path"].as_str().unwrap_or_default();
+            let p = std::path::Path::new(path);
+            let plain = !path.is_empty()
+                && !p.is_absolute()
+                && p.components().all(|c| matches!(c, std::path::Component::Normal(_)))
+                && !path.split(['/', '\\']).any(|c| c.trim_end_matches(['.', ' ']).eq_ignore_ascii_case(".git"));
+            if plain { Ok(()) } else { Err(format!("caminho não permitido: {path}")) }
+        }
+        _ => Ok(()),
+    }
+}
+
+fn check_call(method: &str, params: &Value) -> Result<(), String> {
+    check_allowed(method)?;
+    check_params(method, params)
+}
+
 /// Only one caller restarts the daemon connection at a time; the others wait for it outside any slot lock.
 static RECONNECT: Mutex<()> = Mutex::new(());
 /// How long a caller waits for another one's reconnect before giving up.
@@ -219,7 +263,7 @@ fn with_client<T>(slot: &Mutex<Option<Client>>, retry: bool, f: impl Fn(&mut Cli
 
 #[tauri::command]
 async fn daemon_call(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, String> {
-    check_allowed(&method)?;
+    check_call(&method, &params)?;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_client(&st.control, read_only(&method), |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
@@ -230,7 +274,7 @@ async fn daemon_call(state: tauri::State<'_, Arc<State>>, method: String, params
 
 #[tauri::command]
 async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, String> {
-    check_allowed(&method)?;
+    check_call(&method, &params)?;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_client(&st.bg, read_only(&method), |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
@@ -774,6 +818,25 @@ mod tests {
         assert!(missing.is_empty(), "frontend calls methods missing from ALLOWED_METHODS (main.rs): {missing:?}");
         let unused: Vec<_> = listed.difference(&called).collect();
         assert!(unused.is_empty(), "ALLOWED_METHODS lists methods the frontend never calls: {unused:?}");
+    }
+
+    #[test]
+    fn spawn_and_write_are_narrowed() {
+        use super::check_call;
+        use serde_json::json;
+        for ok in ["pwsh", "powershell", "C:\\Program Files\\PowerShell\\7\\pwsh.exe", "/bin/zsh", "/usr/bin/bash", "CMD.EXE", "wsl"] {
+            assert!(check_call("session.spawn", &json!({"program": ok})).is_ok(), "{ok}");
+        }
+        for bad in ["calc.exe", "/usr/bin/python3", "curl", "", "C:\\Windows\\System32\\mshta.exe", "bash.exe.evil"] {
+            assert!(check_call("session.spawn", &json!({"program": bad})).is_err(), "{bad}");
+        }
+        assert!(check_call("session.spawn", &json!({"program": "bash", "env": {"AXELSTRA_KEY": "x"}})).is_ok());
+        assert!(check_call("session.spawn", &json!({"program": "bash", "env": {"LD_PRELOAD": "x"}})).is_err());
+        assert!(check_call("fs.write", &json!({"path": "src/a.rs"})).is_ok());
+        for bad in ["", "../x", "/etc/passwd", "C:\\x", ".git/config", ".GIT\\hooks\\pre-commit", "a/.git/b", "a/../b"] {
+            assert!(check_call("fs.write", &json!({"path": bad})).is_err(), "{bad}");
+        }
+        assert!(check_call("fs.read", &json!({"path": "../x"})).is_ok());
     }
 
     #[test]
