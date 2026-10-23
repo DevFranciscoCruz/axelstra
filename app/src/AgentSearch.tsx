@@ -1,7 +1,7 @@
 import { For, Show, createSignal, onCleanup } from "solid-js";
 import { AgentHit, agentSearch, launchDefaultAgent } from "./api";
 import { Modal } from "./Modal";
-import { findWorktree, refreshSessions, setError, setShowAgentSearch, setActiveSession, selectWorktree } from "./store";
+import { findWorktree, projectTerse, refreshSessions, setError, setShowAgentSearch, setActiveSession, selectWorktree } from "./store";
 
 const baseName = (p: string) => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
 const ago = (ts: number) => {
@@ -47,7 +47,7 @@ export function AgentSearch() {
     setShowAgentSearch(false);
     selectWorktree(t.wt.path);
     try {
-      const id = await launchDefaultAgent(t.project.id, t.wt.path, "claude", "claude", { resume: h.session });
+      const id = await launchDefaultAgent(t.project.id, t.wt.path, "claude", "claude", { resume: h.session }, undefined, projectTerse(t.project.id));
       await refreshSessions();
       setActiveSession(id);
     } catch (e) {
