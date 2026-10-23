@@ -492,12 +492,12 @@ export function App() {
               {(a) => (
                 <button
                   class="primary"
-                  classList={{ pref: a === defaultAgent() }}
+                  classList={{ pref: a === projectAgent(current()?.project.id) }}
                   onClick={() => {
                     setDefaultAgent(a);
                     done()(a);
                   }}
-                  ref={(el) => a === defaultAgent() && queueMicrotask(() => el.focus())}
+                  ref={(el) => a === projectAgent(current()?.project.id) && queueMicrotask(() => el.focus())}
                 >
                   {a}
                 </button>
@@ -703,7 +703,7 @@ export function App() {
                 <path d="M5.5 3v10M10.5 3v10" />
               </svg>
             </button>
-            <button class="icon add" title={`Novo agente (${defaultAgent()})`} aria-label={`Novo agente (${defaultAgent()})`} onClick={newAgent}>
+            <button class="icon add" title={`Novo agente (${projectAgent(current()?.project.id)})`} aria-label={`Novo agente (${projectAgent(current()?.project.id)})`} onClick={newAgent}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 1.5c.4 3.4 1.6 4.6 5 5-3.4.4-4.6 1.6-5 5-.4-3.4-1.6-4.6-5-5 3.4-.4 4.6-1.6 5-5z" />
               </svg>
