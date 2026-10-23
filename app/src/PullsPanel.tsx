@@ -46,11 +46,11 @@ export function PullsPanel() {
     <aside class="rightbar" id="rpanel" role="tabpanel" aria-labelledby={`rtab-${rightTab()}`}>
       <RightTabs />
       <div class="rtools">
-        <button class="icon" classList={{ on: kind() === "pr" }} onClick={() => setKind("pr")}>
+        <button class="icon" classList={{ on: kind() === "pr" }} aria-pressed={kind() === "pr"} onClick={() => setKind("pr")}>
           PRs
         </button>
-        <button class="icon" classList={{ on: kind() === "issue" }} onClick={() => setKind("issue")}>
-          Issues
+        <button class="icon" classList={{ on: kind() === "issue" }} aria-pressed={kind() === "issue"} onClick={() => setKind("issue")}>
+          Problemas
         </button>
         <span class="grow" />
         <button class="icon" title="Atualizar" aria-label="Atualizar" onClick={() => void refetch()}>

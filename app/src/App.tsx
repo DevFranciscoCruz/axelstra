@@ -16,7 +16,7 @@ import { Dispatcher } from "./Dispatcher";
 import { Settings } from "./Settings";
 import { Shortcuts } from "./Shortcuts";
 import { LEFT, RIGHT, resizeTo, splitTo } from "./layout";
-import { isTextTarget, overlayOpen } from "./keyboard";
+import { K, isTextTarget, overlayOpen } from "./keyboard";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
 import { PanelIcon } from "./PanelIcon";
@@ -31,6 +31,7 @@ import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./V
 import { ErrorToast } from "./ErrorToast";
 import { Modal } from "./Modal";
 import { Tab } from "./Tab";
+import { pickProject } from "./projectActions";
 import { StateDot } from "./StateDot";
 import { dotOfSession } from "./agentState";
 import { tabKeys } from "./a11y";
@@ -566,7 +567,7 @@ export function App() {
                 { label: `Novo agente (${projectAgent(current()!.project.id)})`, run: () => void newAgent() },
                 { label: "Novo terminal", run: () => void newTerminal() },
                 { label: "Dividir terminal", run: () => void toggleSplit() },
-                { label: "Reabrir último separador fechado", hint: "Ctrl+Shift+T", run: () => void reopenClosed() },
+                { label: "Reabrir último separador fechado", hint: K("Ctrl+Shift+T"), run: () => void reopenClosed() },
                 ...(activeSession() !== null ? [{ label: "Mudar o nome do separador", hint: "F2", run: () => setRenaming(activeSession()) }] : []),
                 ...(current()!.wt.is_main
                   ? []
@@ -576,14 +577,14 @@ export function App() {
           ...(projects().length > 0
             ? [{ label: "Novo worktree", hint: "worktree", run: () => { showSidebarNow(); setCreatingWorktree(current()?.project.id ?? projects()[0].id); } }]
             : []),
-          { label: "Pesquisar conversas", hint: "Ctrl+Shift+F", run: () => setShowAgentSearch(true) },
+          { label: "Pesquisar conversas", hint: K("Ctrl+Shift+F"), run: () => setShowAgentSearch(true) },
           { label: "Orquestração: agentes e workers", run: () => setShowOrchestra(true) },
-          { label: "Definições", hint: "Ctrl+,", run: () => setShowSettings(true) },
+          { label: "Definições", hint: K("Ctrl+,"), run: () => setShowSettings(true) },
           { label: "Despachante", hint: "pedidos enviados a cada worktree", run: () => setShowDispatcher(true) },
           { label: "Automatizações", hint: "agendamento", run: () => setShowAutomations(true) },
           { label: "Atalhos de teclado", hint: "?", run: () => setShowShortcuts(true) },
-          { label: showSidebar() ? "Ocultar projetos" : "Mostrar projetos", hint: "Ctrl+B", run: toggleSidebar },
-          { label: showRightPanel() ? "Ocultar painel direito" : "Mostrar painel direito", hint: "Ctrl+Shift+B", run: toggleRightPanel },
+          { label: showSidebar() ? "Ocultar projetos" : "Mostrar projetos", hint: K("Ctrl+B"), run: toggleSidebar },
+          { label: showRightPanel() ? "Ocultar painel direito" : "Mostrar painel direito", hint: K("Ctrl+Shift+B"), run: toggleRightPanel },
           { label: computerOn() ? "Controlo do ecrã pelos agentes: desligar" : "Controlo do ecrã pelos agentes: ligar", run: () => void toggleComputer() },
         ]}
       />
@@ -619,16 +620,19 @@ export function App() {
           fallback={
             <div class="placeholder">
               <Show when={!showSidebar()}>
-                <button class="icon add" title="Mostrar projetos (Ctrl+B)" aria-label="Mostrar projetos (Ctrl+B)" onClick={toggleSidebar}>
+                <button class="icon add" title={K("Mostrar projetos (Ctrl+B)")} aria-label={K("Mostrar projetos (Ctrl+B)")} onClick={toggleSidebar}>
                   <PanelIcon side="left" on={false} />
                 </button>
               </Show>
-              Adicione um projeto e escolha um worktree.
+              <div>Adicione um projeto e escolha um worktree.</div>
+              <Show when={projects().length === 0}>
+                <button class="primary" onClick={() => void pickProject()}>Adicionar projeto</button>
+              </Show>
             </div>
           }
         >
           <div class="tabbar">
-            <button class="icon add" title="Projetos (Ctrl+B)" aria-label="Projetos (Ctrl+B)" classList={{ on: showSidebar() }} onClick={toggleSidebar}>
+            <button class="icon add" title={K("Projetos (Ctrl+B)")} aria-label={K("Projetos (Ctrl+B)")} classList={{ on: showSidebar() }} onClick={toggleSidebar}>
               <PanelIcon side="left" on={showSidebar()} />
             </button>
             <div class="tabs" role="tablist" aria-label="Separadores" onKeyDown={(e) => tabKeys(e)}>
@@ -738,7 +742,7 @@ export function App() {
                 </button>
               )}
             </For>
-            <button class="icon add" title="Ditado por voz (Ctrl+Shift+M)" aria-label="Ditado por voz (Ctrl+Shift+M)" classList={{ on: listening(), rec: listening() }} onClick={() => void toggleVoice()} hidden={!voiceSupported}>
+            <button class="icon add" title={K("Ditado por voz (Ctrl+Shift+M)")} aria-label={K("Ditado por voz (Ctrl+Shift+M)")} classList={{ on: listening(), rec: listening() }} onClick={() => void toggleVoice()} hidden={!voiceSupported}>
               <MicIcon />
             </button>
             <button class="icon add" title="Dividir: ver dois terminais lado a lado" aria-label="Dividir: ver dois terminais lado a lado" classList={{ on: splitSession() !== null }} onClick={() => void toggleSplit()}>
@@ -757,7 +761,7 @@ export function App() {
               </svg>
             </button>
             <Show when={!showRightPanel()}>
-              <button class="icon add" title="Mostrar painel direito (Ctrl+Shift+B)" aria-label="Mostrar painel direito (Ctrl+Shift+B)" onClick={toggleRightPanel}>
+              <button class="icon add" title={K("Mostrar painel direito (Ctrl+Shift+B)")} aria-label={K("Mostrar painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>
                 <PanelIcon side="right" on={false} />
               </button>
             </Show>
@@ -790,7 +794,7 @@ export function App() {
                       <button onClick={() => void newTerminal()}>+ Terminal</button>
                     </div>
                     <div class="hints">
-                      <kbd>Ctrl+K</kbd> paleta · <kbd>Ctrl+B</kbd> projetos · <kbd>Ctrl+Shift+B</kbd> painel direito
+                      <kbd>{K("Ctrl+K")}</kbd> paleta · <kbd>{K("Ctrl+B")}</kbd> projetos · <kbd>{K("Ctrl+Shift+B")}</kbd> painel direito
                     </div>
                   </div>
                 }

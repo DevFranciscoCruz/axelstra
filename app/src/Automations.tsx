@@ -146,7 +146,7 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
                   )}
                 </For>
               </div>
-              <span class="cmt-msg">{msg()}</span>
+              <span class="cmt-msg" role="status" aria-live="polite">{msg()}</span>
             </>
           }
         >
@@ -244,7 +244,7 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
                 })()}
               </div>
               <div class="m-actions">
-                <span class="cmt-msg grow">{msg()}</span>
+                <span class="cmt-msg grow" role="status" aria-live="polite">{msg()}</span>
                 <button onClick={() => void leaveDraft()}>Cancelar</button>
                 <button class="primary" disabled={!d().name.trim() || !d().prompt.trim()} onClick={() => void save()}>
                   Guardar

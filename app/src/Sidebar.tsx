@@ -1,9 +1,9 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { Icon } from "./Icon";
 import { ask, askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
-import { addProject, getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
+import { getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
 import { Modal } from "./Modal";
+import { pickProject } from "./projectActions";
 import { StateDot } from "./StateDot";
 import { dotOfSession, dotOfWorktree } from "./agentState";
 import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
@@ -172,16 +172,6 @@ export function Sidebar() {
     await refreshProjects();
     await refreshSessions();
   };
-
-  const pickProject = () =>
-    run(async () => {
-      const dir = await open({ directory: true, multiple: false, title: "Escolha a pasta do projeto" });
-      if (typeof dir !== "string") return;
-      const added = await addProject(dir);
-      await refreshProjects();
-      const main = projects().find((p) => p.id === added.id)?.worktrees.find((w) => w.is_main);
-      if (main) selectWorktree(main.path);
-    });
 
   // a project with its own default agent starts new worktrees with it
   createEffect(() => {
@@ -370,12 +360,20 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
         <img src={logo} alt="" />
         Axelstra
       </div>
-      <button class="primary" onClick={pickProject}>
+      <button class="primary" onClick={() => void pickProject()}>
         + Adicionar projeto
       </button>
 
       <div class="section">Projetos</div>
-      <For each={projects()} fallback={<div class="empty">Nenhum projeto</div>}>
+      <For
+        each={projects()}
+        fallback={
+          <div class="empty">
+            <div>Nenhum projeto</div>
+            <button class="primary" onClick={() => void pickProject()}>Adicionar o primeiro projeto</button>
+          </div>
+        }
+      >
         {(p) => (
           <div class="project">
             <div class="project-head" title={p.path} onContextMenu={(e) => showMenu(e, projectMenu(p))}>

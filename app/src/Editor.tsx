@@ -1,3 +1,4 @@
+import { K } from "./keyboard";
 import { Compartment, EditorState, Extension } from "@codemirror/state";
 import { Icon } from "./Icon";
 import { EditorView, drawSelection, highlightActiveLine, keymap, lineNumbers } from "@codemirror/view";
@@ -199,8 +200,8 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
             <i class="bdot" />
           </span>
         </Show>
-        <span class="emsg">{msg()}</span>
-        <button class="icon" disabled={!dirty()} title="Guardar (Ctrl+S)" onClick={() => void save()}>
+        <span class="emsg" role="status" aria-live="polite">{msg()}</span>
+        <button class="icon" disabled={!dirty()} title={K("Guardar (Ctrl+S)")} onClick={() => void save()}>
           Guardar
         </button>
         <button class="icon" title="Fechar" aria-label="Fechar" onClick={() => guarded(() => setOpenFile(null))}>
