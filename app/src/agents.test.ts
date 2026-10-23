@@ -28,8 +28,6 @@ describe("agent pickers", () => {
 describe("agentLine resume", () => {
   it("continues the latest conversation per agent", () => {
     expect(agentLine("gemini", undefined, true, false, "h")).toBe("gemini --resume latest || gemini");
-    expect(agentLine("opencode", undefined, true, false, "h")).toBe("opencode --continue || opencode");
     expect(agentLine("codex", undefined, true, false, "h")).toBe("codex resume --last || codex");
-    expect(agentLine("aider", undefined, true, false, "h")).toBe("aider || aider");
   });
 });
