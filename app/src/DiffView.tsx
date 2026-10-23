@@ -130,7 +130,7 @@ export function DiffView() {
                                 Enviar ao agente
                               </button>
                               <button onClick={() => setCommenting(null)}>Cancelar</button>
-                              <span class="cmt-msg">{sendMsg()}</span>
+                              <span class="cmt-msg" role="status" aria-live="polite">{sendMsg()}</span>
                             </div>
                           </td>
                         </tr>

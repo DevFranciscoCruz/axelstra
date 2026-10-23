@@ -1,3 +1,4 @@
+import { K } from "./keyboard";
 import { Show, createEffect, createSignal, onCleanup } from "solid-js";
 import { Icon } from "./Icon";
 import { invoke } from "@tauri-apps/api/core";
@@ -237,7 +238,7 @@ export const VoiceDraft = (props: { target: number | null }) => {
               } else if (e.key === "Escape") close();
             }}
           />
-          <button onClick={() => void toggleVoice()} disabled={voiceState() === "transcribing"} title="Ditado (Ctrl+Shift+M)">
+          <button onClick={() => void toggleVoice()} disabled={voiceState() === "transcribing"} title={K("Ditado (Ctrl+Shift+M)")}>
             {listening() ? "Parar" : voiceState() === "transcribing" ? "…" : "Ditar"}
           </button>
           <button onClick={() => void send(false)} title="Colar no terminal sem Enter">

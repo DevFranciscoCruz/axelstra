@@ -38,7 +38,7 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
       out.push(
         { label: "Ficheiros", hint: "painel", run: () => setRightTab("files") },
         { label: "Alterações", hint: "painel", run: () => setRightTab("changes") },
-        { label: "PRs e issues", hint: "painel", run: () => setRightTab("pulls") },
+        { label: "PRs e problemas", hint: "painel", run: () => setRightTab("pulls") },
         { label: "Kanban", hint: "vista", run: () => setShowKanban(true) },
       );
     }

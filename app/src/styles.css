@@ -754,7 +754,7 @@ tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: v
 .update-toast {
   position: fixed;
   right: 16px;
-  bottom: 16px;
+  bottom: 36px;
   z-index: 60;
   width: 320px;
   padding: 12px;
@@ -793,7 +793,7 @@ button:not([class]):hover:not(:disabled) { border-color: var(--accent); color: v
 .tab > span:not(.dot):not(.dtag) { overflow: hidden; text-overflow: ellipsis; }
 .tab:focus-within .x, .item:focus-within .x, .row:focus-within .x, .split-pane:focus-within .split-x { visibility: visible; opacity: 1; }
 
-.error-toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 60; max-width: min(560px, 92vw); display: flex; gap: 10px; align-items: flex-start; background: var(--panel); border: 1px solid var(--danger); color: var(--danger); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, .4); }
+.error-toast { position: fixed; left: 50%; bottom: 36px; transform: translateX(-50%); z-index: 60; max-width: min(560px, 92vw); display: flex; gap: 10px; align-items: flex-start; background: var(--panel); border: 1px solid var(--danger); color: var(--danger); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, .4); }
 .error-toast .et-msg { word-break: break-word; white-space: pre-line; max-height: 120px; overflow: auto; }
 
 .placeholder.empty { display: flex; flex-direction: column; align-items: center; gap: 12px; }
