@@ -39,10 +39,14 @@ fn rename_persists_with_the_session() {
     let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join("sessions.json")).unwrap()).unwrap();
     assert!(saved.as_array().unwrap().iter().any(|s| s["label"] == "build"));
 
-    // empty names and unknown sessions are refused, and the name is left alone
-    assert!(c.call("session.rename", json!({"id": sid, "label": "   "})).is_err());
+    // an empty name brings back the one the session started with; unknown sessions are refused
+    let r = c.call("session.rename", json!({"id": sid, "label": "   "})).unwrap();
+    assert_eq!(r["label"], "shell");
+    assert_eq!(c.call("session.list", json!({})).unwrap()[0]["label"], "shell");
     assert!(c.call("session.rename", json!({"id": sid + 99, "label": "x"})).is_err());
-    assert_eq!(c.call("session.list", json!({})).unwrap()[0]["label"], "build");
+    // renaming again after a reset still remembers the original
+    c.call("session.rename", json!({"id": sid, "label": "deploy"})).unwrap();
+    assert_eq!(c.call("session.rename", json!({"id": sid, "label": ""})).unwrap()["label"], "shell");
 
     c.call("session.remove", json!({"id": sid})).unwrap();
 }

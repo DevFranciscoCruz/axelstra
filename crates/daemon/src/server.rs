@@ -755,12 +755,31 @@ fn dispatch(
         "session.rename" => {
             let id = sid()?;
             session()?;
-            let label = p["label"].as_str().map(str::trim).filter(|l| !l.is_empty()).ok_or_else(|| anyhow::anyhow!("missing label"))?;
-            let label: String = label.chars().take(120).collect();
-            reg.labels.lock().unwrap().insert(id, label.clone());
-            if let Some(spec) = reg.specs.lock().unwrap().get_mut(&id) {
-                spec["label"] = json!(label);
+            let wanted: String = p["label"].as_str().unwrap_or_default().trim().chars().take(120).collect();
+            let mut labels = reg.labels.lock().unwrap();
+            let mut specs = reg.specs.lock().unwrap();
+            // the name the session was started with, kept the first time it is renamed, so an empty name can bring it back
+            let base = specs.get(&id).and_then(|sp| sp["base_label"].as_str().map(str::to_string)).or_else(|| labels.get(&id).cloned());
+            let label = if wanted.is_empty() { base.clone().unwrap_or_default() } else { wanted };
+            if label.is_empty() {
+                labels.remove(&id);
+            } else {
+                labels.insert(id, label.clone());
             }
+            if let Some(spec) = specs.get_mut(&id) {
+                if spec.get("base_label").is_none() {
+                    if let Some(b) = &base {
+                        spec["base_label"] = json!(b);
+                    }
+                }
+                if label.is_empty() {
+                    spec.as_object_mut().map(|o| o.remove("label"));
+                } else {
+                    spec["label"] = json!(label);
+                }
+            }
+            drop(labels);
+            drop(specs);
             reg.persist();
             Ok(json!({"label": label}))
         }
