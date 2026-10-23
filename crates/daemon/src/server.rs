@@ -256,7 +256,7 @@ fn spawn_scheduler(reg: Arc<Registry>) {
                 })
                 .await;
             }
-            if n % 20 == 0 && reg.saved.with_file_name("janitor.on").exists() {
+            if n % 20 == 0 && !reg.saved.with_file_name("janitor.off").exists() {
                 let r = reg.clone();
                 let _ = tokio::task::spawn_blocking(move || {
                     for s in crate::janitor::sweep(&r.store, &|path| r.worktree_busy(path), false) {
@@ -813,15 +813,16 @@ fn dispatch(
             Ok(json!({"swept": done}))
         }
         "janitor.auto" => {
-            let flag = reg.saved.with_file_name("janitor.on");
+            // on unless the user turned it off: the file records the opt-out
+            let flag = reg.saved.with_file_name("janitor.off");
             if let Some(on) = p["on"].as_bool() {
                 if on {
-                    let _ = std::fs::write(&flag, "1");
-                } else {
                     let _ = std::fs::remove_file(&flag);
+                } else {
+                    let _ = std::fs::write(&flag, "1");
                 }
             }
-            Ok(json!({"on": flag.exists()}))
+            Ok(json!({"on": !flag.exists()}))
         }
         "flow.set" => {
             let id = p["flow"].as_str().unwrap_or_default().to_string();
