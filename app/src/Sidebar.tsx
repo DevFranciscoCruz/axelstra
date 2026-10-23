@@ -840,6 +840,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
               <Field label="Agente" full><Select
                   value={newAgent()}
                   label="Agente"
+                  iconOnly
                   options={[{ value: "none", label: "Nenhum (só o worktree)" }, ...agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))]}
                   onChange={setNewAgentSig}
                 /></Field>

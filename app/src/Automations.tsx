@@ -174,7 +174,8 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
                 <Field label="Agente">
                   <Select
                     value={d().agent}
-                    options={agentOptions(agents() ?? [], d().agent)}
+                    iconOnly
+                  options={agentOptions(agents() ?? [], d().agent)}
                     onChange={(v) => setDraft({ ...d(), agent: v })}
                   />
                   <Show when={agentWarning(agents() ?? [], d().agent)}>{(w) => <span class="auto-note">{w()}</span>}</Show>
