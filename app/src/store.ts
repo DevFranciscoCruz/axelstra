@@ -392,7 +392,7 @@ export const renameTab = (id: number, name: string) => {
     else delete next[id];
     return next;
   });
-  if (n) void call("session.rename", { id, label: n }).catch(() => {});
+  void call("session.rename", { id, label: n }).then(() => refreshSessions()).catch(() => {});
 };
 /** the order the user dragged tabs into; ids not in it follow in their natural order */
 const [tabOrder, setTabOrder] = createSignal<number[]>([]);
