@@ -1,4 +1,5 @@
 import { ask } from "./Confirm";
+import { LEFT, RIGHT, fitPanel } from "./layout";
 import { createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { Changes, Commit, DispatchMeta, FlowTask, GhItem, Project, SessionInfo, Terse, Worktree, WtStatus, call, callBg, flowTasks, ghListBg, gitChanges, listProjects, listSessions, worktreeStatus } from "./api";
@@ -98,16 +99,22 @@ const num = (k: string, d: number) => {
   const n = Number(load(k));
   return Number.isFinite(n) && n > 0 ? n : d;
 };
-export const [leftW, setLeftWSig] = createSignal(num("axelstra.leftW", 260));
-export const [rightW, setRightWSig] = createSignal(num("axelstra.rightW", 320));
+const [leftRaw, setLeftRaw] = createSignal(num("axelstra.leftW", 260));
+const [rightRaw, setRightRaw] = createSignal(num("axelstra.rightW", 320));
+// the window size, so the saved widths shrink when the window does (and come back when it grows)
+const [winW, setWinW] = createSignal(typeof window === "undefined" ? 1400 : window.innerWidth);
+if (typeof window !== "undefined") window.addEventListener("resize", () => setWinW(window.innerWidth));
+/** widths in use: what was saved, limited so the centre keeps a usable width */
+export const leftW = () => fitPanel(leftRaw(), LEFT, rightOn() ? rightRaw() : 0, winW());
+export const rightW = () => fitPanel(rightRaw(), RIGHT, leftOn() ? leftW() : 0, winW());
 export const setLeftW = (w: number) => {
-  const v = Math.round(Math.min(Math.max(w, 180), 480));
-  setLeftWSig(v);
+  const v = fitPanel(w, LEFT, rightOn() ? rightRaw() : 0, winW());
+  setLeftRaw(v);
   save("axelstra.leftW", String(v));
 };
 export const setRightW = (w: number) => {
-  const v = Math.round(Math.min(Math.max(w, 240), 640));
-  setRightWSig(v);
+  const v = fitPanel(w, RIGHT, leftOn() ? leftW() : 0, winW());
+  setRightRaw(v);
   save("axelstra.rightW", String(v));
 };
 
