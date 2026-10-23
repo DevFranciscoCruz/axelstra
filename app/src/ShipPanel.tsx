@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Badge, Button, CheckboxInput } from "./ui";
+import { Badge, Button, Checkbox } from "./ui";
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { press } from "./a11y";
 import { ask } from "./Confirm";
@@ -176,9 +176,7 @@ export function ShipPanel() {
                 </Show>
               </div>
               <Show when={s().can_merge}>
-                <label class="ship-opt">
-                  <CheckboxInput checked={delBranch()} onChange={(e) => setDelBranch(e.currentTarget.checked)} /> Apagar o branch depois do merge
-                </label>
+                <Checkbox labelClass="ship-opt" checked={delBranch()} onChange={(e) => setDelBranch(e.currentTarget.checked)} label="Apagar o branch depois do merge" />
               </Show>
             </Show>
           )}
