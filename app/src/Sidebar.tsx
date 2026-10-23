@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { Icon } from "./Icon";
-import { ask } from "./Confirm";
+import { ask, askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import { addProject, getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
 import { Modal } from "./Modal";
@@ -213,6 +213,17 @@ export function Sidebar() {
       }
     });
 
+  // leaving the new-worktree dialog with a name typed in asks first
+  const closeNewWorktree = async () => {
+    if (newName().trim() && !(await askDiscard("O nome do worktree ainda não foi criado."))) return;
+    setCreating(null);
+    setNewName("");
+  };
+  const closeSetup = async (setup?: string | null) => {
+    if (setupText() !== (setup ?? "") && !(await askDiscard("O comando de setup tem alterações por guardar."))) return;
+    setEditSetup(null);
+  };
+
   const saveSetup = (projectId: string) =>
     run(async () => {
       await setProjectSetup(projectId, setupText());
@@ -381,7 +392,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 onInput={(e) => setSetupText(e.currentTarget.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") void saveSetup(p.id);
-                  if (e.key === "Escape") setEditSetup(null);
+                  if (e.key === "Escape") void closeSetup(p.setup);
                 }}
                 ref={(el) => queueMicrotask(() => el.focus())}
               />
@@ -546,7 +557,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
         {(pid) => {
           const proj = () => projects().find((x) => x.id === pid());
           return (
-            <Modal label="Novo worktree" onClose={() => setCreating(null)}>
+            <Modal label="Novo worktree" dirty={!!newName().trim()} onClose={() => void closeNewWorktree()}>
               <div class="m-title" style={{ "font-weight": "600" }}>Novo worktree</div>
               <label class="m-full">
                 Projeto
@@ -570,7 +581,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 </select>
               </label>
               <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-                <button onClick={() => setCreating(null)}>Cancelar</button>
+                <button onClick={() => void closeNewWorktree()}>Cancelar</button>
                 <button class="primary" disabled={!newName().trim()} onClick={() => void submitWorktree(pid())}>
                   Criar worktree
                 </button>
