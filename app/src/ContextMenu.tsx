@@ -15,16 +15,24 @@ export type MenuItem =
 
 type Open = { x: number; y: number; items: MenuItem[]; minWidth?: number };
 const [menu, setMenu] = createSignal<Open | null>(null);
+/** a menu or dropdown is open: it is the topmost layer, so Esc and Tab belong to it and not to a dialog underneath */
+export const menuOpen = () => menu() !== null;
+/** where focus was when the menu opened; it goes back there when the menu closes from the keyboard */
+let opener: HTMLElement | null = null;
+const openMenu = (m: Open) => {
+  opener = document.activeElement as HTMLElement | null;
+  setMenu(m);
+};
 
 /** Right-click menu at the pointer. */
 export const showMenu = (e: MouseEvent, items: MenuItem[]) => {
   e.preventDefault();
   e.stopPropagation();
-  setMenu({ x: e.clientX, y: e.clientY, items });
+  openMenu({ x: e.clientX, y: e.clientY, items });
 };
 
 /** Menu at a fixed point (dropdowns open under their button). */
-export const showMenuAt = (x: number, y: number, items: MenuItem[], minWidth?: number) => setMenu({ x, y, items, minWidth });
+export const showMenuAt = (x: number, y: number, items: MenuItem[], minWidth?: number) => openMenu({ x, y, items, minWidth });
 
 function Items(props: { items: MenuItem[]; sub?: boolean; flip?: boolean }) {
   const [openSub, setOpenSub] = createSignal<number | null>(null);
@@ -79,7 +87,13 @@ export function ContextMenu() {
     const close = () => setMenu(null);
     const key = (e: KeyboardEvent) => {
       if (!menu()) return;
-      if (e.key === "Escape") return close();
+      if (e.key === "Escape" || e.key === "Tab") {
+        // handled here, so the dialog under the menu keeps its own Esc and Tab for later
+        e.preventDefault();
+        close();
+        opener?.focus?.();
+        return;
+      }
       const act = document.activeElement as HTMLElement | null;
       const list = act?.closest(".ctx") ?? document.querySelector(".ctx-root > .ctx");
       const btns = [...(list?.querySelectorAll<HTMLElement>(":scope > .ctx-wrap > .ctx-item:not(:disabled)") ?? [])];
