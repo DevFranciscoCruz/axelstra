@@ -1,6 +1,7 @@
 //! Messages between sessions and the bookkeeping of ephemeral workers: who is whose child, who reported
 //! "done", who escalated, and how many workers may run at once. Pure data; the server delivers nudges.
 
+use crate::store::LockRecover;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -117,33 +118,33 @@ impl Bus {
     }
 
     pub fn set_parent(&self, child: u32, parent: u32) {
-        self.parents.lock().unwrap().insert(child, parent);
+        self.parents.lock_recover().insert(child, parent);
     }
     pub fn parent_of(&self, child: u32) -> Option<u32> {
-        self.parents.lock().unwrap().get(&child).copied()
+        self.parents.lock_recover().get(&child).copied()
     }
 
     pub fn add_worker(&self, id: u32) {
-        self.workers.lock().unwrap().insert(id);
+        self.workers.lock_recover().insert(id);
     }
     pub fn mark_reaped(&self, id: u32) {
-        self.reaped.lock().unwrap().insert(id);
+        self.reaped.lock_recover().insert(id);
     }
     pub fn is_reaped(&self, id: u32) -> bool {
-        self.reaped.lock().unwrap().contains(&id)
+        self.reaped.lock_recover().contains(&id)
     }
     /// workers still alive according to `alive`; forgets the ones that are gone
     pub fn live_workers(&self, alive: impl Fn(u32) -> bool) -> usize {
-        let mut w = self.workers.lock().unwrap();
+        let mut w = self.workers.lock_recover();
         w.retain(|id| alive(*id));
         w.len()
     }
 
     pub fn finished(&self, id: u32) -> Option<Value> {
-        self.finished.lock().unwrap().get(&id).cloned()
+        self.finished.lock_recover().get(&id).cloned()
     }
     pub fn is_escalated(&self, id: u32) -> bool {
-        self.escalated.lock().unwrap().contains(&id)
+        self.escalated.lock_recover().contains(&id)
     }
 
     /// Stores a message and applies its side effects. The caller checked that `to` exists.
@@ -152,17 +153,17 @@ impl Bus {
         // an answer belongs to the conversation of the message it answers
         let thread = thread.or_else(|| reply_to.and_then(|r| self.get(r)).and_then(|o| o.thread));
         let m = Msg { id, from, to, kind: kind.to_string(), text: text.to_string(), reply_to, thread, ts: now(), read: false };
-        self.inbox.lock().unwrap().entry(to).or_default().push(m.clone());
+        self.inbox.lock_recover().entry(to).or_default().push(m.clone());
         match (kind, from) {
             ("escalate", Some(f)) => {
-                self.escalated.lock().unwrap().insert(f);
+                self.escalated.lock_recover().insert(f);
             }
             ("done", Some(f)) => {
-                self.finished.lock().unwrap().insert(f, json!({"text": text, "id": id}));
+                self.finished.lock_recover().insert(f, json!({"text": text, "id": id}));
             }
             // any answer from the parent unblocks an escalated worker
             ("reply" | "message", _) => {
-                self.escalated.lock().unwrap().remove(&to);
+                self.escalated.lock_recover().remove(&to);
             }
             _ => {}
         }
@@ -170,12 +171,12 @@ impl Bus {
     }
 
     pub fn unread(&self, session: u32) -> usize {
-        self.inbox.lock().unwrap().get(&session).map(|v| v.iter().filter(|m| !m.read).count()).unwrap_or(0)
+        self.inbox.lock_recover().get(&session).map(|v| v.iter().filter(|m| !m.read).count()).unwrap_or(0)
     }
 
     /// Messages of `session`, oldest first; unread only unless `all`. `mark` flags the returned ones as read.
     pub fn inbox(&self, session: u32, all: bool, mark: bool) -> Vec<Msg> {
-        let mut g = self.inbox.lock().unwrap();
+        let mut g = self.inbox.lock_recover();
         let Some(list) = g.get_mut(&session) else { return vec![] };
         let mut out = vec![];
         for m in list.iter_mut() {
@@ -191,29 +192,28 @@ impl Bus {
 
     /// Every message of a thread, in the order they were sent.
     pub fn thread(&self, name: &str) -> Vec<Msg> {
-        let mut v: Vec<Msg> =
-            self.inbox.lock().unwrap().values().flatten().filter(|m| m.thread.as_deref() == Some(name)).cloned().collect();
+        let mut v: Vec<Msg> = self.inbox.lock_recover().values().flatten().filter(|m| m.thread.as_deref() == Some(name)).cloned().collect();
         v.sort_by_key(|m| m.id);
         v
     }
 
     pub fn get(&self, id: u64) -> Option<Msg> {
-        self.inbox.lock().unwrap().values().flatten().find(|m| m.id == id).cloned()
+        self.inbox.lock_recover().values().flatten().find(|m| m.id == id).cloned()
     }
 
     /// The reply to message `id`, if one arrived.
     pub fn reply_to(&self, id: u64) -> Option<Msg> {
-        self.inbox.lock().unwrap().values().flatten().find(|m| m.reply_to == Some(id) && m.kind == "reply").cloned()
+        self.inbox.lock_recover().values().flatten().find(|m| m.reply_to == Some(id) && m.kind == "reply").cloned()
     }
 
     /// Drops everything kept about a session that is gone.
     pub fn forget(&self, id: u32) {
-        self.inbox.lock().unwrap().remove(&id);
-        self.parents.lock().unwrap().remove(&id);
-        self.finished.lock().unwrap().remove(&id);
-        self.escalated.lock().unwrap().remove(&id);
-        self.workers.lock().unwrap().remove(&id);
-        self.reaped.lock().unwrap().remove(&id);
+        self.inbox.lock_recover().remove(&id);
+        self.parents.lock_recover().remove(&id);
+        self.finished.lock_recover().remove(&id);
+        self.escalated.lock_recover().remove(&id);
+        self.workers.lock_recover().remove(&id);
+        self.reaped.lock_recover().remove(&id);
     }
 }
 

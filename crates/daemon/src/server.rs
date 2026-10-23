@@ -666,6 +666,13 @@ fn ensure_session_notifier(reg: &Arc<Registry>, tx: &Tx, subs: &mut HashMap<u32,
     });
 }
 
+/// The task file of an agent session, if it has one and the path is still one of ours.
+fn note_path(reg: &Registry, id: u32) -> Option<std::path::PathBuf> {
+    let note = std::path::PathBuf::from(reg.metas.lock_recover().get(&id)?["note"].as_str()?);
+    let root = crate::notes::root(reg.saved.parent()?);
+    crate::notes::inside_root(&root, &note).then_some(note)
+}
+
 /// What `session.list` answers. Takes sessions, labels, metas in the registry's lock order.
 fn session_list(reg: &Registry) -> Vec<Value> {
     let l = reg.sessions.lock_recover();
@@ -760,7 +767,11 @@ fn dispatch(
                 s.env.push(("AXELSTRA_PARENT".into(), par.to_string()));
             }
             let history_key = p["meta"]["key"].as_str().map(String::from);
-            let id = reg.spawn(&s, p["label"].as_str(), meta)?;
+            // an agent gets a name ("Tarefa N") and its task file; the prompt it starts with is the goal
+            let data_dir = reg.saved.parent().unwrap_or(std::path::Path::new("")).to_path_buf();
+            let label = crate::notes::on_spawn(&crate::notes::root(&data_dir), p["label"].as_str(), &mut meta, p["goal"].as_str());
+            let note = meta.as_ref().and_then(|m| m.get("note").cloned());
+            let id = reg.spawn(&s, label.as_deref(), meta)?;
             // a restored agent shows what its terminal said before the restart, dimmed, above its own output
             if let (Some(key), Some(sess)) = (history_key, reg.get(id)) {
                 if let Some(text) = take_history(&reg, &key) {
@@ -785,6 +796,14 @@ fn dispatch(
             }
             let mut spec = p.clone();
             spec["id"] = Value::Null;
+            // restoring brings back the name and the file; the goal text stays out of sessions.json
+            spec.as_object_mut().map(|o| o.remove("goal"));
+            if let Some(l) = &label {
+                spec["label"] = json!(l);
+            }
+            if let (Some(n), true) = (note, spec["meta"].is_object()) {
+                spec["meta"]["note"] = n;
+            }
             reg.specs.lock_recover().insert(id, spec);
             reg.persist();
             Ok(json!({"id": id}))
@@ -978,6 +997,13 @@ fn dispatch(
             let target = reg.get(to).ok_or_else(|| anyhow::anyhow!("no such session {to}"))?;
             let text = p["text"].as_str().unwrap_or_default();
             let m = reg.bus.send(from, to, kind, text, p["reply_to"].as_u64(), p["thread"].as_str().map(String::from));
+            // the summary of a finished agent goes into the Relatorio section of its task file
+            if let (true, Some(f)) = (kind == "done", from) {
+                if let Some(note) = note_path(reg, f) {
+                    let (status, body) = crate::notes::split_status(text);
+                    let _ = crate::notes::append(&note, status, body);
+                }
+            }
             // agents get a one-line notice; a worker with a reaper reports through it instead
             let quiet = p["quiet"].as_bool() == Some(true) || (kind == "done" && from.map(|f| reg.bus.is_reaped(f)).unwrap_or(false));
             let agent = reg.metas.lock_recover().get(&to).map(|m| m["kind"] == "agent").unwrap_or(false);
@@ -988,6 +1014,28 @@ fn dispatch(
                 crate::msgbus::deliver(target.clone(), crate::msgbus::paste(&crate::msgbus::notice(&m, &label)));
             }
             Ok(json!({"id": m.id}))
+        }
+        "notes.read" | "notes.append" | "notes.export" => {
+            let id = p["session"].as_u64().ok_or_else(|| anyhow::anyhow!("missing session"))? as u32;
+            let note = note_path(reg, id).ok_or_else(|| anyhow::anyhow!("esta sessão não tem ficheiro de tarefa"))?;
+            match req.method.as_str() {
+                "notes.read" => {
+                    let name = note.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    Ok(json!({"text": crate::notes::read(&note)?, "path": note.to_string_lossy(), "name": name}))
+                }
+                "notes.append" => {
+                    let title = if p["title"].as_str() == Some("ok") { "ok" } else { "nota" };
+                    crate::notes::append(&note, title, p["text"].as_str().unwrap_or_default())?;
+                    Ok(json!({"path": note.to_string_lossy()}))
+                }
+                _ => {
+                    // only into a worktree of a registered project, never over a file without an explicit flag
+                    let wt = reg.metas.lock_recover().get(&id).and_then(|m| m["worktree"].as_str().map(String::from)).unwrap_or_default();
+                    let wt = tokio::task::block_in_place(|| crate::projects::known_worktree(&reg.store, &wt))?;
+                    let out = crate::notes::export(&note, &wt, p["overwrite"].as_bool() == Some(true))?;
+                    Ok(json!({"path": out.to_string_lossy()}))
+                }
+            }
         }
         "msg.inbox" => {
             let to = p["session"].as_u64().ok_or_else(|| anyhow::anyhow!("missing session"))? as u32;

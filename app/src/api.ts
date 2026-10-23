@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { projectTerse } from "./store";
 
-export type SessionMeta = { project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; parent?: number; worker?: boolean };
+export type SessionMeta = { project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; note?: string; parent?: number; worker?: boolean };
 export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
@@ -90,7 +90,7 @@ export const launchDefaultAgent = async (
   worktree: string,
   agent: string,
   cli: string,
-  restore?: { key?: string; resume?: string },
+  restore?: { key?: string; resume?: string; note?: string },
   pre?: { rules: string | null },
   terse?: Terse,
 ) => {
@@ -106,7 +106,7 @@ export const launchDefaultAgent = async (
   const line = agentLine(cli, resume, !!restore, ps, `${dir}/hooks.json`, rules);
   const run = ps ? [...args, "-NoExit", "-Command", line] : [...args, "-c", `${line}; exec ${shQuote(program, false)} -l`];
   const env = key ? { AXELSTRA_KEY: key, AXELSTRA_DIR: dir } : undefined;
-  const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent", agent: cli, resume, key }, env);
+  const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent", agent: cli, resume, key, note: restore?.note }, env);
   // only claude takes the rules as a system prompt: type them into the others once they have booted
   if (rules && cli !== "claude" && !restore) void nudge(id, rules);
   return id;
@@ -169,7 +169,7 @@ export const restoreSessions = async (): Promise<{ restored: number; skipped: nu
         } else {
           const terse = projectTerse(m.project);
           const rules = await rulesFor(terse);
-          const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume }, { rules }, terse);
+          const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume, note: m.note }, { rules }, terse);
           const x = m as { interrupted?: boolean; lost_workers?: string[] };
           const note = restartNote(!!x.interrupted, x.lost_workers ?? []);
           if (note) void nudge(id, note).catch(() => 0);
@@ -246,6 +246,15 @@ export const spawnSession = (
   meta?: SessionMeta,
   env?: Record<string, string>,
 ) => call<{ id: number }>("session.spawn", { program, args, label, cwd, meta, env, ...startSize() });
+
+/** the task file of an agent: its text, path and name */
+export const notesRead = (session: number) => call<{ text: string; path: string; name: string }>("notes.read", { session });
+/** copies the task file into the worktree's .axelstra folder; refuses to replace a file unless `overwrite` */
+export const notesExport = (session: number, overwrite = false) => call<{ path: string }>("notes.export", { session, overwrite });
+/** worktree path -> the other worktrees that edit some of the same files */
+export const dispatchOverlaps = () => callBg<Record<string, string[]>>("dispatch.overlaps");
+/** the name of a worktree folder/branch as the daemon renames it */
+export const worktreeRename = (path: string, name: string) => call<{ path?: string }>("worktree.rename", { path, name });
 
 export const killSession = (id: number) => call("session.kill", { id });
 export const removeSession = (id: number) => call("session.remove", { id });

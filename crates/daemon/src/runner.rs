@@ -3,6 +3,7 @@
 
 use crate::client::{Client, Frame};
 use crate::proto;
+use crate::store::LockRecover;
 use anyhow::Result;
 use axelstra_core::runner::{AgentSpawn, Handle, Runner};
 use serde_json::json;
@@ -33,7 +34,7 @@ struct SessionHandle {
 impl Runner for DaemonRunner {
     fn spawn(&self, s: &AgentSpawn) -> Result<Box<dyn Handle>> {
         let env: serde_json::Map<String, serde_json::Value> = s.env.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
-        let r = self.client.lock().unwrap().call(
+        let r = self.client.lock_recover().call(
             "session.spawn",
             json!({
                 "program": s.program, "args": s.args, "cwd": s.cwd,
@@ -54,18 +55,18 @@ impl Runner for DaemonRunner {
 
 impl Handle for SessionHandle {
     fn try_wait(&mut self) -> Result<Option<String>> {
-        let r = self.client.lock().unwrap().call("session.status", json!({"id": self.id}))?;
+        let r = self.client.lock_recover().call("session.status", json!({"id": self.id}))?;
         Ok(if r["running"] == true { None } else { Some(format!("exited ({})", r["code"])) })
     }
 
     fn kill(&mut self) {
-        let _ = self.client.lock().unwrap().call("session.kill", json!({"id": self.id}));
+        let _ = self.client.lock_recover().call("session.kill", json!({"id": self.id}));
     }
 }
 
 impl Drop for SessionHandle {
     fn drop(&mut self) {
-        let _ = self.client.lock().unwrap().call("session.remove", json!({"id": self.id}));
+        let _ = self.client.lock_recover().call("session.remove", json!({"id": self.id}));
     }
 }
 

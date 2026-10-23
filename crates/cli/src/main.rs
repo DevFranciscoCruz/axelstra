@@ -91,6 +91,10 @@ enum Cmd {
         #[arg(long)]
         to: Option<u32>,
     },
+    /// Add a note to this agent's task file (the Relatorio section)
+    Note { text: String },
+    /// Print the path of this agent's task file
+    TaskFile,
     /// Worker: ask the parent for help; this session shows as waiting until answered
     Escalate {
         text: String,
@@ -145,8 +149,12 @@ enum Cmd {
         worktree: PathBuf,
         #[arg(long, default_value = "claude")]
         agent: String,
+        /// First message for the agent; `-` reads it from stdin
         #[arg(long)]
         prompt: Option<String>,
+        /// Read the first message from a file (safest for long text or special characters)
+        #[arg(long)]
+        prompt_file: Option<PathBuf>,
         /// Type this worker's output into session ID when done (no value: $AXELSTRA_SESSION)
         #[arg(long, num_args = 0..=1)]
         report_to: Option<Option<u32>>,
@@ -400,6 +408,8 @@ fn main() -> Result<()> {
         | Cmd::Reply { .. }
         | Cmd::Done { .. }
         | Cmd::Escalate { .. }
+        | Cmd::Note { .. }
+        | Cmd::TaskFile
         | Cmd::Limit { .. }
         | Cmd::Thread { .. }
         | Cmd::Computer { .. }
