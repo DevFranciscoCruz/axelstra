@@ -8,15 +8,15 @@ pub mod janitor;
 pub mod kanban;
 pub mod lag;
 pub mod msgbus;
+#[cfg(windows)]
+pub mod pipesec;
 pub mod ports;
 pub mod projects;
-pub mod publish;
 pub mod proto;
+pub mod publish;
+pub mod runner;
 pub mod server;
 pub mod skill;
 pub mod store;
 pub mod watcher;
 pub mod wtstatus;
-pub mod runner;
-#[cfg(windows)]
-pub mod pipesec;

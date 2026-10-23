@@ -31,18 +31,18 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 pub fn slug(title: &str) -> String {
-    let mut s: String = title
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
+    let mut s: String = title.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
     while s.contains("--") {
         s = s.replace("--", "-");
     }
     let s = s.trim_matches('-');
     let s: String = s.chars().take(40).collect();
     let s = s.trim_matches('-').to_string();
-    if s.is_empty() { "card".into() } else { s }
+    if s.is_empty() {
+        "card".into()
+    } else {
+        s
+    }
 }
 
 pub fn list(repo: &Path) -> Result<Board> {

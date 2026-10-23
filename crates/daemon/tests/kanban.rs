@@ -1,4 +1,3 @@
-
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::json;
@@ -33,8 +32,13 @@ fn cards_crud_and_git_exclusion() {
     let token = "k".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()
-            .block_on(server::serve_with_store(p, t, s)).unwrap();
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(server::serve_with_store(p, t, s))
+            .unwrap();
     });
     std::thread::sleep(Duration::from_millis(300));
     let mut c = Client::connect(&pipe, &token).unwrap();
@@ -43,7 +47,8 @@ fn cards_crud_and_git_exclusion() {
     assert_eq!(c.call("kanban.list", json!({"project": pid})).unwrap()["cards"], json!([]));
 
     // free text becomes a card whose id comes from the title
-    let a = c.call("kanban.save", json!({"project": pid, "title": "Add Login Page!", "body": "make it pretty\n\nwith **markdown**"})).unwrap();
+    let a =
+        c.call("kanban.save", json!({"project": pid, "title": "Add Login Page!", "body": "make it pretty\n\nwith **markdown**"})).unwrap();
     assert_eq!(a["meta"]["id"], "add-login-page");
     assert_eq!(a["meta"]["status"], "backlog");
     let b = c.call("kanban.save", json!({"project": pid, "title": "Add login page"})).unwrap();
@@ -56,7 +61,11 @@ fn cards_crud_and_git_exclusion() {
     assert!(!repo.join(".gitignore").exists());
 
     // edit + dependency + move keep the body
-    c.call("kanban.save", json!({"project": pid, "id": "add-login-page-2", "title": "Second", "body": "b2", "depends_on": ["add-login-page"], "priority": 3})).unwrap();
+    c.call(
+        "kanban.save",
+        json!({"project": pid, "id": "add-login-page-2", "title": "Second", "body": "b2", "depends_on": ["add-login-page"], "priority": 3}),
+    )
+    .unwrap();
     c.call("kanban.move", json!({"project": pid, "id": "add-login-page-2", "status": "todo"})).unwrap();
     let board = c.call("kanban.list", json!({"project": pid})).unwrap();
     let card = board["cards"].as_array().unwrap().iter().find(|x| x["meta"]["id"] == "add-login-page-2").unwrap();
@@ -68,7 +77,10 @@ fn cards_crud_and_git_exclusion() {
 
     // bad input is rejected, a hand-broken card is reported instead of hiding the board
     assert!(c.call("kanban.move", json!({"project": pid, "id": "add-login-page", "status": "bogus"})).is_err());
-    assert!(c.call("kanban.save", json!({"project": pid, "id": "add-login-page", "title": "x", "depends_on": ["add-login-page"]})).is_err(), "self dependency");
+    assert!(
+        c.call("kanban.save", json!({"project": pid, "id": "add-login-page", "title": "x", "depends_on": ["add-login-page"]})).is_err(),
+        "self dependency"
+    );
     assert!(c.call("kanban.delete", json!({"project": pid, "id": "..\\x"})).is_err());
     std::fs::write(repo.join(".kanban/oops.md"), "no frontmatter").unwrap();
     let board = c.call("kanban.list", json!({"project": pid})).unwrap();

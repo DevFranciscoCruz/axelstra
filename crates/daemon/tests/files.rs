@@ -1,4 +1,3 @@
-
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::json;
@@ -38,8 +37,13 @@ fn list_read_write_and_confinement() {
     let token = "f".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()
-            .block_on(server::serve_with_store(p, t, s)).unwrap();
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(server::serve_with_store(p, t, s))
+            .unwrap();
     });
     std::thread::sleep(Duration::from_millis(300));
     let mut c = Client::connect(&pipe, &token).unwrap();
@@ -58,7 +62,9 @@ fn list_read_write_and_confinement() {
     let o = c.call("fs.read", json!({"worktree": w, "path": "src/a.rs"})).unwrap();
     assert_eq!((o["eol"].as_str(), o["text"].as_str()), (Some("crlf"), Some("fn a() {}\nfn b() {}\n")));
     let hash = o["hash"].as_str().unwrap().to_string();
-    let r = c.call("fs.write", json!({"worktree": w, "path": "src/a.rs", "text": "fn a() {}\nfn c() {}\n", "eol": "crlf", "base_hash": hash})).unwrap();
+    let r = c
+        .call("fs.write", json!({"worktree": w, "path": "src/a.rs", "text": "fn a() {}\nfn c() {}\n", "eol": "crlf", "base_hash": hash}))
+        .unwrap();
     assert!(r["hash"].is_string(), "{r}");
     assert_eq!(std::fs::read(repo.join("src/a.rs")).unwrap(), b"fn a() {}\r\nfn c() {}\r\n");
 

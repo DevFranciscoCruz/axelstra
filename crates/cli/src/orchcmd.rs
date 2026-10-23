@@ -20,20 +20,29 @@ fn me() -> Result<u32> {
 }
 
 fn parent(to: Option<u32>) -> Result<u32> {
-    to.or_else(|| env_id("AXELSTRA_PARENT")).context("no parent session: pass --to ID ($AXELSTRA_PARENT is not set, this session was not started as a worker)")
+    to.or_else(|| env_id("AXELSTRA_PARENT"))
+        .context("no parent session: pass --to ID ($AXELSTRA_PARENT is not set, this session was not started as a worker)")
 }
 
 fn fmt_msg(m: &Value) -> String {
     let from = m["from"].as_u64().map_or("?".to_string(), |f| f.to_string());
     let re = m["reply_to"].as_u64().map_or(String::new(), |r| format!(" (reply to #{r})"));
-    format!("#{} {} from session {}{}:\n{}", m["id"], m["kind"].as_str().unwrap_or("message"), from, re, m["text"].as_str().unwrap_or_default())
+    format!(
+        "#{} {} from session {}{}:\n{}",
+        m["id"],
+        m["kind"].as_str().unwrap_or("message"),
+        from,
+        re,
+        m["text"].as_str().unwrap_or_default()
+    )
 }
 
 pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
     match cmd {
         Cmd::Msg { to, text, thread, from, quiet } => {
             let from = from.or_else(|| env_id("AXELSTRA_SESSION"));
-            let r = c.call("msg.send", json!({"from": from, "to": to, "text": text, "kind": "message", "thread": thread, "quiet": quiet}))?;
+            let r =
+                c.call("msg.send", json!({"from": from, "to": to, "text": text, "kind": "message", "thread": thread, "quiet": quiet}))?;
             println!("{}", r["id"]);
         }
         Cmd::Inbox { all, no_mark, json, session } => {
@@ -56,7 +65,9 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
         }
         Cmd::Ask { to, text, thread, timeout } => {
             let from = me()?;
-            let q = c.call("msg.send", json!({"from": from, "to": to, "text": text, "kind": "ask", "thread": thread}))?["id"].as_u64().unwrap_or(0);
+            let q = c.call("msg.send", json!({"from": from, "to": to, "text": text, "kind": "ask", "thread": thread}))?["id"]
+                .as_u64()
+                .unwrap_or(0);
             let t0 = Instant::now();
             loop {
                 let r = c.call("msg.reply_of", json!({"id": q}))?;
@@ -77,7 +88,10 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             let to = orig["from"].as_u64().context("that message has no sender to reply to")?;
             // an asker blocked in `axelstra ask` picks the answer up by itself: no notice typed into its screen
             let quiet = orig["kind"] == "ask";
-            let m = c.call("msg.send", json!({"from": env_id("AXELSTRA_SESSION"), "to": to, "text": text, "kind": "reply", "reply_to": id, "quiet": quiet}))?;
+            let m = c.call(
+                "msg.send",
+                json!({"from": env_id("AXELSTRA_SESSION"), "to": to, "text": text, "kind": "reply", "reply_to": id, "quiet": quiet}),
+            )?;
             println!("{}", m["id"]);
         }
         Cmd::Done { text, status, to } => {
@@ -108,10 +122,13 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             }
         }
         Cmd::Limit { n } => {
-            let r = c.call("orch.limits", match n {
-                Some(n) => json!({"max_workers": n}),
-                None => json!({}),
-            })?;
+            let r = c.call(
+                "orch.limits",
+                match n {
+                    Some(n) => json!({"max_workers": n}),
+                    None => json!({}),
+                },
+            )?;
             println!("max workers {} ({} running)", r["max_workers"], r["workers"]);
         }
         Cmd::Flow { file, timeout, cleanup, resume } => return flow(c, &file, timeout, cleanup, resume),
@@ -228,7 +245,8 @@ fn state_word(s: St) -> &'static str {
 
 /// Tells the daemon (for the sidebar) and the disk (for `--resume`) where each task stands, when it changed.
 fn publish(c: &mut Client, flow_id: &str, state_file: &std::path::Path, tasks: &[Task], st: &HashMap<String, St>, last: &mut String) {
-    let snapshot: Vec<Value> = tasks.iter().map(|t| json!({"id": t.id, "worktree": t.worktree.to_string_lossy(), "state": state_word(st[&t.id])})).collect();
+    let snapshot: Vec<Value> =
+        tasks.iter().map(|t| json!({"id": t.id, "worktree": t.worktree.to_string_lossy(), "state": state_word(st[&t.id])})).collect();
     let text = Value::Array(snapshot.clone()).to_string();
     if text == *last {
         return;
@@ -247,7 +265,16 @@ fn keep_reason(path: &str, is_main: bool) -> Option<String> {
     if is_main {
         return Some("main worktree".into());
     }
-    let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(path).args(args).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
     match git(&["status", "--porcelain"]) {
         Some(s) if s.is_empty() => {}
         Some(_) => return Some("uncommitted changes".into()),
@@ -261,7 +288,10 @@ fn keep_reason(path: &str, is_main: bool) -> Option<String> {
 
 fn remove_worktree(c: &mut Client, projects: &Value, t: &Task) {
     let Ok((p, wp)) = find_worktree(projects, &t.worktree) else { return };
-    let is_main = p["worktrees"].as_array().and_then(|a| a.iter().find(|w| w["path"].as_str() == Some(wp.as_str()))).map_or(false, |w| w["is_main"] == json!(true));
+    let is_main = p["worktrees"]
+        .as_array()
+        .and_then(|a| a.iter().find(|w| w["path"].as_str() == Some(wp.as_str())))
+        .map_or(false, |w| w["is_main"] == json!(true));
     if let Some(why) = keep_reason(&wp, is_main) {
         println!("[flow] {}: worktree kept ({why})", t.id);
         return;
@@ -287,7 +317,8 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resu
     let flow_id = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf()).to_string_lossy().to_string();
     let state_file = flow_state_path(&flow_id);
     if resume {
-        let saved: HashMap<String, String> = std::fs::read_to_string(&state_file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let saved: HashMap<String, String> =
+            std::fs::read_to_string(&state_file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         for t in &tasks {
             if saved.get(&t.id).map(String::as_str) == Some("done") {
                 st.insert(t.id.clone(), St::Ok);
@@ -325,14 +356,25 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resu
                 Some(s) if s["finished"] == json!(true) => Some((true, "reported done".into())),
                 Some(s) if s["running"] != json!(true) => {
                     let code = c.call("session.status", json!({"id": id}))?["code"].as_i64();
-                    Some((code == Some(0) || (t.agent.is_some() && code.is_none()), format!("exit {}", code.map_or("?".to_string(), |c| c.to_string()))))
+                    Some((
+                        code == Some(0) || (t.agent.is_some() && code.is_none()),
+                        format!("exit {}", code.map_or("?".to_string(), |c| c.to_string())),
+                    ))
                 }
-                Some(s) if t.agent.is_some() && worked.get(&t.id) == Some(&true) && s["waiting"] != json!(true) && s["idle_ms"].as_u64().unwrap_or(0) >= t.idle_secs.unwrap_or(20) * 1000 => {
+                Some(s)
+                    if t.agent.is_some()
+                        && worked.get(&t.id) == Some(&true)
+                        && s["waiting"] != json!(true)
+                        && s["idle_ms"].as_u64().unwrap_or(0) >= t.idle_secs.unwrap_or(20) * 1000 =>
+                {
                     Some((true, "went quiet".into()))
                 }
                 Some(s) => {
                     if s["waiting"] == json!(true) && told_waiting.insert(t.id.clone(), true).is_none() {
-                        println!("[flow] {}: waiting for an answer (session {id}); use `axelstra read {id}` and `axelstra say {id} \"…\"`", t.id);
+                        println!(
+                            "[flow] {}: waiting for an answer (session {id}); use `axelstra read {id}` and `axelstra say {id} \"…\"`",
+                            t.id
+                        );
                     }
                     None
                 }
@@ -349,7 +391,8 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resu
                 let _ = c.call("session.remove", json!({"id": id}));
                 if cleanup && ok {
                     // a worktree another task still needs stays
-                    let shared = tasks.iter().any(|o| o.id != t.id && o.worktree == t.worktree && matches!(st[&o.id], St::Pending | St::Running));
+                    let shared =
+                        tasks.iter().any(|o| o.id != t.id && o.worktree == t.worktree && matches!(st[&o.id], St::Pending | St::Running));
                     if !shared {
                         remove_worktree(&mut c, &projects, t);
                     }
@@ -369,8 +412,15 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resu
                     let (program, args) = one_shot_line(t.cmd.as_deref().unwrap_or_default());
                     let label = t.cmd.as_deref().unwrap_or_default().split_whitespace().next().unwrap_or("cmd").to_string();
                     let meta = json!({"worktree": wt, "kind": "terminal"});
-                    c.call("session.spawn", with_reap(json!({"program": program, "args": args, "cwd": wt, "label": label, "meta": meta, "cols": 120, "rows": 30}), None, true))
-                        .map(|r| r["id"].as_u64().unwrap_or(0) as u32)
+                    c.call(
+                        "session.spawn",
+                        with_reap(
+                            json!({"program": program, "args": args, "cwd": wt, "label": label, "meta": meta, "cols": 120, "rows": 30}),
+                            None,
+                            true,
+                        ),
+                    )
+                    .map(|r| r["id"].as_u64().unwrap_or(0) as u32)
                 }
             };
             match started {
@@ -391,7 +441,10 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resu
             break;
         }
         if t0.elapsed() >= Duration::from_secs(timeout) {
-            eprintln!("[flow] timeout after {timeout}s; still running: {}", tasks.iter().filter(|t| st[&t.id] == St::Running).map(|t| t.id.as_str()).collect::<Vec<_>>().join(", "));
+            eprintln!(
+                "[flow] timeout after {timeout}s; still running: {}",
+                tasks.iter().filter(|t| st[&t.id] == St::Running).map(|t| t.id.as_str()).collect::<Vec<_>>().join(", ")
+            );
             std::process::exit(2);
         }
         std::thread::sleep(Duration::from_millis(1000));
@@ -414,7 +467,16 @@ mod tests {
     use super::*;
 
     fn t(id: &str, after: &[&str]) -> Task {
-        Task { id: id.into(), worktree: ".".into(), agent: None, prompt: None, cmd: Some("x".into()), after: after.iter().map(|s| s.to_string()).collect(), idle_secs: None, lines: None }
+        Task {
+            id: id.into(),
+            worktree: ".".into(),
+            agent: None,
+            prompt: None,
+            cmd: Some("x".into()),
+            after: after.iter().map(|s| s.to_string()).collect(),
+            idle_secs: None,
+            lines: None,
+        }
     }
 
     #[test]
@@ -422,7 +484,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("axl-keep-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let g = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&dir).args(args).output().unwrap().status.success());
+        let g =
+            |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&dir).args(args).output().unwrap().status.success());
         g(&["init", "-q"]);
         g(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"]);
         let path = dir.to_string_lossy().to_string();

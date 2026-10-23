@@ -34,16 +34,19 @@ fn save_run_and_delete() {
     let token = "a".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()
-            .block_on(server::serve_with_store(p, t, s)).unwrap();
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(server::serve_with_store(p, t, s))
+            .unwrap();
     });
     std::thread::sleep(Duration::from_millis(300));
     let mut c = Client::connect(&pipe, &token).unwrap();
     let pid = c.call("project.add", json!({"path": &repo})).unwrap()["id"].as_str().unwrap().to_string();
 
-    let mk = |name: &str, schedule: serde_json::Value| {
-        json!({"id": "", "name": name, "project": pid, "agent": "claude", "prompt": "look at it's TODOs", "schedule": schedule, "enabled": true, "last_run": 0})
-    };
+    let mk = |name: &str, schedule: serde_json::Value| json!({"id": "", "name": name, "project": pid, "agent": "claude", "prompt": "look at it's TODOs", "schedule": schedule, "enabled": true, "last_run": 0});
 
     // bad input is refused before anything is stored
     assert!(c.call("automation.save", mk("", json!({"kind": "daily", "time": "09:00"}))).is_err());

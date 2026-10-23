@@ -105,8 +105,8 @@ impl std::error::Error for CallTimeout {}
 /// How long `call` waits for the reply. Calls that run git, the network or an agent CLI get longer; none wait forever.
 fn default_timeout(method: &str) -> Duration {
     match method {
-        "git.push" | "git.pr" | "git.suggest" | "git.commit" | "worktree.create" | "worktree.from_pr" | "worktree.sweep" | "project.add" | "automation.run" | "orch.start" | "gh.list"
-        | "agent.search" => Duration::from_secs(600),
+        "git.push" | "git.pr" | "git.suggest" | "git.commit" | "worktree.create" | "worktree.from_pr" | "worktree.sweep"
+        | "project.add" | "automation.run" | "orch.start" | "gh.list" | "agent.search" => Duration::from_secs(600),
         _ => Duration::from_secs(60),
     }
 }
@@ -114,9 +114,9 @@ fn default_timeout(method: &str) -> Duration {
 /// True for the error a read gets when its deadline fires: a socket timeout (Unix) or the pipe read cancelled by
 /// the watchdog (Windows, ERROR_OPERATION_ABORTED).
 fn is_timeout(e: &anyhow::Error) -> bool {
-    e.chain().filter_map(|c| c.downcast_ref::<std::io::Error>()).any(|io| {
-        matches!(io.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) || io.raw_os_error() == Some(995)
-    })
+    e.chain()
+        .filter_map(|c| c.downcast_ref::<std::io::Error>())
+        .any(|io| matches!(io.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) || io.raw_os_error() == Some(995))
 }
 
 /// Bounds the blocking reads on one connection until `finish`.
@@ -201,8 +201,7 @@ fn open(pipe: &str) -> Result<Conn> {
 
 #[cfg(unix)]
 fn open(path: &str) -> Result<Conn> {
-    let s = std::os::unix::net::UnixStream::connect(path)
-        .with_context(|| format!("daemon not reachable at {path}"))?;
+    let s = std::os::unix::net::UnixStream::connect(path).with_context(|| format!("daemon not reachable at {path}"))?;
     Ok(Conn::Unix(s))
 }
 
@@ -227,7 +226,15 @@ impl Client {
 
     /// Independent handle for a second thread (e.g. one reads while one writes).
     pub fn try_clone(&self) -> Result<Client> {
-        Ok(Client { rd: self.rd.try_clone()?, wr: self.wr.try_clone()?, next: 1 << 40, proto: self.proto, instance: self.instance, timeout: self.timeout, broken: self.broken })
+        Ok(Client {
+            rd: self.rd.try_clone()?,
+            wr: self.wr.try_clone()?,
+            next: 1 << 40,
+            proto: self.proto,
+            instance: self.instance,
+            timeout: self.timeout,
+            broken: self.broken,
+        })
     }
 
     /// Sends a request and waits for its reply, at most `timeout` (or the method's default): a hung daemon

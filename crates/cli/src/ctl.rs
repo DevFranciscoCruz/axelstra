@@ -75,8 +75,19 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             let r = c.call("worktree.sweep", json!({"dry_run": dry_run}))?;
             let list = r["swept"].as_array().cloned().unwrap_or_default();
             for s in &list {
-                let verb = if dry_run { "would remove" } else if s["removed"] == json!(true) { "removed" } else { "could not remove" };
-                println!("{verb} {} ({}, {})", s["path"].as_str().unwrap_or_default(), s["branch"].as_str().unwrap_or_default(), s["why"].as_str().unwrap_or_default());
+                let verb = if dry_run {
+                    "would remove"
+                } else if s["removed"] == json!(true) {
+                    "removed"
+                } else {
+                    "could not remove"
+                };
+                println!(
+                    "{verb} {} ({}, {})",
+                    s["path"].as_str().unwrap_or_default(),
+                    s["branch"].as_str().unwrap_or_default(),
+                    s["why"].as_str().unwrap_or_default()
+                );
             }
             if list.is_empty() {
                 println!("nothing to remove");
@@ -104,7 +115,11 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             let meta = json!({"project": p["id"], "worktree": wt, "kind": "terminal"});
             let r = c.call(
                 "session.spawn",
-                with_reap(json!({"program": program, "args": args, "cwd": wt, "label": label, "meta": meta, "cols": 120, "rows": 30}), reap, false),
+                with_reap(
+                    json!({"program": program, "args": args, "cwd": wt, "label": label, "meta": meta, "cols": 120, "rows": 30}),
+                    reap,
+                    false,
+                ),
             )?;
             println!("{}", r["id"]);
         }
@@ -117,7 +132,11 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             let meta = json!({"project": p["id"], "worktree": wt, "kind": "terminal"});
             let r = c.call(
                 "session.spawn",
-                with_reap(json!({"program": program, "args": args, "cwd": wt, "label": label, "meta": meta, "cols": 120, "rows": 30}), reap, false),
+                with_reap(
+                    json!({"program": program, "args": args, "cwd": wt, "label": label, "meta": meta, "cols": 120, "rows": 30}),
+                    reap,
+                    false,
+                ),
             )?;
             println!("{}", r["id"]);
         }
@@ -209,7 +228,15 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             }
             Err(e) => return Err(e),
         },
-        c2 @ (Cmd::Msg { .. } | Cmd::Inbox { .. } | Cmd::Ask { .. } | Cmd::Reply { .. } | Cmd::Done { .. } | Cmd::Escalate { .. } | Cmd::Limit { .. } | Cmd::Thread { .. } | Cmd::Flow { .. }) => return super::orchcmd::run(c2, c),
+        c2 @ (Cmd::Msg { .. }
+        | Cmd::Inbox { .. }
+        | Cmd::Ask { .. }
+        | Cmd::Reply { .. }
+        | Cmd::Done { .. }
+        | Cmd::Escalate { .. }
+        | Cmd::Limit { .. }
+        | Cmd::Thread { .. }
+        | Cmd::Flow { .. }) => return super::orchcmd::run(c2, c),
         c2 @ Cmd::Computer { .. } => return super::computer::run(c2, c),
         _ => unreachable!(),
     }
@@ -217,7 +244,14 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
 }
 
 /// Starts a claude/codex session in `worktree` (visible in the app); returns its session id.
-pub(crate) fn spawn_agent(c: &mut Client, worktree: &Path, agent: &str, prompt: Option<&str>, reap: Option<Value>, worker: bool) -> Result<u32> {
+pub(crate) fn spawn_agent(
+    c: &mut Client,
+    worktree: &Path,
+    agent: &str,
+    prompt: Option<&str>,
+    reap: Option<Value>,
+    worker: bool,
+) -> Result<u32> {
     // any agent CLI on the PATH works (opencode, gemini...); only claude and codex get conversation resume
     if agent.is_empty() || !agent.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')) {
         bail!("--agent must be the name of a command on the PATH (claude, codex, opencode...)");
@@ -242,9 +276,11 @@ pub(crate) fn spawn_agent(c: &mut Client, worktree: &Path, agent: &str, prompt: 
         line.push_str(&format!(" --append-system-prompt {}", if ps { ps_quote(r) } else { sh_quote(r) }));
     }
     let prompt_owned = match (&rules, prompt) {
-        (Some(r), Some(p)) if agent != "claude" => Some(format!("{r}
+        (Some(r), Some(p)) if agent != "claude" => Some(format!(
+            "{r}
 
-{p}")),
+{p}"
+        )),
         (_, Some(p)) => Some(p.to_string()),
         _ => None,
     };
@@ -269,7 +305,11 @@ pub(crate) fn spawn_agent(c: &mut Client, worktree: &Path, agent: &str, prompt: 
     }
     let r = c.call(
         "session.spawn",
-        with_reap(json!({"program": program, "args": args, "cwd": wt, "label": agent, "meta": meta, "env": env, "cols": 120, "rows": 30}), reap, worker),
+        with_reap(
+            json!({"program": program, "args": args, "cwd": wt, "label": agent, "meta": meta, "env": env, "cols": 120, "rows": 30}),
+            reap,
+            worker,
+        ),
     )?;
     Ok(r["id"].as_u64().unwrap_or(0) as u32)
 }
@@ -319,9 +359,10 @@ fn abs_norm(p: &Path) -> String {
 /// Project whose id, name or path equals `r`.
 pub(crate) fn find_project_by_ref<'a>(projects: &'a Value, r: &str) -> Option<&'a Value> {
     let want = abs_norm(Path::new(r));
-    projects.as_array()?.iter().find(|p| {
-        p["id"].as_str() == Some(r) || p["name"].as_str() == Some(r) || norm(p["path"].as_str().unwrap_or_default()) == want
-    })
+    projects
+        .as_array()?
+        .iter()
+        .find(|p| p["id"].as_str() == Some(r) || p["name"].as_str() == Some(r) || norm(p["path"].as_str().unwrap_or_default()) == want)
 }
 
 /// (project, worktree path as the daemon knows it) for a worktree directory.
@@ -524,8 +565,14 @@ mod tests {
     #[test]
     fn reap_resolution() {
         assert!(reap_for(None, None, "exit", None, None, Some("3")).unwrap().is_none());
-        assert_eq!(reap_for(Some(Some(7)), None, "exit", None, Some(10), None).unwrap().unwrap(), json!({"parent": 7, "mode": "exit", "lines": 10}));
-        assert_eq!(reap_for(Some(None), Some("idle"), "exit", Some(5), None, Some("3")).unwrap().unwrap(), json!({"parent": 3, "mode": "idle", "idle_secs": 5}));
+        assert_eq!(
+            reap_for(Some(Some(7)), None, "exit", None, Some(10), None).unwrap().unwrap(),
+            json!({"parent": 7, "mode": "exit", "lines": 10})
+        );
+        assert_eq!(
+            reap_for(Some(None), Some("idle"), "exit", Some(5), None, Some("3")).unwrap().unwrap(),
+            json!({"parent": 3, "mode": "idle", "idle_secs": 5})
+        );
         assert!(reap_for(Some(None), None, "exit", None, None, None).is_err());
         assert!(reap_for(Some(Some(1)), Some("x"), "exit", None, None, None).is_err());
     }

@@ -33,10 +33,7 @@ fn setup(name: &str) -> Env {
 
 impl Env {
     fn card(&self, id: &str, deps: &[&str], extra: &str) {
-        let t = format!(
-            "---\nid: {id}\nstatus: todo\ndepends_on: [{}]\n{extra}---\ntask {id}\n",
-            deps.join(",")
-        );
+        let t = format!("---\nid: {id}\nstatus: todo\ndepends_on: [{}]\n{extra}---\ntask {id}\n", deps.join(","));
         std::fs::write(self.repo.join(".kanban").join(format!("{id}.md")), t).unwrap();
     }
 
@@ -70,7 +67,11 @@ impl Env {
             poll_ms: 100,
             runner: None,
         };
-        if self.trusted { orch::run_trusted(&o) } else { orch::run(&o) }
+        if self.trusted {
+            orch::run_trusted(&o)
+        } else {
+            orch::run(&o)
+        }
     }
 }
 
@@ -166,12 +167,16 @@ fn rerun_rolls_back_half_finished_merge_and_resumes() {
 fn card_ids_that_escape_the_worktree_dir_are_not_loaded() {
     let e = setup("slug");
     e.card("a", &[], "");
-    std::fs::write(e.repo.join(".kanban/evil.md"), "---
+    std::fs::write(
+        e.repo.join(".kanban/evil.md"),
+        "---
 id: x/../../y
 status: todo
 ---
 body
-").unwrap();
+",
+    )
+    .unwrap();
     let l = card::load_dir(&e.repo.join(".kanban")).unwrap();
     assert_eq!(l.cards.len(), 1);
     assert_eq!(l.broken.len(), 1);
@@ -193,8 +198,12 @@ body
 #[test]
 fn acceptance_commands_need_trust() {
     let mut e = setup("trust");
-    e.card("a", &[], "acceptance: \"exit 0\"
-");
+    e.card(
+        "a",
+        &[],
+        "acceptance: \"exit 0\"
+",
+    );
     let err = e.try_run("t").err().expect("untrusted run must refuse").to_string();
     assert!(err.contains("not trusted") && err.contains("a: exit 0"), "{err}");
     assert_eq!(e.status("a"), "todo");
@@ -221,8 +230,12 @@ fn retry_merge_integrates_a_resolved_conflict() {
 
     // the user merges the integration branch into the task branch and resolves it
     let _ = Command::new("git").current_dir(&wt).args(["merge", "orch/t"]).status().unwrap();
-    std::fs::write(wt.join("shared.txt"), "resolved
-").unwrap();
+    std::fs::write(
+        wt.join("shared.txt"),
+        "resolved
+",
+    )
+    .unwrap();
     sh(&wt, &["add", "-A"]);
     sh(&wt, &["-c", "user.name=x", "-c", "user.email=x@x", "commit", "-qm", "resolve"]);
 

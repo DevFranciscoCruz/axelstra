@@ -62,9 +62,7 @@ pub fn data_dir() -> std::path::PathBuf {
     } else if cfg!(target_os = "macos") {
         home().map(|h| h.join("Library").join("Application Support"))
     } else {
-        std::env::var_os("XDG_DATA_HOME")
-            .map(std::path::PathBuf::from)
-            .or_else(|| home().map(|h| h.join(".local").join("share")))
+        std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| home().map(|h| h.join(".local").join("share")))
     };
     base.unwrap_or_else(std::env::temp_dir).join("axelstra")
 }

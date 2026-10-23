@@ -37,7 +37,11 @@ pub fn parse(path: &str, out: &str) -> Status {
 /// `status` for the UI's polling: one `git status` per worktree every 4 s at most, however many windows or polls ask.
 /// Decisions that delete things (janitor, flow cleanup) call `status` and always see the current state.
 pub fn status_cached(worktree: &str) -> Status {
-    use std::{collections::HashMap, sync::Mutex, time::{Duration, Instant}};
+    use std::{
+        collections::HashMap,
+        sync::Mutex,
+        time::{Duration, Instant},
+    };
     static CACHE: Mutex<Option<HashMap<String, (Instant, Status)>>> = Mutex::new(None);
     let key = worktree.replace('\\', "/").to_ascii_lowercase();
     if let Ok(mut g) = CACHE.lock() {

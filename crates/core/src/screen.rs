@@ -42,8 +42,16 @@ pub fn last_lines(bytes: &[u8], cols: u16, rows: u16, lines: usize) -> Vec<Strin
 pub fn last_reply(lines: &[String]) -> Option<String> {
     let is_chrome = |l: &str| {
         let t = l.trim_start();
-        t.starts_with('─') || t.starts_with('✻') || t.starts_with('✢') || t.starts_with('✶') || t.starts_with('*') && t.contains("for ")
-            || t.starts_with('>') || t.starts_with('❯') || t.starts_with('⏵') || t.starts_with("Model:") || t.starts_with("? for shortcuts")
+        t.starts_with('─')
+            || t.starts_with('✻')
+            || t.starts_with('✢')
+            || t.starts_with('✶')
+            || t.starts_with('*') && t.contains("for ")
+            || t.starts_with('>')
+            || t.starts_with('❯')
+            || t.starts_with('⏵')
+            || t.starts_with("Model:")
+            || t.starts_with("? for shortcuts")
     };
     let is_tool_call = |t: &str| {
         let name = t.split('(').next().unwrap_or("");
@@ -90,10 +98,7 @@ mod tests {
         .iter()
         .map(|s| s.to_string())
         .collect();
-        assert_eq!(
-            last_reply(&l).unwrap(),
-            "Both gate failures are fixed.\n- Test assertions: done.\nTo finish, allow the amend."
-        );
+        assert_eq!(last_reply(&l).unwrap(), "Both gate failures are fixed.\n- Test assertions: done.\nTo finish, allow the amend.");
     }
 
     #[test]

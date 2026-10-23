@@ -47,7 +47,9 @@ fn run_user(cmdline: &str, input: &str) {
     let child = if cfg!(windows) {
         // Claude runs status lines through a POSIX shell (Git Bash on Windows); fall back to cmd
         // not plain `bash`: on Windows that is often the WSL stub
-        let git = [r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files (x86)\Git\bin\bash.exe"].into_iter().find(|p| std::path::Path::new(p).exists());
+        let git = [r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files (x86)\Git\bin\bash.exe"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists());
         match git {
             Some(bash) => spawn(bash, &["-c"]),
             None => spawn("cmd", &["/d", "/c"]),

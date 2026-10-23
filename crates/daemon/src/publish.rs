@@ -247,13 +247,21 @@ mod suggest_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let g = |args: &[&str]| assert!(exec(&dir, "git", args).unwrap().0, "git {args:?}");
         g(&["init", "-q", "-b", "main"]);
-        std::fs::write(dir.join("a.txt"), "one
-").unwrap();
+        std::fs::write(
+            dir.join("a.txt"),
+            "one
+",
+        )
+        .unwrap();
         g(&["add", "-A"]);
         g(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "feat: add a.txt"]);
-        std::fs::write(dir.join("a.txt"), "one
+        std::fs::write(
+            dir.join("a.txt"),
+            "one
 two
-").unwrap();
+",
+        )
+        .unwrap();
         let m = suggest_message(&dir).unwrap();
         eprintln!("suggested: {m}");
         assert!(!m.trim().is_empty() && !m.contains("```"));

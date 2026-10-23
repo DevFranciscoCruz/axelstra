@@ -78,15 +78,10 @@ fn validate(m: &Meta) -> Result<()> {
 
 pub fn parse(text: &str, path: &Path) -> Result<Card> {
     let text = text.trim_start_matches('\u{feff}').replace("\r\n", "\n");
-    let rest = text
-        .strip_prefix("---\n")
-        .with_context(|| format!("{}: missing frontmatter", path.display()))?;
-    let (front, body) = rest
-        .split_once("\n---")
-        .with_context(|| format!("{}: unterminated frontmatter", path.display()))?;
+    let rest = text.strip_prefix("---\n").with_context(|| format!("{}: missing frontmatter", path.display()))?;
+    let (front, body) = rest.split_once("\n---").with_context(|| format!("{}: unterminated frontmatter", path.display()))?;
     let body = body.trim_start_matches('\n').to_string();
-    let meta: Meta = serde_yaml::from_str(front)
-        .with_context(|| format!("{}: bad frontmatter", path.display()))?;
+    let meta: Meta = serde_yaml::from_str(front).with_context(|| format!("{}: bad frontmatter", path.display()))?;
     validate(&meta).with_context(|| path.display().to_string())?;
     Ok(Card { meta, body, path: path.to_path_buf() })
 }
@@ -170,8 +165,7 @@ pub fn topo_order(cards: &[Card]) -> Result<Vec<String>> {
             }
         }
     }
-    let mut indeg: HashMap<&str, usize> =
-        cards.iter().map(|c| (c.meta.id.as_str(), c.meta.depends_on.len())).collect();
+    let mut indeg: HashMap<&str, usize> = cards.iter().map(|c| (c.meta.id.as_str(), c.meta.depends_on.len())).collect();
     let mut order = Vec::new();
     let mut ready: Vec<&Card> = cards.iter().filter(|c| c.meta.depends_on.is_empty()).collect();
     while !ready.is_empty() {
@@ -197,10 +191,7 @@ mod tests {
     use super::*;
 
     fn card(id: &str, deps: &[&str]) -> Card {
-        let t = format!(
-            "---\nid: {id}\nstatus: todo\ndepends_on: [{}]\n---\nbody\n",
-            deps.join(",")
-        );
+        let t = format!("---\nid: {id}\nstatus: todo\ndepends_on: [{}]\n---\nbody\n", deps.join(","));
         parse(&t, Path::new(id)).unwrap()
     }
 
@@ -225,26 +216,40 @@ permission_mode: plan
     #[test]
     fn rejects_unsafe_ids_agents_and_modes() {
         for id in ["x/../../y", "..", "a..b", "a b", r"a\b", ".hidden", ""] {
-            let t = format!("---
+            let t = format!(
+                "---
 id: {id:?}
 ---
-");
+"
+            );
             assert!(parse(&t, Path::new("x")).is_err(), "id {id:?} accepted");
         }
-        assert!(parse("---
+        assert!(parse(
+            "---
 id: ok.1_x-y
 ---
-", Path::new("x")).is_ok());
-        assert!(parse("---
+",
+            Path::new("x")
+        )
+        .is_ok());
+        assert!(parse(
+            "---
 id: x
 agent: rm
 ---
-", Path::new("x")).is_err());
-        assert!(parse("---
+",
+            Path::new("x")
+        )
+        .is_err());
+        assert!(parse(
+            "---
 id: x
 permission_mode: \"--evil\"
 ---
-", Path::new("x")).is_err());
+",
+            Path::new("x")
+        )
+        .is_err());
     }
 
     #[test]
@@ -252,16 +257,24 @@ permission_mode: \"--evil\"
         let d = std::env::temp_dir().join(format!("axelstra_card_dir_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join("a.md"), "---
+        std::fs::write(
+            d.join("a.md"),
+            "---
 id: a
 ---
 hi
-").unwrap();
+",
+        )
+        .unwrap();
         std::fs::write(d.join("bad.md"), "no frontmatter").unwrap();
-        std::fs::write(d.join("evil.md"), "---
+        std::fs::write(
+            d.join("evil.md"),
+            "---
 id: ../evil
 ---
-").unwrap();
+",
+        )
+        .unwrap();
         let l = load_dir(&d).unwrap();
         assert_eq!(l.cards.len(), 1);
         assert_eq!(l.broken.len(), 2);

@@ -35,7 +35,8 @@ fn resolve_base(wt: &Path, b: &str) -> Result<String> {
     if b.is_empty() || b.starts_with('-') || b.chars().any(|c| c.is_control() || c.is_whitespace()) {
         bail!("invalid base ref '{b}'");
     }
-    git::must(wt, &["rev-parse", "--verify", "--quiet", "--end-of-options", &format!("{b}^{{commit}}")]).with_context(|| format!("unknown base ref '{b}'"))
+    git::must(wt, &["rev-parse", "--verify", "--quiet", "--end-of-options", &format!("{b}^{{commit}}")])
+        .with_context(|| format!("unknown base ref '{b}'"))
 }
 
 /// Commit to diff against: HEAD, or the merge-base of HEAD and `base` for a branch-wide view.
@@ -77,7 +78,15 @@ pub fn changes(wt: &Path, base: Option<&str>) -> Result<Changes> {
             }
             b'u' => {
                 let path = rec.splitn(11, ' ').last().unwrap_or_default();
-                files.push(FileChange { path: path.into(), status: 'U', untracked: false, staged: false, added: 0, removed: 0, binary: false });
+                files.push(FileChange {
+                    path: path.into(),
+                    status: 'U',
+                    untracked: false,
+                    staged: false,
+                    added: 0,
+                    removed: 0,
+                    binary: false,
+                });
             }
             b'?' => {
                 let path = &rec[2..];

@@ -4,7 +4,11 @@ use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
 fn shell() -> (String, Vec<String>) {
-    if cfg!(windows) { ("cmd".into(), vec!["/q".into()]) } else { ("sh".into(), vec![]) }
+    if cfg!(windows) {
+        ("cmd".into(), vec!["/q".into()])
+    } else {
+        ("sh".into(), vec![])
+    }
 }
 
 fn spawn(c: &mut Client, label: &str, extra: Value) -> u64 {
@@ -33,8 +37,13 @@ fn messages_ask_done_escalate_and_the_worker_limit() {
     let token = "c".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()
-            .block_on(server::serve_with_store(p, t, s)).unwrap();
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(server::serve_with_store(p, t, s))
+            .unwrap();
     });
     std::thread::sleep(Duration::from_millis(300));
     let mut c = Client::connect(&pipe, &token).unwrap();
@@ -55,7 +64,9 @@ fn messages_ask_done_escalate_and_the_worker_limit() {
     let _ = m;
 
     // ask / reply
-    let q = c.call("msg.send", json!({"from": helper, "to": boss, "text": "which db?", "kind": "ask", "quiet": true})).unwrap()["id"].as_u64().unwrap();
+    let q = c.call("msg.send", json!({"from": helper, "to": boss, "text": "which db?", "kind": "ask", "quiet": true})).unwrap()["id"]
+        .as_u64()
+        .unwrap();
     assert!(c.call("msg.reply_of", json!({"id": q})).unwrap()["reply"].is_null());
     c.call("msg.send", json!({"from": boss, "to": helper, "text": "postgres", "kind": "reply", "reply_to": q, "quiet": true})).unwrap();
     assert_eq!(c.call("msg.reply_of", json!({"id": q})).unwrap()["reply"]["text"], "postgres");

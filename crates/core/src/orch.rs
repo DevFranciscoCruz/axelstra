@@ -36,7 +36,6 @@ pub enum St {
     NeedsReview,
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "ev", rename_all = "snake_case")]
 enum Ev {
@@ -124,11 +123,7 @@ fn run_with(o: &Options, trust_acceptance: bool) -> Result<Report> {
     std::fs::create_dir_all(run_dir.join("logs"))?;
     ensure_excluded(&common)?;
 
-    let cards: Vec<Card> = card::load_dir(&repo.join(".kanban"))?
-        .cards
-        .into_iter()
-        .filter(|c| c.meta.status == "todo")
-        .collect();
+    let cards: Vec<Card> = card::load_dir(&repo.join(".kanban"))?.cards.into_iter().filter(|c| c.meta.status == "todo").collect();
     if cards.is_empty() {
         bail!("no cards with status: todo in {}", repo.join(".kanban").display());
     }
@@ -138,9 +133,7 @@ fn run_with(o: &Options, trust_acceptance: bool) -> Result<Report> {
     let todo_ids: Vec<String> = cards.iter().map(|c| c.meta.id.clone()).collect();
     let mut cards = cards;
     for c in &mut cards {
-        c.meta.depends_on.retain(|d| {
-            todo_ids.contains(d) || !all.iter().any(|a| &a.meta.id == d && a.meta.status == "done")
-        });
+        c.meta.depends_on.retain(|d| todo_ids.contains(d) || !all.iter().any(|a| &a.meta.id == d && a.meta.status == "done"));
     }
     card::topo_order(&cards)?;
 
@@ -174,8 +167,7 @@ fn run_with(o: &Options, trust_acceptance: bool) -> Result<Report> {
 
     loop {
         // 1. promote Blocked -> Ready once every dependency is Merged
-        let merged_ids: Vec<String> =
-            tasks.values().filter(|t| t.st == St::Merged).map(|t| t.card.meta.id.clone()).collect();
+        let merged_ids: Vec<String> = tasks.values().filter(|t| t.st == St::Merged).map(|t| t.card.meta.id.clone()).collect();
         for t in tasks.values_mut() {
             if t.st == St::Blocked && t.card.meta.depends_on.iter().all(|d| merged_ids.contains(d)) {
                 t.st = St::Ready;
@@ -183,8 +175,7 @@ fn run_with(o: &Options, trust_acceptance: bool) -> Result<Report> {
         }
 
         // 2. poll running tasks
-        let running: Vec<String> =
-            tasks.values().filter(|t| t.st == St::Running).map(|t| t.card.meta.id.clone()).collect();
+        let running: Vec<String> = tasks.values().filter(|t| t.st == St::Running).map(|t| t.card.meta.id.clone()).collect();
         for id in running {
             let t = tasks.get_mut(&id).unwrap();
             let live = t.live.as_mut().unwrap();
@@ -232,8 +223,7 @@ fn run_with(o: &Options, trust_acceptance: bool) -> Result<Report> {
 
         // 3. launch Ready tasks up to the concurrency cap, highest priority first
         let mut running_n = tasks.values().filter(|t| t.st == St::Running).count();
-        let mut ready: Vec<String> =
-            tasks.values().filter(|t| t.st == St::Ready).map(|t| t.card.meta.id.clone()).collect();
+        let mut ready: Vec<String> = tasks.values().filter(|t| t.st == St::Ready).map(|t| t.card.meta.id.clone()).collect();
         ready.sort_by_key(|id| (-tasks[id].card.meta.priority, id.clone()));
         for id in ready {
             if running_n >= o.max_concurrency {
@@ -280,32 +270,23 @@ fn run_with(o: &Options, trust_acceptance: bool) -> Result<Report> {
         }
     }
     let by = |s: St| {
-        let mut v: Vec<String> =
-            tasks.values().filter(|t| t.st == s).map(|t| t.card.meta.id.clone()).collect();
+        let mut v: Vec<String> = tasks.values().filter(|t| t.st == s).map(|t| t.card.meta.id.clone()).collect();
         v.sort();
         v
     };
-    Ok(Report {
-        merged: by(St::Merged),
-        failed: failures,
-        needs_review: reviews,
-        blocked: by(St::Blocked),
-        integ_branch,
-        integ_wt,
-    })
+    Ok(Report { merged: by(St::Merged), failed: failures, needs_review: reviews, blocked: by(St::Blocked), integ_branch, integ_wt })
 }
 
 fn check_trust(cards: &[Card], trusted: bool) -> Result<()> {
-    let cmds: Vec<String> = cards
-        .iter()
-        .filter_map(|c| c.meta.acceptance.as_ref().map(|a| format!("{}: {a}", c.meta.id)))
-        .collect();
+    let cmds: Vec<String> = cards.iter().filter_map(|c| c.meta.acceptance.as_ref().map(|a| format!("{}: {a}", c.meta.id))).collect();
     if !trusted && !cmds.is_empty() {
         bail!(
             "acceptance commands run through the shell and were not trusted; confirm them first:
 {}",
-            cmds.join("
-")
+            cmds.join(
+                "
+"
+            )
         );
     }
     Ok(())
@@ -492,7 +473,11 @@ pub fn retry_merge(repo: &Path, wt_root: &Path, name: &str, id: &str, trust_acce
 
 fn first_line(summary: &str, fallback: &str) -> String {
     let l = summary.lines().next().unwrap_or("").trim();
-    if l.is_empty() { fallback.to_string() } else { l.to_string() }
+    if l.is_empty() {
+        fallback.to_string()
+    } else {
+        l.to_string()
+    }
 }
 
 fn run_acceptance(wt: &Path, cmd: &str) -> Result<bool> {

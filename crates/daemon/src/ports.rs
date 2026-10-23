@@ -55,7 +55,16 @@ fn listening_table() -> Result<Vec<Port>> {
         let mut buf: Vec<u32> = Vec::new();
         // the table can grow between the size query and the read: retry a few times
         for _ in 0..4 {
-            let rc = unsafe { GetExtendedTcpTable(if size == 0 { std::ptr::null_mut() } else { buf.as_mut_ptr().cast() }, &mut size, 0, af, TCP_TABLE_OWNER_PID_LISTENER, 0) };
+            let rc = unsafe {
+                GetExtendedTcpTable(
+                    if size == 0 { std::ptr::null_mut() } else { buf.as_mut_ptr().cast() },
+                    &mut size,
+                    0,
+                    af,
+                    TCP_TABLE_OWNER_PID_LISTENER,
+                    0,
+                )
+            };
             match rc {
                 0 => {
                     let bytes = buf.as_ptr().cast::<u8>();
@@ -125,10 +134,7 @@ mod tests {
     #[test]
     fn lsof_fields() {
         let s = "p10\nn*:3000\nn[::1]:3000\np11\nn127.0.0.1:8080\n";
-        assert_eq!(
-            parse_lsof(s),
-            vec![Port { port: 3000, pid: 10 }, Port { port: 3000, pid: 10 }, Port { port: 8080, pid: 11 }]
-        );
+        assert_eq!(parse_lsof(s), vec![Port { port: 3000, pid: 10 }, Port { port: 3000, pid: 10 }, Port { port: 8080, pid: 11 }]);
     }
 
     #[test]
