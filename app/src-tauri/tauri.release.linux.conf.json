@@ -1,0 +1,12 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb",
+      "appimage"
+    ],
+    "externalBin": [
+      "binaries/axelstra"
+    ]
+  }
+}

@@ -274,7 +274,8 @@ pub fn codex_limits() -> Option<Value> {
 }
 
 /// per transcript: (length, mtime, bytes already consumed, totals so far)
-static CACHE: Mutex<Option<HashMap<PathBuf, (u64, u64, u64, UsageAcc)>>> = Mutex::new(None);
+static CACHE: Mutex<Option<HashMap<PathBuf, ClaudeEntry>>> = Mutex::new(None);
+type ClaudeEntry = (u64, u64, u64, UsageAcc);
 
 /// Token usage of one Claude conversation: the file named by `session_id`, or the newest one of the project.
 pub fn claude_usage(cwd: &str, session_id: Option<&str>) -> Option<Usage> {
@@ -386,7 +387,8 @@ pub fn codex_totals(lines: impl Iterator<Item = String>) -> (Option<String>, Usa
 }
 
 /// per Codex file: (length, mtime, folder it ran in, totals)
-static CODEX_CACHE: Mutex<Option<HashMap<PathBuf, (u64, u64, Option<String>, Usage)>>> = Mutex::new(None);
+static CODEX_CACHE: Mutex<Option<HashMap<PathBuf, CodexEntry>>> = Mutex::new(None);
+type CodexEntry = (u64, u64, Option<String>, Usage);
 
 fn codex_file(path: &Path) -> Option<(Option<String>, Usage)> {
     use std::io::{Read, Seek, SeekFrom};
