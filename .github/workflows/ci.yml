@@ -66,8 +66,9 @@ jobs:
           -A clippy::manual_is_multiple_of
           -A clippy::needless_borrow
           -A clippy::redundant_closure
-          -A clippy::chunks_exact_with_const_size
+          -A clippy::chunks_exact_to_as_chunks
           -A clippy::unnecessary_map_or
+          -A unknown-lints
   # Linux is experimental: this only proves the desktop host still compiles there.
   linux-host:
     runs-on: ubuntu-latest
