@@ -19,6 +19,43 @@ pub fn state_of(event: &str) -> Option<&'static str> {
 /// Longest the hook may take, daemon down or hung included: a hook must never hold the agent up.
 const LIMIT: Duration = Duration::from_millis(1500);
 
+/// `axelstra hook install claude` and `axelstra hook status claude` manage the settings entries (they print and may
+/// fail); everything else is the hook call itself, which never prints and never fails.
+pub fn dispatch(agent: &str, event: &str) -> anyhow::Result<()> {
+    match agent {
+        "install" | "status" => {
+            if event != "claude" {
+                anyhow::bail!("só o claude tem hooks: axelstra hook {agent} claude");
+            }
+            let v = if agent == "install" { axelstra_daemon::hooks::install()? } else { axelstra_daemon::hooks::status()? };
+            println!("{}", report(agent, &v));
+        }
+        _ => run(agent, event),
+    }
+    Ok(())
+}
+
+/// The one-line pt-PT answer printed by `hook install` and `hook status`.
+fn report(action: &str, v: &serde_json::Value) -> String {
+    let path = v["path"].as_str().unwrap_or_default();
+    if let Some(p) = v["problem"].as_str() {
+        return p.to_string();
+    }
+    if action == "install" {
+        return match (v["changed"] == json!(true), v["backup"].as_str()) {
+            (false, _) => format!("Os hooks já estavam instalados em {path}."),
+            (true, Some(b)) => format!("Hooks instalados em {path}. Cópia de segurança: {b}"),
+            (true, None) => format!("Hooks instalados em {path}."),
+        };
+    }
+    let missing: Vec<&str> = ["Notification", "Stop", "UserPromptSubmit"].into_iter().filter(|e| v["events"][e] != json!(true)).collect();
+    if missing.is_empty() {
+        format!("Hooks instalados em {path}.")
+    } else {
+        format!("Faltam hooks em {path}: {}. Corre: axelstra hook install claude", missing.join(", "))
+    }
+}
+
 pub fn run(agent: &str, event: &str) {
     let (Some(state), Ok(session)) = (state_of(event), std::env::var("AXELSTRA_SESSION")) else { return };
     let Ok(id) = session.trim().parse::<u32>() else { return };
@@ -46,6 +83,21 @@ mod tests {
         assert_eq!(state_of("Stop"), Some("idle"));
         assert_eq!(state_of("UserPromptSubmit"), Some("working"));
         assert_eq!(state_of("PreToolUse"), None);
+    }
+
+    #[test]
+    fn reports_are_pt_pt_and_name_what_is_missing() {
+        let st = json!({"path": "p", "events": {"Notification": true, "Stop": false, "UserPromptSubmit": true}});
+        assert!(report("status", &st).contains("Faltam hooks em p: Stop"));
+        let done = json!({"path": "p", "events": {"Notification": true, "Stop": true, "UserPromptSubmit": true}});
+        assert_eq!(report("status", &done), "Hooks instalados em p.");
+        assert!(report("install", &json!({"path": "p", "changed": false})).contains("já estavam"));
+        assert!(report("install", &json!({"path": "p", "changed": true, "backup": "b"})).contains("Cópia de segurança: b"));
+    }
+
+    #[test]
+    fn only_claude_has_managed_hooks() {
+        assert!(dispatch("install", "codex").is_err());
     }
 
     #[test]

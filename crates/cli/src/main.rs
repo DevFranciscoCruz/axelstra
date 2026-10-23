@@ -37,7 +37,8 @@ enum Cmd {
     /// Claude Code status line command used by Axelstra sessions (not meant to be run by hand)
     #[command(hide = true)]
     StatuslineTee,
-    /// Agent hook: tell the daemon what the agent in this session is doing (`axelstra hook claude Stop`)
+    /// Agent hook: tell the daemon what the agent in this session is doing (`axelstra hook claude Stop`).
+    /// `axelstra hook install claude` adds the status hooks to Claude Code's settings, `axelstra hook status claude` checks them
     #[command(hide = true)]
     Hook { agent: String, event: String },
     /// Print a bundled agent guide: `axelstra skills get axelstration`
@@ -445,7 +446,7 @@ fn main() -> Result<()> {
         }
         Cmd::Lock { name, slots, timeout, command } => std::process::exit(lock::run(&name, slots, timeout, &command)?),
         Cmd::StatuslineTee => statusline::tee()?,
-        Cmd::Hook { agent, event } => hook::run(&agent, &event),
+        Cmd::Hook { agent, event } => hook::dispatch(&agent, &event)?,
         Cmd::Skills { .. } => print!("{}", axelstra_daemon::skill::guide()),
         Cmd::InstallSkill => {
             for f in axelstra_daemon::skill::install_forced()? {

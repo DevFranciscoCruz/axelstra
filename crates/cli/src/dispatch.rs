@@ -52,8 +52,12 @@ fn changed_files(wt: &str, base: &str) -> BTreeSet<String> {
     if let Some(t) = git(wt, &["diff", "--name-only", &format!("{base}...HEAD")]) {
         out.extend(t.lines().map(|l| l.trim().replace('\\', "/")).filter(|l| !l.is_empty()));
     }
-    if let Some(t) = git(wt, &["status", "--porcelain"]) {
-        out.extend(t.lines().filter_map(|l| l.get(3..)).map(|l| l.trim().replace('\\', "/")).filter(|l| !l.is_empty()));
+    // uncommitted: tracked edits and new files, asked for apart because `git` trims its output, which would eat the
+    // leading space of the first `status --porcelain` line and misparse that path
+    for args in [&["diff", "--name-only", "HEAD"][..], &["ls-files", "--others", "--exclude-standard"][..]] {
+        if let Some(t) = git(wt, args) {
+            out.extend(t.lines().map(|l| l.trim().replace('\\', "/")).filter(|l| !l.is_empty()));
+        }
     }
     out
 }
@@ -302,5 +306,33 @@ mod tests {
         remember(&mut m, "C:/wt/a", None, "and sort it");
         assert_eq!(m["c:/wt/a"]["title"], "add filter to orders");
         assert_eq!(m["c:/wt/a"]["requests"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn changed_files_keeps_the_first_path_whole() {
+        let dir = std::env::temp_dir().join(format!("axelstra-cf-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let d = dir.to_str().unwrap();
+        let g = |a: &[&str]| {
+            let ok = Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(a)
+                .current_dir(d)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {a:?}");
+        };
+        g(&["init", "-q"]);
+        std::fs::write(dir.join("alpha.txt"), "1").unwrap();
+        g(&["add", "."]);
+        g(&["commit", "-qm", "first"]);
+        std::fs::write(dir.join("alpha.txt"), "2").unwrap();
+        std::fs::write(dir.join("new.txt"), "n").unwrap();
+        let got = changed_files(d, "HEAD");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(got.into_iter().collect::<Vec<_>>(), vec!["alpha.txt", "new.txt"]);
     }
 }

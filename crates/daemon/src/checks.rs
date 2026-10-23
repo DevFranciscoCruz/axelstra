@@ -257,8 +257,38 @@ pub fn status(wt: &Path) -> Status {
     }
 }
 
+/// A branch name safe to hand to `git push origin --delete`: no leading dash, no `..`, no ref syntax characters,
+/// and never the trunk.
+pub fn deletable_branch(b: &str) -> bool {
+    !b.is_empty()
+        && b.len() <= 200
+        && !matches!(b, "main" | "master" | "HEAD")
+        && !b.starts_with(['-', '/', '.'])
+        && !b.ends_with(['/', '.'])
+        && !b.contains("..")
+        && !b.contains("//")
+        && !b.ends_with(".lock")
+        && b.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+}
+
+/// Argv for `gh pr merge`. `--delete-branch` is never part of it: gh would try to delete the local branch, which is
+/// checked out in this worktree, and fail after the merge went through.
+fn merge_args(auto: bool) -> Vec<&'static str> {
+    let mut args = vec!["pr", "merge", "--squash"];
+    if auto {
+        args.push("--auto");
+    }
+    args
+}
+
+/// Argv that deletes the remote branch, or None when the name is not safe to pass on.
+fn delete_remote_args(branch: &str) -> Option<Vec<&str>> {
+    deletable_branch(branch).then(|| vec!["push", "origin", "--delete", branch])
+}
+
 /// Squash-merges the PR (or arms auto-merge). The same gate as the button: a direct merge only when `status` says
-/// it can be merged, so a stale click cannot merge a failing PR.
+/// it can be merged, so a stale click cannot merge a failing PR. With `delete_branch` the remote branch is deleted
+/// after a direct merge; the local branch and the worktree are left for the janitor.
 pub fn merge(wt: &Path, auto: bool, delete_branch: bool) -> Result<String> {
     let st = status(wt);
     if !st.problem.is_empty() {
@@ -270,14 +300,7 @@ pub fn merge(wt: &Path, auto: bool, delete_branch: bool) -> Result<String> {
     if !auto && !st.can_merge {
         bail!("pull request #{} cannot be merged yet (checks {}, mergeable {}, state {})", st.number, st.ci, st.mergeable, st.merge_state);
     }
-    let mut args = vec!["pr", "merge", "--squash"];
-    if auto {
-        args.push("--auto");
-    }
-    if delete_branch {
-        args.push("--delete-branch");
-    }
-    let o = gh(wt, &args, MERGE_TIMEOUT).map_err(|e| match e {
+    let o = gh(wt, &merge_args(auto), MERGE_TIMEOUT).map_err(|e| match e {
         RunError::Missing => anyhow::anyhow!("could not start gh. Install the GitHub CLI and run `gh auth login`."),
         RunError::Timeout => anyhow::anyhow!("gh pr merge took too long"),
         RunError::Other(e) => anyhow::anyhow!(e),
@@ -285,7 +308,31 @@ pub fn merge(wt: &Path, auto: bool, delete_branch: bool) -> Result<String> {
     if !o.ok {
         bail!("gh pr merge failed: {}", o.stderr.trim());
     }
-    Ok(o.stdout.trim().to_string())
+    let mut out = o.stdout.trim().to_string();
+    // armed auto-merge has not merged anything yet: the branch must stay until it does
+    if delete_branch && !auto {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&delete_remote(wt));
+    }
+    Ok(out)
+}
+
+/// Deletes the remote branch of `wt` after a merge and says in pt-PT what happened. Never fails the merge.
+fn delete_remote(wt: &Path) -> String {
+    let branch = git::current_branch(wt).unwrap_or_default();
+    let Some(args) = delete_remote_args(&branch) else {
+        return "Merge feito. Não apaguei o ramo remoto: o nome do ramo não é seguro para apagar.".into();
+    };
+    match git::run(wt, &args) {
+        Ok(o) if o.ok => format!("Merge feito e ramo remoto {branch} apagado. O ramo local e o worktree ficam para o janitor."),
+        Ok(o) => format!(
+            "Merge feito, mas não consegui apagar o ramo remoto {branch}: {}. O ramo local e o worktree ficam para o janitor.",
+            o.stderr.lines().last().unwrap_or("erro desconhecido")
+        ),
+        Err(e) => format!("Merge feito, mas não consegui apagar o ramo remoto {branch}: {e}."),
+    }
 }
 
 #[cfg(test)]
@@ -392,6 +439,20 @@ mod tests {
         assert_eq!(classify_failure("To get started with GitHub CLI, please run:  gh auth login"), "auth");
         assert_eq!(classify_failure("You are not logged in to any GitHub hosts."), "auth");
         assert_eq!(classify_failure("HTTP 502"), "error");
+    }
+
+    #[test]
+    fn merge_never_asks_gh_to_delete_the_branch() {
+        assert_eq!(merge_args(false), ["pr", "merge", "--squash"]);
+        assert_eq!(merge_args(true), ["pr", "merge", "--squash", "--auto"]);
+    }
+
+    #[test]
+    fn remote_delete_argv_is_fixed_and_the_ref_validated() {
+        assert_eq!(delete_remote_args("ax/polish").unwrap(), ["push", "origin", "--delete", "ax/polish"]);
+        for bad in ["", "main", "master", "-f", "--force", "a..b", "a b", "a;rm", "x/", "/x", "a//b", "a.lock", "feat~1", "a:b", "$(x)"] {
+            assert!(delete_remote_args(bad).is_none(), "{bad:?}");
+        }
     }
 
     #[test]
