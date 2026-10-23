@@ -5,6 +5,7 @@ use crate::store::{read_json, write_atomic, LockRecover};
 use anyhow::{bail, Context, Result};
 use axelstra_core::git;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -16,6 +17,15 @@ pub struct Project {
     /// command run in a terminal of every new worktree (e.g. `bun install`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup: Option<String>,
+    /// worktree path -> path of its parent worktree (both normalized with `norm_path`): worktrees of one theme are
+    /// shown together under the parent. Entries of worktrees that no longer exist are harmless and ignored.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub parents: BTreeMap<String, String>,
+}
+
+/// The form of a worktree path used as a key: forward slashes, lowercase, no trailing slash.
+pub fn norm_path(s: &str) -> String {
+    s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase()
 }
 
 pub fn store_path() -> PathBuf {
@@ -90,7 +100,7 @@ pub fn add(store: &Path, path: &str) -> Result<Project> {
     while v.iter().any(|p| p.id == id) {
         id.push_str("-2");
     }
-    let p = Project { id, name, path: root_s, setup: None };
+    let p = Project { id, name, path: root_s, setup: None, parents: BTreeMap::new() };
     v.push(p.clone());
     save(store, &v)?;
     Ok(p)
@@ -253,6 +263,115 @@ pub fn worktree_remove(p: &Project, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// The non-main worktree `path` of project `p`, as git lists it.
+fn plain_worktree(p: &Project, path: &str) -> Result<git::Worktree> {
+    let want = norm_path(path);
+    let wt = git::worktree_list(Path::new(&p.path))?.into_iter().find(|w| norm_path(&w.path) == want).context("not a worktree of this project")?;
+    if wt.is_main {
+        bail!("o worktree principal não pode fazer parte de um grupo");
+    }
+    Ok(wt)
+}
+
+/// True when following `parents` upwards from `start` reaches `target`.
+fn reaches(parents: &BTreeMap<String, String>, start: &str, target: &str) -> bool {
+    let mut cur = start.to_string();
+    // the chain cannot be longer than the map: a loop already in the file (hand edited) still ends
+    for _ in 0..=parents.len() {
+        if cur == target {
+            return true;
+        }
+        match parents.get(&cur) {
+            Some(next) => cur = next.clone(),
+            None => return false,
+        }
+    }
+    true
+}
+
+/// Checks that `parent` is a worktree of `p` that `path` may move under: same project, not the main worktree, not
+/// itself, and not one of its own descendants (that would make a cycle). With `path` None (a worktree not created
+/// yet) only the parent is checked.
+pub fn check_parent(p: &Project, path: Option<&str>, parent: &str) -> Result<()> {
+    let par = plain_worktree(p, parent).context("o grupo escolhido não é um worktree deste projeto")?;
+    let Some(path) = path else { return Ok(()) };
+    let me = plain_worktree(p, path)?;
+    let (me, par) = (norm_path(&me.path), norm_path(&par.path));
+    if me == par {
+        bail!("um worktree não pode ficar dentro de si próprio");
+    }
+    if reaches(&p.parents, &par, &me) {
+        bail!("isso criava um ciclo: o grupo escolhido já está dentro deste worktree");
+    }
+    Ok(())
+}
+
+/// Puts the worktree `path` of project `id` under `parent`, or back at the top level when `parent` is None.
+/// Replaces whatever the worktree had before (also for a new worktree that reuses an old path).
+pub fn set_parent(store: &Path, id: &str, path: &str, parent: Option<&str>) -> Result<()> {
+    let _g = STORE_LOCK.lock_recover();
+    let mut v = load_for_update(store)?;
+    let p = v.iter_mut().find(|p| p.id == id).with_context(|| format!("unknown project {id}"))?;
+    let me = norm_path(&plain_worktree(p, path)?.path);
+    match parent.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(par) => {
+            check_parent(p, Some(path), par)?;
+            let par = norm_path(&plain_worktree(p, par)?.path);
+            p.parents.insert(me, par);
+        }
+        None => {
+            p.parents.remove(&me);
+        }
+    }
+    save(store, &v)
+}
+
+/// Forgets the parent of a removed worktree, and the link of its children.
+pub fn forget_parent(store: &Path, id: &str, path: &str) -> Result<()> {
+    let _g = STORE_LOCK.lock_recover();
+    let mut v = load_for_update(store)?;
+    let Some(p) = v.iter_mut().find(|p| p.id == id) else { return Ok(()) };
+    let gone = norm_path(path);
+    let before = p.parents.len();
+    p.parents.retain(|k, par| *k != gone && *par != gone);
+    if p.parents.len() != before {
+        save(store, &v)?;
+    }
+    Ok(())
+}
+
+/// A renamed worktree keeps its place: its own link and the links of its children follow the new path.
+pub fn rename_parent(store: &Path, id: &str, old: &str, new: &str) -> Result<()> {
+    let _g = STORE_LOCK.lock_recover();
+    let mut v = load_for_update(store)?;
+    let Some(p) = v.iter_mut().find(|p| p.id == id) else { return Ok(()) };
+    let (old, new) = (norm_path(old), norm_path(new));
+    let moved: BTreeMap<String, String> = p
+        .parents
+        .iter()
+        .map(|(k, par)| (if *k == old { new.clone() } else { k.clone() }, if *par == old { new.clone() } else { par.clone() }))
+        .collect();
+    if moved != p.parents {
+        p.parents = moved;
+        save(store, &v)?;
+    }
+    Ok(())
+}
+
+/// The parent of each worktree as the UI wants it: worktree path -> parent path, both as git lists them.
+/// Pairs whose worktrees are gone are left out.
+pub fn parent_paths(p: &Project, worktrees: &[git::Worktree]) -> BTreeMap<String, String> {
+    let real: BTreeMap<String, &str> = worktrees.iter().filter(|w| !w.is_main).map(|w| (norm_path(&w.path), w.path.as_str())).collect();
+    worktrees
+        .iter()
+        .filter(|w| !w.is_main)
+        .filter_map(|w| {
+            let par = p.parents.get(&norm_path(&w.path))?;
+            real.get(par).map(|r| (w.path.clone(), r.to_string()))
+        })
+        .collect()
+}
+
 const LOGO_CANDIDATES: [&str; 8] =
     ["logo.png", "logo.svg", "assets/logo.png", "assets/logo.svg", "docs/logo.png", ".github/logo.png", "icon.png", "assets/icon.png"];
 
@@ -346,8 +465,8 @@ mod store_tests {
         let gone = r.join("gone").to_string_lossy().to_string();
         let store = r.join("projects.json");
         let list = vec![
-            Project { id: "gone".into(), name: "gone".into(), path: gone, setup: None },
-            Project { id: "real".into(), name: "real".into(), path: real_s.clone(), setup: None },
+            Project { id: "gone".into(), name: "gone".into(), path: gone, setup: None, parents: BTreeMap::new() },
+            Project { id: "real".into(), name: "real".into(), path: real_s.clone(), setup: None, parents: BTreeMap::new() },
         ];
         save(&store, &list).unwrap();
         let wt = known_worktree(&store, &real_s).unwrap();
@@ -416,7 +535,7 @@ mod rename_tests {
         git::must(&repo, &["add", "."]).unwrap();
         git::must(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"]).unwrap();
         let path = git::canon(&repo).unwrap().to_string_lossy().to_string();
-        (root, Project { id: "p".into(), name: "proj".into(), path, setup: None })
+        (root, Project { id: "p".into(), name: "proj".into(), path, setup: None, parents: BTreeMap::new() })
     }
 
     #[test]
@@ -465,5 +584,100 @@ mod rename_tests {
         assert_eq!(rep.copied, vec![".env"]);
         assert_eq!(std::fs::read_to_string(Path::new(&w.path).join(".env")).unwrap(), "KEY=1");
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod parent_tests {
+    use super::*;
+
+    fn setup(tag: &str) -> (PathBuf, Project, PathBuf) {
+        let root = std::env::temp_dir().join(format!("axl-parent-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let repo = root.join("proj");
+        std::fs::create_dir_all(&repo).unwrap();
+        git::must(&repo, &["init", "-q", "-b", "main"]).unwrap();
+        std::fs::write(repo.join("a.txt"), "1").unwrap();
+        git::must(&repo, &["add", "."]).unwrap();
+        git::must(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"]).unwrap();
+        let path = git::canon(&repo).unwrap().to_string_lossy().to_string();
+        let p = Project { id: "p".into(), name: "proj".into(), path, setup: None, parents: BTreeMap::new() };
+        let store = root.join("projects.json");
+        save(&store, &[p.clone()]).unwrap();
+        (root, p, store)
+    }
+
+    fn reload(store: &Path) -> Project {
+        load(store).remove(0)
+    }
+
+    #[test]
+    fn parent_is_saved_survives_a_reload_and_can_be_cleared() {
+        let (root, p, store) = setup("ok");
+        let a = worktree_create(&p, "a").unwrap();
+        let b = worktree_create(&p, "b").unwrap();
+        set_parent(&store, "p", &b.path, Some(&a.path)).unwrap();
+        let again = reload(&store);
+        assert_eq!(again.parents.get(&norm_path(&b.path)), Some(&norm_path(&a.path)));
+        let all = git::worktree_list(Path::new(&p.path)).unwrap();
+        assert_eq!(parent_paths(&again, &all).get(&b.path), Some(&a.path));
+        set_parent(&store, "p", &b.path, None).unwrap();
+        assert!(reload(&store).parents.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn parent_refuses_self_cycles_main_and_strangers() {
+        let (root, p, store) = setup("no");
+        let a = worktree_create(&p, "a").unwrap();
+        let b = worktree_create(&p, "b").unwrap();
+        let c = worktree_create(&p, "c").unwrap();
+        let err = |r: Result<()>| format!("{:#}", r.unwrap_err());
+        assert!(err(set_parent(&store, "p", &a.path, Some(&a.path))).contains("si próprio"));
+        set_parent(&store, "p", &b.path, Some(&a.path)).unwrap();
+        set_parent(&store, "p", &c.path, Some(&b.path)).unwrap();
+        // a under c would close the loop a -> c -> b -> a
+        assert!(err(set_parent(&store, "p", &a.path, Some(&c.path))).contains("ciclo"));
+        assert!(err(set_parent(&store, "p", &a.path, Some(&p.path))).contains("principal"));
+        assert!(err(set_parent(&store, "p", &p.path, Some(&a.path))).contains("principal"));
+        assert!(err(set_parent(&store, "p", &a.path, Some("C:/nowhere"))).contains("worktree deste projeto"));
+        assert!(err(set_parent(&store, "other", &a.path, Some(&b.path))).contains("unknown project"));
+        // the refusals changed nothing
+        assert_eq!(reload(&store).parents.len(), 2);
+        // a worktree not created yet: only the parent is checked
+        assert!(check_parent(&p, None, &a.path).is_ok());
+        assert!(check_parent(&p, None, "C:/nowhere").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn forgetting_a_worktree_drops_it_and_frees_its_children() {
+        let (root, p, store) = setup("forget");
+        let a = worktree_create(&p, "a").unwrap();
+        let b = worktree_create(&p, "b").unwrap();
+        set_parent(&store, "p", &b.path, Some(&a.path)).unwrap();
+        forget_parent(&store, "p", &a.path).unwrap();
+        assert!(reload(&store).parents.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn renaming_moves_the_links() {
+        let (root, p, store) = setup("rename");
+        let a = worktree_create(&p, "a").unwrap();
+        let b = worktree_create(&p, "b").unwrap();
+        set_parent(&store, "p", &b.path, Some(&a.path)).unwrap();
+        rename_parent(&store, "p", &a.path, "C:/x/proj-z").unwrap();
+        assert_eq!(reload(&store).parents.get(&norm_path(&b.path)), Some(&"c:/x/proj-z".to_string()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_loop_in_the_file_does_not_hang() {
+        let mut m = BTreeMap::new();
+        m.insert("a".to_string(), "b".to_string());
+        m.insert("b".to_string(), "a".to_string());
+        assert!(reaches(&m, "a", "zzz"));
+        assert!(!reaches(&BTreeMap::new(), "a", "b"));
     }
 }

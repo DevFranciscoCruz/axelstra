@@ -52,13 +52,18 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             let r = c.call("session.spawn", json!({"program": cmd[0], "args": &cmd[1..], "cwd": std::env::current_dir()?}))?;
             println!("{r}");
         }
-        Cmd::Worktree { cmd: WtCmd::Create { project, name } } => {
+        Cmd::Worktree { cmd: WtCmd::Create { project, name, parent } } => {
             let projects = c.call("project.list", json!({}))?;
             let pid = match find_project_by_ref(&projects, &project) {
                 Some(p) => p["id"].as_str().unwrap_or_default().to_string(),
                 None => bail!("no registered project matches {project:?} (see `axelstra projects`)"),
             };
-            let r = c.call("worktree.create", json!({"project": pid, "name": name}))?;
+            // the parent is given as a folder; the daemon knows worktrees by the path git lists
+            let parent = match parent {
+                Some(par) => Some(find_worktree(&projects, &par)?.1),
+                None => None,
+            };
+            let r = c.call("worktree.create", json!({"project": pid, "name": name, "parent": parent}))?;
             println!("{}", r["path"].as_str().unwrap_or_default());
         }
         Cmd::Worktree { cmd: WtCmd::Rm { path } } => {

@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn project_json_lists_only_merged() {
-        let p = Project { id: "p1".into(), name: "P".into(), path: ".".into(), setup: None };
+        let p = Project { id: "p1".into(), name: "P".into(), path: ".".into(), setup: None, parents: Default::default() };
         let rs = vec![
             row(|r| r.branch = "ax/a".into()),
             row(|r| {
@@ -174,7 +174,7 @@ mod tests {
         g(&repo, &["merge", "-q", "--ff-only", "ax/done"]);
         g(&repo, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
         std::fs::write(dirty.join("x.txt"), "x").unwrap();
-        let p = Project { id: "p".into(), name: "P".into(), path: repo.to_string_lossy().into(), setup: None };
+        let p = Project { id: "p".into(), name: "P".into(), path: repo.to_string_lossy().into(), setup: None, parents: Default::default() };
         let rs = rows(&p, &|_| false);
         let c = count(&rs);
         assert_eq!((c.total, c.dirty, c.merged, c.no_agent), (2, 1, 1, 2), "{rs:?}");

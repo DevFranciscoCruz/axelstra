@@ -1076,6 +1076,21 @@ fn dispatch(
                 }
             }
         }
+        "notes.worktree" => {
+            // the task files whose header names this worktree, for the empty state of a worktree without sessions
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            let project = p["project"].as_str().unwrap_or_default().to_string();
+            let root = crate::notes::root(reg.saved.parent().unwrap_or(std::path::Path::new("")));
+            let items = tokio::task::block_in_place(|| crate::notes::for_worktree(&root, &project, &wt.to_string_lossy()));
+            Ok(json!({"items": items}))
+        }
+        "notes.read_file" => {
+            let root = crate::notes::root(reg.saved.parent().unwrap_or(std::path::Path::new("")));
+            let project = p["project"].as_str().unwrap_or_default();
+            let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
+            let note = crate::notes::file_of(&root, project, name).ok_or_else(|| anyhow::anyhow!("ficheiro de tarefa não encontrado"))?;
+            Ok(json!({"text": crate::notes::read(&note)?, "path": note.to_string_lossy(), "name": name}))
+        }
         "msg.inbox" => {
             let to = p["session"].as_u64().ok_or_else(|| anyhow::anyhow!("missing session"))? as u32;
             let list = reg.bus.inbox(to, p["all"].as_bool() == Some(true), p["mark"].as_bool() != Some(false));
@@ -1254,6 +1269,18 @@ fn dispatch(
                     let mut wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();
                     wts.retain(|w| w.is_main || w.path.replace('\\', "/").contains("/.axelstra-wt/"));
                     let ident = axelstra_core::git::identity(repo);
+                    let parents = crate::projects::parent_paths(pr, &wts);
+                    let wts: Vec<Value> = wts
+                        .into_iter()
+                        .map(|w| {
+                            let parent = parents.get(&w.path).cloned();
+                            let mut v = serde_json::to_value(w).unwrap_or_default();
+                            if let Some(par) = parent {
+                                v["parent"] = json!(par);
+                            }
+                            v
+                        })
+                        .collect();
                     json!({"id": pr.id, "name": ident.display_name, "path": pr.path, "worktrees": wts, "git": axelstra_core::git::is_repo(repo),
                            "setup": pr.setup, "default_branch": axelstra_core::git::default_branch(repo), "slug": ident.slug, "icon_url": ident.icon_url, "remote": ident.remote})
                 })
@@ -1487,12 +1514,28 @@ fn dispatch(
         "worktree.create" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
+            // a parent that is not a worktree of this project is refused before anything is created
+            let parent = p["parent"].as_str().map(str::trim).filter(|s| !s.is_empty());
+            if let Some(par) = parent {
+                crate::projects::check_parent(&pr, None, par)?;
+            }
             let (wt, env) = tokio::task::block_in_place(|| crate::projects::worktree_create_report(&pr, name))?;
+            // also clears a link left by an earlier worktree at the same path
+            if let Err(e) = crate::projects::set_parent(&reg.store, &pr.id, &wt.path, parent) {
+                eprintln!("parent of {}: {e:#}", wt.path);
+            }
             // the worktree plus what .worktreeinclude copied (env_copied) and left out (env_skipped)
             let mut v = serde_json::to_value(wt)?;
             v["env_copied"] = json!(env.copied);
             v["env_skipped"] = json!(env.skipped);
             Ok(v)
+        }
+        "worktree.set_parent" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
+            let parent = p["parent"].as_str();
+            tokio::task::block_in_place(|| crate::projects::set_parent(&reg.store, &pr.id, path, parent))?;
+            Ok(json!({}))
         }
         "worktree.rename" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
@@ -1500,6 +1543,7 @@ fn dispatch(
             let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
             let busy = reg.worktree_working(path);
             let wt = tokio::task::block_in_place(|| crate::projects::worktree_rename(&pr, path, name, busy))?;
+            let _ = crate::projects::rename_parent(&reg.store, &pr.id, path, &wt.path);
             // the dispatcher's notes (title, requests) are keyed by path: they follow the folder
             let f = reg.saved.with_file_name("dispatch.json");
             let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
@@ -1607,6 +1651,7 @@ fn dispatch(
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
             tokio::task::block_in_place(|| crate::projects::worktree_remove(&pr, path))?;
+            let _ = crate::projects::forget_parent(&reg.store, &pr.id, path);
             Ok(json!({}))
         }
         "ping" => Ok(json!({})),

@@ -168,6 +168,70 @@ pub fn read(path: &Path) -> Result<String> {
     Ok(std::fs::read_to_string(path)?)
 }
 
+/// One task file of a worktree, as the empty-state list shows it.
+#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+pub struct NoteInfo {
+    /// file name without `.md`: also the name passed back to read it
+    pub name: String,
+    /// "ok" once the agent reported it finished, "nota" for notes only, "aberto" when nothing was written yet
+    pub status: String,
+    /// the first lines of the Relatorio section
+    pub excerpt: String,
+    /// seconds since the epoch of the last change
+    pub modified: u64,
+}
+
+fn header_value<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    text.lines().take(8).find_map(|l| l.strip_prefix(&format!("- {key}: ")).map(str::trim))
+}
+
+/// Status and first lines of the Relatorio section of a task file.
+fn summarize(text: &str) -> (String, String) {
+    let body = text.split_once("\n## Relatorio").map(|(_, r)| r).unwrap_or_default();
+    let status = if body.contains("- ok\n") {
+        "ok"
+    } else if body.contains("### ") {
+        "nota"
+    } else {
+        "aberto"
+    };
+    let lines: Vec<&str> = body.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).take(3).collect();
+    let mut excerpt = lines.join(" ");
+    if excerpt.chars().count() > 240 {
+        excerpt = excerpt.chars().take(240).collect::<String>() + "…";
+    }
+    (status.into(), excerpt)
+}
+
+/// The task files of a project whose header names `worktree` (newest first). Files that cannot be read are skipped.
+pub fn for_worktree(root: &Path, project: &str, worktree: &str) -> Vec<NoteInfo> {
+    let want = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
+    let want_wt = want(worktree);
+    let Ok(rd) = std::fs::read_dir(root.join(safe_name(project))) else { return vec![] };
+    let mut out: Vec<NoteInfo> = rd
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
+        .filter_map(|e| {
+            let path = e.path();
+            let text = read(&path).ok()?;
+            if want(header_value(&text, "Worktree")?) != want_wt {
+                return None;
+            }
+            let (status, excerpt) = summarize(&text);
+            let modified = e.metadata().ok()?.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+            Some(NoteInfo { name: path.file_stem()?.to_string_lossy().into_owned(), status, excerpt, modified })
+        })
+        .collect();
+    out.sort_by(|a, b| b.modified.cmp(&a.modified).then_with(|| a.name.cmp(&b.name)));
+    out
+}
+
+/// The task file `name` of `project`, if it is one of ours.
+pub fn file_of(root: &Path, project: &str, name: &str) -> Option<PathBuf> {
+    let p = root.join(safe_name(project)).join(format!("{}.md", safe_name(name)));
+    inside_root(root, &p).then_some(p)
+}
+
 /// Copies the task file into `worktree/.axelstra/`. Never replaces a file already there unless `overwrite`.
 /// The caller checked that `worktree` is a known worktree.
 pub fn export(note: &Path, worktree: &Path, overwrite: bool) -> Result<PathBuf> {
@@ -307,5 +371,25 @@ mod tests {
         assert!(read(&out).unwrap().contains("novo"));
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&wt);
+    }
+
+    #[test]
+    fn notes_are_found_by_the_worktree_in_their_header() {
+        let root = dir("bywt");
+        let mut a = Some(json!({"project": "p-bywt", "worktree": "C:/x/Wt-A", "kind": "agent", "agent": "claude"}));
+        let mut b = Some(json!({"project": "p-bywt", "worktree": "C:/x/wt-b", "kind": "agent", "agent": "claude"}));
+        on_spawn(&root, Some("claude"), &mut a, Some("faz A"));
+        on_spawn(&root, Some("claude"), &mut b, None);
+        let pa = PathBuf::from(a.unwrap()["note"].as_str().unwrap());
+        assert_eq!(for_worktree(&root, "p-bywt", "c:\\x\\wt-a/")[0].status, "aberto");
+        append(&pa, "ok", "feito\ncom detalhe").unwrap();
+        let found = for_worktree(&root, "p-bywt", "C:/x/wt-a");
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].status.as_str(), found[0].excerpt.as_str()), ("ok", "feito com detalhe"));
+        assert_eq!(for_worktree(&root, "p-bywt", "C:/x/other").len(), 0);
+        assert_eq!(for_worktree(&root, "no-such-project", "C:/x/wt-a").len(), 0);
+        assert!(file_of(&root, "p-bywt", &found[0].name).is_some());
+        assert!(file_of(&root, "p-bywt", "../../x").is_none());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
