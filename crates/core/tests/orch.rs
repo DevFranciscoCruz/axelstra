@@ -8,6 +8,7 @@ use std::process::Command;
 struct Env {
     root: PathBuf,
     repo: PathBuf,
+    trusted: bool,
 }
 
 fn sh(cwd: &Path, args: &[&str]) {
@@ -27,7 +28,7 @@ fn setup(name: &str) -> Env {
     std::fs::write(repo.join("shared.txt"), "base\n").unwrap();
     sh(&repo, &["add", "-A"]);
     sh(&repo, &["commit", "-qm", "init"]);
-    Env { repo: git::canon(&repo).unwrap(), root }
+    Env { repo: git::canon(&repo).unwrap(), root, trusted: false }
 }
 
 impl Env {
@@ -45,6 +46,10 @@ impl Env {
     }
 
     fn run(&self, name: &str) -> Report {
+        self.try_run(name).unwrap()
+    }
+
+    fn try_run(&self, name: &str) -> anyhow::Result<Report> {
         let tools = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools");
         let marker = self.root.join("flaky.marker");
         let agent: Vec<String> = if cfg!(windows) {
@@ -56,7 +61,7 @@ impl Env {
             let script = git::canon(&tools.join("fake-agent.sh")).unwrap();
             ["sh", &script.to_string_lossy(), &marker.to_string_lossy()].map(String::from).to_vec()
         };
-        orch::run(&Options {
+        let o = Options {
             repo: self.repo.clone(),
             name: name.into(),
             max_concurrency: 2,
@@ -64,8 +69,8 @@ impl Env {
             agent_override: Some(agent),
             poll_ms: 100,
             runner: None,
-        })
-        .unwrap()
+        };
+        if self.trusted { orch::run_trusted(&o) } else { orch::run(&o) }
     }
 }
 
@@ -155,4 +160,76 @@ fn rerun_rolls_back_half_finished_merge_and_resumes() {
     assert_eq!(r2.merged, ["b"]);
     assert!(!r2.integ_wt.join("half.txt").exists(), "half-done merge not rolled back");
     assert!(r2.integ_wt.join("a.txt").exists(), "earlier merge lost");
+}
+
+#[test]
+fn card_ids_that_escape_the_worktree_dir_are_not_loaded() {
+    let e = setup("slug");
+    e.card("a", &[], "");
+    std::fs::write(e.repo.join(".kanban/evil.md"), "---
+id: x/../../y
+status: todo
+---
+body
+").unwrap();
+    let l = card::load_dir(&e.repo.join(".kanban")).unwrap();
+    assert_eq!(l.cards.len(), 1);
+    assert_eq!(l.broken.len(), 1);
+    let r = e.run("t");
+    assert_eq!(r.merged, ["a"]);
+    assert!(!e.root.join("y").exists());
+    let o = Options {
+        repo: e.repo.clone(),
+        name: "../x".into(),
+        max_concurrency: 1,
+        wt_root: e.root.join("wt"),
+        agent_override: None,
+        poll_ms: 100,
+        runner: None,
+    };
+    assert!(orch::run(&o).is_err());
+}
+
+#[test]
+fn acceptance_commands_need_trust() {
+    let mut e = setup("trust");
+    e.card("a", &[], "acceptance: \"exit 0\"
+");
+    let err = e.try_run("t").err().expect("untrusted run must refuse").to_string();
+    assert!(err.contains("not trusted") && err.contains("a: exit 0"), "{err}");
+    assert_eq!(e.status("a"), "todo");
+    e.trusted = true;
+    assert_eq!(e.run("t2").merged, ["a"]);
+}
+
+#[test]
+fn retry_merge_integrates_a_resolved_conflict() {
+    let e = setup("retrymerge");
+    e.card("a", &[], "");
+    e.card("conflict", &[], "");
+    let r = e.run("t");
+    let loser = r.needs_review[0].0.clone();
+    assert_eq!(r.needs_review[0].1, "merge conflict");
+    let wt_root = e.root.join("wt");
+    let wt = wt_root.join(format!("t-{loser}"));
+    let wt_root = wt_root.as_path();
+
+    // still conflicting: stays in review
+    assert!(orch::retry_merge(&e.repo, wt_root, "t", &loser, false).is_err());
+    assert_eq!(e.status(&loser), "needs-review");
+    assert!(git::must(&r.integ_wt, &["status", "--porcelain"]).unwrap().is_empty());
+
+    // the user merges the integration branch into the task branch and resolves it
+    let _ = Command::new("git").current_dir(&wt).args(["merge", "orch/t"]).status().unwrap();
+    std::fs::write(wt.join("shared.txt"), "resolved
+").unwrap();
+    sh(&wt, &["add", "-A"]);
+    sh(&wt, &["-c", "user.name=x", "-c", "user.email=x@x", "commit", "-qm", "resolve"]);
+
+    orch::retry_merge(&e.repo, wt_root, "t", &loser, false).unwrap();
+    assert_eq!(e.status(&loser), "done");
+    assert!(r.integ_wt.join(format!("{loser}.txt")).exists());
+    assert!(!wt.exists(), "task worktree removed after the merge");
+    // a card that is no longer in review cannot be merged again
+    assert!(orch::retry_merge(&e.repo, wt_root, "t", &loser, false).is_err());
 }

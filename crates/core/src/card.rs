@@ -49,6 +49,33 @@ pub struct Card {
     pub path: PathBuf,
 }
 
+/// `--permission-mode` values of the claude CLI.
+pub const PERMISSION_MODES: [&str; 6] = ["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"];
+/// Agent keys the UI can offer; the orchestrator can run a subset of them.
+pub const AGENTS: [&str; 6] = ["claude", "codex", "chatgpt", "opencode", "gemini", "aider"];
+
+/// Ids and run names end up in worktree paths and branch names: `[A-Za-z0-9._-]`, no `..`.
+pub fn valid_slug(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && !s.starts_with('.')
+        && !s.contains("..")
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+fn validate(m: &Meta) -> Result<()> {
+    if !valid_slug(&m.id) {
+        bail!("invalid card id {:?}: use letters, digits, '.', '_' or '-' (no '..')", m.id);
+    }
+    if !AGENTS.contains(&m.agent.as_str()) {
+        bail!("card '{}': unknown agent {:?}", m.id, m.agent);
+    }
+    if !PERMISSION_MODES.contains(&m.permission_mode.as_str()) {
+        bail!("card '{}': unknown permission_mode {:?}", m.id, m.permission_mode);
+    }
+    Ok(())
+}
+
 pub fn parse(text: &str, path: &Path) -> Result<Card> {
     let text = text.trim_start_matches('\u{feff}').replace("\r\n", "\n");
     let rest = text
@@ -60,22 +87,42 @@ pub fn parse(text: &str, path: &Path) -> Result<Card> {
     let body = body.trim_start_matches('\n').to_string();
     let meta: Meta = serde_yaml::from_str(front)
         .with_context(|| format!("{}: bad frontmatter", path.display()))?;
+    validate(&meta).with_context(|| path.display().to_string())?;
     Ok(Card { meta, body, path: path.to_path_buf() })
 }
 
-pub fn load_dir(dir: &Path) -> Result<Vec<Card>> {
-    let mut out = Vec::new();
+/// Cards found in a directory plus the files that could not be read or parsed.
+#[derive(Debug, Default)]
+pub struct Loaded {
+    pub cards: Vec<Card>,
+    pub broken: Vec<(PathBuf, String)>,
+}
+
+impl IntoIterator for Loaded {
+    type Item = Card;
+    type IntoIter = std::vec::IntoIter<Card>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.cards.into_iter()
+    }
+}
+
+/// One unreadable card does not hide the others: it is returned in `broken`.
+pub fn load_dir(dir: &Path) -> Result<Loaded> {
+    let mut out = Loaded::default();
     if !dir.is_dir() {
         return Ok(out);
     }
     for e in std::fs::read_dir(dir)? {
         let p = e?.path();
         if p.extension().is_some_and(|x| x == "md") {
-            let t = std::fs::read_to_string(&p)?;
-            out.push(parse(&t, &p)?);
+            match std::fs::read_to_string(&p).map_err(anyhow::Error::from).and_then(|t| parse(&t, &p)) {
+                Ok(c) => out.cards.push(c),
+                Err(e) => out.broken.push((p, format!("{e:#}"))),
+            }
         }
     }
-    out.sort_by(|a, b| a.meta.id.cmp(&b.meta.id));
+    out.cards.sort_by(|a, b| a.meta.id.cmp(&b.meta.id));
+    out.broken.sort();
     Ok(out)
 }
 
@@ -173,6 +220,51 @@ permission_mode: plan
 ---
 ";
         assert_eq!(parse(t, Path::new("x")).unwrap().meta.permission_mode, "plan");
+    }
+
+    #[test]
+    fn rejects_unsafe_ids_agents_and_modes() {
+        for id in ["x/../../y", "..", "a..b", "a b", r"a\b", ".hidden", ""] {
+            let t = format!("---
+id: {id:?}
+---
+");
+            assert!(parse(&t, Path::new("x")).is_err(), "id {id:?} accepted");
+        }
+        assert!(parse("---
+id: ok.1_x-y
+---
+", Path::new("x")).is_ok());
+        assert!(parse("---
+id: x
+agent: rm
+---
+", Path::new("x")).is_err());
+        assert!(parse("---
+id: x
+permission_mode: \"--evil\"
+---
+", Path::new("x")).is_err());
+    }
+
+    #[test]
+    fn load_dir_skips_bad_files() {
+        let d = std::env::temp_dir().join(format!("axelstra_card_dir_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("a.md"), "---
+id: a
+---
+hi
+").unwrap();
+        std::fs::write(d.join("bad.md"), "no frontmatter").unwrap();
+        std::fs::write(d.join("evil.md"), "---
+id: ../evil
+---
+").unwrap();
+        let l = load_dir(&d).unwrap();
+        assert_eq!(l.cards.len(), 1);
+        assert_eq!(l.broken.len(), 2);
     }
 
     #[test]
