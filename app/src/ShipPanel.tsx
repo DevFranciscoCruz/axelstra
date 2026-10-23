@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Button, CheckboxInput } from "./ui";
+import { Badge, Button, CheckboxInput } from "./ui";
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { press } from "./a11y";
 import { ask } from "./Confirm";
@@ -141,8 +141,8 @@ export function ShipPanel() {
               </div>
               <div class="ship-title" title={s().title}>{s().title}</div>
               <div class="ship-facts">
-                <span class="chip">{REVIEW_LABEL[s().review]}</span>
-                <span class="chip" classList={{ bad: s().mergeable === "no" }}>{mergeLabel(s())}</span>
+                <Badge>{REVIEW_LABEL[s().review]}</Badge>
+                <Badge variant={s().mergeable === "no" ? "bad" : "default"}>{mergeLabel(s())}</Badge>
               </div>
               <Show when={open() && s().checks.length}>
                 <ul class="ship-checks" aria-label="Checks">
@@ -155,7 +155,7 @@ export function ShipPanel() {
                           </Show>
                         </span>
                         <Show when={c.link} fallback={<span class="ship-name" title={c.name}>{c.name}</span>}>
-                          <button class="link ship-name" title={`Abrir ${c.name} no browser`} onClick={() => void openLink(c.link)}>{c.name}</button>
+                          <Button variant="row" size="bare" class="ship-name block truncate" title={`Abrir ${c.name} no browser`} onClick={() => void openLink(c.link)}>{c.name}</Button>
                         </Show>
                         <span class="ship-state">{CHECK_LABEL[c.state][1]}</span>
                       </li>

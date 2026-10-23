@@ -1,5 +1,5 @@
 import { K } from "./keyboard";
-import { Button, Input, Textarea } from "./ui";
+import { Button, Input, Textarea, cn } from "./ui";
 import { RightTabs } from "./RightTabs";
 import { ShipPanel } from "./ShipPanel";
 import { Icon } from "./Icon";
@@ -149,12 +149,11 @@ export function ChangesPanel() {
       <RightTabs />
 
       <div class="sc-head">
-        <Button variant="secondary" size={null} class="pill rounded-full px-3 py-1 border-border" disabled={busy()} onClick={() => setPrOpen(!prOpen())}>
+        <Button variant="secondary" size="pill" class="border-border" disabled={busy()} onClick={() => setPrOpen(!prOpen())}>
           <Icon name="branch" size={13} /> Criar PR
         </Button>
         <span class="grow" />
-        <Button variant="ghost" size="icon"
-          class="icon"
+        <Button variant="icon" size="icon"
           title="Atualizar" aria-label="Atualizar"
           onClick={() => {
             void refreshChanges();
@@ -163,8 +162,7 @@ export function ChangesPanel() {
         >
           <Icon name="refresh" />
         </Button>
-        <Button variant="ghost" size="icon"
-          class="icon"
+        <Button variant="icon" size="icon"
           title="Mais ações" aria-label="Mais ações"
           onClick={(e) =>
             showMenu(e, [
@@ -223,9 +221,8 @@ export function ChangesPanel() {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && canCommit()) void doCommit();
             }}
           />
-          <Button variant="ghost" size="icon"
-            class="icon sc-ai"
-            classList={{ busy: suggesting() }}
+          <Button variant="icon" size="icon"
+            class={cn("absolute bottom-1.5 right-1.5 text-primary disabled:text-muted-foreground", suggesting() && "animate-pulse")}
             disabled={suggesting() || busy() || files().length === 0}
             title={files().length === 0 ? "Sem alterações para descrever" : "Sugerir mensagem com IA (usa o claude)"}
             aria-label="Sugerir mensagem com IA"
@@ -235,13 +232,13 @@ export function ChangesPanel() {
           </Button>
         </div>
         <div class="sc-split">
-          <Button variant="secondary" size={null} class="sc-main flex-1 p-2 rounded-l-lg rounded-r-none border-border" disabled={!canCommit()} title={canCommit() ? K("Commit (Ctrl+Enter)") : files().length === 0 ? "Sem alterações para commit" : message().trim() ? "A trabalhar…" : "Escreve uma mensagem"} onClick={() => void doCommit()}>
+          <Button variant="secondary" size="split" class="border-border" disabled={!canCommit()} title={canCommit() ? K("Commit (Ctrl+Enter)") : files().length === 0 ? "Sem alterações para commit" : message().trim() ? "A trabalhar…" : "Escreve uma mensagem"} onClick={() => void doCommit()}>
             <Icon name="check" /> Commit
           </Button>
           <Button
             variant="secondary"
-            size={null}
-            class="sc-drop w-8 p-0 rounded-r-lg rounded-l-none border-l-0 border-border"
+            size="splitEnd"
+            class="border-border"
             disabled={busy()}
             title="Mais opções de commit" aria-label="Mais opções de commit"
             onClick={(e) =>

@@ -1,4 +1,5 @@
 import { For, Show, createResource } from "solid-js";
+import { Button } from "./ui";
 import { Icon } from "./Icon";
 import { NoteView, openNoteFile } from "./NoteView";
 import { notesWorktree } from "./api";
@@ -18,7 +19,7 @@ export function WorktreeReports(props: { project: string; worktree: string }) {
         <div class="wt-reports" role="list" aria-label="Relatórios dos agentes deste worktree">
           <For each={notes()}>
             {(n) => (
-              <button type="button" class="wt-report" role="listitem" onClick={() => openNoteFile(props.project, n.name)} title="Abrir o relatório">
+              <Button type="button" variant="row" size="bare" class="flex-col items-stretch gap-[3px] rounded-xl border-border bg-popover px-2.5 py-2 text-sm text-foreground hover:border-primary" role="listitem" onClick={() => openNoteFile(props.project, n.name)} title="Abrir o relatório">
                 <span class="wt-report-head">
                   <Icon name="file" size={12} inline />
                   <span class="wt-report-name">{n.name}</span>
@@ -28,7 +29,7 @@ export function WorktreeReports(props: { project: string; worktree: string }) {
                 <Show when={n.excerpt}>
                   <span class="wt-report-excerpt">{n.excerpt}</span>
                 </Show>
-              </button>
+              </Button>
             )}
           </For>
         </div>

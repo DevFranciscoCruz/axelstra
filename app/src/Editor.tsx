@@ -209,10 +209,10 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
           </span>
         </Show>
         <span class="emsg" role="status" aria-live="polite">{msg()}</span>
-        <Button variant="ghost" size="icon" class="icon" disabled={!dirty()} title={K("Guardar (Ctrl+S)")} onClick={() => void save()}>
+        <Button variant="icon" size="icon" disabled={!dirty()} title={K("Guardar (Ctrl+S)")} onClick={() => void save()}>
           Guardar
         </Button>
-        <Button variant="ghost" size="icon" class="icon" title="Fechar" aria-label="Fechar" onClick={() => guarded(() => setOpenFile(null))}>
+        <Button variant="icon" size="icon" title="Fechar" aria-label="Fechar" onClick={() => guarded(() => setOpenFile(null))}>
           <Icon name="x" />
         </Button>
       </div>

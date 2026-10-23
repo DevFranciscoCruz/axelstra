@@ -32,7 +32,7 @@ export function RightTabs() {
         {tab("pulls", "PRs")}
       </div>
       <span class="grow" />
-      <Button variant="ghost" size="icon" class="icon add on" title={K("Esconder painel direito (Ctrl+Shift+B)")} aria-label={K("Esconder painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>
+      <Button variant="icon" size="icon" class="text-foreground" title={K("Esconder painel direito (Ctrl+Shift+B)")} aria-label={K("Esconder painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>
         <PanelIcon side="right" on={true} />
       </Button>
     </div>
