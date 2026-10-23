@@ -1,5 +1,6 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Icon, hasIcon } from "./Icon";
+import { PlainButton } from "./ui/plain";
 
 export type MenuItem =
   | { separator: true }
@@ -62,7 +63,7 @@ function Items(props: { items: MenuItem[]; sub?: boolean; flip?: boolean; listbo
                 setFlip(e.currentTarget.getBoundingClientRect().right + 230 > window.innerWidth);
               }}
             >
-              <button
+              <PlainButton
                 class="ctx-item"
                 role={props.listbox ? "option" : "menuitem"}
                 aria-selected={props.listbox ? !!it.selected : undefined}
@@ -81,7 +82,7 @@ function Items(props: { items: MenuItem[]; sub?: boolean; flip?: boolean; listbo
                 <Show when={it.children}>
                   <span class="ctx-arrow"><Icon name="chevRight" size={11} /></span>
                 </Show>
-              </button>
+              </PlainButton>
               <Show when={it.children && openSub() === i()}>
                 <Items items={it.children!} sub flip={flip()} />
               </Show>

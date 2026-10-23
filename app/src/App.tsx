@@ -1,7 +1,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { Icon, hasIcon } from "./Icon";
 import { Select } from "./Select";
-import { Button } from "./ui";
+import { Button, Field, PlainButton, PlainInput } from "./ui";
 import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { SessionInfo, restoreSessions, listPorts, watchWorktree, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
@@ -564,15 +564,16 @@ export function App() {
           return (
             <Modal label="Novo agente" onClose={() => done()(null)}>
               <div class="m-heading">Novo agente</div>
-              <label class="m-full" onKeyDown={(e) => e.key === "Enter" && (e.ctrlKey || e.metaKey) && go()}>
-                Agente
+              <div class="m-full" onKeyDown={(e) => e.key === "Enter" && (e.ctrlKey || e.metaKey) && go()}>
+                <Field label="Agente" full>
                 <Select
                   value={choice()}
                   label="Agente"
                   options={[...agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))]}
                   onChange={setChoice}
                 />
-              </label>
+                </Field>
+              </div>
               <div class="m-actions" style={{ "justify-content": "flex-end" }}>
                 <Button onClick={() => done()(null)}>Cancelar</Button>
                 <Button variant="default" onClick={go} ref={(el) => queueMicrotask(() => el.focus())}>
@@ -646,21 +647,21 @@ export function App() {
           fallback={
             <div class="placeholder">
               <Show when={!showSidebar()}>
-                <button class="icon add" title={K("Mostrar projetos (Ctrl+B)")} aria-label={K("Mostrar projetos (Ctrl+B)")} onClick={toggleSidebar}>
+                <PlainButton class="icon add" title={K("Mostrar projetos (Ctrl+B)")} aria-label={K("Mostrar projetos (Ctrl+B)")} onClick={toggleSidebar}>
                   <PanelIcon side="left" on={false} />
-                </button>
+                </PlainButton>
               </Show>
               <div>Adiciona um projeto e escolhe um worktree.</div>
               <Show when={projects().length === 0}>
-                <button class="primary" onClick={() => void pickProject()}>Adicionar projeto</button>
+                <Button variant="default" onClick={() => void pickProject()}>Adicionar projeto</Button>
               </Show>
             </div>
           }
         >
           <div class="tabbar">
-            <button class="icon add" title={K("Projetos (Ctrl+B)")} aria-label={K("Projetos (Ctrl+B)")} classList={{ on: showSidebar() }} onClick={toggleSidebar}>
+            <PlainButton class="icon add" title={K("Projetos (Ctrl+B)")} aria-label={K("Projetos (Ctrl+B)")} classList={{ on: showSidebar() }} onClick={toggleSidebar}>
               <PanelIcon side="left" on={showSidebar()} />
-            </button>
+            </PlainButton>
             <div class="tabs" role="tablist" aria-label="Separadores" onKeyDown={(e) => tabKeys(e)}>
             <Tab selected={showKanban()} tabbable={!anyTabSelected()} onSelect={() => guarded(() => { setShowDocker(false); setShowKanban(true); })}>
               <span class="dtag"><Icon name="grid" size={11} /></span>
@@ -713,7 +714,7 @@ export function App() {
                     renaming() === s.id ? (
                       <>
                         <StateDot state={dotOfSession(s)} />
-                        <input
+                        <PlainInput
                           class="tab-rename"
                           aria-label="Nome do separador"
                           value={tabLabel(s)}
@@ -767,33 +768,33 @@ export function App() {
             </Show>
             <For each={ports()}>
               {(port) => (
-                <button class="port" title={`Abrir http://localhost:${port} no navegador`} onClick={() => void openUrl(`http://localhost:${port}`)}>
+                <PlainButton class="port" title={`Abrir http://localhost:${port} no navegador`} onClick={() => void openUrl(`http://localhost:${port}`)}>
                   :{port} <Icon name="external" size={11} inline />
-                </button>
+                </PlainButton>
               )}
             </For>
-            <button class="icon add" title={K("Ditado por voz (Ctrl+Shift+M)")} aria-label={K("Ditado por voz (Ctrl+Shift+M)")} classList={{ on: listening(), rec: listening() }} onClick={() => void toggleVoice()} hidden={!voiceSupported}>
+            <PlainButton class="icon add" title={K("Ditado por voz (Ctrl+Shift+M)")} aria-label={K("Ditado por voz (Ctrl+Shift+M)")} classList={{ on: listening(), rec: listening() }} onClick={() => void toggleVoice()} hidden={!voiceSupported}>
               <MicIcon />
-            </button>
-            <button class="icon add" title="Dividir: ver dois terminais lado a lado" aria-label="Dividir: ver dois terminais lado a lado" classList={{ on: splitSession() !== null }} onClick={() => void toggleSplit()}>
+            </PlainButton>
+            <PlainButton class="icon add" title="Dividir: ver dois terminais lado a lado" aria-label="Dividir: ver dois terminais lado a lado" classList={{ on: splitSession() !== null }} onClick={() => void toggleSplit()}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
                 <path d="M5.5 3v10M10.5 3v10" />
               </svg>
-            </button>
-            <button class="icon add" title={`Novo agente (${projectAgent(current()?.project.id)})`} aria-label={`Novo agente (${projectAgent(current()?.project.id)})`} onClick={newAgent}>
+            </PlainButton>
+            <PlainButton class="icon add" title={`Novo agente (${projectAgent(current()?.project.id)})`} aria-label={`Novo agente (${projectAgent(current()?.project.id)})`} onClick={newAgent}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 1.5c.4 3.4 1.6 4.6 5 5-3.4.4-4.6 1.6-5 5-.4-3.4-1.6-4.6-5-5 3.4-.4 4.6-1.6 5-5z" />
               </svg>
-            </button>
-            <button class="icon add" title="Novo terminal" aria-label="Novo terminal" onClick={newTerminal}>
+            </PlainButton>
+            <PlainButton class="icon add" title="Novo terminal" aria-label="Novo terminal" onClick={newTerminal}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
                 <path d="M8 3.5v9M3.5 8h9" />
               </svg>
-            </button>
+            </PlainButton>
             <Show when={!showRightPanel()}>
-              <button class="icon add" title={K("Mostrar painel direito (Ctrl+Shift+B)")} aria-label={K("Mostrar painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>
+              <PlainButton class="icon add" title={K("Mostrar painel direito (Ctrl+Shift+B)")} aria-label={K("Mostrar painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>
                 <PanelIcon side="right" on={false} />
-              </button>
+              </PlainButton>
             </Show>
           </div>
           <VoiceDraft target={activeSession()} />
@@ -820,10 +821,10 @@ export function App() {
                     <div>Sem terminais neste worktree.</div>
                     <Show when={current()}>{(c) => <WorktreeReports project={c().project.id} worktree={c().wt.path} />}</Show>
                     <div class="empty-actions">
-                      <button class="primary" onClick={() => void newAgent()}>
+                      <Button variant="default" onClick={() => void newAgent()}>
                         <Icon name="sparkle" size={12} inline /> Abrir agente
-                      </button>
-                      <button onClick={() => void newTerminal()}>+ Terminal</button>
+                      </Button>
+                      <Button onClick={() => void newTerminal()}>+ Terminal</Button>
                     </div>
                     <div class="hints">
                       <kbd>{K("Ctrl+K")}</kbd> paleta · <kbd>{K("Ctrl+B")}</kbd> projetos · <kbd>{K("Ctrl+Shift+B")}</kbd> painel direito
@@ -869,9 +870,9 @@ export function App() {
                     }}
                   />
                   <div class="split-pane" style={{ flex: `0 0 ${splitFrac() * 100}%` }}>
-                    <button class="split-x" title="Fechar divisão" aria-label="Fechar divisão" onClick={() => setSplitSession(null)}>
+                    <PlainButton class="split-x" title="Fechar divisão" aria-label="Fechar divisão" onClick={() => setSplitSession(null)}>
                       <Icon name="x" />
-                    </button>
+                    </PlainButton>
                     <Show when={splitSession()} keyed>
                       {(id) => <TerminalView id={id} focus={false} onExit={() => void refreshSessions()} />}
                     </Show>

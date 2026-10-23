@@ -17,6 +17,7 @@ import { press } from "./a11y";
 import { S } from "./strings";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import logo from "./assets/logo.png";
+import { Button, Field, Input, PlainButton, PlainInput } from "./ui";
 import {
   AGENTS,
   canonAgent,
@@ -486,9 +487,9 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
         <img src={logo} alt="" />
         Axelstra
       </div>
-      <button class="primary" onClick={() => void pickProject()}>
+      <Button variant="default" onClick={() => void pickProject()}>
         + Adicionar projeto
-      </button>
+      </Button>
 
       <div class="section">Projetos</div>
       <For
@@ -496,7 +497,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
         fallback={
           <div class="empty">
             <div>Nenhum projeto</div>
-            <button class="primary" onClick={() => void pickProject()}>Adicionar o primeiro projeto</button>
+            <Button variant="default" onClick={() => void pickProject()}>Adicionar o primeiro projeto</Button>
           </div>
         }
       >
@@ -509,7 +510,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
           return (
           <div class="project" classList={{ collapsed: projFolded(p.id) }}>
             <div class="project-head" title={p.path} onContextMenu={(e) => showMenu(e, projectMenu(p))}>
-              <button
+              <PlainButton
                 type="button"
                 class="icon proj-fold"
                 aria-expanded={!projFolded(p.id)}
@@ -518,13 +519,13 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 onClick={() => toggleProject(p.id)}
               >
                 <Icon name={projFolded(p.id) ? "chevRight" : "chevDown"} size={12} />
-              </button>
+              </PlainButton>
               <ProjectIcon id={p.id} name={p.name} url={p.icon_url} />
               <span class="pname" title={p.slug ?? p.path}>{p.name}</span>
-              <button class="icon" title="Novo worktree" aria-label="Novo worktree" onClick={() => setCreating(creating() === p.id ? null : p.id)}>
+              <PlainButton class="icon" title="Novo worktree" aria-label="Novo worktree" onClick={() => setCreating(creating() === p.id ? null : p.id)}>
                 <Icon name="plus" />
-              </button>
-              <button
+              </PlainButton>
+              <PlainButton
                 class="icon"
                 title={p.setup ? `Setup: ${p.setup}` : "Comando de setup para novos worktrees"} aria-label={p.setup ? `Setup: ${p.setup}` : "Comando de setup para novos worktrees"}
                 onClick={() => {
@@ -533,13 +534,13 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 }}
               >
                 <Icon name="gear" />
-              </button>
-              <button class="icon" title="Tirar da lista (não apaga ficheiros)" aria-label="Tirar projeto da lista" onClick={() => void dropProject(p.id, p.name)}>
+              </PlainButton>
+              <PlainButton class="icon" title="Tirar da lista (não apaga ficheiros)" aria-label="Tirar projeto da lista" onClick={() => void dropProject(p.id, p.name)}>
                 <Icon name="x" />
-              </button>
+              </PlainButton>
             </div>
             <Show when={editSetup() === p.id}>
-              <input
+              <PlainInput
                 class="wt-input"
                 placeholder="setup, ex.: bun install (vazio = nenhum)"
                 value={setupText()}
@@ -554,7 +555,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 <div class="pm-row">
                   <For each={pms().installed}>
                     {(m) => (
-                      <button
+                      <PlainButton
                         class="pill"
                         classList={{ active: setupText() === `${m} install` }}
                         title={m === pms().suggested ? "Sugerido pelo lockfile do projeto" : `Usar ${m} install`}
@@ -562,7 +563,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                       >
                         {m}
                         {m === pms().suggested ? <Icon name="star" size={10} inline /> : null}
-                      </button>
+                      </PlainButton>
                     )}
                   </For>
                 </div>
@@ -621,7 +622,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                     title={w.path}
                   >
                     <Show when={kids() > 0}>
-                      <button
+                      <PlainButton
                         type="button"
                         class="wt-fold"
                         aria-expanded={!isFolded()}
@@ -633,9 +634,9 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                         }}
                       >
                         <Icon name={isFolded() ? "chevRight" : "chevDown"} size={11} />
-                      </button>
+                      </PlainButton>
                     </Show>
-                    <button type="button" class="wt-open" aria-current={norm(selectedWorktree()) === norm(w.path) ? "true" : undefined} onClick={() => void openWorktree(p.id, w.path, w.is_main)}>
+                    <PlainButton type="button" class="wt-open" aria-current={norm(selectedWorktree()) === norm(w.path) ? "true" : undefined} onClick={() => void openWorktree(p.id, w.path, w.is_main)}>
                     <StateDot state={dotOfWorktree({ queued: queued(), waiting: waiting(), working: working(), needs: needs(), live: live() })} />
                     <span class="name">{w.is_main ? (p.default_branch ?? "main") : label()}</span>
                     <Show when={!w.is_main && topic(w.path)?.title && topic(w.path)!.title !== label()}>
@@ -677,8 +678,8 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                     <Show when={isPinned(w.path)}>
                       <span class="pin" title="Fixado"><Icon name="pin" size={11} /></span>
                     </Show>
-                    </button>
-                    <button
+                    </PlainButton>
+                    <PlainButton
                       class="x"
                       title="Mais ações" aria-label="Mais ações"
                       onClick={(e) => {
@@ -688,9 +689,9 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                       }}
                     >
                       <Icon name="more" />
-                    </button>
+                    </PlainButton>
                     <Show when={!w.is_main}>
-                      <button
+                      <PlainButton
                         class="x"
                         title="Remover worktree" aria-label="Remover worktree"
                         onClick={(e) => {
@@ -699,15 +700,15 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                         }}
                       >
                         <Icon name="x" />
-                      </button>
+                      </PlainButton>
                     </Show>
                   </div>
                   <Show when={agents().length > 0}>
                     <div class="wt-agents" style={depth() > 0 ? { "margin-left": `${14 + depth() * 14}px` } : undefined}>
-                      <button class="wt-agents-head" onClick={() => toggleAgents(w.path)} aria-expanded={!agentsHidden().has(norm(w.path))}>
+                      <PlainButton class="wt-agents-head" onClick={() => toggleAgents(w.path)} aria-expanded={!agentsHidden().has(norm(w.path))}>
                         <span>{agents().length} {agents().length === 1 ? "agente" : "agentes"}</span>
                         <Icon name={agentsHidden().has(norm(w.path)) ? "chevRight" : "chevDown"} size={11} />
-                      </button>
+                      </PlainButton>
                       <Show when={!agentsHidden().has(norm(w.path))}>
                         <For each={agents()}>
                           {(a) => {
@@ -719,7 +720,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                                 <Show
                                   when={renamingAgent() !== a.id}
                                   fallback={
-                                    <input
+                                    <PlainInput
                                       class="wt-agent-edit"
                                       aria-label="Nome do agente"
                                       value={info().name}
@@ -732,7 +733,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                                     />
                                   }
                                 >
-                                  <button
+                                  <PlainButton
                                     type="button"
                                     class="wt-agent-open"
                                     data-agent-row={a.id}
@@ -762,12 +763,12 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                                       <span class="wt-agent-wt" title={a.meta?.worktree}>{info().worktree}</span>
                                     </Show>
                                     <span class="wt-agent-time">{a.running ? idleLabel(a.idle_ms) : "fim"}</span>
-                                  </button>
+                                  </PlainButton>
                                 </Show>
                                 <Show when={info().hasReport && renamingAgent() !== a.id}>
-                                  <button type="button" class="wt-agent-report" aria-label={`Relatório de ${info().name}`} title="Abrir o relatório deste agente" onClick={() => openNote(a.id, info().name)}>
+                                  <PlainButton type="button" class="wt-agent-report" aria-label={`Relatório de ${info().name}`} title="Abrir o relatório deste agente" onClick={() => openNote(a.id, info().name)}>
                                     <Icon name="file" size={11} /> Relatório
-                                  </button>
+                                  </PlainButton>
                                 </Show>
                               </div>
                             );
@@ -783,13 +784,13 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
             <Show when={lay().finished.length > 0}>
               <div class="wt-done">
                 <div class="wt-done-head">
-                  <button type="button" class="wt-done-toggle" aria-expanded={doneOpen().has(p.id)} onClick={() => toggleDone(p.id)}>
+                  <PlainButton type="button" class="wt-done-toggle" aria-expanded={doneOpen().has(p.id)} onClick={() => toggleDone(p.id)}>
                     <Icon name={doneOpen().has(p.id) ? "chevDown" : "chevRight"} size={11} />
                     <span>Concluídos ({lay().finished.length})</span>
-                  </button>
-                  <button type="button" class="wt-done-clean" title="Remover os worktrees já merged" onClick={() => void cleanFinished(lay().finished.map((w) => `${p.name}: ${w.branch ?? w.path}`))}>
+                  </PlainButton>
+                  <PlainButton type="button" class="wt-done-clean" title="Remover os worktrees já merged" onClick={() => void cleanFinished(lay().finished.map((w) => `${p.name}: ${w.branch ?? w.path}`))}>
                     Limpar
-                  </button>
+                  </PlainButton>
                 </div>
                 <Show when={doneOpen().has(p.id)}>
                   <For each={lay().finished}>
@@ -797,11 +798,11 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                       const label = () => w.branch ?? "(destacado)";
                       return (
                         <div class="item wt finished" classList={{ active: norm(selectedWorktree()) === norm(w.path) }} onContextMenu={(e) => showMenu(e, worktreeMenu(p, w, label()))} title={w.path}>
-                          <button type="button" class="wt-open" aria-current={norm(selectedWorktree()) === norm(w.path) ? "true" : undefined} onClick={() => void openWorktree(p.id, w.path, w.is_main)}>
+                          <PlainButton type="button" class="wt-open" aria-current={norm(selectedWorktree()) === norm(w.path) ? "true" : undefined} onClick={() => void openWorktree(p.id, w.path, w.is_main)}>
                             <StateDot state="done" />
                             <span class="name">{label()}</span>
-                          </button>
-                          <button
+                          </PlainButton>
+                          <PlainButton
                             class="x"
                             title="Remover worktree" aria-label={`Remover ${label()}`}
                             onClick={(e) => {
@@ -810,7 +811,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                             }}
                           >
                             <Icon name="x" />
-                          </button>
+                          </PlainButton>
                         </div>
                       );
                     }}
@@ -824,49 +825,40 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
       </For>
 
       <div class="grow" />
-      <button class="side-link" onClick={() => setShowAutomations(true)}>
+      <PlainButton class="side-link" onClick={() => setShowAutomations(true)}>
         <Icon name="clock" size={13} /> Automatizações
-      </button>
-      <button class="side-link" onClick={() => setShowDispatcher(true)} title="Para onde foi cada pedido feito na main">
+      </PlainButton>
+      <PlainButton class="side-link" onClick={() => setShowDispatcher(true)} title="Para onde foi cada pedido feito na main">
         <Icon name="branch" size={13} /> Despachante
-      </button>
-      <button class="side-link" onClick={() => setShowSettings(true)}>
+      </PlainButton>
+      <PlainButton class="side-link" onClick={() => setShowSettings(true)}>
         <Icon name="gear" size={13} /> Definições
-      </button>
+      </PlainButton>
       <Show when={creating()}>
         {(pid) => {
           const proj = () => projects().find((x) => x.id === pid());
           return (
             <Modal label="Novo worktree" dirty={!!newName().trim()} onClose={() => void closeNewWorktree()}>
               <div class="m-title" style={{ "font-weight": "600" }}>Novo worktree</div>
-              <label class="m-full">
-                Projeto
-                <input value={proj()?.name ?? ""} disabled />
-              </label>
-              <label class="m-full">
-                Nome
-                <input
+              <Field label="Projeto" full><Input value={proj()?.name ?? ""} disabled /></Field>
+              <Field label="Nome" full><Input
                   placeholder="nome do worktree (também o nome do branch)"
                   value={newName()}
                   onInput={(e) => setNewName(e.currentTarget.value)}
                   onKeyDown={(e) => e.key === "Enter" && newName().trim() && void submitWorktree(pid())}
                   ref={(el) => queueMicrotask(() => el.focus())}
-                />
-              </label>
-              <label class="m-full">
-                Agente
-                <Select
+                /></Field>
+              <Field label="Agente" full><Select
                   value={newAgent()}
                   label="Agente"
                   options={[{ value: "none", label: "Nenhum (só o worktree)" }, ...agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))]}
                   onChange={setNewAgentSig}
-                />
-              </label>
+                /></Field>
               <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-                <button onClick={() => void closeNewWorktree()}>Cancelar</button>
-                <button class="primary" disabled={!newName().trim()} onClick={() => void submitWorktree(pid())}>
+                <Button onClick={() => void closeNewWorktree()}>Cancelar</Button>
+                <Button variant="default" disabled={!newName().trim()} onClick={() => void submitWorktree(pid())}>
                   Criar worktree
-                </button>
+                </Button>
               </div>
             </Modal>
           );
@@ -877,23 +869,20 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
         {(r) => (
           <Modal label="Mudar o nome do worktree" dirty={wtNewName().trim() !== r().name} onClose={() => setRenamingWt(null)}>
             <div class="m-title" style={{ "font-weight": "600" }}>Mudar o nome do worktree</div>
-            <label class="m-full">
-              Nome
-              <input
+            <Field label="Nome" full><Input
                 value={wtNewName()}
                 onInput={(e) => { setWtNewName(e.currentTarget.value); setWtRenameErr(""); }}
                 onKeyDown={(e) => e.key === "Enter" && void submitWtRename()}
                 ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
-              />
-            </label>
+              /></Field>
             <Show when={wtRenameErr()}>
               <div class="note-status bad" role="alert">{wtRenameErr()}</div>
             </Show>
             <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-              <button onClick={() => setRenamingWt(null)}>Cancelar</button>
-              <button class="primary" disabled={!wtNewName().trim() || wtNewName().trim() === r().name} onClick={() => void submitWtRename()}>
+              <Button onClick={() => setRenamingWt(null)}>Cancelar</Button>
+              <Button variant="default" disabled={!wtNewName().trim() || wtNewName().trim() === r().name} onClick={() => void submitWtRename()}>
                 Mudar o nome
-              </button>
+              </Button>
             </div>
           </Modal>
         )}

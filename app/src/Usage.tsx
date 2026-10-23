@@ -2,6 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import { TokenUsage, agentUsage, worktreeUsage } from "./api";
 import { activeSession, projects, sessions } from "./store";
 import { WtUsage, fmtTokens as fmt, ranked, spentOf, totalOf, usageTip } from "./usageFormat";
+import { PlainButton } from "./ui";
 
 const [wtUsage, setWtUsage] = createSignal<WtUsage[]>([]);
 let lastLoad = 0;
@@ -56,9 +57,9 @@ function WorktreeUsageList() {
   return (
     <Show when={rows().length}>
       <span class="wt-usage" style={{ "align-self": "center" }}>
-        <button class="usage-chip" style={{ background: "none", border: "none" }} title={wtUsageTip(list())} aria-expanded={open()} onClick={() => setOpen(!open())}>
+        <PlainButton class="usage-chip" style={{ background: "none", border: "none" }} title={wtUsageTip(list())} aria-expanded={open()} onClick={() => setOpen(!open())}>
           Σ {fmt(spentOf(total()))}
-        </button>
+        </PlainButton>
         <Show when={open()}>
           <div
             role="dialog"
