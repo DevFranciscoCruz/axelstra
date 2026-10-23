@@ -26,7 +26,8 @@ import { ConfirmHost } from "./Confirm";
 import { AgentSearch } from "./AgentSearch";
 import { Orchestra } from "./Orchestra";
 import { UsageChip } from "./Usage";
-import { computerEnable, computerStatus } from "./api";
+import { agentsList, computerEnable, computerStatus } from "./api";
+import { ProjectSettings } from "./ProjectSettings";
 import { StatusBar } from "./StatusBar";
 import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
 import { ErrorToast } from "./ErrorToast";
@@ -91,6 +92,8 @@ import {
   setOpenFile,
   setOpenDiff,
   setShowDocker,
+  setShowProjectSettings,
+  showProjectSettings,
   setShowKanban,
   showDocker,
   showKanban,
@@ -153,7 +156,7 @@ export function App() {
   onMount(() =>
     void tauriInvoke<string[]>("missing_tools")
       .then((m) => {
-        addAgents(["opencode", "gemini", "aider"].filter((a) => !m.includes(a)));
+        void agentsList().then((l) => addAgents(l.filter((a) => a.installed && a.id !== "claude" && a.id !== "codex").map((a) => a.id))).catch(() => 0);
         const bits: string[] = [];
         if (m.includes("git")) bits.push("o git não está instalado ou não está no PATH (sem ele não há worktrees)");
         if (m.includes("claude") && m.includes("codex")) bits.push("nem o claude nem o codex foram encontrados (instala um deles para usar agentes)");
@@ -602,6 +605,9 @@ export function App() {
       </Show>
       <Show when={showSettings()}>
         <Settings />
+      </Show>
+      <Show when={showProjectSettings()} keyed>
+        {(id) => <ProjectSettings projectId={id} onClose={() => setShowProjectSettings(null)} />}
       </Show>
       <Show when={showDispatcher()}>
         <Dispatcher />

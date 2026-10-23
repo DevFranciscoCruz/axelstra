@@ -201,6 +201,7 @@ const ALLOWED_METHODS: &[&str] = &[
     "docker.stats",
     "docker.status",
     "docker.volumes",
+    "agents.list", "git.checks", "git.merge", "project.env_preview", "worktree.rename", "dispatch.overlaps", "notes.read", "notes.export",
     "kanban.delete",
     "kanban.list",
     "kanban.move",

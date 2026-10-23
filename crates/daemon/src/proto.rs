@@ -9,8 +9,8 @@
 
 /// Version of the app <-> daemon contract. A daemon outlives app updates, so the app only restarts
 /// a daemon older than this; bump it when the app starts calling something an old daemon lacks.
-/// 2: app.dir, session.pending, session.pending_clear. 6: settings.get / settings.set. 7: settings.get / settings.set carry shell, notify_sound, notify_mode. 8: session.rename. 9: git.suggest. 10: agent.worktree_usage. 11: docker.*.
-pub const PROTO: u64 = 11;
+/// 2: app.dir, session.pending, session.pending_clear. 6: settings.get / settings.set. 7: settings.get / settings.set carry shell, notify_sound, notify_mode. 8: session.rename. 9: git.suggest. 10: agent.worktree_usage. 11: docker.*. 12: agents.list, git.checks, git.merge, project.env_preview, worktree.rename, dispatch.overlaps, notes.*.
+pub const PROTO: u64 = 12;
 
 pub const MAX_FRAME: usize = 16 << 20;
 
