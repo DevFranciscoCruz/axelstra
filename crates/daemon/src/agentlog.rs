@@ -1,6 +1,7 @@
 //! Reads the transcripts the agent CLIs already keep on disk: full-text search across past
 //! conversations and token usage of one session. Nothing is indexed or cached on disk; files are
 //! scanned on demand, newest first, so an idle daemon costs nothing.
+use crate::store::LockRecover;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -308,7 +309,7 @@ pub fn claude_usage(cwd: &str, session_id: Option<&str>) -> Option<Usage> {
 fn file_usage(path: PathBuf) -> Option<Usage> {
     let meta = std::fs::metadata(&path).ok()?;
     let (len, mt) = (meta.len(), mtime(&path));
-    let mut cache = CACHE.lock().unwrap();
+    let mut cache = CACHE.lock_recover();
     let map = cache.get_or_insert_with(HashMap::new);
     let mut prev = map.remove(&path);
     if let Some((l, m, _, acc)) = &prev {
@@ -414,7 +415,7 @@ fn codex_file(path: &Path) -> Option<(Option<String>, Usage)> {
     use std::io::{Read, Seek, SeekFrom};
     let meta = std::fs::metadata(path).ok()?;
     let (len, mt) = (meta.len(), mtime(path));
-    let mut cache = CODEX_CACHE.lock().unwrap();
+    let mut cache = CODEX_CACHE.lock_recover();
     let map = cache.get_or_insert_with(HashMap::new);
     if let Some((l, m, cwd, u)) = map.get(path) {
         if *l == len && *m == mt {
