@@ -499,3 +499,9 @@ export const dockerAction = (action: DockerAction, o: { id?: string; force?: boo
 /** Logs and shell are sessions the daemon starts with a fixed command in the worktree; the answer is the session id. */
 export const dockerOpenLogs = (worktree: string, id: string, project?: string) => call<{ id: number }>("docker.open_logs", { worktree, id, project }).then((r) => r.id);
 export const dockerOpenShell = (worktree: string, id: string, project?: string) => call<{ id: number }>("docker.open_shell", { worktree, id, project }).then((r) => r.id);
+
+/** Claude hooks that report agent state (needs input, done) to Axelstra, kept in ~/.claude/settings.json. */
+export type HooksStatus = { installed: boolean; path: string };
+export type HooksInstall = { changed: boolean; path: string; backup: string | null };
+export const hooksStatus = () => call<HooksStatus>("hooks.status");
+export const hooksInstall = () => call<HooksInstall>("hooks.install");

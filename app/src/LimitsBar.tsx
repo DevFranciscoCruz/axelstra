@@ -31,7 +31,7 @@ const Meter = (p: { pct?: number; label: string; tip: string }) => (
       <span class="lim-bar">
         <i classList={{ warn: p.pct! >= 70, bad: p.pct! >= 90 }} style={{ width: `${Math.min(100, p.pct!)}%` }} />
       </span>
-      <span>{Math.round(p.pct!)}% used</span>
+      <span>{Math.round(p.pct!)}% usado</span>
       <Show when={p.label}>
         <span class="lim-dim">{p.label}</span>
       </Show>

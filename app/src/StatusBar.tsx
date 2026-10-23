@@ -7,6 +7,7 @@ import { StateDot } from "./StateDot";
 import { Icon } from "./Icon";
 import { countsFor, groupAgents, mergedList, type AgentEntry, type OverviewProject } from "./statusGroups";
 import { LimitsBar } from "./LimitsBar";
+import { hoverIntent, keepInside } from "./hoverIntent";
 import { NotificationBell } from "./NotificationBell";
 import { pollWtUsage, wtUsageTip } from "./Usage";
 import { ranked, spentOf, totalOf, fmtTokens } from "./usageFormat";
@@ -26,14 +27,30 @@ const fmt = (b: number) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(2)} GB` 
 
 const svg = { width: 14, height: 14, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", "stroke-width": 1.3, "stroke-linecap": "round", "stroke-linejoin": "round" } as const;
 
-/** A status bar chip that opens a popover: a button (keyboard and screen readers), closed by Escape, a click outside or leaving it. */
+let popSeq = 0;
+
+/** A status bar chip that opens a popover: a button (keyboard and screen readers), also opened by hovering or keyboard focus; closed by Escape, a click outside or leaving it. */
 function Popover(props: { chip: JSX.Element; label: string; onOpen?: () => void; children: (close: () => void) => JSX.Element }) {
   const [open, setOpen] = createSignal(false);
+  const [shift, setShift] = createSignal(0);
+  const id = `sb-pop-${++popSeq}`;
+  let pinned = false; // opened by a click: hovering away does not close it
   let box!: HTMLSpanElement;
-  const close = () => setOpen(false);
+  let pop: HTMLDivElement | undefined;
+  const hover = hoverIntent((v) => (v ? setOpen(true) : !pinned && setOpen(false)));
+  const close = () => {
+    hover.cancel();
+    pinned = false;
+    setOpen(false);
+  };
+  onCleanup(hover.cancel);
   createEffect(() => {
-    if (!open()) return;
+    if (!open()) {
+      setShift(0);
+      return;
+    }
     props.onOpen?.();
+    requestAnimationFrame(() => pop && setShift(keepInside(pop.getBoundingClientRect().right - shift(), window.innerWidth)));
     const away = (e: Event) => !box.contains(e.target as Node) && close();
     document.addEventListener("pointerdown", away);
     onCleanup(() => document.removeEventListener("pointerdown", away));
@@ -42,6 +59,8 @@ function Popover(props: { chip: JSX.Element; label: string; onOpen?: () => void;
     <span
       class="sb-pop-wrap"
       ref={box}
+      onPointerEnter={(e) => e.pointerType !== "touch" && hover.enter()}
+      onPointerLeave={(e) => e.pointerType !== "touch" && hover.leave()}
       onKeyDown={(e) => {
         if (e.key === "Escape" && open()) {
           e.stopPropagation();
@@ -49,13 +68,26 @@ function Popover(props: { chip: JSX.Element; label: string; onOpen?: () => void;
           box.querySelector<HTMLElement>(".sb-item")?.focus();
         }
       }}
+      onFocusIn={(e) => e.target instanceof HTMLElement && e.target.matches(":focus-visible") && setOpen(true)}
       onFocusOut={(e) => !box.contains(e.relatedTarget as Node | null) && close()}
     >
-      <button class="sb-item" aria-haspopup="true" aria-expanded={open()} aria-label={props.label} onClick={() => setOpen(!open())}>
+      <button
+        class="sb-item"
+        aria-haspopup="true"
+        aria-expanded={open()}
+        aria-describedby={open() ? id : undefined}
+        aria-label={props.label}
+        onClick={() => {
+          hover.cancel();
+          if (open() && pinned) return close();
+          pinned = true;
+          setOpen(true);
+        }}
+      >
         {props.chip}
       </button>
       <Show when={open()}>
-        <div class="sb-pop" role="group" aria-label={props.label}>
+        <div class="sb-pop" id={id} ref={pop} role="group" aria-label={props.label} style={shift() ? { left: `${shift()}px` } : undefined}>
           {props.children(close)}
         </div>
       </Show>
