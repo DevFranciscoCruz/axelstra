@@ -4,7 +4,9 @@
 use anyhow::{bail, Context, Result};
 use axelstra_core::git;
 use serde::{Deserialize, Serialize};
+use crate::store::{read_json, write_atomic, LockRecover};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
@@ -21,15 +23,21 @@ pub fn store_path() -> PathBuf {
 }
 
 pub fn load(store: &Path) -> Vec<Project> {
-    std::fs::read_to_string(store).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    read_json(store).ok().flatten().unwrap_or_default()
+}
+
+/// Serializes read-modify-write of the projects file: two UI calls adding projects at once must not drop one.
+static STORE_LOCK: Mutex<()> = Mutex::new(());
+
+/// The list to modify and save back. Unlike `load`, a file that exists but cannot be read is an error, so an
+/// empty list is never saved over projects we merely failed to read (a corrupt file was moved to `.bad` by then).
+fn load_for_update(store: &Path) -> Result<Vec<Project>> {
+    Ok(read_json(store).with_context(|| format!("could not read {}", store.display()))?.unwrap_or_default())
 }
 
 fn save(store: &Path, v: &[Project]) -> Result<()> {
-    std::fs::create_dir_all(store.parent().unwrap())?;
     // temp file + rename: a crash never leaves a half-written list
-    let tmp = store.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(v)?)?;
-    std::fs::rename(&tmp, store)?;
+    write_atomic(store, &serde_json::to_vec_pretty(v)?)?;
     Ok(())
 }
 
@@ -72,7 +80,8 @@ pub fn add(store: &Path, path: &str) -> Result<Project> {
         Err(e) => return Err(e).with_context(|| format!("{path} is not a folder")),
     };
     let root_s = root.to_string_lossy().to_string();
-    let mut v = load(store);
+    let _g = STORE_LOCK.lock_recover();
+    let mut v = load_for_update(store)?;
     if let Some(p) = v.iter().find(|p| p.path.eq_ignore_ascii_case(&root_s)) {
         return Ok(p.clone());
     }
@@ -111,23 +120,27 @@ pub fn package_managers(path: Option<&Path>, preferred: Option<&str>) -> (Vec<&'
 }
 
 pub fn set_setup(store: &Path, id: &str, setup: Option<String>) -> Result<()> {
-    let mut v = load(store);
+    let _g = STORE_LOCK.lock_recover();
+    let mut v = load_for_update(store)?;
     let p = v.iter_mut().find(|p| p.id == id).with_context(|| format!("unknown project {id}"))?;
     p.setup = setup.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     save(store, &v)
 }
 
 pub fn remove(store: &Path, id: &str) -> Result<()> {
-    let mut v = load(store);
+    let _g = STORE_LOCK.lock_recover();
+    let mut v = load_for_update(store)?;
     v.retain(|p| p.id != id);
     save(store, &v)
 }
 
 /// Only worktrees of registered projects may be inspected, never arbitrary paths.
+/// A project whose folder is gone (or whose git fails) is skipped, not an error for every other project.
 pub fn known_worktree(store: &Path, path: &str) -> Result<PathBuf> {
     let want = path.replace('\\', "/").to_ascii_lowercase();
     for p in load(store) {
-        for w in git::worktree_list(Path::new(&p.path))? {
+        let Ok(list) = git::worktree_list(Path::new(&p.path)) else { continue };
+        for w in list {
             if w.path.replace('\\', "/").to_ascii_lowercase() == want {
                 return Ok(PathBuf::from(w.path));
             }
@@ -266,5 +279,81 @@ mod package_manager_tests {
             assert_eq!(suggested, Some("npm"));
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod store_tests {
+    use super::*;
+
+    fn root(tag: &str) -> PathBuf {
+        let r = std::env::temp_dir().join(format!("axl-pstore-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&r);
+        std::fs::create_dir_all(&r).unwrap();
+        r
+    }
+
+    #[test]
+    fn known_worktree_skips_a_project_whose_folder_is_gone() {
+        let r = root("known");
+        let real = r.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let real_s = git::canon(&real).unwrap().to_string_lossy().to_string();
+        let gone = r.join("gone").to_string_lossy().to_string();
+        let store = r.join("projects.json");
+        let list = vec![
+            Project { id: "gone".into(), name: "gone".into(), path: gone, setup: None },
+            Project { id: "real".into(), name: "real".into(), path: real_s.clone(), setup: None },
+        ];
+        save(&store, &list).unwrap();
+        let wt = known_worktree(&store, &real_s).unwrap();
+        let norm = |s: &str| s.to_ascii_lowercase().replace('\\', "/");
+        assert_eq!(norm(&wt.to_string_lossy()), norm(&real_s));
+        assert!(known_worktree(&store, "somewhere/else").is_err());
+        let _ = std::fs::remove_dir_all(&r);
+    }
+
+    #[test]
+    fn corrupt_projects_file_is_kept_aside_when_a_project_is_added() {
+        let r = root("corrupt");
+        let dir = r.join("proj");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = r.join("projects.json");
+        std::fs::write(&store, "[{ not json").unwrap();
+        assert!(load(&store).is_empty());
+        add(&store, &dir.to_string_lossy()).unwrap();
+        assert_eq!(std::fs::read_to_string(crate::store::bad_path(&store)).unwrap(), "[{ not json");
+        assert_eq!(load(&store).len(), 1);
+        let _ = std::fs::remove_dir_all(&r);
+    }
+
+    #[test]
+    fn an_unreadable_projects_file_is_never_overwritten_by_an_update() {
+        let r = root("unreadable");
+        let store = r.join("projects.json");
+        // a folder where the file should be: it exists but cannot be read
+        std::fs::create_dir_all(&store).unwrap();
+        assert!(load(&store).is_empty());
+        assert!(remove(&store, "x").is_err());
+        assert!(store.is_dir());
+        let _ = std::fs::remove_dir_all(&r);
+    }
+
+    #[test]
+    fn concurrent_adds_all_survive() {
+        let r = root("concurrent");
+        let store = r.join("projects.json");
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let (dir, store) = (r.join(format!("p{i}")), store.clone());
+                std::fs::create_dir_all(&dir).unwrap();
+                std::thread::spawn(move || add(&store, &dir.to_string_lossy()).unwrap())
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        assert_eq!(load(&store).len(), 8);
+        let _ = std::fs::remove_dir_all(&r);
     }
 }

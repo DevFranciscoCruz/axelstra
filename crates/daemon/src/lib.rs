@@ -14,6 +14,7 @@ pub mod publish;
 pub mod proto;
 pub mod server;
 pub mod skill;
+pub mod store;
 pub mod watcher;
 pub mod wtstatus;
 pub mod runner;
