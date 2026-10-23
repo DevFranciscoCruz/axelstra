@@ -2,6 +2,7 @@ import { For, Show, createResource, createSignal } from "solid-js";
 import { projectEnvPreview, setProjectSetup } from "./api";
 import { Modal } from "./Modal";
 import { projects, refreshProjects, setError } from "./store";
+import { Button, Input } from "./ui";
 
 const LIST = { margin: "0", "padding-left": "18px", "font-family": "monospace", "font-size": "12px", "line-height": "1.5" };
 
@@ -31,11 +32,11 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
       <div class="auto-head">
         <strong>{project()?.name}</strong>
         <span class="grow" />
-        <button onClick={props.onClose}>Fechar</button>
+        <Button onClick={props.onClose}>Fechar</Button>
       </div>
 
       <label for="ps-setup">Comando de setup</label>
-      <input
+      <Input
         id="ps-setup"
         placeholder="ex.: bun install (vazio = nenhum)"
         value={setup()}
@@ -80,11 +81,11 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
       </Show>
 
       <div class="m-actions">
-        <button onClick={() => void refetch()}>Atualizar lista</button>
+        <Button onClick={() => void refetch()}>Atualizar lista</Button>
         <span class="grow" />
-        <button class="primary" disabled={saving() || !dirty()} onClick={() => void save()}>
+        <Button variant="default" disabled={saving() || !dirty()} onClick={() => void save()}>
           Guardar
-        </button>
+        </Button>
       </div>
     </Modal>
   );

@@ -1,5 +1,6 @@
 import { Show, createSignal } from "solid-js";
 import { Modal } from "./Modal";
+import { Button } from "./ui";
 
 type Opts = { title?: string; kind?: "warning" | "info" | "error"; okLabel?: string; cancelLabel?: string };
 type Pending = { message: string; opts: Opts; resolve: (ok: boolean) => void; /** a third button: its label, and what answering it resolves */ third?: { label: string; resolve: () => void } };
@@ -51,11 +52,11 @@ export function ConfirmHost() {
             {p.message}
           </div>
           <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-            <button ref={(el) => focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(false)}>{p.opts.cancelLabel ?? "Cancelar"}</button>
-            <Show when={p.third}>{(t) => <button class="kind-warn" onClick={answerThird}>{t().label}</button>}</Show>
-            <button class="primary" classList={{ "kind-warn": focusesCancel(p.opts.kind) && !p.third }} ref={(el) => !focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(true)}>
+            <Button ref={(el: HTMLButtonElement) => focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(false)}>{p.opts.cancelLabel ?? "Cancelar"}</Button>
+            <Show when={p.third}>{(t) => <Button variant="destructive" onClick={answerThird}>{t().label}</Button>}</Show>
+            <Button variant={focusesCancel(p.opts.kind) && !p.third ? "destructive" : "default"} class={focusesCancel(p.opts.kind) && !p.third ? "primary kind-warn" : "primary"} ref={(el: HTMLButtonElement) => !focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(true)}>
               {p.opts.okLabel ?? "Sim"}
-            </button>
+            </Button>
           </div>
         </Modal>
       )}
