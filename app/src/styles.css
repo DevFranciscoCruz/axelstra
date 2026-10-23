@@ -964,3 +964,5 @@ button.icon, button.x, button.split-x, button.cbtn { display: inline-flex; align
 .item.wt .wt-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 0; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .rtablist { display: flex; gap: 2px; }
 button.rtab { background: none; border: 0; font: inherit; cursor: pointer; }
+.show-more { margin: 6px 8px; padding: 4px 10px; background: transparent; border: 1px solid var(--line-3); border-radius: 6px; color: var(--text); font-size: 12px; }
+.show-more:hover { border-color: var(--accent); color: var(--accent); }
