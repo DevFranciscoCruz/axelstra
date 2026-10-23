@@ -1,7 +1,7 @@
 import { ask } from "./Confirm";
 import { createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { Changes, Commit, DispatchMeta, FlowTask, GhItem, Project, SessionInfo, Terse, Worktree, WtStatus, callBg, flowTasks, ghListBg, gitChanges, listProjects, listSessions, worktreeStatus } from "./api";
+import { Changes, Commit, DispatchMeta, FlowTask, GhItem, Project, SessionInfo, Terse, Worktree, WtStatus, call, callBg, flowTasks, ghListBg, gitChanges, listProjects, listSessions, worktreeStatus } from "./api";
 
 /** Paths come back with either slash style; compare them in one normal form. */
 export const norm = (p?: string | null) => (p ?? "").replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
@@ -381,7 +381,7 @@ export const watchDispatch = () => {
 };
 
 // ---- tabs of the selected worktree: names, order and the ones just closed ----
-/** names the user gave tabs (the daemon knows only the original label) */
+/** names the user gave tabs: shown at once, and also sent to the daemon so they survive a restart (the local copy covers a failed call) */
 const [tabNames, setTabNames] = createSignal<Record<number, string>>({});
 export const tabLabel = (s: SessionInfo) => tabNames()[s.id] ?? s.label ?? `Sessão ${s.id}`;
 export const renameTab = (id: number, name: string) => {
@@ -392,6 +392,7 @@ export const renameTab = (id: number, name: string) => {
     else delete next[id];
     return next;
   });
+  if (n) void call("session.rename", { id, label: n }).catch(() => {});
 };
 /** the order the user dragged tabs into; ids not in it follow in their natural order */
 const [tabOrder, setTabOrder] = createSignal<number[]>([]);
