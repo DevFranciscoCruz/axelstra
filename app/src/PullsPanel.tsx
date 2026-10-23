@@ -3,7 +3,7 @@ import { Icon } from "./Icon";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { GhItem, ghList, worktreeFromPr } from "./api";
 import { RightTabs } from "./RightTabs";
-import { findWorktree, refreshProjects, selectWorktree, selectedWorktree, setError, rightTab } from "./store";
+import { findWorktree, refreshProjects, selectWorktree, selectedWorktree, setError, rightTab , showNotice } from "./store";
 
 const CHECK: Record<string, [string, string]> = { pass: ["check", "Checks a passar"], fail: ["x", "Checks a falhar"], pending: ["ellipsis", "Checks a correr"] };
 const REVIEW: Record<string, string> = { approved: "aprovado", changes: "alterações pedidas", review: "falta revisão" };
@@ -35,6 +35,7 @@ export function PullsPanel() {
       const w = await worktreeFromPr(p, n);
       await refreshProjects();
       selectWorktree(w.path);
+      showNotice(`Worktree do PR #${n} criado.`);
     } catch (e) {
       setError(String(e));
     } finally {

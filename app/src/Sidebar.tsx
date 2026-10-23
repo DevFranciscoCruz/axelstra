@@ -229,6 +229,9 @@ export function Sidebar() {
         setPendingWt(null);
       }
       selectWorktree(w.path);
+      const copied = w.env_copied?.length ? ` · ${w.env_copied.length} ficheiro(s) de ambiente copiado(s)` : "";
+      const skipped = w.env_skipped?.length ? ` · ${w.env_skipped.length} ficou de fora` : "";
+      showNotice(`Worktree "${name}" criado${copied}${skipped}.`);
       if (newAgent() !== "none") await launchDefaultAgent(projectId, w.path, newAgent(), AGENTS[newAgent()], undefined, undefined, projectTerse(projectId));
       let setup = projects().find((p) => p.id === projectId)?.setup;
       if (!setup && (await getSettings().then((x) => x.auto_install, () => false))) {
