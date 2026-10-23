@@ -2,7 +2,7 @@ import { RightTabs } from "./RightTabs";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
 import { For, Show, createResource, createSignal } from "solid-js";
-import { Commit, FileChange, gitCommit, gitLog, gitPr, gitPush } from "./api";
+import { Commit, FileChange, gitCommit, gitLog, gitPr, gitPush, gitSuggest } from "./api";
 import { showMenu } from "./ContextMenu";
 import { press } from "./a11y";
 import {
@@ -49,6 +49,7 @@ export function ChangesPanel() {
   const [prOpen, setPrOpen] = createSignal(false);
   const [prTitle, setPrTitle] = createSignal("");
   const [busy, setBusy] = createSignal(false);
+  const [suggesting, setSuggesting] = createSignal(false);
   const [note, setNote] = createSignal<{ ok: boolean; text: string } | null>(null);
   const [showChanges, setShowChanges] = createSignal(true);
   const [showCommits, setShowCommits] = createSignal(true);
@@ -57,6 +58,22 @@ export function ChangesPanel() {
     () => ({ wt: selectedWorktree(), base: commitsBase(), n: changes()?.files.length ?? 0 }),
     (k) => (k.wt ? gitLog(k.wt, k.base) : []),
   );
+
+  // asks the agent for a message that fits the changes; the user reads and edits it before committing
+  const suggest = async () => {
+    const wt = selectedWorktree();
+    if (!wt || suggesting()) return;
+    setSuggesting(true);
+    setNote(null);
+    try {
+      const m = await gitSuggest(wt);
+      if (selectedWorktree() === wt) setMessage(m);
+    } catch (e) {
+      setNote({ ok: false, text: String(e) });
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   const act = async (f: () => Promise<string>) => {
     setBusy(true);
@@ -192,15 +209,27 @@ export function ChangesPanel() {
       </Show>
 
       <div class="sc-commit">
-        <textarea
-          placeholder="Mensagem (Ctrl+Enter para fazer commit)"
-          rows={3}
-          value={message()}
-          onInput={(e) => setMessage(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && e.ctrlKey && canCommit()) void doCommit();
-          }}
-        />
+        <div class="sc-msg">
+          <textarea
+            placeholder={suggesting() ? "A gerar mensagem…" : "Mensagem (Ctrl+Enter para fazer commit)"}
+            rows={3}
+            value={message()}
+            onInput={(e) => setMessage(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && e.ctrlKey && canCommit()) void doCommit();
+            }}
+          />
+          <button
+            class="icon sc-ai"
+            classList={{ busy: suggesting() }}
+            disabled={suggesting() || busy() || files().length === 0}
+            title={files().length === 0 ? "Sem alterações para descrever" : "Sugerir mensagem com IA (usa o claude)"}
+            aria-label="Sugerir mensagem com IA"
+            onClick={() => void suggest()}
+          >
+            <Icon name="sparkle" size={14} />
+          </button>
+        </div>
         <div class="sc-split">
           <button class="sc-main" disabled={!canCommit()} title={canCommit() ? "Commit (Ctrl+Enter)" : files().length === 0 ? "Sem alterações para commit" : message().trim() ? "A trabalhar…" : "Escreva uma mensagem"} onClick={() => void doCommit()}>
             <Icon name="check" /> Commit
