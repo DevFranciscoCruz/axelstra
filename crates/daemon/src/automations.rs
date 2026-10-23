@@ -23,7 +23,7 @@ pub struct Automation {
     pub id: String,
     pub name: String,
     pub project: String,
-    /// id of an agent in the core agents table (claude, codex, gemini, opencode, aider)
+    /// id of an agent in the core agents table (claude, codex, gemini)
     pub agent: String,
     pub prompt: String,
     pub schedule: Schedule,
@@ -273,14 +273,12 @@ mod tests {
     fn automation_commands_come_from_the_agents_table() {
         let gem = agent_command("gemini", "do it").unwrap().1.last().unwrap().clone();
         assert!(gem.contains("gemini") && gem.contains("-i") && gem.contains("do it"), "{gem}");
-        let aider = agent_command("aider", "do it").unwrap().1.last().unwrap().clone();
-        assert!(aider.contains("--message"), "{aider}");
         assert!(agent_command("powershell", "x").is_err());
     }
 
     #[test]
     fn unknown_agent_is_rejected() {
-        for ok in ["claude", "codex", "gemini", "opencode", "aider"] {
+        for ok in ["claude", "codex", "gemini"] {
             let mut a = auto(Schedule::Interval { minutes: 30 });
             a.agent = ok.into();
             assert!(validate(&a).is_ok(), "{ok}");

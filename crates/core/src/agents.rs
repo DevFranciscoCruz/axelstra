@@ -2,7 +2,7 @@
 //! unattended, and whether they resume. Everything is array argv; there is no shell string in here.
 //!
 //! Flags checked against the installed CLI's own `--help` on this machine: claude 2.1.309 and codex-cli 0.154.0.
-//! UNVERIFIED (CLI not installed here, taken from the official docs): every gemini, opencode and aider flag.
+//! UNVERIFIED (CLI not installed here, taken from the official docs): every gemini flag.
 //! `codex --full-auto` no longer exists in 0.154, so codex uses `--sandbox workspace-write` instead.
 
 use anyhow::{bail, Result};
@@ -69,31 +69,6 @@ pub const TABLE: &[Agent] = &[
         unattended: &["--approval-mode", "auto_edit"],
         dangerous: Some(&["--approval-mode", "yolo"]),
         resume: Some(&["--resume", "latest"]),
-    },
-    Agent {
-        id: "opencode",
-        name: "opencode",
-        aliases: &[],
-        exes: &["opencode"],
-        install: "npm install -g opencode-ai",
-        interactive_prompt: Some(&["--prompt"]),
-        headless: &["run"],
-        unattended: &[],
-        dangerous: Some(&["--auto"]),
-        resume: Some(&["--continue"]),
-    },
-    Agent {
-        id: "aider",
-        name: "Aider",
-        aliases: &[],
-        exes: &["aider"],
-        install: "python -m pip install aider-install && aider-install",
-        // no flag opens the chat on a prompt: --message answers once and exits
-        interactive_prompt: None,
-        headless: &["--message"],
-        unattended: &[],
-        dangerous: Some(&["--yes-always"]),
-        resume: Some(&["--restore-chat-history"]),
     },
 ];
 
@@ -203,8 +178,8 @@ impl Agent {
     /// flags, `dangerous` the permission-skipping ones; claude's own `--permission-mode` is the caller's.
     pub fn headless_argv(&self, prompt: &str, unattended: bool, dangerous: bool) -> Vec<String> {
         let mut v = vec![self.exes[0].to_string()];
-        // `codex exec` and `opencode run` are subcommands: options come after them, the prompt last
-        let sub = matches!(self.id, "codex" | "opencode");
+        // `codex exec` is a subcommand: options come after it, the prompt last
+        let sub = self.id == "codex";
         if sub {
             v.extend(self.headless.iter().map(|s| s.to_string()));
         }
@@ -268,7 +243,7 @@ mod tests {
         assert!(get("").is_none());
         let e = require("rm -rf").unwrap_err().to_string();
         assert!(e.contains("desconhecido") && e.contains("gemini"), "{e}");
-        assert_eq!(ids(), ["claude", "codex", "gemini", "opencode", "aider"]);
+        assert_eq!(ids(), ["claude", "codex", "gemini"]);
     }
 
     #[test]
@@ -277,9 +252,6 @@ mod tests {
         assert_eq!(get("claude").unwrap().interactive_argv(p, false), s(&["claude", "faz isto"]));
         assert_eq!(get("codex").unwrap().interactive_argv(p, false), s(&["codex", "faz isto"]));
         assert_eq!(get("gemini").unwrap().interactive_argv(p, false), s(&["gemini", "-i", "faz isto"]));
-        assert_eq!(get("opencode").unwrap().interactive_argv(p, false), s(&["opencode", "--prompt", "faz isto"]));
-        // aider has no way to open the chat on a prompt
-        assert_eq!(get("aider").unwrap().interactive_argv(p, false), s(&["aider"]));
         assert_eq!(get("gemini").unwrap().interactive_argv(None, false), s(&["gemini"]));
     }
 
@@ -297,8 +269,6 @@ mod tests {
         assert_eq!(h("claude", true, false), s(&["claude", "-p", "P"]));
         assert_eq!(h("codex", true, false), s(&["codex", "exec", "--sandbox", "workspace-write", "P"]));
         assert_eq!(h("gemini", true, false), s(&["gemini", "--approval-mode", "auto_edit", "-p", "P"]));
-        assert_eq!(h("opencode", true, false), s(&["opencode", "run", "P"]));
-        assert_eq!(h("aider", true, false), s(&["aider", "--message", "P"]));
     }
 
     #[test]
@@ -325,7 +295,6 @@ mod tests {
 
     #[test]
     fn start_argv_falls_back_to_one_shot() {
-        assert_eq!(get("aider").unwrap().start_argv("P"), s(&["aider", "--message", "P"]));
         assert_eq!(get("claude").unwrap().start_argv("P"), s(&["claude", "P"]));
     }
 
@@ -343,7 +312,6 @@ mod tests {
         }
         let path = std::env::join_paths([&dir]).unwrap();
         assert_eq!(find_in(&["gemini"], &path), Some(f));
-        assert_eq!(find_in(&["opencode"], &path), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

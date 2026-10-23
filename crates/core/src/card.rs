@@ -52,7 +52,7 @@ pub struct Card {
 /// `--permission-mode` values of the claude CLI.
 pub const PERMISSION_MODES: [&str; 6] = ["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"];
 /// Agent keys the UI can offer; the orchestrator can run a subset of them.
-pub const AGENTS: [&str; 6] = ["claude", "codex", "chatgpt", "opencode", "gemini", "aider"];
+pub const AGENTS: [&str; 4] = ["claude", "codex", "chatgpt", "gemini"];
 
 /// Ids and run names end up in worktree paths and branch names: `[A-Za-z0-9._-]`, no `..`.
 pub fn valid_slug(s: &str) -> bool {

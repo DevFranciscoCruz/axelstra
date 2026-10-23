@@ -627,10 +627,10 @@ async fn app_quit(app: tauri::AppHandle, keep: Option<bool>) {
     app.exit(0);
 }
 
-/// Which of the tools the app leans on are not on PATH (git, claude, codex, gh) plus other agent CLIs worth offering (opencode, gemini, aider).
+/// Which of the tools the app leans on are not on PATH (git, claude, codex, gh) plus other agent CLIs worth offering (gemini).
 #[tauri::command]
 fn missing_tools() -> Vec<String> {
-    ["git", "claude", "codex", "gh", "opencode", "gemini", "aider"].into_iter().filter(|t| !on_path(t)).map(String::from).collect()
+    ["git", "claude", "codex", "gh", "gemini"].into_iter().filter(|t| !on_path(t)).map(String::from).collect()
 }
 
 fn on_path(name: &str) -> bool {

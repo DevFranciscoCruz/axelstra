@@ -291,9 +291,9 @@ pub(crate) fn spawn_agent(
 ) -> Result<u32> {
     // what the agent was asked, kept as the goal at the top of its task file
     let goal = prompt.unwrap_or_default().to_string();
-    // any agent CLI on the PATH works (opencode, gemini...); only claude and codex get conversation resume
+    // any agent CLI on the PATH works (gemini...); only claude and codex get conversation resume
     if agent.is_empty() || !agent.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')) {
-        bail!("--agent must be the name of a command on the PATH (claude, codex, opencode...)");
+        bail!("--agent must be the name of a command on the PATH (claude, codex, gemini...)");
     }
     let projects = c.call("project.list", json!({}))?;
     let (p, wt) = find_worktree(&projects, worktree)?;

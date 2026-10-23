@@ -542,10 +542,6 @@ mod tests {
         assert_eq!(agent_command("codex", "auto", true).unwrap(), ["codex", "--sandbox", "workspace-write", p]);
         assert_eq!(agent_command("gemini", "auto", false).unwrap(), ["gemini", "--approval-mode", "auto_edit", "-p", p]);
         assert_eq!(agent_command("gemini", "auto", true).unwrap(), ["gemini", "--approval-mode", "auto_edit", "-i", p]);
-        assert_eq!(agent_command("opencode", "auto", false).unwrap(), ["opencode", "run", p]);
-        assert_eq!(agent_command("aider", "auto", false).unwrap(), ["aider", "--message", p]);
-        // aider cannot take a prompt in its TUI: one-shot even when interactive
-        assert_eq!(agent_command("aider", "auto", true).unwrap(), ["aider", "--message", p]);
         assert!(agent_command("rm", "auto", false).unwrap_err().to_string().contains("desconhecido"));
         assert!(agent_command("claude", "--evil", false).is_err());
     }

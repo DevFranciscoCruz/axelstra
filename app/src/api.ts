@@ -76,7 +76,6 @@ export const shQuote = (s: string, ps: boolean) =>
 const RESUME_LINE: Record<string, string> = {
   codex: "codex resume --last",
   gemini: "gemini --resume latest",
-  opencode: "opencode --continue",
 };
 
 /** Command line for an agent. On restore it resumes the earlier conversation, falling back to a fresh start. */
@@ -434,7 +433,7 @@ export const agentStatus = (key: string) => callBg<{ status: ClaudeStatus | null
 
 /** One entry of the daemon's agents table; `installed` says whether its executable is on the PATH. */
 export type AgentInfo = { id: string; name: string; installed: boolean; path: string | null; install: string; can_resume: boolean; interactive_prompt: boolean };
-/** Every agent the app knows (claude, codex, gemini, opencode, aider) with its installed state. */
+/** Every agent the app knows (claude, codex, gemini) with its installed state. */
 export const agentsList = () => callBg<{ agents: AgentInfo[] }>("agents.list").then((r) => r.agents);
 
 /** Select options for the agent pickers: the installed agents, plus `current` when it is not (so a saved choice never vanishes). */

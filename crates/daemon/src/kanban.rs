@@ -8,7 +8,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 /// Agents a card may name. A single list so it is easy to replace by the shared agent registry.
-pub const AGENTS: [&str; 5] = ["claude", "codex", "gemini", "opencode", "aider"];
+pub const AGENTS: [&str; 3] = ["claude", "codex", "gemini"];
 pub const STATUSES: [&str; 5] = ["backlog", "todo", "in-progress", "needs-review", "done"];
 
 #[derive(Serialize)]
