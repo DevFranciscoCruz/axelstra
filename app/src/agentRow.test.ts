@@ -63,5 +63,6 @@ describe("task file view", () => {
   it("handles windows line endings and empty text", () => {
     expect(parseNote("a\r\nb\r\n")).toEqual([{ kind: "p", text: "a\nb" }]);
     expect(parseNote("")).toEqual([]);
+    expect(parseNote("# T\n\n## Objetivo\n\nfaz\n\n## Relatorio\n")).toEqual([{ kind: "h", level: 1, text: "T" }, { kind: "h", level: 2, text: "Objetivo" }, { kind: "p", text: "faz" }]);
   });
 });

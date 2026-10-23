@@ -36,5 +36,7 @@ export const parseNote = (src: string): MdBlock[] => {
   // an unclosed fence still shows what it held
   if (fence) out.push({ kind: "code", text: fence.join("\n") });
   flush();
+  // a heading with nothing under it at the end (the empty "Relatorio" of a task still in progress) says nothing
+  while (out.length && out[out.length - 1].kind === "h") out.pop();
   return out;
 };
