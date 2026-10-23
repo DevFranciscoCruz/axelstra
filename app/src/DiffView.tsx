@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createResource, createSignal } from "solid-js";
+import { Button, Textarea } from "./ui";
 import { Icon } from "./Icon";
 import { PAGE, capList } from "./listing";
 import { gitDiff, writeSession } from "./api";
@@ -89,9 +90,9 @@ export function DiffView() {
             </span>
           )}
         </Show>
-        <button class="icon" title="Recarregar" aria-label="Recarregar" onClick={() => void refetch()}>
+        <Button variant="ghost" size="icon" class="icon" title="Recarregar" aria-label="Recarregar" onClick={() => void refetch()}>
           <Icon name="refresh" />
-        </button>
+        </Button>
       </div>
       <div class="diff-body">
         <Show when={!text.loading} fallback={<div class="placeholder">A carregar…</div>}>
@@ -119,17 +120,17 @@ export function DiffView() {
                       <Show when={commenting() === i()}>
                         <tr class="cmt">
                           <td colspan="3">
-                            <textarea
+                            <Textarea
                               placeholder="O que o agente deve mudar aqui?"
                               value={note()}
                               onInput={(e) => setNote(e.currentTarget.value)}
                               ref={(el) => queueMicrotask(() => el.focus())}
                             />
                             <div class="cmt-actions">
-                              <button class="primary" disabled={!note().trim()} onClick={() => void sendFeedback(r)}>
+                              <Button variant="default" size="sm" disabled={!note().trim()} onClick={() => void sendFeedback(r)}>
                                 Enviar ao agente
-                              </button>
-                              <button onClick={() => setCommenting(null)}>Cancelar</button>
+                              </Button>
+                              <Button size="sm" onClick={() => setCommenting(null)}>Cancelar</Button>
                               <span class="cmt-msg" role="status" aria-live="polite">{sendMsg()}</span>
                             </div>
                           </td>
@@ -141,9 +142,9 @@ export function DiffView() {
               </tbody>
             </table>
             <Show when={page().hidden > 0}>
-              <button class="show-more" onClick={() => setLimit(limit() + PAGE)}>
+              <Button variant="outline" size="sm" class="show-more" onClick={() => setLimit(limit() + PAGE)}>
                 Mostrar mais linhas ({page().hidden})
-              </button>
+              </Button>
             </Show>
           </Show>
         </Show>
