@@ -1,7 +1,6 @@
 import { For, JSX, Show, createResource, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { NotifyMode, SettingsPatch, ShellChoice, Terse, call, daemonShutdown, diagnostics, getSettings, resetShellCache, setSettings } from "./api";
-import { radioKeys } from "./a11y";
 import { ask } from "./Confirm";
 import { HooksSection } from "./HooksSection";
 import { Modal } from "./Modal";
@@ -11,33 +10,24 @@ import { setShowSettings, showNotice } from "./store";
 import { DEFAULT_FONT, MAX_FONT, MIN_FONT, TermTheme, setTermPrefs, termPrefs } from "./termprefs";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
 import "./termui.css";
-import { Button, CheckboxField, Field, Input, cn } from "./ui";
+import { Button, CheckboxField, Field, Input, RadioGroup } from "./ui";
 
 const TERSE: Terse[] = ["off", "short", "tiny"];
 const NOTIFY: NotifyMode[] = ["all", "waiting", "off"];
 const SHELLS: ShellChoice[] = ["auto", "pwsh", "powershell", "bash", "wsl", "cmd"];
 const THEMES: TermTheme[] = ["dark", "light"];
 
-/** A row of exclusive choices: one tab stop (the checked one), arrow keys move and select. */
+/** A row of exclusive choices (a null value, "auto", is keyed by a sentinel: radio values are strings). */
+const NONE = "__none__";
 function Choices<T extends string | null>(props: { label: string; value: T; options: { value: T; label: string; hint?: string }[]; onPick: (v: T) => void }) {
+  const key = (v: T) => v ?? NONE;
   return (
-    <div class="set-choices" role="radiogroup" aria-label={props.label} onKeyDown={radioKeys}>
-      <For each={props.options}>
-        {(o) => (
-          <Button
-            role="radio"
-            aria-checked={props.value === o.value}
-            tabindex={props.value === o.value ? 0 : -1}
-            size="sm"
-            class={cn("rounded-full", props.value === o.value && "border-primary bg-primary/10 text-primary")}
-            title={o.hint}
-            onClick={() => props.onPick(o.value)}
-          >
-            {o.label}
-          </Button>
-        )}
-      </For>
-    </div>
+    <RadioGroup
+      label={props.label}
+      value={key(props.value)}
+      options={props.options.map((o) => ({ value: key(o.value), label: o.label, hint: o.hint }))}
+      onChange={(k) => props.onPick(props.options.find((o) => key(o.value) === k)!.value)}
+    />
   );
 }
 

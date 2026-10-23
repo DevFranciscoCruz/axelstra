@@ -2,7 +2,7 @@ import { For, Show, createResource, createSignal } from "solid-js";
 import { projectEnvPreview, setProjectSetup } from "./api";
 import { Modal } from "./Modal";
 import { projects, refreshProjects, setError } from "./store";
-import { Button, Input } from "./ui";
+import { Button, Field, Input } from "./ui";
 
 const LIST = { margin: "0", "padding-left": "18px", "font-family": "monospace", "font-size": "12px", "line-height": "1.5" };
 
@@ -35,22 +35,23 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
         <Button onClick={props.onClose}>Fechar</Button>
       </div>
 
-      <label for="ps-setup">Comando de setup</label>
-      <Input
-        id="ps-setup"
-        placeholder="ex.: bun install (vazio = nenhum)"
-        value={setup()}
-        onInput={(e) => setSetup(e.currentTarget.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !saving()) void save();
-        }}
-      />
+      <Field label="Comando de setup">
+        <Input
+          id="ps-setup"
+          placeholder="ex.: bun install (vazio = nenhum)"
+          value={setup()}
+          onInput={(e) => setSetup(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !saving()) void save();
+          }}
+        />
+      </Field>
       <div class="auto-note">
         Corre num terminal visível de cada worktree novo. Fica guardado só nesta app, nunca no repositório: um repositório clonado não consegue
         mandar o Axelstra correr comandos.
       </div>
 
-      <label>Ficheiros copiados para worktrees novos</label>
+      <div class="text-xs text-muted-foreground">Ficheiros copiados para worktrees novos</div>
       <div class="auto-note">
         Lista no ficheiro <code>.worktreeinclude</code>, na raiz do projeto, os padrões (sintaxe do .gitignore) dos ficheiros ignorados pelo git
         a copiar do checkout principal, por exemplo <code>.env</code> ou <code>.env.local</code>. Máximo de 50 ficheiros de 5 MB cada.
