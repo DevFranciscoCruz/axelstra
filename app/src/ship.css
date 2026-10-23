@@ -1,12 +1,12 @@
 .ship { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .ship .sc-title { padding-top: 6px; }
-.ship .muted, .ship-line.muted { color: var(--muted); font-size: 11px; }
-.ship-line { padding: 4px 10px; font-size: 11px; color: var(--muted); }
-.ship-problem { display: flex; gap: 8px; padding: 8px 10px; font-size: 12px; align-items: flex-start; }
+.ship .muted, .ship-line.muted { color: var(--muted); font-size: var(--fs-sm); }
+.ship-line { padding: 4px 10px; font-size: var(--fs-sm); color: var(--muted); }
+.ship-problem { display: flex; gap: 8px; padding: 8px 10px; font-size: var(--fs-md); align-items: flex-start; }
 .ship-problem:not(.soft) { color: var(--warn); }
 .ship-problem.soft { color: var(--muted); }
 .ship-problem .ship-icon { flex: none; margin-top: 2px; }
-.ship-ci { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
+.ship-ci { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-sm); font-weight: 600; letter-spacing: 0; color: var(--muted); }
 .ship-ci.pass { color: var(--ok); }
 .ship-ci.fail { color: var(--danger); }
 .ship-ci.pending { color: var(--warn); }
@@ -14,15 +14,15 @@
 .ship-facts { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 6px; }
 .ship-facts .chip.bad { color: var(--danger); border-color: var(--danger); }
 .ship-checks { list-style: none; margin: 0; padding: 0 10px 6px; max-height: 180px; overflow: auto; }
-.ship-check { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 12px; min-width: 0; }
+.ship-check { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: var(--fs-md); min-width: 0; }
 .ship-mark { flex: none; width: 14px; display: inline-flex; justify-content: center; }
 .ship-check.pass .ship-mark { color: var(--ok); }
 .ship-check.fail .ship-mark { color: var(--danger); }
 .ship-check.pending .ship-mark { color: var(--warn); }
 .ship-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
-.ship-state { flex: none; font-size: 11px; color: var(--muted); }
+.ship-state { flex: none; font-size: var(--fs-sm); color: var(--muted); }
 .ship-check.fail .ship-state { color: var(--danger); font-weight: 600; }
 .ship-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 10px; }
-.ship-opt { display: flex; align-items: center; gap: 6px; padding: 2px 10px; font-size: 11px; color: var(--muted); }
+.ship-opt { display: flex; align-items: center; gap: 6px; padding: 2px 10px; font-size: var(--fs-sm); color: var(--muted); }
 .ship .pnote { padding: 0 10px; }
 .ship .pnote:empty { display: none; }

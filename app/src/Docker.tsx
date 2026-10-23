@@ -10,7 +10,7 @@ import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
 import { Icon } from "./Icon";
 import { TerminalView } from "./TerminalView";
 import { Filter, ago, filterContainers, groupByProject, imageUsers, isRunning, isSecretKey, joinPath, parseCreated, portChips, searchLog, stateInfo } from "./dockerLogic";
-import { findWorktree, keepSame, openSession, refreshSessions, selectedWorktree, sessions, setShowDocker, showDocker } from "./store";
+import { findWorktree, keepSame, openSession, refreshSessions, selectedWorktree, sessions, setError, setShowDocker, showDocker, showNotice } from "./store";
 import "./docker.css";
 
 /** The Docker view fills the centre area like the Kanban; whoever mounts it owns this signal. */
@@ -50,9 +50,9 @@ const [volumes, setVolumes] = createSignal<DockerVolume[]>([]);
 const [networks, setNetworks] = createSignal<DockerNetwork[]>([]);
 const [loadErr, setLoadErr] = createSignal("");
 const [loaded, setLoaded] = createSignal(false);
-const [note, setNote] = createSignal<{ text: string; err: boolean }>({ text: "", err: false });
 
-const say = (text: string, err = false) => setNote({ text, err });
+/** results go to the app toast, like everywhere else */
+const say = (text: string, err = false) => (err ? setError(text) : showNotice(text));
 const nameOf = (e: unknown) => String(e).replace(/^Error: /, "");
 
 /** shell sessions started from the detail pane, per container id, so coming back to the tab finds the same shell */
@@ -364,7 +364,7 @@ export function DockerView() {
                               <span class="auto-note">{running()}/{items().length} a correr</span>
                             </button>
                             <span class="grow" />
-                            <button class="dk-gbtn" disabled={busy()} onClick={() => bulk(g, items(), "up")}>Subir</button>
+                            <button class="dk-gbtn" disabled={busy()} onClick={() => bulk(g, items(), "up")}>Iniciar</button>
                             <button class="dk-gbtn" disabled={busy()} onClick={() => bulk(g, items(), "stop")}>Parar</button>
                             <button class="dk-gbtn danger" disabled={busy()} onClick={() => bulk(g, items(), "rm")}>Apagar</button>
                           </div>
@@ -413,7 +413,6 @@ export function DockerView() {
               <NetworksList list={networks()} q={q()} />
             </Show>
           </div>
-          <div class="dk-note" classList={{ err: note().err }} role="status" aria-live="polite">{note().text}</div>
         </Show>
       </section>
 
@@ -487,7 +486,7 @@ function ComposeBar(props: { compose: DockerCompose | null; wt: string | null; b
             <span class="auto-note">Sem serviços criados.</span>
           </Show>
           <span class="grow" />
-          <button disabled={props.busy} onClick={() => props.run("up")}>Subir</button>
+          <button disabled={props.busy} onClick={() => props.run("up")}>Iniciar</button>
           <button disabled={props.busy} onClick={() => props.run("down")}>Parar e remover</button>
         </Show>
       </div>

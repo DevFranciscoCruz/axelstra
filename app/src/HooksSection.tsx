@@ -30,9 +30,11 @@ export function HooksSection() {
         <Show when={!st.error && st()} fallback={<span class="auto-note">{st.error ? "Estado dos hooks indisponível (daemon desatualizado?)." : "A carregar…"}</span>}>
           {(v) => <span>{v().installed ? "Hooks instalados" : "Hooks não instalados"}</span>}
         </Show>
-        <button disabled={busy()} onClick={() => void install()}>
-          {busy() ? "A instalar…" : "Instalar hooks do Claude"}
-        </button>
+        <Show when={!st()?.installed}>
+          <button disabled={busy()} onClick={() => void install()}>
+            {busy() ? "A instalar…" : "Instalar hooks do Claude"}
+          </button>
+        </Show>
       </div>
       <Show when={error()}>
         <div class="set-err" role="alert">

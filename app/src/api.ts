@@ -463,7 +463,8 @@ export const agentsList = () => callBg<{ agents: AgentInfo[] }>("agents.list").t
 
 /** Select options for the agent pickers: the installed agents, plus `current` when it is not (so a saved choice never vanishes). */
 export const agentOptions = (list: AgentInfo[], current?: string) => {
-  const out = list.filter((a) => a.installed).map((a) => ({ value: a.id, label: a.name }));
+  const mark = (id: string) => (["claude", "codex", "gemini"].includes(id) ? id : undefined);
+  const out: { value: string; label: string; icon?: string }[] = list.filter((a) => a.installed).map((a) => ({ value: a.id, label: a.name, icon: mark(a.id) }));
   const cur = current && list.find((a) => a.id === current || (current === "chatgpt" && a.id === "codex"));
   if (current && !out.some((o) => o.value === current || (current === "chatgpt" && o.value === "codex"))) {
     out.push({ value: current, label: cur ? `${cur.name} (não instalado)` : `${current} (desconhecido)` });

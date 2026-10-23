@@ -114,9 +114,6 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
                 <For each={list() ?? []} fallback={
                   <div class="placeholder empty">
                     <div>Nenhuma automatização</div>
-                    <Show when={projects().length > 0}>
-                      <button class="primary" onClick={() => edit(blank(projects()[0].id))}>+ Criar a primeira</button>
-                    </Show>
                   </div>
                 }>
                   {(a) => (

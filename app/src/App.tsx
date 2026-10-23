@@ -1,5 +1,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { Icon } from "./Icon";
+import { Icon, hasIcon } from "./Icon";
+import { Select } from "./Select";
+import { Button } from "./ui";
 import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { SessionInfo, restoreSessions, listPorts, watchWorktree, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
 import { ChangesPanel } from "./ChangesPanel";
@@ -47,6 +49,7 @@ import {
   agentKeys,
   setInstalledAgents,
   agentPrompt,
+  pickAgent,
   defaultAgent,
   fileLine,
   setDaemonReconnecting,
@@ -421,7 +424,10 @@ export function App() {
   const newAgent = async () => {
     const c = current();
     if (!c) return;
-    const agent = projectAgent(c.project.id);
+    // asks which agent to open (or a plain terminal); a choice becomes the default
+    const agent = await pickAgent();
+    if (!agent) return;
+    if (agent === "shell") return void newTerminal();
     try {
       const id = await launchDefaultAgent(c.project.id, c.wt.path, agent, AGENTS[agent], undefined, undefined, projectTerse(c.project.id));
       await refreshSessions();
@@ -549,27 +555,33 @@ export function App() {
         />
       </Show>
       <Show when={agentPrompt()}>
-        {(done) => (
-          <Modal label="Abrir com qual agente?" onClose={() => done()(null)} backClass="agent-back" class="agent-modal">
-            <h3>Abrir com qual agente?</h3>
-            <For each={agentKeys()}>
-              {(a) => (
-                <button
-                  class="primary"
-                  classList={{ pref: a === projectAgent(current()?.project.id) }}
-                  onClick={() => {
-                    setDefaultAgent(a);
-                    done()(a);
-                  }}
-                  ref={(el) => a === projectAgent(current()?.project.id) && queueMicrotask(() => el.focus())}
-                >
-                  {a}
-                </button>
-              )}
-            </For>
-            <button onClick={() => done()("shell")}>Só terminal</button>
-          </Modal>
-        )}
+        {(done) => {
+          const [choice, setChoice] = createSignal(projectAgent(current()?.project.id));
+          const go = () => {
+            setDefaultAgent(choice());
+            done()(choice());
+          };
+          return (
+            <Modal label="Novo agente" onClose={() => done()(null)}>
+              <div class="m-heading">Novo agente</div>
+              <label class="m-full" onKeyDown={(e) => e.key === "Enter" && (e.ctrlKey || e.metaKey) && go()}>
+                Agente
+                <Select
+                  value={choice()}
+                  label="Agente"
+                  options={[...agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))]}
+                  onChange={setChoice}
+                />
+              </label>
+              <div class="m-actions" style={{ "justify-content": "flex-end" }}>
+                <Button onClick={() => done()(null)}>Cancelar</Button>
+                <Button variant="default" onClick={go} ref={(el) => queueMicrotask(() => el.focus())}>
+                  Abrir
+                </Button>
+              </div>
+            </Modal>
+          );
+        }}
       </Show>
       <Palette
         actions={() => [

@@ -1,0 +1,39 @@
+/* Tailwind for the shadcn-style components in ui/. The older hand-written styles sit in the `legacy` layer, below
+   the utilities, so a component built with utilities is never overridden by an old global rule such as `button {}`.
+   Preflight is left out on purpose: the old styles already reset what they need. */
+@layer theme, legacy, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+@import "./styles.css" layer(legacy);
+
+/* shadcn's semantic names, pointing at the app's own tokens (so light and dark come for free) */
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--s3);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--panel);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--on-accent);
+  --color-secondary: var(--s2);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--s1);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--s1);
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--on-accent);
+  --color-border: var(--line-ctl);
+  --color-input: var(--line-ctl);
+  --color-ring: var(--accent);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+  --text-xs: var(--fs-sm);
+  --text-sm: var(--fs-md);
+  --text-base: var(--fs-base);
+  --text-lg: var(--fs-lg);
+}

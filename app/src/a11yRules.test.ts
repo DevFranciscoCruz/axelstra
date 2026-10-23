@@ -55,8 +55,8 @@ describe("styles", () => {
   });
 
   it("the project letter is readable on the accent", () => {
-    expect(contrast("#15121f", token("--accent"))).toBeGreaterThanOrEqual(4.5);
-    expect(/\.picon\.letter[^}]*color: #15121f/.test(css)).toBe(true);
+    expect(contrast(token("--on-accent"), token("--accent"))).toBeGreaterThanOrEqual(4.5);
+    expect(/\.picon\.letter[^}]*color: var\(--on-accent\)/.test(css)).toBe(true);
   });
 
   it("control borders stand out from the dialog", () => {
