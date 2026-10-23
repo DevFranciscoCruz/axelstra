@@ -54,10 +54,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with: { components: "rustfmt, clippy" }
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      # not blocking yet: the tree has never been through rustfmt (see rustfmt.toml). Run `cargo fmt --all` once
-      # when no branch is in flight, then drop continue-on-error.
       - run: cargo fmt --all --check
-        continue-on-error: true
       # warnings fail the build. The -A list is what the tree still has outside the files this check was set up
       # with (core/git.rs, daemon/server.rs, cli, app voice.rs): fix those, then delete the matching -A.
       - run: >
