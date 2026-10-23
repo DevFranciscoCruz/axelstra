@@ -46,7 +46,9 @@ export const parseStored = (raw: string | null): NotifEntry[] => {
     const ok = v.filter(
       (x): x is NotifEntry =>
         !!x && typeof x.id === "string" && typeof x.at === "number" && KINDS.includes(x.kind) && typeof x.worktree === "string" && typeof x.text === "string",
-    );
+    )
+      // early builds logged every agent that merely went quiet as an error: those are noise, drop them on load
+      .filter((x) => !(x.kind === "error" && x.text.includes("ficou parado")));
     return trim(
       ok
         .map((x) => ({ id: x.id, at: x.at, kind: x.kind, worktree: x.worktree, text: x.text, session: typeof x.session === "number" ? x.session : undefined, read: x.read === true }))
