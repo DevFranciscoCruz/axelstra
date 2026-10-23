@@ -4,120 +4,197 @@
 <meta charset="utf-8">
 <title>Axelstra demo</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- Fake data only. A scripted mock of the app (same colours as app/src/styles.css) that renders from one
-     number, the time in ms, so a recorder can step it frame by frame: window.setT(ms). Opened directly it plays in a loop. -->
+<!-- Fake data only. A scripted mock of the app (same colours and labels as app/src) that renders from one number,
+     the time in ms, so a recorder can step it frame by frame: window.setT(ms). Opened directly it plays in a loop. -->
 <style>
-:root{--bg:#1e1f23;--panel:#24262c;--line:#33363f;--line-3:#43434f;--text:#d7dae0;--muted:#8b90a0;--accent:#a78bfa;--ok:#4ade80;--warn:#e5c07b}
+:root{--bg:#1e1f23;--panel:#24262c;--line:#33363f;--line-3:#43434f;--text:#d7dae0;--muted:#8b90a0;--accent:#a78bfa;--ok:#4ade80;--warn:#e5c07b;--bad:#f87171}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{background:#14151a;display:grid;place-items:center;font:13px/1.4 "Inter Variable","Segoe UI Variable","Segoe UI",system-ui,sans-serif;color:var(--text)}
-#win{width:960px;height:540px;background:var(--bg);border:1px solid var(--line-3);border-radius:10px;overflow:hidden;display:grid;grid-template-columns:260px 1fr;position:relative}
-.side{background:var(--panel);border-right:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:4px}
-.brand{font-weight:700;font-size:14px;padding:2px 4px 8px}
+#win{width:1280px;height:720px;background:var(--bg);border:1px solid var(--line-3);border-radius:10px;overflow:hidden;position:relative;display:grid;grid-template-rows:1fr 26px}
+.cols{display:grid;grid-template-columns:250px 1fr 310px;min-height:0}
+.side{background:var(--panel);border-right:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:4px;min-height:0}
+.brand{font-weight:700;font-size:14px;padding:2px 4px 4px}
+.addp{border:0;background:var(--accent);color:#1a1530;border-radius:6px;padding:6px 8px;font:inherit;font-weight:600;text-align:center;margin-bottom:4px}
 .sec{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:6px 4px 2px}
 .proj{margin-bottom:6px}
-.ph{display:flex;align-items:center;gap:6px;padding:4px 4px;font-weight:600}
+.ph{display:flex;align-items:center;gap:6px;padding:4px;font-weight:600}
 .pi{width:16px;height:16px;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:700;color:#fff}
-.ph .sp{flex:1}.ph .ic{color:var(--muted);font-size:14px;padding:0 4px}
+.sp{flex:1}.ic{color:var(--muted);font-size:14px;padding:0 4px}
 .row{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;margin-left:2px;white-space:nowrap}
 .row.sel{background:#2f323b}
-.row .n{flex:1;overflow:hidden;text-overflow:ellipsis}
-.row .c{color:var(--ok);font-size:11px}
+.row .n{flex:1;overflow:hidden;text-overflow:ellipsis}.row .c{color:var(--ok);font-size:11px}
 .dot{width:8px;height:8px;border-radius:50%;background:#7a7f8e;flex:none}
-.dot.work{background:var(--ok)}.dot.work.p{box-shadow:0 0 0 3px rgba(74,222,128,.25)}
-.dot.done{background:var(--accent)}
+.dot.work{background:var(--ok)}.dot.p{box-shadow:0 0 0 3px rgba(74,222,128,.25)}.dot.done{background:var(--accent)}
 .box{margin:2px 2px 6px 14px;padding:4px;border:1px solid var(--line);border-radius:10px}
 .box .h{font-size:11px;color:var(--muted);padding:2px 6px 4px}
 .ag{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;font-size:12px}
 .ag .t{margin-left:auto;color:var(--muted);font-size:11px}
 .input{margin:2px 6px 6px;border:1px solid var(--accent);border-radius:6px;padding:5px 8px;background:var(--bg);min-height:28px}
 .caret{display:inline-block;width:1px;height:13px;background:var(--text);vertical-align:-2px;margin-left:1px}
-.main{display:flex;flex-direction:column;min-width:0}
-.tabs{display:flex;gap:4px;padding:8px 10px;border-bottom:1px solid var(--line)}
+.links{margin-top:auto;border-top:1px solid var(--line);padding-top:8px;color:var(--muted)}
+.links div{padding:5px 8px;display:flex;align-items:center;gap:8px}
+.main{display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--line)}
+.tabs{display:flex;gap:4px;padding:8px 10px;border-bottom:1px solid var(--line);align-items:center}
 .tab{padding:4px 10px;border-radius:6px;color:var(--muted)}.tab.on{background:#2f323b;color:var(--text)}
 .term{flex:1;padding:14px 16px;font:12.5px/1.55 "Cascadia Mono",Consolas,monospace;overflow:hidden}
 .term .u{color:var(--text)}.term .m{color:var(--muted)}.term .g{color:var(--ok)}.term .a{color:var(--accent)}
-.term .add{color:var(--ok)}.term .del{color:#f87171}
-.toast{position:absolute;right:14px;bottom:14px;background:#2a2a32;border:1px solid var(--line-3);border-radius:10px;padding:10px 14px;box-shadow:0 8px 24px rgba(0,0,0,.4);transition:none}
+.add{color:var(--ok)}.del{color:var(--bad)}
+.right{display:flex;flex-direction:column;min-width:0;background:var(--panel)}
+.rtabs{display:flex;gap:4px;padding:8px 10px;border-bottom:1px solid var(--line)}
+.rtab{padding:4px 10px;border-radius:6px;color:var(--muted)}.rtab.on{background:#2f323b;color:var(--text)}
+.rh{font-size:10px;letter-spacing:.08em;color:var(--muted);padding:10px 12px 4px}
+.f{display:flex;gap:8px;padding:4px 12px;font-size:12px;align-items:center}
+.f .s{width:14px;color:var(--warn);font-weight:700}.f .s.A{color:var(--ok)}.f .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{color:var(--muted);padding:6px 12px;font-size:12px}
+.cm{margin:auto 10px 10px;display:flex;flex-direction:column;gap:6px}
+.cm .in{background:var(--bg);border:1px solid var(--line-3);border-radius:6px;padding:6px 8px;min-height:30px;font-size:12px}
+.cm .bt{border:0;border-radius:6px;padding:7px;text-align:center;font-weight:600;background:#3a3d4a;color:var(--muted)}
+.cm .bt.on{background:var(--accent);color:#1a1530}.cm .bt.press{filter:brightness(1.25)}
+.pr{margin:8px 12px;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.pr b{display:block;font-weight:600}.pr span{color:var(--muted);font-size:12px}.pr .ok{color:var(--ok)}
+.sb{display:flex;align-items:center;gap:14px;padding:0 12px;border-top:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--muted)}
+.sb .on{color:var(--ok)}.lim{display:flex;align-items:center;gap:6px}.lim-bar{width:56px;height:5px;border-radius:3px;background:#383b46;overflow:hidden;display:inline-block}
+.lim-bar i{display:block;height:100%;background:var(--accent)}.lim-bar i.warn{background:var(--warn)}
+.sb .sp{flex:1}
+.toast{position:absolute;right:322px;bottom:40px;background:#2a2a32;border:1px solid var(--line-3);border-radius:10px;padding:10px 14px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .toast b{display:block;margin-bottom:2px}.toast span{color:var(--muted);font-size:12px}
+.back{position:absolute;inset:0;background:rgba(0,0,0,.5);display:flex;justify-content:center;padding-top:110px}
+.pal{width:520px;height:max-content;background:#2a2a32;border:1px solid var(--line-3);border-radius:10px;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,.5)}
+.pal .pin{padding:12px 14px;border-bottom:1px solid var(--line-3);min-height:44px}
+.pal .it{display:flex;gap:10px;padding:8px 14px}.pal .it.on{background:#383b4a}.pal .it .hint{margin-left:auto;color:var(--muted);font-size:12px}
 </style>
 </head>
 <body>
 <div id="win">
-  <aside class="side">
-    <div class="brand">Axelstra</div>
-    <div class="sec">Projects</div>
-    <div id="projects"></div>
-  </aside>
-  <section class="main">
-    <div class="tabs"><span class="tab on" id="tab">claude</span><span class="tab">pnpm dev</span></div>
-    <div class="term" id="term"></div>
-  </section>
-  <div class="toast" id="toast" style="display:none"><b>claude finished</b><span>ax/dark-mode · 2 files changed</span></div>
+  <div class="cols">
+    <aside class="side">
+      <div class="brand">Axelstra</div>
+      <div class="addp">+ Adicionar projeto</div>
+      <div class="sec">Projetos</div>
+      <div id="projects"></div>
+      <div class="links"><div><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg> Automatizações</div><div><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 2.5-3 2.5-6.5 4"/></svg> Despachante</div><div><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M12.4 3.6l-1.2 1.2M4.8 11.2l-1.2 1.2"/></svg> Definições</div></div>
+    </aside>
+    <section class="main"><div class="tabs" id="tabs"></div><div class="term" id="term"></div></section>
+    <section class="right"><div class="rtabs" id="rtabs"></div><div id="rbody" style="display:flex;flex-direction:column;flex:1;min-height:0"></div></section>
+  </div>
+  <div class="sb" id="sb"></div>
+  <div class="toast" id="toast" style="display:none"><b>claude terminou</b><span>ax/dark-mode · 2 ficheiros alterados</span></div>
+  <div class="back" id="pal" style="display:none"></div>
 </div>
 <script>
-const TOTAL = 15000;
-const NEW_NAME = "promo-codes";
-const LINES = [ // [appears at ms, html]
-  [3900, '<span class="a">&gt;</span> <span class="u">Add validation for EU promo codes at checkout</span>'],
+const TOTAL = 21000;
+const NEW = "promo-codes";
+const COMMIT_MSG = "Add dark mode toggle";
+const spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+const $ = (id) => document.getElementById(id);
+const typed = (s, t, start, speed) => s.slice(0, Math.max(0, Math.min(s.length, Math.floor((t - start) / speed))));
+
+// terminal transcripts: [appears at ms, html]
+const PROMO = [
+  [3900, '<span class="a">&gt;</span> Add validation for EU promo codes at checkout'],
   [5600, '<span class="m">● I\'ll start with the existing promo helper.</span>'],
   [6400, '<span class="m">  Ran 1 shell command</span>'],
-  [7200, '<span class="u">● Update(src/lib/promo.ts)</span>'],
+  [7200, '● Update(src/lib/promo.ts)'],
   [7600, '<span class="add">    + export const isEuCode = (c: string) =&gt; /^EU-[A-Z0-9]{6}$/.test(c);</span>'],
   [7900, '<span class="del">    - if (!code) return false;</span>'],
-  [8400, '<span class="u">● Ran 14 tests</span> <span class="g">✓ all passed</span>'],
+  [8400, '● Ran 14 tests <span class="g">✓ all passed</span>'],
 ];
-const spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+const DARK = [
+  [0, '<span class="a">&gt;</span> Add a dark mode toggle to the settings page'],
+  [0, '<span class="m">● Reading src/theme.ts and Settings.tsx</span>'],
+  [0, '● Update(src/theme.ts)'],
+  [0, '<span class="add">    + export const toggleTheme = () =&gt; document.documentElement.classList.toggle("dark");</span>'],
+  [9600, '● Update(src/Settings.tsx)'],
+  [9600, '<span class="add">    + &lt;Switch label="Dark mode" onChange={toggleTheme} /&gt;</span>'],
+  [9600, '● Ran 9 tests <span class="g">✓ all passed</span>'],
+  [9600, '<span class="g">Done.</span> 2 files changed.'],
+];
 
-function row(name, state, sel, count) {
+function row(name, state, sel) {
   const dot = state === "work" ? "dot work p" : state === "done" ? "dot done" : "dot";
-  return `<div class="row${sel ? " sel" : ""}"><span class="${dot}"></span><span class="n">${name}</span>${count ? `<span class="c">${count}</span>` : ""}</div>`;
+  return `<div class="row${sel ? " sel" : ""}"><span class="${dot}"></span><span class="n">${name}</span></div>`;
 }
-function agent(label, time) {
-  return `<div class="box"><div class="h">1 agent</div><div class="ag"><span class="dot work"></span>${label}<span class="t">${time}</span></div></div>`;
-}
+const agent = (time) => `<div class="box"><div class="h">1 agente</div><div class="ag"><span class="dot work"></span>claude<span class="t">${time}</span></div></div>`;
+const proj = (c, name, body) => `<div class="proj"><div class="ph"><span class="pi" style="background:${c}">${name[0].toUpperCase()}</span>${name}<span class="sp"></span><span class="ic">+</span><span class="ic">⚙</span><span class="ic">×</span></div>${body}</div>`;
 
 function render(t) {
   const pulse = Math.floor(t / 500) % 2 === 0;
-  let html = "";
-  // acme-web
-  html += `<div class="proj"><div class="ph"><span class="pi" style="background:#6366f1">A</span>acme-web<span class="sp"></span><span class="ic">+</span><span class="ic">⚙</span></div>`;
-  html += row("main", "idle", false, "");
-  // dark-mode finishes at 9600
+  const palOpen = t >= 11000 && t < 12800;
+  const sel = t < 3600 ? "dark" : t < 12800 ? "promo" : "dark"; // selected worktree
   const darkDone = t >= 9600;
-  html += row("ax/dark-mode", darkDone ? "done" : "work", false, "");
-  if (!darkDone) html += agent("claude", t < 2000 ? "4m" : "5m");
-  // typing the new worktree name
-  if (t >= 1200 && t < 3000) {
-    const n = Math.max(0, Math.min(NEW_NAME.length, Math.floor((t - 1500) / 110)));
-    html += `<div class="input">${NEW_NAME.slice(0, n)}${pulse ? '<span class="caret"></span>' : ""}</div>`;
-  } else if (t >= 3000 && t < 3600) {
-    html += `<div class="row"><span class="dot work"></span><span class="n" style="color:var(--muted)">Creating ${NEW_NAME}…</span></div>`;
-  } else if (t >= 3600) {
-    html += row("ax/" + NEW_NAME, "work", true, "") + agent("claude", t < 9000 ? "now" : "1m");
-  }
-  html += `</div>`;
-  // acme-api
-  html += `<div class="proj"><div class="ph"><span class="pi" style="background:#0ea5e9">A</span>acme-api<span class="sp"></span><span class="ic">+</span><span class="ic">⚙</span></div>`;
-  html += row("main", "idle", t < 3600, "");
-  html += `</div>`;
-  document.getElementById("projects").innerHTML = html;
+  const committed = t >= 15400;
+
+  // sidebar
+  let web = row("main", "idle", false);
+  web += row("ax/dark-mode", darkDone ? "done" : "work", sel === "dark");
+  if (!darkDone) web += agent(t < 2000 ? "4m" : "5m");
+  if (t >= 1200 && t < 3000) web += `<div class="input">${typed(NEW, t, 1500, 110)}${pulse ? '<span class="caret"></span>' : ""}</div>`;
+  else if (t >= 3000 && t < 3600) web += `<div class="row"><span class="dot work"></span><span class="n" style="color:var(--muted)">A criar ${NEW}…</span></div>`;
+  else if (t >= 3600) web += row("ax/" + NEW, "work", sel === "promo") + agent(t < 9000 ? "agora" : "1m");
+  $("projects").innerHTML = proj("#6366f1", "acme-web", web) + proj("#0ea5e9", "acme-api", row("main", "idle", false));
 
   // terminal
-  const term = document.getElementById("term");
-  const tab = document.getElementById("tab");
-  if (t < 3600) {
-    tab.textContent = "claude";
-    term.innerHTML = `<span class="m">acme-api · main</span><br><span class="m">No agent here. Pick a worktree or press + to add one.</span>`;
-  } else {
-    tab.textContent = "claude · " + NEW_NAME;
-    let out = `<span class="m">ax/${NEW_NAME} · claude</span><br>`;
-    for (const [at, h] of LINES) if (t >= at) out += h + "<br>";
+  const dev = t >= 4600;
+  $("tabs").innerHTML = `<span class="tab on">claude</span>${dev ? '<span class="tab">pnpm dev</span>' : ""}<span class="sp"></span><span class="ic">⌕</span>`;
+  let out;
+  if (sel === "promo") {
+    out = `<span class="m">ax/${NEW} · claude</span><br>`;
+    for (const [at, h] of PROMO) if (t >= at) out += h + "<br>";
     if (t >= 4400 && t < 8900) out += `<span class="a">${spin[Math.floor(t / 90) % spin.length]}</span> <span class="m">Thinking…</span>`;
-    term.innerHTML = out;
+  } else {
+    out = `<span class="m">ax/dark-mode · claude</span><br>`;
+    for (const [at, h] of DARK) if (t >= at) out += h + "<br>";
+    if (!darkDone) out += `<span class="a">${spin[Math.floor(t / 90) % spin.length]}</span> <span class="m">Thinking…</span>`;
   }
-  // toast
-  document.getElementById("toast").style.display = t >= 9800 && t < 13200 ? "block" : "none";
+  $("term").innerHTML = out;
+
+  // right panel
+  const showPulls = t >= 17200;
+  let files;
+  if (sel === "promo") {
+    files = [];
+    if (t >= 7600) files.push(["M", "src/lib/promo.ts", "+42 −3"]);
+    if (t >= 8400) files.push(["A", "src/lib/promo.test.ts", "+60"]);
+  } else files = committed ? [] : [["M", "src/theme.ts", "+18 −2"], ["M", "src/Settings.tsx", "+24 −1"]];
+  const n = files.length;
+  $("rtabs").innerHTML = `<span class="rtab">Ficheiros</span><span class="rtab${showPulls ? "" : " on"}">Alterações${n ? " " + n : ""}</span><span class="rtab${showPulls ? " on" : ""}">PRs</span>`;
+  let body;
+  if (showPulls) {
+    body = `<div class="pr"><b>#42 Add dark mode toggle</b><span>ax/dark-mode → main · <span class="ok">checks passed</span></span></div>
+            <div class="pr"><b>#41 Fix invoice rounding</b><span>ax/invoice-fix → main · aberto há 2 dias</span></div>`;
+  } else {
+    body = `<div class="rh">ALTERAÇÕES</div>`;
+    body += n ? files.map((f) => `<div class="f"><span class="s ${f[0]}">${f[0]}</span><span class="nm">${f[1]}</span><span class="m" style="color:var(--muted)">${f[2]}</span></div>`).join("") : `<div class="empty">Sem alterações</div>`;
+    if (committed) body += `<div class="rh">COMMITS</div><div class="f"><span class="s" style="color:var(--accent)">●</span><span class="nm">${COMMIT_MSG}</span><span style="color:var(--muted)">agora</span></div>`;
+    if (sel === "dark") {
+      const msg = typed(COMMIT_MSG, t, 13600, 60);
+      const ready = n > 0 && msg.length > 0;
+      const press = t >= 15200 && t < 15500;
+      body += `<div class="cm"><div class="in">${committed ? '<span style="color:var(--muted)">Mensagem do commit</span>' : msg + (pulse && !msg.length === false ? '<span class="caret"></span>' : "") || '<span style="color:var(--muted)">Mensagem do commit</span>'}</div><div class="bt${ready ? " on" : ""}${press ? " press" : ""}">Commit</div></div>`;
+    }
+  }
+  $("rbody").innerHTML = body;
+
+  // status bar
+  const terms = (t < 3600 ? 2 : 4) + (dev ? 1 : 0) - (t < 3600 ? 0 : 1);
+  const ports = t >= 6000 ? 2 : 1;
+  const ctx = sel === "promo" ? Math.min(41, 8 + Math.floor((t - 3900) / 250)) : 34;
+  $("sb").innerHTML = `<span class="on">☕ On</span><span>▦ 1.2 GB</span><span>▣ 6.4%</span><span>▸ ${terms}</span><span>⚡ ${ports}</span><span class="sp"></span>
+    <span class="lim">ctx <span class="lim-bar"><i style="width:${Math.max(8, ctx)}%"></i></span>${Math.max(8, ctx)}%</span>
+    <span class="lim"><span class="lim-bar"><i style="width:58%"></i></span>58% used · 5h</span>
+    <span class="lim"><span class="lim-bar"><i style="width:41%"></i></span>41% used · semana</span>`;
+
+  $("toast").style.display = t >= 9800 && t < 12000 ? "block" : "none";
+
+  // command palette
+  const pal = $("pal");
+  if (palOpen) {
+    const q = typed("dark", t, 11300, 130);
+    const items = q ? [["ax/dark-mode", "worktree · acme-web"], ["Alternar tema", "ação"]] : [["ax/dark-mode", "worktree · acme-web"], ["ax/promo-codes", "worktree · acme-web"], ["Novo worktree", "ação"], ["Definições", "ação"]];
+    pal.style.display = "flex";
+    pal.innerHTML = `<div class="pal"><div class="pin">${q || '<span style="color:var(--muted)">Ir para worktree ou executar ação…</span>'}${pulse ? '<span class="caret"></span>' : ""}</div>${items.map((it, i) => `<div class="it${i === 0 ? " on" : ""}"><span>${it[0]}</span><span class="hint">${it[1]}</span></div>`).join("")}</div>`;
+  } else pal.style.display = "none";
 }
 
 window.setT = (t) => render(t);
