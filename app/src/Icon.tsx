@@ -94,6 +94,10 @@ const PATHS: Record<string, JSX.Element> = {
   ),
 };
 
+/** JSX builds real DOM nodes: inserting the shared node in a second place would move it out of the first,
+ *  leaving every other use of the icon empty. Each use gets its own copy. */
+const fresh = (el: JSX.Element): JSX.Element => (Array.isArray(el) ? el.map(fresh) : el instanceof Node ? el.cloneNode(true) : el);
+
 /** true when `name` is an icon this file draws (menus accept an icon name or plain text) */
 export const hasIcon = (name: string | undefined): boolean => !!name && name in PATHS;
 
@@ -111,6 +115,6 @@ export const Icon = (props: { name: keyof typeof PATHS | string; size?: number; 
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    {PATHS[props.name]}
+    {fresh(PATHS[props.name])}
   </svg>
 );
