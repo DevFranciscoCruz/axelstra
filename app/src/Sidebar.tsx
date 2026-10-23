@@ -173,6 +173,19 @@ export function Sidebar() {
       }
     })(),
   );
+  // a whole project folded to its header
+  const projKey = (id: string) => `project:${id}`;
+  const projFolded = (id: string) => folded().has(projKey(id));
+  const toggleProject = (id: string) => {
+    const next = new Set(folded());
+    if (!next.delete(projKey(id))) next.add(projKey(id));
+    setFolded(next);
+    try {
+      localStorage.setItem(GROUPS_KEY, JSON.stringify([...next]));
+    } catch {
+      /* preference only */
+    }
+  };
   const toggleFold = (path: string) => {
     const next = new Set(folded());
     const k = wtKey(path);
@@ -491,8 +504,18 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
             return layout(p.worktrees, { finished: fin, hidden: nested(), collapsed: folded(), pinned: isPinned });
           });
           return (
-          <div class="project">
+          <div class="project" classList={{ collapsed: projFolded(p.id) }}>
             <div class="project-head" title={p.path} onContextMenu={(e) => showMenu(e, projectMenu(p))}>
+              <button
+                type="button"
+                class="icon proj-fold"
+                aria-expanded={!projFolded(p.id)}
+                aria-label={projFolded(p.id) ? `Abrir o projeto ${p.name}` : `Fechar o projeto ${p.name}`}
+                title={projFolded(p.id) ? "Mostrar os worktrees" : "Esconder os worktrees"}
+                onClick={() => toggleProject(p.id)}
+              >
+                <Icon name={projFolded(p.id) ? "chevRight" : "chevDown"} size={12} />
+              </button>
               <ProjectIcon id={p.id} name={p.name} url={p.icon_url} />
               <span class="pname" title={p.slug ?? p.path}>{p.name}</span>
               <button class="icon" title="Novo worktree" aria-label="Novo worktree" onClick={() => setCreating(creating() === p.id ? null : p.id)}>
