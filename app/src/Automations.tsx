@@ -106,16 +106,16 @@ export function Automations() {
                           {projectName(a.project)} · {a.agent} · {describe(a)}
                         </div>
                       </div>
-                      <button class="icon" title="Executar agora" onClick={() => void runNow(a)}>
+                      <button class="icon" title="Executar agora" aria-label="Executar agora" onClick={() => void runNow(a)}>
                         <Icon name="play" />
                       </button>
-                      <button class="icon" title={a.enabled ? "Desativar" : "Ativar"} onClick={() => void toggle(a)}>
+                      <button class="icon" title={a.enabled ? "Desativar" : "Ativar"} aria-label={a.enabled ? "Desativar" : "Ativar"} onClick={() => void toggle(a)}>
                         <Icon name={a.enabled ? "pause" : "play"} />
                       </button>
-                      <button class="icon" title="Editar" onClick={() => setDraft({ ...a })}>
+                      <button class="icon" title="Editar" aria-label="Editar" onClick={() => setDraft({ ...a })}>
                         <Icon name="pencil" />
                       </button>
-                      <button class="icon danger" title="Apagar automatização" onClick={() => void remove(a)}>
+                      <button class="icon danger" title="Apagar automatização" aria-label="Apagar automatização" onClick={() => void remove(a)}>
                         <Icon name="x" />
                       </button>
                     </div>

@@ -81,7 +81,7 @@ export function DiffView() {
             </span>
           )}
         </Show>
-        <button class="icon" title="Recarregar" onClick={() => void refetch()}>
+        <button class="icon" title="Recarregar" aria-label="Recarregar" onClick={() => void refetch()}>
           <Icon name="refresh" />
         </button>
       </div>
@@ -97,7 +97,7 @@ export function DiffView() {
                         <td class="ln">{r.old ?? ""}</td>
                         <td class="ln">
                           <Show when={r.kind !== "hunk" && r.kind !== "note"} fallback={r.neu ?? ""}>
-                            <button class="cbtn" title="Comentar e enviar ao agente" onClick={() => { setNote(""); setCommenting(commenting() === i() ? null : i()); }}>
+                            <button class="cbtn" title="Comentar e enviar ao agente" aria-label="Comentar e enviar ao agente" onClick={() => { setNote(""); setCommenting(commenting() === i() ? null : i()); }}>
                               ＋
                             </button>
                             <span class="lnum">{r.neu ?? ""}</span>

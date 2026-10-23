@@ -29,7 +29,7 @@ import { StatusBar } from "./StatusBar";
 import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
 import { ErrorToast } from "./ErrorToast";
 import { Modal } from "./Modal";
-import { labelIcons, press } from "./a11y";
+import { press } from "./a11y";
 import { ask } from "./Confirm";
 import { PullsPanel } from "./PullsPanel";
 import { TerminalView } from "./TerminalView";
@@ -152,7 +152,6 @@ export function App() {
   );
 
   onMount(() => {
-    labelIcons();
     void refreshProjects();
     // sessions of a previous daemon run come back before the first list, so the sidebar never shows them missing
     const restore = (prefix: string) =>
@@ -560,7 +559,7 @@ export function App() {
           fallback={
             <div class="placeholder">
               <Show when={!showSidebar()}>
-                <button class="icon add" title="Mostrar projetos (Ctrl+B)" onClick={toggleSidebar}>
+                <button class="icon add" title="Mostrar projetos (Ctrl+B)" aria-label="Mostrar projetos (Ctrl+B)" onClick={toggleSidebar}>
                   <PanelIcon side="left" on={false} />
                 </button>
               </Show>
@@ -569,7 +568,7 @@ export function App() {
           }
         >
           <div class="tabbar">
-            <button class="icon add" title="Projetos (Ctrl+B)" classList={{ on: showSidebar() }} onClick={toggleSidebar}>
+            <button class="icon add" title="Projetos (Ctrl+B)" aria-label="Projetos (Ctrl+B)" classList={{ on: showSidebar() }} onClick={toggleSidebar}>
               <PanelIcon side="left" on={showSidebar()} />
             </button>
             <div class="tabs">
@@ -639,7 +638,7 @@ export function App() {
                   </Show>
                   <button
                     class="x"
-                    title="Fechar"
+                    title="Fechar" aria-label="Fechar"
                     onClick={(e) => {
                       e.stopPropagation();
                       void close(s);
@@ -655,7 +654,7 @@ export function App() {
                 <div class="tab diff-tab" classList={{ active: !showKanban() }} title={c().subject} {...press(() => setShowKanban(false), "tab")}>
                   <span class="dtag"><Icon name="branch" size={11} /></span>
                   <span>{c().short}</span>
-                  <button class="x" title="Fechar commit" onClick={() => setOpenCommit(null)}>
+                  <button class="x" title="Fechar commit" aria-label="Fechar commit" onClick={() => setOpenCommit(null)}>
                     <Icon name="x" />
                   </button>
                 </div>
@@ -666,7 +665,7 @@ export function App() {
                 <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} {...press(() => setShowKanban(false), "tab")}>
                   <span class="dtag"><Icon name="pencil" size={11} /></span>
                   <span>{baseName(p())}</span>
-                  <button class="x" title="Fechar ficheiro" onClick={(e) => { e.stopPropagation(); guarded(() => setOpenFile(null)); }}>
+                  <button class="x" title="Fechar ficheiro" aria-label="Fechar ficheiro" onClick={(e) => { e.stopPropagation(); guarded(() => setOpenFile(null)); }}>
                     <Icon name="x" />
                   </button>
                 </div>
@@ -677,7 +676,7 @@ export function App() {
                 <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} {...press(() => setShowKanban(false), "tab")}>
                   <span class="dtag">Δ</span>
                   <span>{baseName(p())}</span>
-                  <button class="x" title="Fechar diff" onClick={() => setOpenDiff(null)}>
+                  <button class="x" title="Fechar diff" aria-label="Fechar diff" onClick={() => setOpenDiff(null)}>
                     <Icon name="x" />
                   </button>
                 </div>
@@ -696,26 +695,26 @@ export function App() {
                 </button>
               )}
             </For>
-            <button class="icon add" title="Ditado por voz (Ctrl+Shift+M)" classList={{ on: listening(), rec: listening() }} onClick={() => void toggleVoice()} hidden={!voiceSupported}>
+            <button class="icon add" title="Ditado por voz (Ctrl+Shift+M)" aria-label="Ditado por voz (Ctrl+Shift+M)" classList={{ on: listening(), rec: listening() }} onClick={() => void toggleVoice()} hidden={!voiceSupported}>
               <MicIcon />
             </button>
-            <button class="icon add" title="Dividir: ver dois terminais lado a lado" classList={{ on: splitSession() !== null }} onClick={() => void toggleSplit()}>
+            <button class="icon add" title="Dividir: ver dois terminais lado a lado" aria-label="Dividir: ver dois terminais lado a lado" classList={{ on: splitSession() !== null }} onClick={() => void toggleSplit()}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
                 <path d="M5.5 3v10M10.5 3v10" />
               </svg>
             </button>
-            <button class="icon add" title={`Novo agente (${defaultAgent()})`} onClick={newAgent}>
+            <button class="icon add" title={`Novo agente (${defaultAgent()})`} aria-label={`Novo agente (${defaultAgent()})`} onClick={newAgent}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 1.5c.4 3.4 1.6 4.6 5 5-3.4.4-4.6 1.6-5 5-.4-3.4-1.6-4.6-5-5 3.4-.4 4.6-1.6 5-5z" />
               </svg>
             </button>
-            <button class="icon add" title="Novo terminal" onClick={newTerminal}>
+            <button class="icon add" title="Novo terminal" aria-label="Novo terminal" onClick={newTerminal}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
                 <path d="M8 3.5v9M3.5 8h9" />
               </svg>
             </button>
             <Show when={!showRightPanel()}>
-              <button class="icon add" title="Mostrar painel direito (Ctrl+Shift+B)" onClick={toggleRightPanel}>
+              <button class="icon add" title="Mostrar painel direito (Ctrl+Shift+B)" aria-label="Mostrar painel direito (Ctrl+Shift+B)" onClick={toggleRightPanel}>
                 <PanelIcon side="right" on={false} />
               </button>
             </Show>
@@ -778,7 +777,7 @@ export function App() {
                     }}
                   />
                   <div class="split-pane" style={{ flex: `0 0 ${splitFrac() * 100}%` }}>
-                    <button class="split-x" title="Fechar divisão" onClick={() => setSplitSession(null)}>
+                    <button class="split-x" title="Fechar divisão" aria-label="Fechar divisão" onClick={() => setSplitSession(null)}>
                       <Icon name="x" />
                     </button>
                     <Show when={splitSession()} keyed>

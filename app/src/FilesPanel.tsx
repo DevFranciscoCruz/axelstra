@@ -316,12 +316,12 @@ export function FilesPanel() {
           {info()?.project.name ?? "Ficheiros"}
         </strong>
         <span class="grow" />
-        <button class="icon" title="Recolher tudo" onClick={() => setExpanded(new Set([""]))}>
+        <button class="icon" title="Recolher tudo" aria-label="Recolher tudo" onClick={() => setExpanded(new Set([""]))}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 5h10M5 8.5h6M7 12h2" />
           </svg>
         </button>
-        <button class="icon" title="Atualizar" onClick={() => setGen(gen() + 1)}>
+        <button class="icon" title="Atualizar" aria-label="Atualizar" onClick={() => setGen(gen() + 1)}>
           <Icon name="refresh" />
         </button>
       </div>
