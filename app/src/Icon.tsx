@@ -28,6 +28,7 @@ const PATHS: Record<string, JSX.Element> = {
     </>
   ),
   play: <path d="M5 3.5v9l7-4.5z" fill="currentColor" />,
+  bolt: <path d="M9 2L4.5 9H8l-1 5L11.5 7H8z" />,
   pause: <path d="M5.5 3.5v9M10.5 3.5v9" />,
   pencil: <path d="M10.5 3l2.5 2.5L6 12.5 3 13l.5-3z" />,
   arrowUp: <path d="M8 13V3M4 7l4-4 4 4" />,

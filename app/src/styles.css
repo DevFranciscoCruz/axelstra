@@ -550,7 +550,9 @@ button.icon:hover {
 .kcount { color: var(--muted); font-weight: 400; flex: 1; }
 .kcards { flex: 1; overflow: auto; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 6px; }
 .modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 10; }
-.modal { width: min(560px, 92vw); max-height: 88vh; display: flex; flex-direction: column; gap: 8px; background: #2a2a32; border: 1px solid var(--line-3); border-radius: 10px; padding: 14px; }
+.modal { width: min(560px, 92vw); max-height: 88vh; display: flex; flex-direction: column; gap: 8px; background: #2a2a32; border: 1px solid var(--line-3); border-radius: 10px; padding: 14px; overflow-y: auto; }
+/* every dialog scrolls inside its max-height instead of squashing its children or running off the window */
+.modal > * { flex-shrink: 0; }
 .modal input, .modal textarea, .modal select { background: #22222a; color: inherit; border: 1px solid var(--line-2); border-radius: 4px; padding: 5px 7px; font: inherit; font-size: 13px; box-sizing: border-box; }
 .m-title { font-size: 15px !important; }
 .m-body { min-height: 180px; resize: vertical; font-family: "Cascadia Code", Consolas, monospace !important; }
@@ -616,7 +618,7 @@ button.danger { color: var(--danger); }
 .menu-item .tick { font-size: 11px; }
 
 .agent-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
-.agent-modal { background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 240px; }
+.agent-modal { background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 240px; max-height: 88vh; overflow-y: auto; }
 .agent-modal h3 { margin: 0 0 6px; font-size: 14px; }
 .agent-modal button { padding: 8px 10px; border-radius: 6px; cursor: pointer; }
 .agent-modal button.pref { outline: 2px solid var(--accent); }
@@ -911,8 +913,7 @@ button.icon, button.x, button.split-x, button.cbtn { display: inline-flex; align
 .wt-badge .bd { display: inline-flex; align-items: center; gap: 1px; }
 .side-link { display: flex; align-items: center; gap: 6px; }
 .pill { display: inline-flex; align-items: center; gap: 6px; }
-.modal.settings { width: min(520px, 92vw); overflow-y: auto; }
-.modal.settings > * { flex-shrink: 0; }
+.modal.settings { width: min(520px, 92vw); }
 .set-sec { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
 .set-sec h4 { margin: 0; font-size: 13px; }
 .set-sec .auto-note { margin: 0; }
@@ -929,3 +930,6 @@ button.icon, button.x, button.split-x, button.cbtn { display: inline-flex; align
 .disp-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .disp-reqs { margin: 2px 0 0; padding-left: 18px; font-size: 12px; color: var(--muted); }
 .disp-reqs li { margin: 1px 0; }
+
+/* a confirmation about something destructive: the button that proceeds says so, the safe one has the focus */
+.modal .m-actions button.primary.kind-warn { background: var(--danger); color: #1e1f23; }
