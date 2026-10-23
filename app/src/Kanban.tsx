@@ -2,15 +2,13 @@ import { Select } from "./Select";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
-import { Board, KCard, OrchRun, gitPr, gitPush, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchRetry, orchStart, orchStatus } from "./api";
+import { AgentInfo, Board, KCard, agentOptions, agentWarning, agentsList, OrchRun, gitPr, gitPush, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchRetry, orchStart, orchStatus } from "./api";
 import { Modal } from "./Modal";
-import { agentKeys, refreshProjects, selectWorktree, setShowKanban } from "./store";
+import { refreshProjects, selectWorktree, setShowKanban } from "./store";
 import { press } from "./a11y";
 
 /** only cards are accepted by the columns: a terminal tab or a file dragged over is ignored */
 const CARD_MIME = "application/x-axelstra-card";
-/** agents the orchestrator can run unattended */
-const RUNNABLE = ["claude", "chatgpt", "codex"];
 
 const COLS: { id: string; label: string }[] = [
   { id: "backlog", label: "Ideias" },
@@ -25,6 +23,7 @@ type Draft = { id?: string; title: string; body: string; status: string; depends
 export function Kanban(props: { project: string }) {
   const [board, setBoard] = createSignal<Board>({ cards: [], broken: [] });
   const [err, setErr] = createSignal("");
+  const [agents, setAgents] = createSignal<AgentInfo[]>([]);
   const [draft, setDraft] = createSignal<Draft | null>(null);
   const [over, setOver] = createSignal<string | null>(null);
   const [dragId, setDragId] = createSignal<string | null>(null);
@@ -77,6 +76,7 @@ export function Kanban(props: { project: string }) {
     }
   };
   onMount(() => {
+    agentsList().then(setAgents, () => {});
     void reload();
     void pollRun();
     // agents move cards while the orchestrator runs
@@ -359,9 +359,10 @@ export function Kanban(props: { project: string }) {
                   Agente
                   <Select
                     value={d().agent}
-                    options={[...new Set([...agentKeys().filter((a) => RUNNABLE.includes(a)), d().agent])].map((a) => ({ value: a, label: a }))}
+                    options={agentOptions(agents(), d().agent)}
                     onChange={(v) => setDraft({ ...d(), agent: v })}
                   />
+                  <Show when={agentWarning(agents(), d().agent)}>{(w) => <span class="auto-note">{w()}</span>}</Show>
                 </label>
                 <label>
                   Prioridade

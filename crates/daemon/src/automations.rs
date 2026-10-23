@@ -23,7 +23,7 @@ pub struct Automation {
     pub id: String,
     pub name: String,
     pub project: String,
-    /// key of the agent CLI: "claude" or "codex"
+    /// id of an agent in the core agents table (claude, codex, gemini, opencode, aider)
     pub agent: String,
     pub prompt: String,
     pub schedule: Schedule,
@@ -62,9 +62,7 @@ pub fn validate(a: &Automation) -> Result<()> {
     if a.prompt.trim().is_empty() {
         bail!("prompt is empty");
     }
-    if !matches!(a.agent.as_str(), "claude" | "codex") {
-        bail!("unknown agent {}", a.agent);
-    }
+    axelstra_core::agents::require(&a.agent)?;
     match &a.schedule {
         Schedule::Interval { minutes } if *minutes < 5 => bail!("interval must be at least 5 minutes"),
         Schedule::Interval { minutes } if *minutes > MAX_INTERVAL_MINUTES => bail!("interval must be at most a year"),
@@ -151,13 +149,26 @@ pub fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-/// Program and args that run `cli "<prompt>"` in a shell and leave that shell open afterwards.
-pub fn agent_command(cli: &str, prompt: &str) -> (String, Vec<String>) {
+/// Program and args that run the agent `cli` (an id from the agents table) on `prompt` in a shell and leave that
+/// shell open afterwards. Every argument is quoted; the agent's own flags come from the table.
+pub fn agent_command(cli: &str, prompt: &str) -> Result<(String, Vec<String>)> {
+    let argv = axelstra_core::agents::require(cli)?.start_argv(prompt);
+    Ok(shell_command(&argv))
+}
+
+/// Same, for a program named outside the table (the `AXELSTRA_AGENT_CLI` override).
+pub fn raw_command(cli: &str, prompt: &str) -> (String, Vec<String>) {
+    shell_command(&[cli.to_string(), prompt.to_string()])
+}
+
+fn shell_command(argv: &[String]) -> (String, Vec<String>) {
     if cfg!(windows) {
-        ("powershell".into(), vec!["-NoLogo".into(), "-NoExit".into(), "-Command".into(), format!("{cli} {}", ps_quote(prompt))])
+        let line = argv.iter().map(|a| ps_quote(a)).collect::<Vec<_>>().join(" ");
+        // `&` calls the quoted program name (a .cmd shim included)
+        ("powershell".into(), vec!["-NoLogo".into(), "-NoExit".into(), "-Command".into(), format!("& {line}")])
     } else {
         let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        let line = format!("{cli} {}; exec {} -l", sh_quote(prompt), sh_quote(&sh));
+        let line = format!("{}; exec {} -l", argv.iter().map(|a| sh_quote(a)).collect::<Vec<_>>().join(" "), sh_quote(&sh));
         (sh, vec!["-l".into(), "-c".into(), line])
     }
 }
@@ -254,7 +265,28 @@ mod tests {
         assert_eq!(ps_quote("a\u{2019};calc;\u{2018}"), "'a\u{2019}\u{2019};calc;\u{2018}\u{2018}'");
         assert_eq!(ps_quote("\u{201A}\u{201B}"), "'\u{201A}\u{201A}\u{201B}\u{201B}'");
         assert_eq!(sh_quote("it's $x"), "'it'\\''s $x'");
-        let (_, args) = agent_command("claude", "a 'b'");
+        let (_, args) = agent_command("claude", "a 'b'").unwrap();
         assert!(args.last().unwrap().contains("claude"));
+    }
+
+    #[test]
+    fn automation_commands_come_from_the_agents_table() {
+        let gem = agent_command("gemini", "do it").unwrap().1.last().unwrap().clone();
+        assert!(gem.contains("gemini") && gem.contains("-i") && gem.contains("do it"), "{gem}");
+        let aider = agent_command("aider", "do it").unwrap().1.last().unwrap().clone();
+        assert!(aider.contains("--message"), "{aider}");
+        assert!(agent_command("powershell", "x").is_err());
+    }
+
+    #[test]
+    fn unknown_agent_is_rejected() {
+        for ok in ["claude", "codex", "gemini", "opencode", "aider"] {
+            let mut a = auto(Schedule::Interval { minutes: 30 });
+            a.agent = ok.into();
+            assert!(validate(&a).is_ok(), "{ok}");
+        }
+        let mut a = auto(Schedule::Interval { minutes: 30 });
+        a.agent = "rm".into();
+        assert!(validate(&a).unwrap_err().to_string().contains("desconhecido"));
     }
 }
