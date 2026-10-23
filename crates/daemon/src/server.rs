@@ -1,4 +1,5 @@
 use crate::proto::*;
+use crate::store::{read_json, write_atomic, LockRecover};
 use anyhow::Result;
 use axelstra_core::pty::{Session, Spawn};
 use serde::Deserialize;
@@ -15,6 +16,15 @@ use tokio::sync::mpsc;
 static INSTANCE: std::sync::LazyLock<u64> =
     std::sync::LazyLock::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0));
 
+/// Frames queued for one connection's writer task. Bounded: a client that stops reading slows its own senders
+/// down (they block) instead of growing the daemon's memory.
+type Tx = mpsc::Sender<Vec<u8>>;
+const OUT_QUEUE: usize = 1024;
+
+/// Lock order. Hold at most these in this order, never a later one while taking an earlier one:
+///   auto_lock, sessions, labels, metas, specs, pending, then the leaf locks (runs, flows, plist).
+/// Leaf locks are never held while taking another lock. A path that needs two takes them in this order
+/// (`session.list`, `daemon.shutdown` and `persist` do); the `lock_order` test runs those paths against each other.
 struct Registry {
     next: AtomicU32,
     sessions: Mutex<HashMap<u32, Arc<Session>>>,
@@ -49,13 +59,40 @@ struct Registry {
 impl Registry {
     /// Rewrites sessions.json: still-pending sessions first, then the live ones.
     fn persist(&self) {
-        let mut v = self.pending.lock().unwrap().clone();
-        let specs = self.specs.lock().unwrap();
+        // both locks stay held through the write, so two persists cannot land out of order
+        let specs = self.specs.lock_recover();
+        let pending = self.pending.lock_recover();
+        let mut v = pending.clone();
         let mut ids: Vec<_> = specs.keys().copied().collect();
         ids.sort();
         v.extend(ids.iter().map(|i| specs[i].clone()));
         if let Ok(text) = serde_json::to_string(&v) {
-            let _ = std::fs::write(&self.saved, text);
+            let _ = write_atomic(&self.saved, text.as_bytes());
+        }
+    }
+
+    fn new(store: std::path::PathBuf, pipe: String, token: String) -> Registry {
+        let saved = store.with_file_name("sessions.json");
+        // a corrupt sessions.json is moved to sessions.json.bad, so the first persist cannot wipe it
+        let pending = read_json::<Vec<Value>>(&saved).ok().flatten().unwrap_or_default();
+        Registry {
+            next: AtomicU32::new(0),
+            sessions: Default::default(),
+            labels: Default::default(),
+            metas: Default::default(),
+            store,
+            pipe,
+            token,
+            runs: Default::default(),
+            auto_lock: Default::default(),
+            flows: Default::default(),
+            plist: Default::default(),
+            specs: Default::default(),
+            pending: Mutex::new(pending),
+            saved,
+            bus: crate::msgbus::Bus::new(),
+            clients: Default::default(),
+            computer: AtomicBool::new(false),
         }
     }
 
@@ -64,24 +101,24 @@ impl Registry {
         let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
         let want = norm(path);
         // a worktree a running flow plan still has to use (queued or running) is not finished, whatever its branch says
-        let in_flow = self.flows.lock().unwrap().values().any(|t| {
+        let in_flow = self.flows.lock_recover().values().any(|t| {
             t.as_array().map(|a| a.iter().any(|x| x["worktree"].as_str().map(|w| norm(w) == want).unwrap_or(false) && matches!(x["state"].as_str(), Some("queued") | Some("running")))).unwrap_or(false)
         });
         if in_flow {
             return true;
         }
         // one lock at a time (the rest of the daemon takes sessions before metas)
-        let alive: Vec<u32> = self.sessions.lock().unwrap().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, _)| *id).collect();
-        let metas = self.metas.lock().unwrap();
+        let alive: Vec<u32> = self.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, _)| *id).collect();
+        let metas = self.metas.lock_recover();
         let in_meta = |id: &u32| metas.get(id).and_then(|m| m["worktree"].as_str()).map(|w| norm(w) == want).unwrap_or(false);
         let hit = alive.iter().any(in_meta);
         drop(metas);
-        let specs = self.specs.lock().unwrap();
-        hit || alive.iter().any(|id| specs.get(id).and_then(|sp| sp["cwd"].as_str()).map(|c| norm(c).starts_with(&want)).unwrap_or(false))
+        let specs = self.specs.lock_recover();
+        hit || alive.iter().any(|id| specs.get(id).and_then(|sp| sp["cwd"].as_str()).map(|c| within(&norm(c), &want)).unwrap_or(false))
     }
 
     fn get(&self, id: u32) -> Option<Arc<Session>> {
-        self.sessions.lock().unwrap().get(&id).cloned()
+        self.sessions.lock_recover().get(&id).cloned()
     }
 
     /// Starts a session and records its label and UI metadata.
@@ -102,15 +139,21 @@ impl Registry {
             }
         }
         let sess = Arc::new(Session::spawn(&s)?);
-        self.sessions.lock().unwrap().insert(id, sess);
+        self.sessions.lock_recover().insert(id, sess);
         if let Some(l) = label {
-            self.labels.lock().unwrap().insert(id, l.to_string());
+            self.labels.lock_recover().insert(id, l.to_string());
         }
         if let Some(m) = meta {
-            self.metas.lock().unwrap().insert(id, m);
+            self.metas.lock_recover().insert(id, m);
         }
         Ok(id)
     }
+}
+
+/// True when `path` is `root` or lies below it, comparing whole path components (`/a/wt-2` is not inside `/a/wt`).
+/// Both are already normalized (forward slashes, lowercase).
+fn within(path: &str, root: &str) -> bool {
+    std::path::Path::new(path).starts_with(root)
 }
 
 const SHELLS: [&str; 6] = ["auto", "pwsh", "powershell", "bash", "wsl", "cmd"];
@@ -146,7 +189,7 @@ fn apply_ui_settings(saved: &mut Value, p: &Value) -> Result<()> {
 
 /// The app-wide settings file next to the daemon state (missing or broken = no settings).
 fn read_settings(saved: &std::path::Path) -> Value {
-    std::fs::read_to_string(saved.with_file_name("settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({}))
+    read_json(&saved.with_file_name("settings.json")).ok().flatten().unwrap_or_else(|| json!({}))
 }
 
 /// Ephemeral worker: when it finishes (process exit, or quiet for `idle_secs` in "idle" mode) its last
@@ -173,17 +216,17 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
                 if axelstra_core::waiting::needs_input(&s.tail(4096)) || axelstra_core::waiting::asks_question(&screen) {
                     // it is waiting for an answer, not finished: keep it and tell the parent once (until it works again)
                     if let Some((pid, ps)) = parent.and_then(|p| reg.get(p).map(|s| (p, s))) {
-                        let label = reg.labels.lock().unwrap().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
+                        let label = reg.labels.lock_recover().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
                         let shown = axelstra_core::screen::last_reply(&s.screen_lines(200)).unwrap_or_else(|| screen.join("\n"));
                         let text = format!("parou à espera de uma resposta. Última mensagem:\n{shown}");
                         let m = reg.bus.send(Some(id), pid, "escalate", &text, None, None);
-                        let agent = reg.metas.lock().unwrap().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
+                        let agent = reg.metas.lock_recover().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
                         if agent {
                             crate::msgbus::deliver(ps, crate::msgbus::paste(&crate::msgbus::notice(&m, &format!("{label} (sessão {id})"))));
                         }
                     }
                     worked = false;
-                } else if !nudged && reg.metas.lock().unwrap().get(&id).map(|m| m["kind"] == "agent").unwrap_or(false) {
+                } else if !nudged && reg.metas.lock_recover().get(&id).map(|m| m["kind"] == "agent").unwrap_or(false) {
                     // first quiet spell: ask the worker to report through the bus instead of scraping its screen
                     let text = "[axelstra] você parou sem reportar. Se terminou, rode `axelstra done \"<relatório>\"` com o resultado (o que mudou, o que falhou, o que falta). Se está bloqueado ou tem uma dúvida, rode `axelstra escalate \"<motivo>\"`.";
                     crate::msgbus::deliver(s.clone(), crate::msgbus::paste(text));
@@ -203,7 +246,7 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
         // what the terminal shows, not the escape-code soup of a TUI redrawing itself
         // for an agent TUI only its last reply, not the banner, tool-run lines and status bar around it
         let tail = axelstra_core::screen::last_reply(&s.screen_lines(200)).unwrap_or_else(|| s.screen_lines(lines).join("\n"));
-        let label = reg.labels.lock().unwrap().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
+        let label = reg.labels.lock_recover().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
         let status = match (done_by_idle, code) {
             _ if done_msg.is_some() => "terminou (chamou `axelstra done`)".to_string(),
             (true, _) => "foi fechado por ficar parado sem chamar `axelstra done` (se o texto abaixo for uma pergunta, ele estava à espera de uma resposta e não concluiu)".to_string(),
@@ -212,7 +255,7 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
             _ => "terminou".to_string(),
         };
         if let Some(parent) = parent.and_then(|p| reg.get(p).map(|s| (p, s))) {
-            let agent = reg.metas.lock().unwrap().get(&parent.0).and_then(|m| m["kind"].as_str().map(|k| k == "agent")).unwrap_or(false);
+            let agent = reg.metas.lock_recover().get(&parent.0).and_then(|m| m["kind"].as_str().map(|k| k == "agent")).unwrap_or(false);
             let body = match &done_msg {
                 Some(d) => format!("Relatório:\n{}", d["text"].as_str().unwrap_or_default()),
                 None => format!("Últimas linhas:\n{tail}"),
@@ -223,10 +266,10 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
             crate::msgbus::deliver(parent.1.clone(), data.into_bytes());
         }
         s.kill();
-        reg.sessions.lock().unwrap().remove(&id);
-        reg.labels.lock().unwrap().remove(&id);
-        reg.metas.lock().unwrap().remove(&id);
-        reg.specs.lock().unwrap().remove(&id);
+        reg.sessions.lock_recover().remove(&id);
+        reg.labels.lock_recover().remove(&id);
+        reg.metas.lock_recover().remove(&id);
+        reg.specs.lock_recover().remove(&id);
         reg.bus.forget(id);
         reg.persist();
     });
@@ -256,6 +299,11 @@ fn spawn_scheduler(reg: Arc<Registry>) {
                 })
                 .await;
             }
+            if n % 2 == 0 {
+                // a crash or a kill skips the shutdown save: keep the agent terminals on disk every minute too
+                let r = reg.clone();
+                let _ = tokio::task::spawn_blocking(move || save_histories(&r)).await;
+            }
             if n % 20 == 0 && !reg.saved.with_file_name("janitor.off").exists() {
                 let r = reg.clone();
                 let _ = tokio::task::spawn_blocking(move || {
@@ -267,7 +315,7 @@ fn spawn_scheduler(reg: Arc<Registry>) {
             }
             let r = reg.clone();
             let _ = tokio::task::spawn_blocking(move || {
-                let _g = r.auto_lock.lock().unwrap();
+                let _g = r.auto_lock.lock_recover();
                 let path = crate::automations::store_path(&r.store);
                 let list = crate::automations::load(&path);
                 for id in crate::automations::due_now(&list, crate::automations::now_ts()) {
@@ -317,28 +365,7 @@ pub async fn serve(pipe: String, token: String) -> Result<()> {
 
 /// Same as `serve`, with an explicit projects file (tests must not touch the user's).
 pub async fn serve_with_store(pipe: String, token: String, store: std::path::PathBuf) -> Result<()> {
-    let saved = store.with_file_name("sessions.json");
-    let reg = Arc::new(Registry {
-        next: AtomicU32::new(0),
-        sessions: Default::default(),
-        labels: Default::default(),
-        metas: Default::default(),
-        store,
-        pipe: pipe.clone(),
-        token: token.clone(),
-        runs: Default::default(),
-        auto_lock: Default::default(),
-        flows: Default::default(),
-        plist: Default::default(),
-        specs: Default::default(),
-        pending: Mutex::new(
-            std::fs::read_to_string(&saved).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default(),
-        ),
-        saved,
-        bus: crate::msgbus::Bus::new(),
-        clients: Default::default(),
-        computer: AtomicBool::new(false),
-    });
+    let reg = Arc::new(Registry::new(store, pipe.clone(), token.clone()));
     // Claude Code hook: records the agent's current conversation id (it changes on /clear), keyed by AXELSTRA_KEY
     let dir = reg.saved.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
     let hook = json!({"hooks": {"SessionStart": [{"hooks": [{"type": "command",
@@ -361,10 +388,30 @@ async fn accept_loop(pipe: &str, reg: Arc<Registry>, token: String) -> Result<()
     use tokio::net::windows::named_pipe::ServerOptions;
     let mut server = ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(pipe)?;
     loop {
-        server.connect().await?;
+        // one failed accept (a client that vanished mid-connect) must not end the daemon: log, back off, go on
+        if let Err(e) = server.connect().await {
+            eprintln!("accept failed: {e}");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            server = next_instance(pipe).await;
+            continue;
+        }
         let conn = server;
-        server = ServerOptions::new().reject_remote_clients(true).create(pipe)?;
+        server = next_instance(pipe).await;
         tokio::spawn(handle(conn, reg.clone(), token.clone()));
+    }
+}
+
+/// A fresh pipe instance to accept on, retrying with a short backoff while the system refuses to make one.
+#[cfg(windows)]
+async fn next_instance(pipe: &str) -> tokio::net::windows::named_pipe::NamedPipeServer {
+    loop {
+        match tokio::net::windows::named_pipe::ServerOptions::new().reject_remote_clients(true).create(pipe) {
+            Ok(s) => return s,
+            Err(e) => {
+                eprintln!("could not create a pipe instance: {e}");
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        }
     }
 }
 
@@ -385,8 +432,15 @@ async fn accept_loop(path: &str, reg: Arc<Registry>, token: String) -> Result<()
     let listener = tokio::net::UnixListener::bind(path)?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     loop {
-        let (conn, _) = listener.accept().await?;
-        tokio::spawn(handle(conn, reg.clone(), token.clone()));
+        match listener.accept().await {
+            Ok((conn, _)) => {
+                tokio::spawn(handle(conn, reg.clone(), token.clone()));
+            }
+            Err(e) => {
+                eprintln!("accept failed: {e}");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
     }
 }
 
@@ -416,7 +470,7 @@ fn spawn_idle_exit(reg: Arc<Registry>) {
         loop {
             std::thread::sleep(Duration::from_secs(10));
             let busy = reg.clients.load(Ordering::SeqCst) > 0
-                || reg.sessions.lock().unwrap().values().any(|s| s.try_wait().is_none())
+                || reg.sessions.lock_recover().values().any(|s| s.try_wait().is_none())
                 || crate::automations::load(&crate::automations::store_path(&reg.store)).iter().any(|a| a.enabled);
             idle = if busy { 0 } else { idle + 10 };
             if idle >= limit {
@@ -438,7 +492,7 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
     reg.clients.fetch_add(1, Ordering::SeqCst);
     let _guard = ClientGuard(reg.clone());
     let (mut rd, mut wr) = tokio::io::split(pipe);
-    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(OUT_QUEUE);
     tokio::spawn(async move {
         while let Some(f) = rx.recv().await {
             if wr.write_all(&f).await.is_err() {
@@ -473,7 +527,7 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
                     Ok(v) => json!({"id": req.id, "result": v}),
                     Err(e) => json!({"id": req.id, "error": format!("{e:#}")}),
                 };
-                let _ = tx.send(encode(JSON, body.to_string().as_bytes()));
+                let _ = tx.send(encode(JSON, body.to_string().as_bytes())).await;
                 // deferred work (stream start) runs only after the reply is queued
                 for f in after {
                     f();
@@ -512,10 +566,7 @@ fn save_history(reg: &Registry, key: &str, lines: &[String]) {
     if lines.is_empty() {
         return;
     }
-    if let Some(d) = f.parent() {
-        let _ = std::fs::create_dir_all(d);
-    }
-    let _ = std::fs::write(f, lines.join("\n"));
+    let _ = write_atomic(&f, lines.join("\n").as_bytes());
 }
 
 /// The saved history as terminal text (dim, with a header), removed from disk once read.
@@ -529,7 +580,7 @@ fn take_history(reg: &Registry, key: &str) -> Option<String> {
 
 /// Tells a watching client when the state of any session changed (started, exited, went quiet, escalated, got a
 /// message...), so the UI can drop its fast polling. Cheap: it only looks at in-memory counters once a second.
-fn ensure_session_notifier(reg: &Arc<Registry>, tx: &mpsc::UnboundedSender<Vec<u8>>, subs: &mut HashMap<u32, Arc<AtomicBool>>) {
+fn ensure_session_notifier(reg: &Arc<Registry>, tx: &Tx, subs: &mut HashMap<u32, Arc<AtomicBool>>) {
     const KEY: u32 = u32::MAX - 1;
     if subs.contains_key(&KEY) {
         return;
@@ -541,7 +592,7 @@ fn ensure_session_notifier(reg: &Arc<Registry>, tx: &mpsc::UnboundedSender<Vec<u
         let sig = || {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            let sessions = reg.sessions.lock().unwrap();
+            let sessions = reg.sessions.lock_recover();
             let mut ids: Vec<_> = sessions.keys().copied().collect();
             ids.sort();
             for id in ids {
@@ -557,7 +608,7 @@ fn ensure_session_notifier(reg: &Arc<Registry>, tx: &mpsc::UnboundedSender<Vec<u
             let now = sig();
             if now != last {
                 last = now;
-                if tx.send(encode(EVENT, json!({"event": "session.changed"}).to_string().as_bytes())).is_err() {
+                if tx.blocking_send(encode(EVENT, json!({"event": "session.changed"}).to_string().as_bytes())).is_err() {
                     return;
                 }
             }
@@ -565,10 +616,42 @@ fn ensure_session_notifier(reg: &Arc<Registry>, tx: &mpsc::UnboundedSender<Vec<u
     });
 }
 
+/// What `session.list` answers. Takes sessions, labels, metas in the registry's lock order.
+fn session_list(reg: &Registry) -> Vec<Value> {
+    let l = reg.sessions.lock_recover();
+    let labels = reg.labels.lock_recover();
+    let metas = reg.metas.lock_recover();
+    let mut v: Vec<Value> = l
+        .iter()
+        .map(|(id, s)| {
+            let running = s.try_wait().is_none();
+            let idle = s.idle_ms();
+            // quiet for a moment and the screen ends in a question: the agent waits for the user
+            let waiting = running && (reg.bus.is_escalated(*id) || (idle >= 1500 && axelstra_core::waiting::needs_input(&s.tail(4096))));
+            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "escalated": reg.bus.is_escalated(*id), "unread": reg.bus.unread(*id), "finished": reg.bus.finished(*id).is_some(), "label": labels.get(id), "meta": metas.get(id)})
+        })
+        .collect();
+    v.sort_by_key(|x| x["id"].as_u64());
+    v
+}
+
+/// Writes the screen of every session that has a history key (agents), for the next start to show dimmed.
+/// The locks (sessions, then metas) are held only to pick the sessions; rendering the screens happens after.
+fn save_histories(reg: &Registry) {
+    let picked: Vec<(String, Arc<Session>)> = {
+        let sessions = reg.sessions.lock_recover();
+        let metas = reg.metas.lock_recover();
+        sessions.iter().filter_map(|(id, s)| metas.get(id).and_then(|m| m["key"].as_str()).map(|k| (k.to_string(), s.clone()))).collect()
+    };
+    for (key, s) in picked {
+        save_history(reg, &key, &s.screen_lines(300));
+    }
+}
+
 fn dispatch(
     req: &Req,
     reg: &Arc<Registry>,
-    tx: &mpsc::UnboundedSender<Vec<u8>>,
+    tx: &Tx,
     subs: &mut HashMap<u32, Arc<AtomicBool>>,
     authed: &mut bool,
     token: &str,
@@ -577,7 +660,7 @@ fn dispatch(
     let p = &req.params;
     // anything that changes projects or worktrees makes the cached project list stale
     if (req.method.starts_with("worktree.") && req.method != "worktree.status") || (req.method.starts_with("project.") && !matches!(req.method.as_str(), "project.list" | "project.logo" | "project.log")) {
-        *reg.plist.lock().unwrap() = None;
+        *reg.plist.lock_recover() = None;
     }
     let sid = || -> Result<u32> {
         Ok(p.get("id").and_then(Value::as_u64).ok_or_else(|| anyhow::anyhow!("missing id"))? as u32)
@@ -653,27 +736,11 @@ fn dispatch(
             }
             let mut spec = p.clone();
             spec["id"] = Value::Null;
-            reg.specs.lock().unwrap().insert(id, spec);
+            reg.specs.lock_recover().insert(id, spec);
             reg.persist();
             Ok(json!({"id": id}))
         }
-        "session.list" => {
-            let l = reg.sessions.lock().unwrap();
-            let labels = reg.labels.lock().unwrap();
-            let metas = reg.metas.lock().unwrap();
-            let mut v: Vec<Value> = l
-                .iter()
-                .map(|(id, s)| {
-                    let running = s.try_wait().is_none();
-                    let idle = s.idle_ms();
-                    // quiet for a moment and the screen ends in a question: the agent waits for the user
-                    let waiting = running && (reg.bus.is_escalated(*id) || (idle >= 1500 && axelstra_core::waiting::needs_input(&s.tail(4096))));
-                    json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "escalated": reg.bus.is_escalated(*id), "unread": reg.bus.unread(*id), "finished": reg.bus.finished(*id).is_some(), "label": labels.get(id), "meta": metas.get(id)})
-                })
-                .collect();
-            v.sort_by_key(|x| x["id"].as_u64());
-            Ok(Value::Array(v))
-        }
+        "session.list" => Ok(Value::Array(session_list(reg))),
         "session.subscribe" => {
             let id = sid()?;
             let s = session()?;
@@ -688,7 +755,7 @@ fn dispatch(
             after.push(Box::new(move || {
                 std::thread::spawn(move || {
                 if !snap.is_empty() {
-                    let _ = tx.send(session_frame(OUTPUT, id, &snap));
+                    let _ = tx.blocking_send(session_frame(OUTPUT, id, &snap));
                 }
                 let mut quiet_ticks = 0u32;
                 loop {
@@ -698,7 +765,7 @@ fn dispatch(
                     match rx.recv_timeout(Duration::from_millis(200)) {
                         Ok(d) => {
                             quiet_ticks = 0;
-                            if tx.send(session_frame(OUTPUT, id, &d)).is_err() {
+                            if tx.blocking_send(session_frame(OUTPUT, id, &d)).is_err() {
                                 return;
                             }
                         }
@@ -708,14 +775,14 @@ fn dispatch(
                             quiet_ticks += 1;
                             if quiet_ticks >= 25 {
                                 quiet_ticks = 0;
-                                if tx.send(session_frame(OUTPUT, id, &[])).is_err() {
+                                if tx.blocking_send(session_frame(OUTPUT, id, &[])).is_err() {
                                     return;
                                 }
                             }
                             // ConPTY may keep the output pipe open after the process is gone
                             if s.try_wait().is_some() {
                                 while let Ok(d) = rx.recv_timeout(Duration::from_millis(150)) {
-                                    let _ = tx.send(session_frame(OUTPUT, id, &d));
+                                    let _ = tx.blocking_send(session_frame(OUTPUT, id, &d));
                                 }
                                 break;
                             }
@@ -732,7 +799,7 @@ fn dispatch(
                     std::thread::sleep(Duration::from_millis(50));
                 }
                 let ev = json!({"event": "session.exit", "id": id, "code": code});
-                let _ = tx.send(encode(EVENT, ev.to_string().as_bytes()));
+                let _ = tx.blocking_send(encode(EVENT, ev.to_string().as_bytes()));
                 });
             }));
             Ok(json!({}))
@@ -756,8 +823,8 @@ fn dispatch(
             let id = sid()?;
             session()?;
             let wanted: String = p["label"].as_str().unwrap_or_default().trim().chars().take(120).collect();
-            let mut labels = reg.labels.lock().unwrap();
-            let mut specs = reg.specs.lock().unwrap();
+            let mut labels = reg.labels.lock_recover();
+            let mut specs = reg.specs.lock_recover();
             // the name the session was started with, kept the first time it is renamed, so an empty name can bring it back
             let base = specs.get(&id).and_then(|sp| sp["base_label"].as_str().map(str::to_string)).or_else(|| labels.get(&id).cloned());
             let label = if wanted.is_empty() { base.clone().unwrap_or_default() } else { wanted };
@@ -788,12 +855,15 @@ fn dispatch(
             if let Some(stop) = subs.remove(&id) {
                 stop.store(true, Ordering::SeqCst);
             }
-            if let Some(s) = reg.sessions.lock().unwrap().remove(&id) {
+            if let Some(s) = reg.sessions.lock_recover().remove(&id) {
                 s.kill();
             }
-            reg.labels.lock().unwrap().remove(&id);
-            reg.metas.lock().unwrap().remove(&id);
-            reg.specs.lock().unwrap().remove(&id);
+            reg.labels.lock_recover().remove(&id);
+            // a closed tab keeps no history: the periodic save would otherwise leave its file behind
+            if let Some(f) = reg.metas.lock_recover().remove(&id).and_then(|m| m["key"].as_str().and_then(|k| history_file(reg, k))) {
+                let _ = std::fs::remove_file(f);
+            }
+            reg.specs.lock_recover().remove(&id);
             reg.bus.forget(id);
             reg.persist();
             Ok(json!({}))
@@ -827,16 +897,16 @@ fn dispatch(
         "flow.set" => {
             let id = p["flow"].as_str().unwrap_or_default().to_string();
             if !id.is_empty() {
-                reg.flows.lock().unwrap().insert(id, p["tasks"].clone());
+                reg.flows.lock_recover().insert(id, p["tasks"].clone());
             }
             Ok(json!({}))
         }
         "flow.clear" => {
-            reg.flows.lock().unwrap().remove(p["flow"].as_str().unwrap_or_default());
+            reg.flows.lock_recover().remove(p["flow"].as_str().unwrap_or_default());
             Ok(json!({}))
         }
         "flow.list" => {
-            let all: Vec<Value> = reg.flows.lock().unwrap().values().flat_map(|t| t.as_array().cloned().unwrap_or_default()).collect();
+            let all: Vec<Value> = reg.flows.lock_recover().values().flat_map(|t| t.as_array().cloned().unwrap_or_default()).collect();
             Ok(json!({"tasks": all}))
         }
         "codex.limits" => Ok(json!({"limits": tokio::task::block_in_place(crate::agentlog::codex_limits)})),
@@ -857,10 +927,10 @@ fn dispatch(
             let m = reg.bus.send(from, to, kind, text, p["reply_to"].as_u64(), p["thread"].as_str().map(String::from));
             // agents get a one-line notice; a worker with a reaper reports through it instead
             let quiet = p["quiet"].as_bool() == Some(true) || (kind == "done" && from.map(|f| reg.bus.is_reaped(f)).unwrap_or(false));
-            let agent = reg.metas.lock().unwrap().get(&to).map(|m| m["kind"] == "agent").unwrap_or(false);
+            let agent = reg.metas.lock_recover().get(&to).map(|m| m["kind"] == "agent").unwrap_or(false);
             if agent && !quiet {
                 let label = from
-                    .map(|f| reg.labels.lock().unwrap().get(&f).cloned().unwrap_or_else(|| format!("sessão {f}")))
+                    .map(|f| reg.labels.lock_recover().get(&f).cloned().unwrap_or_else(|| format!("sessão {f}")))
                     .unwrap_or_else(|| "o utilizador".into());
                 crate::msgbus::deliver(target.clone(), crate::msgbus::paste(&crate::msgbus::notice(&m, &label)));
             }
@@ -917,7 +987,7 @@ fn dispatch(
                 saved["auto_install"] = json!(b);
             }
             apply_ui_settings(&mut saved, &p)?;
-            std::fs::write(reg.saved.with_file_name("settings.json"), serde_json::to_vec_pretty(&saved)?)?;
+            write_atomic(&reg.saved.with_file_name("settings.json"), &serde_json::to_vec_pretty(&saved)?)?;
             Ok(json!({}))
         }
         "dispatch.meta" => {
@@ -927,7 +997,7 @@ fn dispatch(
         }
         "session.pending" => {
             let sid_dir = reg.saved.with_file_name("sid");
-            let mut v = reg.pending.lock().unwrap().clone();
+            let mut v = reg.pending.lock_recover().clone();
             for rec in v.iter_mut() {
                 // the agent may have started a new conversation (/clear) since: resume the latest one
                 let Some(key) = rec["meta"]["key"].as_str().map(String::from) else { continue };
@@ -956,7 +1026,7 @@ fn dispatch(
                 (Some(x), Some(y)) => x == y,
                 _ => a["program"] == rec["program"] && a["cwd"] == rec["cwd"] && a["label"] == rec["label"],
             };
-            let mut list = reg.pending.lock().unwrap();
+            let mut list = reg.pending.lock_recover();
             if let Some(i) = list.iter().position(same) {
                 list.remove(i);
             }
@@ -965,7 +1035,7 @@ fn dispatch(
             Ok(json!({}))
         }
         "session.pending_clear" => {
-            reg.pending.lock().unwrap().clear();
+            reg.pending.lock_recover().clear();
             reg.persist();
             Ok(json!({}))
         }
@@ -981,7 +1051,7 @@ fn dispatch(
         }
         "session.resources" => {
             // memory now and total CPU time of every live session (the caller turns CPU time into a percentage)
-            let l = reg.sessions.lock().unwrap().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, s)| (*id, s.clone())).collect::<Vec<_>>();
+            let l = reg.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, s)| (*id, s.clone())).collect::<Vec<_>>();
             let v: Vec<Value> = l.iter().map(|(id, s)| json!({"id": id, "mem": s.memory_now(), "cpu_100ns": s.job_usage().1})).collect();
             Ok(json!({"sessions": v, "cores": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)}))
         }
@@ -1016,7 +1086,7 @@ fn dispatch(
             Ok(json!({"usage": u}))
         }
         "project.list" => {
-            if let Some((at, v)) = reg.plist.lock().unwrap().as_ref() {
+            if let Some((at, v)) = reg.plist.lock_recover().as_ref() {
                 if at.elapsed() < Duration::from_secs(3) {
                     return Ok(v.clone());
                 }
@@ -1034,7 +1104,7 @@ fn dispatch(
                 })
                 .collect();
             let all = Value::Array(v);
-            *reg.plist.lock().unwrap() = Some((std::time::Instant::now(), all.clone()));
+            *reg.plist.lock_recover() = Some((std::time::Instant::now(), all.clone()));
             Ok(all)
         }
         "git.changes" => {
@@ -1066,7 +1136,7 @@ fn dispatch(
         }
         "orch.start" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            if reg.runs.lock().unwrap().get(&pr.id).is_some_and(|r| r["state"] == "running") {
+            if reg.runs.lock_recover().get(&pr.id).is_some_and(|r| r["state"] == "running") {
                 anyhow::bail!("an orchestration is already running for this project");
             }
             let repo = axelstra_core::git::canon(std::path::Path::new(&pr.path))?;
@@ -1083,7 +1153,7 @@ fn dispatch(
             // connects back to this same daemon: must not hold an async worker
             let runner = tokio::task::block_in_place(|| crate::runner::DaemonRunner::connect(&reg.pipe, &reg.token))?;
             let started = json!({"state": "running", "name": name, "integ_branch": format!("orch/{name}")});
-            reg.runs.lock().unwrap().insert(pr.id.clone(), started.clone());
+            reg.runs.lock_recover().insert(pr.id.clone(), started.clone());
             let (reg2, pid, n2) = (reg.clone(), pr.id.clone(), name.clone());
             std::thread::spawn(move || {
                 let res = axelstra_core::orch::run(&axelstra_core::orch::Options {
@@ -1101,13 +1171,13 @@ fn dispatch(
                         "needs_review": r.needs_review, "blocked": r.blocked}),
                     Err(e) => json!({"state": "error", "name": n2, "error": format!("{e:#}")}),
                 };
-                reg2.runs.lock().unwrap().insert(pid, v);
+                reg2.runs.lock_recover().insert(pid, v);
             });
             Ok(started)
         }
         "orch.status" => {
             let id = p["project"].as_str().unwrap_or_default();
-            Ok(reg.runs.lock().unwrap().get(id).cloned().unwrap_or(json!({"state": "idle"})))
+            Ok(reg.runs.lock_recover().get(id).cloned().unwrap_or(json!({"state": "idle"})))
         }
         "kanban.list" | "kanban.save" | "kanban.move" | "kanban.delete" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
@@ -1193,7 +1263,7 @@ fn dispatch(
             tokio::task::block_in_place(|| {
                 crate::watcher::start(wt, stop.clone(), move || {
                     let ev = json!({"event": "fs.changed", "worktree": path});
-                    let _ = tx2.send(encode(EVENT, ev.to_string().as_bytes()));
+                    let _ = tx2.blocking_send(encode(EVENT, ev.to_string().as_bytes()));
                 })
             })?;
             subs.insert(u32::MAX, stop);
@@ -1232,7 +1302,7 @@ fn dispatch(
             let norm = |s: &str| s.replace('\\', "/").to_ascii_lowercase();
             let key = norm(&wt.to_string_lossy());
             let ids: Vec<u32> = {
-                let metas = reg.metas.lock().unwrap();
+                let metas = reg.metas.lock_recover();
                 metas
                     .iter()
                     .filter(|(_, m)| m["worktree"].as_str().map(|w| norm(w)) == Some(key.clone()))
@@ -1244,11 +1314,11 @@ fn dispatch(
             Ok(json!({"ports": tokio::task::block_in_place(|| crate::ports::listening(&pids))?}))
         }
         "automation.list" => {
-            let _g = reg.auto_lock.lock().unwrap();
+            let _g = reg.auto_lock.lock_recover();
             Ok(json!({"automations": crate::automations::load(&crate::automations::store_path(&reg.store))}))
         }
         "automation.save" => {
-            let _g = reg.auto_lock.lock().unwrap();
+            let _g = reg.auto_lock.lock_recover();
             let path = crate::automations::store_path(&reg.store);
             let mut a: crate::automations::Automation = serde_json::from_value(p.clone())
                 .map_err(|e| anyhow::anyhow!("invalid automation: {e}"))?;
@@ -1278,7 +1348,7 @@ fn dispatch(
             Ok(serde_json::to_value(a)?)
         }
         "automation.delete" => {
-            let _g = reg.auto_lock.lock().unwrap();
+            let _g = reg.auto_lock.lock_recover();
             let path = crate::automations::store_path(&reg.store);
             let mut list = crate::automations::load(&path);
             list.retain(|x| x.id != p["id"].as_str().unwrap_or_default());
@@ -1286,7 +1356,7 @@ fn dispatch(
             Ok(json!({}))
         }
         "automation.run" => {
-            let _g = reg.auto_lock.lock().unwrap();
+            let _g = reg.auto_lock.lock_recover();
             let path = crate::automations::store_path(&reg.store);
             tokio::task::block_in_place(|| run_automation(reg, &path, p["id"].as_str().unwrap_or_default()))
         }
@@ -1327,11 +1397,11 @@ fn dispatch(
         "daemon.shutdown" => {
             // remember what was going on, so the next start can pick it up: agents that were working, and the
             // ephemeral workers that die with this daemon (they are not restored) per coordinator
-            let live: Vec<(u32, bool)> = reg.sessions.lock().unwrap().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, s)| (*id, s.idle_ms() < 5000)).collect();
+            let live: Vec<(u32, bool)> = reg.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, s)| (*id, s.idle_ms() < 5000)).collect();
             let mut working: Vec<u32> = vec![];
             let mut lost: HashMap<u32, Vec<String>> = HashMap::new();
             {
-                let metas = reg.metas.lock().unwrap();
+                let metas = reg.metas.lock_recover();
                 for (id, busy) in &live {
                     let m = metas.get(id);
                     if reg.bus.is_reaped(*id) {
@@ -1345,7 +1415,7 @@ fn dispatch(
                 }
             }
             {
-                let mut specs = reg.specs.lock().unwrap();
+                let mut specs = reg.specs.lock_recover();
                 for (id, spec) in specs.iter_mut() {
                     if working.contains(id) {
                         spec["meta"]["interrupted"] = Value::Bool(true);
@@ -1357,16 +1427,9 @@ fn dispatch(
             }
             reg.persist();
             // keep what each agent terminal showed, so the restored tab is not empty
-            {
-                let metas = reg.metas.lock().unwrap();
-                for (id, s) in reg.sessions.lock().unwrap().iter() {
-                    if let Some(key) = metas.get(id).and_then(|m| m["key"].as_str()) {
-                        save_history(&reg, key, &s.screen_lines(300));
-                    }
-                }
-            }
+            save_histories(reg);
             // end every terminal and agent now (their specs stay in sessions.json, so they restore on the next start)
-            for s in reg.sessions.lock().unwrap().values() {
+            for s in reg.sessions.lock_recover().values() {
                 s.kill();
             }
             std::thread::spawn(|| {
@@ -1407,5 +1470,75 @@ mod settings_tests {
         assert!(apply_ui_settings(&mut saved, &json!({"shell": "zsh"})).is_err());
         assert!(apply_ui_settings(&mut saved, &json!({"notify_mode": "loud"})).is_err());
         assert_eq!(saved, json!({}));
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    #[test]
+    fn within_compares_whole_path_components() {
+        assert!(within("c:/a/wt", "c:/a/wt"));
+        assert!(within("c:/a/wt/sub/dir", "c:/a/wt"));
+        assert!(!within("c:/a/wt-2", "c:/a/wt"));
+        assert!(!within("c:/a/wtx/sub", "c:/a/wt"));
+    }
+
+    fn temp_registry(tag: &str) -> Arc<Registry> {
+        let dir = std::env::temp_dir().join(format!("axl-reg-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Arc::new(Registry::new(dir.join("projects.json"), "p".into(), "t".into()))
+    }
+
+    #[test]
+    fn corrupt_sessions_file_is_kept_aside_and_not_overwritten() {
+        let dir = std::env::temp_dir().join(format!("axl-reg-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("sessions.json"), "[{ broken").unwrap();
+        let reg = Registry::new(dir.join("projects.json"), "p".into(), "t".into());
+        assert!(reg.pending.lock_recover().is_empty());
+        reg.persist();
+        assert_eq!(std::fs::read_to_string(dir.join("sessions.json.bad")).unwrap(), "[{ broken");
+        assert_eq!(std::fs::read_to_string(dir.join("sessions.json")).unwrap(), "[]");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn registry_survives_a_poisoned_lock() {
+        let reg = temp_registry("poison");
+        let r = reg.clone();
+        let _ = std::thread::spawn(move || {
+            let _g = r.metas.lock().unwrap();
+            panic!("handler bug");
+        })
+        .join();
+        assert!(reg.metas.is_poisoned());
+        assert!(session_list(&reg).is_empty());
+        save_histories(&reg);
+    }
+
+    /// `session.list` and `daemon.shutdown` both need sessions and metas: with one lock order they never wait on each other.
+    #[test]
+    fn lock_order_paths_do_not_deadlock() {
+        let reg = temp_registry("order");
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        for i in 0..4 {
+            let (r, d) = (reg.clone(), done_tx.clone());
+            std::thread::spawn(move || {
+                for _ in 0..2000 {
+                    if i % 2 == 0 {
+                        session_list(&r);
+                    } else {
+                        save_histories(&r);
+                        r.persist();
+                    }
+                }
+                let _ = d.send(());
+            });
+        }
+        for _ in 0..4 {
+            done_rx.recv_timeout(Duration::from_secs(30)).expect("deadlock between registry locks");
+        }
     }
 }
