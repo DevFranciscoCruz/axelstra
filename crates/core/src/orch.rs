@@ -103,7 +103,21 @@ fn task_branch(run: &str, id: &str) -> String {
     format!("orch-task/{run}/{id}")
 }
 
+/// Runs the cards. Cards that carry an `acceptance` command make this refuse:
+/// the command goes through the shell, so the caller must opt in with `run_trusted`.
 pub fn run(o: &Options) -> Result<Report> {
+    run_with(o, false)
+}
+
+/// Like `run`, but the caller vouches for the cards' acceptance commands.
+pub fn run_trusted(o: &Options) -> Result<Report> {
+    run_with(o, true)
+}
+
+fn run_with(o: &Options, trust_acceptance: bool) -> Result<Report> {
+    if !card::valid_slug(&o.name) {
+        bail!("invalid run name {:?}: use letters, digits, '.', '_' or '-'", o.name);
+    }
     let repo = git::canon(&o.repo)?;
     let common = git::common_dir(&repo)?;
     let run_dir = common.join("axelstra").join("orch").join(&o.name);
@@ -111,6 +125,7 @@ pub fn run(o: &Options) -> Result<Report> {
     ensure_excluded(&common)?;
 
     let cards: Vec<Card> = card::load_dir(&repo.join(".kanban"))?
+        .cards
         .into_iter()
         .filter(|c| c.meta.status == "todo")
         .collect();
@@ -118,7 +133,8 @@ pub fn run(o: &Options) -> Result<Report> {
         bail!("no cards with status: todo in {}", repo.join(".kanban").display());
     }
     // deps on cards outside `todo` (already done) are dropped, unknown ones are errors
-    let all = card::load_dir(&repo.join(".kanban"))?;
+    check_trust(&cards, trust_acceptance)?;
+    let all = card::load_dir(&repo.join(".kanban"))?.cards;
     let todo_ids: Vec<String> = cards.iter().map(|c| c.meta.id.clone()).collect();
     let mut cards = cards;
     for c in &mut cards {
@@ -193,9 +209,9 @@ pub fn run(o: &Options) -> Result<Report> {
 
             match outcome {
                 Ok(summary) => {
-                    finish_task(&repo, &integ_wt, &integ_branch, &o.name, t, &live.wt, &live.branch, &summary, &mut log)?;
+                    let why = finish_task(&repo, &integ_wt, &integ_branch, &o.name, t, &live.wt, &live.branch, &summary, &mut log)?;
                     if t.st == St::NeedsReview {
-                        reviews.push((id.clone(), "merge conflict".into()));
+                        reviews.push((id.clone(), why.into()));
                     } else {
                         card::set_status(&t.card.path, "done")?;
                     }
@@ -279,6 +295,22 @@ pub fn run(o: &Options) -> Result<Report> {
     })
 }
 
+fn check_trust(cards: &[Card], trusted: bool) -> Result<()> {
+    let cmds: Vec<String> = cards
+        .iter()
+        .filter_map(|c| c.meta.acceptance.as_ref().map(|a| format!("{}: {a}", c.meta.id)))
+        .collect();
+    if !trusted && !cmds.is_empty() {
+        bail!(
+            "acceptance commands run through the shell and were not trusted; confirm them first:
+{}",
+            cmds.join("
+")
+        );
+    }
+    Ok(())
+}
+
 fn ensure_excluded(common: &Path) -> Result<()> {
     let p = common.join("info").join("exclude");
     std::fs::create_dir_all(p.parent().unwrap())?;
@@ -297,6 +329,9 @@ fn read_sentinel(wt: &Path) -> Option<Result_> {
 
 fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task) -> Result<Live> {
     let id = &t.card.meta.id;
+    if !card::valid_slug(id) || !card::valid_slug(&o.name) {
+        bail!("invalid card id or run name");
+    }
     let wt = o.wt_root.join(format!("{}-{}", o.name, id));
     let branch = task_branch(&o.name, id);
     // a retry starts from a clean worktree
@@ -322,19 +357,7 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
     let runner: Arc<dyn Runner> = o.runner.clone().unwrap_or_else(|| Arc::new(ProcessRunner));
     let spec: Vec<String> = match &o.agent_override {
         Some(v) => v.clone(),
-        None => match t.card.meta.agent.as_str() {
-            "claude" => {
-                let ask = "Read .axelstra/prompt.md and do the task described there.".to_string();
-                let mut v: Vec<String> =
-                    vec!["claude".into(), "--permission-mode".into(), t.card.meta.permission_mode.clone()];
-                if !runner.interactive() {
-                    v.push("-p".into());
-                }
-                v.push(ask);
-                v
-            }
-            other => bail!("no command configured for agent '{other}'"),
-        },
+        None => agent_command(&t.card.meta.agent, &t.card.meta.permission_mode, runner.interactive())?,
     };
     let pf = prompt.to_string_lossy().to_string();
     let spec: Vec<String> = spec.into_iter().map(|a| a.replace("{prompt_file}", &pf)).collect();
@@ -350,6 +373,31 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
     Ok(Live { handle, wt, branch, started: Instant::now() })
 }
 
+/// Command line for a card's agent. Only agents with a non-interactive mode are supported.
+fn agent_command(agent: &str, permission_mode: &str, interactive: bool) -> Result<Vec<String>> {
+    if !card::PERMISSION_MODES.contains(&permission_mode) {
+        bail!("unknown permission_mode '{permission_mode}'");
+    }
+    let ask = "Read .axelstra/prompt.md and do the task described there.".to_string();
+    let mut v: Vec<String> = match agent {
+        "claude" => vec!["claude".into(), "--permission-mode".into(), permission_mode.into()],
+        "codex" | "chatgpt" => vec!["codex".into()],
+        other => bail!("agent '{other}' cannot run unattended; use claude or codex"),
+    };
+    if agent == "claude" {
+        if !interactive {
+            v.push("-p".into());
+        }
+    } else {
+        if !interactive {
+            v.push("exec".into());
+        }
+        v.push("--full-auto".into());
+    }
+    v.push(ask);
+    Ok(v)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn finish_task(
     repo: &Path,
@@ -361,7 +409,7 @@ fn finish_task(
     branch: &str,
     summary: &str,
     log: &mut Log,
-) -> Result<()> {
+) -> Result<&'static str> {
     let id = t.card.meta.id.clone();
     git::commit_all(wt, &format!("{id}: {}", first_line(summary, &t.card.meta.title)))?;
     let before = git::head(integ_wt)?;
@@ -371,6 +419,7 @@ fn finish_task(
             git::reset_hard(integ_wt, &before)?;
             log.append(Ev::NeedsReview { task: id.clone(), reason: "merge conflict".into() })?;
             t.st = St::NeedsReview; // worktree + branch stay for inspection
+            return Ok("merge conflict");
         }
         Merge::Clean => {
             if let Some(cmd) = &t.card.meta.acceptance {
@@ -378,7 +427,7 @@ fn finish_task(
                     git::reset_hard(integ_wt, &before)?;
                     log.append(Ev::NeedsReview { task: id.clone(), reason: "acceptance failed".into() })?;
                     t.st = St::NeedsReview;
-                    return Ok(());
+                    return Ok("acceptance failed");
                 }
             }
             log.append(Ev::Merged { task: id.clone() })?;
@@ -388,6 +437,56 @@ fn finish_task(
             let _ = integ_branch;
         }
     }
+    Ok("")
+}
+
+/// Merges a `needs-review` task again after the user fixed its branch (resolved the
+/// conflict or the failing acceptance) in the task worktree. Cleans up on success.
+pub fn retry_merge(repo: &Path, wt_root: &Path, name: &str, id: &str, trust_acceptance: bool) -> Result<()> {
+    if !card::valid_slug(name) || !card::valid_slug(id) {
+        bail!("invalid card id or run name");
+    }
+    let repo = git::canon(repo)?;
+    let card = card::load_dir(&repo.join(".kanban"))?
+        .cards
+        .into_iter()
+        .find(|c| c.meta.id == id)
+        .ok_or_else(|| anyhow::anyhow!("card {id} not found"))?;
+    if card.meta.status != "needs-review" {
+        bail!("card {id} is not waiting for review");
+    }
+    check_trust(std::slice::from_ref(&card), trust_acceptance)?;
+    let wt = wt_root.join(format!("{name}-{id}"));
+    let integ_wt = wt_root.join(format!("{name}-integ"));
+    if !wt.exists() || !integ_wt.exists() {
+        bail!("worktrees of run {name} are gone");
+    }
+    if git::has_changes(&integ_wt)? {
+        bail!("integration worktree has uncommitted changes");
+    }
+    let common = git::common_dir(&repo)?;
+    let events = common.join("axelstra").join("orch").join(name).join("events.jsonl");
+    let mut log = Log { f: OpenOptions::new().create(true).append(true).open(&events)? };
+    let branch = task_branch(name, id);
+    git::commit_all(&wt, &format!("{id}: {}", card.meta.title))?;
+    let before = git::head(&integ_wt)?;
+    log.append(Ev::MergeBegin { task: id.into(), integ_before: before.clone() })?;
+    if let Merge::Conflict = git::merge(&integ_wt, &branch, &format!("merge {id}"))? {
+        git::reset_hard(&integ_wt, &before)?;
+        log.append(Ev::NeedsReview { task: id.into(), reason: "merge conflict".into() })?;
+        bail!("still conflicts with the integration branch; resolve it in {}", wt.display());
+    }
+    if let Some(cmd) = &card.meta.acceptance {
+        if !run_acceptance(&integ_wt, cmd)? {
+            git::reset_hard(&integ_wt, &before)?;
+            log.append(Ev::NeedsReview { task: id.into(), reason: "acceptance failed".into() })?;
+            bail!("acceptance failed after merging");
+        }
+    }
+    log.append(Ev::Merged { task: id.into() })?;
+    card::set_status(&card.path, "done")?;
+    let _ = git::worktree_remove(&repo, &wt);
+    let _ = git::branch_delete(&repo, &branch);
     Ok(())
 }
 
@@ -437,4 +536,20 @@ fn recover(repo: &Path, integ_wt: &Path, events: &Path) -> Result<()> {
     }
     let _ = git::run(repo, &["worktree", "prune"]);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_command_supports_claude_and_codex_only() {
+        let c = agent_command("claude", "plan", false).unwrap();
+        assert_eq!(c[..4], ["claude", "--permission-mode", "plan", "-p"]);
+        let x = agent_command("chatgpt", "auto", false).unwrap();
+        assert_eq!(x[..3], ["codex", "exec", "--full-auto"]);
+        assert_eq!(agent_command("codex", "auto", true).unwrap()[..2], ["codex", "--full-auto"]);
+        assert!(agent_command("gemini", "auto", false).is_err());
+        assert!(agent_command("claude", "--evil", false).is_err());
+    }
 }
