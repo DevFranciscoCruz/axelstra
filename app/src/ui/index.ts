@@ -10,3 +10,4 @@ export { cn } from "./cn";
 export { Select } from "./select";
 export { Dialog } from "./dialog";
 export { CheckboxField } from "./checkbox-field";
+export { DropdownMenu } from "./dropdown-menu";
