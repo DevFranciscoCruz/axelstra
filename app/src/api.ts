@@ -313,6 +313,8 @@ export const fsWrite = (worktree: string, path: string, text: string, eol: strin
   call<Saved>("fs.write", { worktree, path, text, eol, bom, base_hash });
 
 export const gitCommit = (worktree: string, message: string) => call<{ sha: string }>("git.commit", { worktree, message });
+/** Commit message the user's `claude` CLI proposes for the pending changes (nothing is staged or committed). */
+export const gitSuggest = (worktree: string) => call<{ message: string }>("git.suggest", { worktree }).then((r) => r.message);
 export const gitPush = (worktree: string) => call<{ output: string }>("git.push", { worktree });
 export const gitPr = (worktree: string, title: string, body: string, base?: string) =>
   call<{ url: string }>("git.pr", { worktree, title, body, base }).then((r) => r.url);

@@ -1129,7 +1129,7 @@ fn dispatch(
                 })
             })
         }
-        "git.commit" | "git.push" | "git.pr" => {
+        "git.commit" | "git.push" | "git.pr" | "git.suggest" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             let s = |k: &str| p[k].as_str().unwrap_or_default().to_string();
             tokio::task::block_in_place(|| -> Result<Value> {
@@ -1137,6 +1137,7 @@ fn dispatch(
                 Ok(match req.method.as_str() {
                     "git.commit" => serde_json::to_value(publish::commit(&wt, &s("message"))?)?,
                     "git.push" => json!({"output": publish::push(&wt)?}),
+                    "git.suggest" => json!({"message": publish::suggest_message(&wt)?}),
                     _ => json!({"url": publish::pull_request(&wt, &s("title"), &s("body"), p["base"].as_str())?}),
                 })
             })

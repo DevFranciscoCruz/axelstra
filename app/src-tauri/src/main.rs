@@ -126,7 +126,7 @@ fn setting(key: &str) -> Value {
 /// Calls that only read: safe to run twice if the connection broke after the daemon may have received them.
 fn read_only(method: &str) -> bool {
     let tail = method.rsplit('.').next().unwrap_or(method);
-    matches!(tail, "list" | "status" | "get" | "read" | "screen" | "usage" | "ports" | "pending" | "info" | "stats" | "log" | "inbox" | "thread" | "search" | "logo" | "dir" | "limits" | "diff" | "changes")
+    matches!(tail, "list" | "status" | "get" | "read" | "screen" | "usage" | "ports" | "pending" | "info" | "stats" | "log" | "inbox" | "thread" | "search" | "logo" | "dir" | "limits" | "diff" | "changes" | "suggest")
 }
 
 /// Daemon methods the webview may forward through `daemon_call` / `daemon_call_bg`: exactly the ones the frontend
@@ -136,7 +136,7 @@ const ALLOWED_METHODS: &[&str] = &[
     "agent.search", "agent.status", "agent.usage", "app.dir", "automation.delete", "automation.list", "automation.run", "automation.save",
     "codex.limits", "computer.enable", "computer.status", "daemon.shutdown", "dispatch.meta", "flow.list",
     "fs.create", "fs.delete", "fs.grep", "fs.list", "fs.read", "fs.rename", "fs.search", "fs.stat", "fs.write",
-    "gh.list", "git.changes", "git.commit", "git.diff", "git.log", "git.pr", "git.push", "git.show",
+    "gh.list", "git.changes", "git.commit", "git.diff", "git.log", "git.pr", "git.push", "git.show", "git.suggest",
     "kanban.delete", "kanban.list", "kanban.move", "kanban.save", "open.editor", "orch.limits", "orch.start", "orch.status",
     "ping", "pm.detect", "ports.list", "project.add", "project.list", "project.logo", "project.remove", "project.setup",
     "session.kill", "session.list", "session.pending", "session.pending_remove", "session.remove", "session.rename", "session.resize",
