@@ -4,6 +4,10 @@
 
 Lightweight desktop workbench for parallel coding agents on git worktrees (Windows and macOS, Tauri + Rust).
 
+<p align="center"><img src="assets/demo/demo.gif" width="820" alt="Axelstra: a new worktree gets an agent, the status dots follow it, and a notification arrives when another agent finishes"></p>
+
+<sub>Scripted mock with fake data: source in [`assets/demo/index.html`](assets/demo/index.html), open it in a browser to watch it live.</sub>
+
 - **Projects and worktrees:** one sidebar entry per repo, one worktree per task, each with its own terminals.
 - **Agents:** open Claude Code or Codex in a worktree with one click; a dot shows working / idle / done and you get a notification when an agent stops.
 - **Terminals:** split view, command palette (`Ctrl+K`), dev-server ports shown as chips that open in the browser.

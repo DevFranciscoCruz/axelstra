@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Axelstra demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Fake data only. A scripted mock of the app (same colours as app/src/styles.css) that renders from one
+     number, the time in ms, so a recorder can step it frame by frame: window.setT(ms). Opened directly it plays in a loop. -->
+<style>
+:root{--bg:#1e1f23;--panel:#24262c;--line:#33363f;--line-3:#43434f;--text:#d7dae0;--muted:#8b90a0;--accent:#a78bfa;--ok:#4ade80;--warn:#e5c07b}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:#14151a;display:grid;place-items:center;font:13px/1.4 "Inter Variable","Segoe UI Variable","Segoe UI",system-ui,sans-serif;color:var(--text)}
+#win{width:960px;height:540px;background:var(--bg);border:1px solid var(--line-3);border-radius:10px;overflow:hidden;display:grid;grid-template-columns:260px 1fr;position:relative}
+.side{background:var(--panel);border-right:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:4px}
+.brand{font-weight:700;font-size:14px;padding:2px 4px 8px}
+.sec{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:6px 4px 2px}
+.proj{margin-bottom:6px}
+.ph{display:flex;align-items:center;gap:6px;padding:4px 4px;font-weight:600}
+.pi{width:16px;height:16px;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:700;color:#fff}
+.ph .sp{flex:1}.ph .ic{color:var(--muted);font-size:14px;padding:0 4px}
+.row{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;margin-left:2px;white-space:nowrap}
+.row.sel{background:#2f323b}
+.row .n{flex:1;overflow:hidden;text-overflow:ellipsis}
+.row .c{color:var(--ok);font-size:11px}
+.dot{width:8px;height:8px;border-radius:50%;background:#7a7f8e;flex:none}
+.dot.work{background:var(--ok)}.dot.work.p{box-shadow:0 0 0 3px rgba(74,222,128,.25)}
+.dot.done{background:var(--accent)}
+.box{margin:2px 2px 6px 14px;padding:4px;border:1px solid var(--line);border-radius:10px}
+.box .h{font-size:11px;color:var(--muted);padding:2px 6px 4px}
+.ag{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;font-size:12px}
+.ag .t{margin-left:auto;color:var(--muted);font-size:11px}
+.input{margin:2px 6px 6px;border:1px solid var(--accent);border-radius:6px;padding:5px 8px;background:var(--bg);min-height:28px}
+.caret{display:inline-block;width:1px;height:13px;background:var(--text);vertical-align:-2px;margin-left:1px}
+.main{display:flex;flex-direction:column;min-width:0}
+.tabs{display:flex;gap:4px;padding:8px 10px;border-bottom:1px solid var(--line)}
+.tab{padding:4px 10px;border-radius:6px;color:var(--muted)}.tab.on{background:#2f323b;color:var(--text)}
+.term{flex:1;padding:14px 16px;font:12.5px/1.55 "Cascadia Mono",Consolas,monospace;overflow:hidden}
+.term .u{color:var(--text)}.term .m{color:var(--muted)}.term .g{color:var(--ok)}.term .a{color:var(--accent)}
+.term .add{color:var(--ok)}.term .del{color:#f87171}
+.toast{position:absolute;right:14px;bottom:14px;background:#2a2a32;border:1px solid var(--line-3);border-radius:10px;padding:10px 14px;box-shadow:0 8px 24px rgba(0,0,0,.4);transition:none}
+.toast b{display:block;margin-bottom:2px}.toast span{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div id="win">
+  <aside class="side">
+    <div class="brand">Axelstra</div>
+    <div class="sec">Projects</div>
+    <div id="projects"></div>
+  </aside>
+  <section class="main">
+    <div class="tabs"><span class="tab on" id="tab">claude</span><span class="tab">pnpm dev</span></div>
+    <div class="term" id="term"></div>
+  </section>
+  <div class="toast" id="toast" style="display:none"><b>claude finished</b><span>ax/dark-mode · 2 files changed</span></div>
+</div>
+<script>
+const TOTAL = 15000;
+const NEW_NAME = "promo-codes";
+const LINES = [ // [appears at ms, html]
+  [3900, '<span class="a">&gt;</span> <span class="u">Add validation for EU promo codes at checkout</span>'],
+  [5600, '<span class="m">● I\'ll start with the existing promo helper.</span>'],
+  [6400, '<span class="m">  Ran 1 shell command</span>'],
+  [7200, '<span class="u">● Update(src/lib/promo.ts)</span>'],
+  [7600, '<span class="add">    + export const isEuCode = (c: string) =&gt; /^EU-[A-Z0-9]{6}$/.test(c);</span>'],
+  [7900, '<span class="del">    - if (!code) return false;</span>'],
+  [8400, '<span class="u">● Ran 14 tests</span> <span class="g">✓ all passed</span>'],
+];
+const spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+
+function row(name, state, sel, count) {
+  const dot = state === "work" ? "dot work p" : state === "done" ? "dot done" : "dot";
+  return `<div class="row${sel ? " sel" : ""}"><span class="${dot}"></span><span class="n">${name}</span>${count ? `<span class="c">${count}</span>` : ""}</div>`;
+}
+function agent(label, time) {
+  return `<div class="box"><div class="h">1 agent</div><div class="ag"><span class="dot work"></span>${label}<span class="t">${time}</span></div></div>`;
+}
+
+function render(t) {
+  const pulse = Math.floor(t / 500) % 2 === 0;
+  let html = "";
+  // acme-web
+  html += `<div class="proj"><div class="ph"><span class="pi" style="background:#6366f1">A</span>acme-web<span class="sp"></span><span class="ic">+</span><span class="ic">⚙</span></div>`;
+  html += row("main", "idle", false, "");
+  // dark-mode finishes at 9600
+  const darkDone = t >= 9600;
+  html += row("ax/dark-mode", darkDone ? "done" : "work", false, "");
+  if (!darkDone) html += agent("claude", t < 2000 ? "4m" : "5m");
+  // typing the new worktree name
+  if (t >= 1200 && t < 3000) {
+    const n = Math.max(0, Math.min(NEW_NAME.length, Math.floor((t - 1500) / 110)));
+    html += `<div class="input">${NEW_NAME.slice(0, n)}${pulse ? '<span class="caret"></span>' : ""}</div>`;
+  } else if (t >= 3000 && t < 3600) {
+    html += `<div class="row"><span class="dot work"></span><span class="n" style="color:var(--muted)">Creating ${NEW_NAME}…</span></div>`;
+  } else if (t >= 3600) {
+    html += row("ax/" + NEW_NAME, "work", true, "") + agent("claude", t < 9000 ? "now" : "1m");
+  }
+  html += `</div>`;
+  // acme-api
+  html += `<div class="proj"><div class="ph"><span class="pi" style="background:#0ea5e9">A</span>acme-api<span class="sp"></span><span class="ic">+</span><span class="ic">⚙</span></div>`;
+  html += row("main", "idle", t < 3600, "");
+  html += `</div>`;
+  document.getElementById("projects").innerHTML = html;
+
+  // terminal
+  const term = document.getElementById("term");
+  const tab = document.getElementById("tab");
+  if (t < 3600) {
+    tab.textContent = "claude";
+    term.innerHTML = `<span class="m">acme-api · main</span><br><span class="m">No agent here. Pick a worktree or press + to add one.</span>`;
+  } else {
+    tab.textContent = "claude · " + NEW_NAME;
+    let out = `<span class="m">ax/${NEW_NAME} · claude</span><br>`;
+    for (const [at, h] of LINES) if (t >= at) out += h + "<br>";
+    if (t >= 4400 && t < 8900) out += `<span class="a">${spin[Math.floor(t / 90) % spin.length]}</span> <span class="m">Thinking…</span>`;
+    term.innerHTML = out;
+  }
+  // toast
+  document.getElementById("toast").style.display = t >= 9800 && t < 13200 ? "block" : "none";
+}
+
+window.setT = (t) => render(t);
+window.TOTAL = TOTAL;
+if (!location.search.includes("manual")) {
+  const t0 = performance.now();
+  const tick = () => { render((performance.now() - t0) % TOTAL); requestAnimationFrame(tick); };
+  tick();
+} else render(0);
+</script>
+</body>
+</html>
