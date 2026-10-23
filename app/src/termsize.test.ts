@@ -21,6 +21,30 @@ describe("createSizeSync", () => {
     expect(send).toHaveBeenCalledWith(100, 30);
   });
 
+  it("a grid that flickered and came back to the same size is nudged so the agent redraws", async () => {
+    const { send, s } = make();
+    s.push();
+    await Promise.resolve();
+    expect(send).toHaveBeenCalledTimes(1);
+    // xterm resized twice inside the debounce and ended where it was
+    s.resized();
+    s.resized();
+    vi.advanceTimersByTime(80);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(send.mock.calls.slice(1)).toEqual([[100, 29], [100, 30]]);
+  });
+
+  it("a resize that really changes the size is sent once, without a nudge", async () => {
+    const { state, send, s } = make();
+    s.push();
+    await Promise.resolve();
+    state.cols = 90;
+    s.resized();
+    vi.advanceTimersByTime(80);
+    await Promise.resolve();
+    expect(send.mock.calls.slice(1)).toEqual([[90, 30]]);
+  });
+
   it("never sends while hidden, and sends when shown", async () => {
     const { state, send, s } = make();
     state.visible = false;
