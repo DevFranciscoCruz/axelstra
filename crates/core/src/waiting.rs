@@ -74,9 +74,98 @@ pub fn asks_question(lines: &[String]) -> bool {
     })
 }
 
+/// What an agent's own hook (Claude Code's Notification, Stop, UserPromptSubmit) said it is doing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HintState {
+    Waiting,
+    Idle,
+    Working,
+}
+
+impl HintState {
+    pub fn parse(s: &str) -> Option<HintState> {
+        match s {
+            "waiting" => Some(HintState::Waiting),
+            "idle" => Some(HintState::Idle),
+            "working" => Some(HintState::Working),
+            _ => None,
+        }
+    }
+}
+
+/// A hint older than this no longer counts: a missed Stop must not leave a red dot forever.
+pub const HINT_TTL_MS: u64 = 2 * 60 * 60 * 1000;
+/// Output within this long after the hint is the screen finishing its redraw, not the agent working again.
+const HINT_SLACK_MS: u64 = 1500;
+
+/// True while the latest hint says waiting and nothing happened since: no typing, no new output, not expired.
+/// `age_ms` is the time since the hint, `since_input_ms` since the user last typed, `idle_ms` since the last output.
+pub fn hint_waiting(state: HintState, age_ms: u64, since_input_ms: u64, idle_ms: u64) -> bool {
+    state == HintState::Waiting && age_ms < HINT_TTL_MS && since_input_ms > age_ms && idle_ms + HINT_SLACK_MS >= age_ms
+}
+
+/// Latest hint per session, with the moment it arrived.
+#[derive(Default)]
+pub struct Hints(std::sync::Mutex<std::collections::HashMap<u32, (std::time::Instant, HintState)>>);
+
+impl Hints {
+    pub fn set(&self, id: u32, state: HintState) {
+        if let Ok(mut m) = self.0.lock() {
+            m.insert(id, (std::time::Instant::now(), state));
+        }
+    }
+
+    pub fn clear(&self, id: u32) {
+        if let Ok(mut m) = self.0.lock() {
+            m.remove(&id);
+        }
+    }
+
+    /// Whether the session's hint still says it waits, given how long it has been quiet (see `hint_waiting`).
+    pub fn waiting(&self, id: u32, since_input_ms: u64, idle_ms: u64) -> bool {
+        let Ok(m) = self.0.lock() else { return false };
+        m.get(&id).map(|(at, st)| hint_waiting(*st, at.elapsed().as_millis() as u64, since_input_ms, idle_ms)).unwrap_or(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hint_waits_until_input_output_or_expiry() {
+        use HintState::*;
+        // hint 10 s ago, no typing ever, quiet since: waiting
+        assert!(hint_waiting(Waiting, 10_000, u64::MAX, 10_000));
+        // output right after the hint is the redraw
+        assert!(hint_waiting(Waiting, 10_000, u64::MAX, 9_000));
+        // real output later: working again
+        assert!(!hint_waiting(Waiting, 10_000, u64::MAX, 2_000));
+        // user typed after the hint
+        assert!(!hint_waiting(Waiting, 10_000, 3_000, 10_000));
+        // typed before the hint: still waiting
+        assert!(hint_waiting(Waiting, 10_000, 20_000, 10_000));
+        // expired
+        assert!(!hint_waiting(Waiting, HINT_TTL_MS, u64::MAX, HINT_TTL_MS));
+        assert!(!hint_waiting(Idle, 10_000, u64::MAX, 10_000));
+        assert!(!hint_waiting(Working, 10_000, u64::MAX, 10_000));
+    }
+
+    #[test]
+    fn hints_replace_and_clear() {
+        let h = Hints::default();
+        h.set(1, HintState::Waiting);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert!(h.waiting(1, u64::MAX, 60_000));
+        assert!(!h.waiting(2, u64::MAX, 60_000));
+        h.set(1, HintState::Working);
+        assert!(!h.waiting(1, u64::MAX, 60_000));
+        h.set(1, HintState::Waiting);
+        h.clear(1);
+        assert!(!h.waiting(1, u64::MAX, 60_000));
+        assert_eq!(HintState::parse("idle"), Some(HintState::Idle));
+        assert_eq!(HintState::parse("x"), None);
+    }
 
     #[test]
     fn free_form_question_is_detected() {

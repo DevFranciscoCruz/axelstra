@@ -400,6 +400,11 @@ export const gitShow = (worktree: string, sha: string) =>
 export type WtStatus = { path: string; dirty: number; ahead: number; behind: number; upstream: boolean };
 export const worktreeStatus = (paths: string[]) => callBg<{ status: WtStatus[] }>("worktree.status", { paths }).then((r) => r.status);
 
+/** counts per project for the status bar (cached by the daemon for about 10 s) */
+export const worktreeOverview = () => callBg<{ projects: import("./statusGroups").OverviewProject[] }>("worktree.overview").then((r) => r.projects);
+/** removes the worktrees whose work is merged (the janitor's sweep) */
+export const worktreeSweep = () => call<{ swept: { path: string; branch: string; removed: boolean }[] }>("worktree.sweep", {}).then((r) => r.swept);
+
 export type AgentHit = { agent: "claude" | "codex"; session: string; cwd: string; ts: number; snippet: string };
 export const agentSearch = (query: string, max = 30) => callBg<{ hits: AgentHit[] }>("agent.search", { query, max }).then((r) => r.hits);
 
