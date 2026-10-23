@@ -232,7 +232,7 @@ mod sys {
             if lines == 0 {
                 bail!("could not read the screen contents");
             }
-            for p in px.chunks_exact_mut(4) {
+            for p in px.as_chunks_mut::<4>().0 {
                 p.swap(0, 2); // BGRA -> RGBA
                 p[3] = 255;
             }
@@ -313,7 +313,7 @@ mod sys {
             "end" => VK_END,
             "pageup" => VK_PRIOR,
             "pagedown" => VK_NEXT,
-            n if n.len() >= 2 && n.starts_with('f') && n[1..].parse::<u16>().map_or(false, |k| (1..=12).contains(&k)) => {
+            n if n.len() >= 2 && n.starts_with('f') && n[1..].parse::<u16>().is_ok_and(|k| (1..=12).contains(&k)) => {
                 VK_F1 + n[1..].parse::<u16>().unwrap() - 1
             }
             n if n.len() == 1 && n.as_bytes()[0].is_ascii_alphanumeric() => n.as_bytes()[0].to_ascii_uppercase() as u16,

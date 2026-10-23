@@ -325,12 +325,12 @@ fn spawn_scheduler(reg: Arc<Registry>) {
                 })
                 .await;
             }
-            if n % 2 == 0 {
+            if n.is_multiple_of(2) {
                 // a crash or a kill skips the shutdown save: keep the agent terminals on disk every minute too
                 let r = reg.clone();
                 let _ = tokio::task::spawn_blocking(move || save_histories(&r)).await;
             }
-            if n % 20 == 0 && !reg.saved.with_file_name("janitor.off").exists() {
+            if n.is_multiple_of(20) && !reg.saved.with_file_name("janitor.off").exists() {
                 let r = reg.clone();
                 let _ = tokio::task::spawn_blocking(move || {
                     for s in crate::janitor::sweep(&r.store, &|path| r.worktree_busy(path), false) {
@@ -733,6 +733,7 @@ fn save_histories(reg: &Registry) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dispatch(
     req: &Req,
     reg: &Arc<Registry>,
@@ -803,7 +804,7 @@ fn dispatch(
             let id = reg.spawn(&s, label.as_deref(), meta)?;
             // a restored agent shows what its terminal said before the restart, dimmed, above its own output
             if let (Some(key), Some(sess)) = (history_key, reg.get(id)) {
-                if let Some(text) = take_history(&reg, &key) {
+                if let Some(text) = take_history(reg, &key) {
                     sess.seed(text.as_bytes());
                 }
             }
@@ -1143,7 +1144,7 @@ fn dispatch(
             if let Some(b) = p["auto_install"].as_bool() {
                 saved["auto_install"] = json!(b);
             }
-            apply_ui_settings(&mut saved, &p)?;
+            apply_ui_settings(&mut saved, p)?;
             write_atomic(&reg.saved.with_file_name("settings.json"), &serde_json::to_vec_pretty(&saved)?)?;
             Ok(json!({}))
         }
@@ -1384,7 +1385,7 @@ fn dispatch(
                 Ok(match req.method.as_str() {
                     "kanban.list" => serde_json::to_value(kanban::list(&repo)?)?,
                     "kanban.save" => {
-                        serde_json::to_value(kanban::save(&repo, p["id"].as_str(), &s("title"), &s("body"), p["status"].as_str(), &p)?)?
+                        serde_json::to_value(kanban::save(&repo, p["id"].as_str(), &s("title"), &s("body"), p["status"].as_str(), p)?)?
                     }
                     "kanban.move" => {
                         kanban::set_status(&repo, &s("id"), &s("status"))?;
@@ -1570,7 +1571,7 @@ fn dispatch(
             let key = norm(&wt.to_string_lossy());
             let ids: Vec<u32> = {
                 let metas = reg.metas.lock_recover();
-                metas.iter().filter(|(_, m)| m["worktree"].as_str().map(|w| norm(w)) == Some(key.clone())).map(|(id, _)| *id).collect()
+                metas.iter().filter(|(_, m)| m["worktree"].as_str().map(norm) == Some(key.clone())).map(|(id, _)| *id).collect()
             };
             let pids: Vec<u32> =
                 ids.iter().filter_map(|id| reg.get(*id)).filter(|s| s.try_wait().is_none()).filter_map(|s| s.pid()).collect();
