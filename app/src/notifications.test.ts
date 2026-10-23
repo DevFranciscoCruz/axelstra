@@ -32,6 +32,12 @@ describe("addEntry", () => {
 });
 
 describe("parseStored", () => {
+  it("drops the old idle noise logged as errors", () => {
+    const e = (id: string, kind: string, text: string) => ({ id, at: 1, kind, worktree: "w", text, read: false });
+    const raw = JSON.stringify([e("a", "error", "Tarefa 8 ficou parado na worktree x"), e("b", "error", "Falhou o merge"), e("c", "done", "ok")]);
+    expect(parseStored(raw).map((x) => x.id).sort()).toEqual(["b", "c"]);
+  });
+
   it("survives garbage", () => {
     expect(parseStored(null)).toEqual([]);
     expect(parseStored("nope")).toEqual([]);
