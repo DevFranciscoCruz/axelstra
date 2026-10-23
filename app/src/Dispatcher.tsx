@@ -1,6 +1,7 @@
 import { For, Show, createMemo, onCleanup } from "solid-js";
 import { Icon } from "./Icon";
 import { Modal } from "./Modal";
+import { StateDot } from "./StateDot";
 import { dispatchTopics, norm, projects, selectWorktree, sessionState, sessionsOf, setShowDispatcher, watchDispatch } from "./store";
 
 /** Live view of what the main session dispatched: one card per topic (worktree) with its latest requests. */
@@ -23,10 +24,10 @@ export function Dispatcher() {
 
   const stateOf = (path: string) => {
     const agents = sessionsOf(path).filter((s) => s.meta?.kind === "agent");
-    if (agents.some((s) => sessionState(s) === "waiting")) return { cls: "wait", text: "à espera de resposta" };
-    if (agents.some((s) => sessionState(s) === "working")) return { cls: "work", text: "a trabalhar" };
-    if (agents.some((s) => s.running)) return { cls: "on", text: "parado" };
-    return { cls: "", text: "sem agente" };
+    if (agents.some((s) => sessionState(s) === "waiting")) return { dot: "waiting" as const, text: "à espera de resposta" };
+    if (agents.some((s) => sessionState(s) === "working")) return { dot: "working" as const, text: "a trabalhar" };
+    if (agents.some((s) => s.running)) return { dot: "idle" as const, text: "parado" };
+    return { dot: "none" as const, text: "sem agente" };
   };
 
   return (
@@ -44,7 +45,7 @@ export function Dispatcher() {
             return (
               <div class="disp-card" classList={{ archived: t.archived }}>
                 <div class="disp-head">
-                  <span class="dot" classList={{ on: st().cls === "on", work: st().cls === "work", wait: st().cls === "wait" }} />
+                  <StateDot state={st().dot} />
                   <strong class="disp-title">{t.title}</strong>
                   <span class="auto-note">{t.archived ? "arquivado" : st().text}</span>
                   <span class="grow" />

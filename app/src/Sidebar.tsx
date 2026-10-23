@@ -4,6 +4,8 @@ import { ask, askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import { addProject, getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
 import { Modal } from "./Modal";
+import { StateDot } from "./StateDot";
+import { dotOfSession, dotOfWorktree } from "./agentState";
 import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
 import { invoke } from "@tauri-apps/api/core";
 import { press } from "./a11y";
@@ -459,11 +461,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                     onContextMenu={(e) => showMenu(e, worktreeMenu(p, w, label()))}
                     title={w.path}
                   >
-                    <span
-                      class="dot"
-                      classList={{ on: live() > 0, work: working() && !waiting(), attn: needs() && !working() && !waiting(), wait: waiting(), queued: queued() }}
-                      title={queued() ? "Na fila: o flow ainda não chegou a esta tarefa" : waiting() ? "O agente espera pela tua resposta" : needs() ? "O agente parou: precisa de atenção" : working() ? "A trabalhar" : live() > 0 ? "Parado" : ""}
-                    />
+                    <StateDot state={dotOfWorktree({ queued: queued(), waiting: waiting(), working: working(), needs: needs(), live: live() })} />
                     <span class="name">{w.is_main ? (p.default_branch ?? "main") : label()}</span>
                     <Show when={!w.is_main && topic(w.path)?.title && topic(w.path)!.title !== label()}>
                       <span class="wt-topic" title={topic(w.path)!.title}>{topic(w.path)!.title}</span>
@@ -538,7 +536,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                               {...press(() => openSession(a.meta?.worktree ?? w.path, a.id))}
                               title={a.label ?? `Sessão ${a.id}`}
                             >
-                              <span class="dot" classList={{ on: a.running, work: sessionState(a) === "working", wait: sessionState(a) === "waiting" }} />
+                              <StateDot state={dotOfSession(a)} />
                               <span class="wt-agent-name">{a.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{a.label ?? `Sessão ${a.id}`}</span>
                               <span class="wt-agent-time">{a.running ? idleLabel(a.idle_ms) : "fim"}</span>
                             </div>
