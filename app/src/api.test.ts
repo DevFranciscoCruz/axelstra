@@ -15,7 +15,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       case "session.pending":
         return pending;
       case "settings.get":
-        return { rules: null };
+        return { rules: `rules:${args.params.terse ?? "global"}` };
       case "app.dir":
         return { dir: "C:/data" };
       case "session.spawn":
@@ -27,6 +27,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   }),
 }));
 
+import { setProjectPref } from "./store";
 import { agentLine, restoreSessions, shQuote } from "./api";
 
 describe("shQuote", () => {
@@ -104,5 +105,22 @@ describe("restoreSessions", () => {
     const r = await restoreSessions();
     expect(r).toEqual({ restored: 1, skipped: 1, failed: ["bad"] });
     expect(calls.filter((c) => c.method === "session.pending_remove")).toHaveLength(3);
+  });
+
+  it("uses each project's own reply style and reads settings once per distinct level", async () => {
+    setProjectPref("pt", { terse: "tiny" });
+    setProjectPref("ps", { terse: "short" });
+    const ag = (label: string, project: string) => ({ program: "pwsh.exe", label, meta: { kind: "agent", agent: "claude", project, worktree: `C:/w/${label}`, key: label, resume: label } });
+    pending = [ag("a", "pt"), ag("b", "pt"), ag("c", "ps"), ag("d", "none"), ag("e", "none")];
+    const r = await restoreSessions();
+    expect(r.restored).toBe(5);
+    const gets = calls.filter((c) => c.method === "settings.get").map((c) => c.params.terse);
+    expect(gets.sort()).toEqual(["short", "tiny", undefined]);
+    const line = (label: string) => calls.find((c) => c.method === "session.spawn" && c.params.label === label)!.params.args.join(" ");
+    expect(line("a")).toContain("rules:tiny");
+    expect(line("b")).toContain("rules:tiny");
+    expect(line("c")).toContain("rules:short");
+    expect(line("d")).toContain("rules:global");
+    expect(line("e")).toContain("rules:global");
   });
 });

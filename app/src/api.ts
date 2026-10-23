@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { projectTerse } from "./store";
 
 export type SessionMeta = { project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; parent?: number; worker?: boolean };
 export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
@@ -151,8 +152,12 @@ export const restoreSessions = async (): Promise<{ restored: number; skipped: nu
   let restored = 0;
   let skipped = 0;
   const failed: string[] = [];
-  // the same for every session: read once for the whole batch
-  const rules = pending.some((r) => r.meta?.kind === "agent") ? await getSettings().then((x) => x.rules, () => null) : null;
+  // rules depend only on the reply style: read once per distinct level (the project's own, else the global one) for the whole batch
+  const rulesByTerse = new Map<Terse | undefined, Promise<string | null>>();
+  const rulesFor = (terse?: Terse) => {
+    if (!rulesByTerse.has(terse)) rulesByTerse.set(terse, getSettings(terse).then((x) => x.rules, () => null));
+    return rulesByTerse.get(terse)!;
+  };
   for (const r of pending) {
     const m = r.meta;
     try {
@@ -161,7 +166,9 @@ export const restoreSessions = async (): Promise<{ restored: number; skipped: nu
         if ((m as { blank?: boolean }).blank) {
           skipped++;
         } else {
-          const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume }, { rules });
+          const terse = projectTerse(m.project);
+          const rules = await rulesFor(terse);
+          const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume }, { rules }, terse);
           const x = m as { interrupted?: boolean; lost_workers?: string[] };
           const note = restartNote(!!x.interrupted, x.lost_workers ?? []);
           if (note) void nudge(id, note).catch(() => 0);
