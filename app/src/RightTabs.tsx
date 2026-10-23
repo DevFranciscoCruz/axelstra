@@ -1,40 +1,31 @@
 import { Show } from "solid-js";
-import { Button } from "./ui";
-import { tabKeys } from "./a11y";
+import { Button, Tabs, TabsList, TabsTrigger } from "./ui";
 import { K } from "./keyboard";
 import { PanelIcon } from "./PanelIcon";
 import { changes, rightTab, setRightTab, toggleRightPanel } from "./store";
 
+type RightTab = "files" | "changes" | "pulls";
+
 /** Tab strip shared by every right-hand panel. */
 export function RightTabs() {
   const n = () => changes()?.files.length ?? 0;
-  const tab = (id: "files" | "changes" | "pulls", label: string) => (
-    <button
-      type="button"
-      class="rtab"
-      classList={{ active: rightTab() === id }}
-      role="tab"
-      id={`rtab-${id}`}
-      aria-selected={rightTab() === id}
-      aria-controls="rpanel"
-      tabindex={rightTab() === id ? 0 : -1}
-      onClick={() => setRightTab(id)}
-    >
+  const tab = (id: RightTab, label: string) => (
+    <TabsTrigger value={id} id={`rtab-${id}`} aria-controls="rpanel">
       {label}
       <Show when={id === "changes" && n()}> {n()}</Show>
-    </button>
+    </TabsTrigger>
   );
   return (
-    <div class="rtabs">
-      <div class="rtablist" role="tablist" aria-label="Painel direito" onKeyDown={(e) => tabKeys(e, true)}>
+    <Tabs value={rightTab()} onChange={(v) => setRightTab(v as RightTab)} class="flex gap-0.5 border-b border-[var(--line)] px-2 pt-1.5">
+      <TabsList aria-label="Painel direito">
         {tab("files", "Ficheiros")}
         {tab("changes", "Alterações")}
         {tab("pulls", "PRs")}
-      </div>
-      <span class="grow" />
+      </TabsList>
+      <span class="flex-1" />
       <Button variant="icon" size="icon" class="text-foreground" title={K("Esconder painel direito (Ctrl+Shift+B)")} aria-label={K("Esconder painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>
         <PanelIcon side="right" on={true} />
       </Button>
-    </div>
+    </Tabs>
   );
 }
