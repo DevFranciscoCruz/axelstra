@@ -131,25 +131,6 @@ export function Sidebar() {
       /* preference only */
     }
   };
-  // worktrees that only hold workers of an agent in another worktree: shown inside that worktree's box, not as rows
-  const nested = createMemo(() => {
-    const all = sessions();
-    const byId = new Map(all.map((x) => [x.id, x]));
-    const out = new Set<string>();
-    const byWt = new Map<string, typeof all>();
-    for (const x of all) {
-      const k = norm(x.meta?.worktree);
-      if (k) byWt.set(k, [...(byWt.get(k) ?? []), x]);
-    }
-    for (const [k, list] of byWt) {
-      const inParent = (x: (typeof all)[number]) => {
-        const par = x.meta?.parent !== undefined ? byId.get(x.meta.parent) : undefined;
-        return !!x.meta?.worker && !!par && norm(par.meta?.worktree) !== k;
-      };
-      if (list.every(inParent)) out.add(k);
-    }
-    return out;
-  });
   // worktrees whose branch is merged and clean, as the daemon's overview lists them (a few seconds old at most)
   const [mergedWts, setMergedWts] = createSignal<ReadonlySet<string>>(new Set());
   let overviewBusy = false;
@@ -505,7 +486,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
           // main first, then the tree of parents and children; the finished ones are listed apart
           const lay = createMemo(() => {
             const fin = new Set(p.worktrees.filter((w) => isFinished(w, mergedWts(), runningIn(w.path))).map((w) => wtKey(w.path)));
-            return layout(p.worktrees, { finished: fin, hidden: nested(), collapsed: folded(), pinned: isPinned });
+            return layout(p.worktrees, { finished: fin, collapsed: folded(), pinned: isPinned });
           });
           return (
           <div class="project" classList={{ collapsed: projFolded(p.id) }}>
@@ -591,13 +572,8 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 const queued = () => live() === 0 && flowState()[norm(w.path)] === "queued";
                 const st = () => wtStatus()[norm(w.path)];
                 const pr = () => prByBranch()[prKey(p.id, w.branch)];
-                // agents of this worktree plus the workers its agents spawned (axelstration), even when they run in other worktrees
-                const agents = () => {
-                  const own = sessionsOf(w.path).filter((x) => x.meta?.kind === "agent");
-                  const ids = new Set(own.map((x) => x.id));
-                  const workers = sessions().filter((x) => x.meta?.worker && x.meta.kind === "agent" && x.meta.parent !== undefined && ids.has(x.meta.parent) && !ids.has(x.id));
-                  return [...own, ...workers];
-                };
+                // agents of this worktree; workers that an agent of another worktree started show in their own worktree
+                const agents = () => sessionsOf(w.path).filter((x) => x.meta?.kind === "agent");
                 return (
                   <>
                   <div
@@ -762,7 +738,6 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                                     <Show when={info().worktree}>
                                       <span class="wt-agent-wt" title={a.meta?.worktree}>{info().worktree}</span>
                                     </Show>
-                                    <span class="wt-agent-time">{a.running ? idleLabel(a.idle_ms) : "fim"}</span>
                                   </PlainButton>
                                 </Show>
                                 <Show when={info().hasReport && renamingAgent() !== a.id}>
@@ -770,6 +745,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                                     <Icon name="file" size={11} /> Relatório
                                   </PlainButton>
                                 </Show>
+                                <span class="wt-agent-time">{a.running ? idleLabel(a.idle_ms) : "fim"}</span>
                               </div>
                             );
                           }}
