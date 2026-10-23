@@ -747,13 +747,13 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                                       <span class="wt-agent-kind">{info().kind}</span>
                                     </Show>
                                     <Show when={info().worktree}>
-                                      <span class="wt-agent-wt" title={a.meta?.worktree}>{info().worktree}</span>
+                                      <span class="wt-agent-wt inline-flex items-center text-muted-foreground" title={info().worktree} role="img" aria-label={`Worktree ${info().worktree}`}><Icon name="branch" size={12} /></span>
                                     </Show>
                                   </Button>
                                 </Show>
                                 <Show when={info().hasReport && renamingAgent() !== a.id}>
-                                  <Button type="button" variant="chip" size="chip" class="mr-1 flex-none gap-1 px-[7px]" aria-label={`Relatório de ${info().name}`} title="Abrir o relatório deste agente" onClick={() => openNote(a.id, info().name)}>
-                                    <Icon name="file" size={11} /> Relatório
+                                  <Button type="button" variant="chip" size="chip" class="mr-1 flex-none px-[6px]" aria-label={`Relatório de ${info().name}`} title="Abrir o relatório deste agente" onClick={() => openNote(a.id, info().name)}>
+                                    <Icon name="file" size={12} />
                                   </Button>
                                 </Show>
                                 <span class="wt-agent-time">{a.running ? idleLabel(a.idle_ms) : "fim"}</span>
