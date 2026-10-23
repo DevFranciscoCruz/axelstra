@@ -9,10 +9,25 @@ use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 const RING_BYTES: usize = 1 << 20;
+/// Chunks (up to 16 KiB each) a subscriber may have waiting before new output is dropped for it.
+const SUB_QUEUE: usize = 4096;
+/// Input writes waiting for the session's writer thread.
+const INPUT_QUEUE: usize = 1024;
+
+/// `lock()` that survives a poisoned mutex: a panic in one handler must not make every later caller panic too.
+trait LockRecover<T> {
+    fn lock_recover(&self) -> MutexGuard<'_, T>;
+}
+
+impl<T> LockRecover<T> for Mutex<T> {
+    fn lock_recover(&self) -> MutexGuard<'_, T> {
+        self.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Spawn {
@@ -26,7 +41,7 @@ pub struct Spawn {
 
 struct Ring {
     buf: VecDeque<u8>,
-    subs: Vec<Sender<Vec<u8>>>,
+    subs: Vec<SyncSender<Vec<u8>>>,
 }
 
 struct Shared {
@@ -51,7 +66,7 @@ pub struct Session {
     size: Mutex<(u16, u16)>,
     /// keystrokes wait here for a writer thread of their own, so a session that stops reading its input
     /// (a hung process, a huge paste) never blocks typing into the others
-    input: Sender<Vec<u8>>,
+    input: SyncSender<Vec<u8>>,
 }
 
 impl Session {
@@ -66,16 +81,24 @@ impl Session {
         for (k, v) in &s.env {
             cmd.env(k, v);
         }
-        let child = pair.slave.spawn_command(cmd).with_context(|| format!("spawn {}", s.program))?;
+        let mut child = pair.slave.spawn_command(cmd).with_context(|| format!("spawn {}", s.program))?;
         drop(pair.slave);
 
-        let job = Job::new()?;
-        if let Some(pid) = child.process_id() {
-            job.assign_pid(pid)?;
-        }
-
-        let mut reader = pair.master.try_clone_reader()?;
-        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
+        // the child already runs: if the rest of the setup fails, it must not be left behind with nobody owning it
+        let setup = Job::new().and_then(|job| {
+            if let Some(pid) = child.process_id() {
+                job.assign_pid(pid)?;
+            }
+            Ok((job, pair.master.try_clone_reader()?, pair.master.take_writer()?))
+        });
+        let (job, mut reader, writer) = match setup {
+            Ok(x) => x,
+            Err(e) => {
+                let _ = child.kill();
+                return Err(e);
+            }
+        };
+        let writer = Arc::new(Mutex::new(writer));
         let shared = Arc::new(Shared {
             ring: Mutex::new(Ring { buf: VecDeque::new(), subs: Vec::new() }),
             eof: AtomicBool::new(false),
@@ -101,7 +124,7 @@ impl Session {
                             if let Some(i) = data.windows(4).position(|w| w == b"[6n") {
                                 data.drain(i..i + 4);
                                 answered = true;
-                                let mut w = reply.lock().unwrap();
+                                let mut w = reply.lock_recover();
                                 let _ = w.write_all(b"[1;1R");
                                 let _ = w.flush();
                             }
@@ -113,25 +136,27 @@ impl Session {
                         if now_ms().saturating_sub(sh.last_in.load(Ordering::Relaxed)) > 700 {
                             sh.last_out.store(now_ms(), Ordering::Relaxed);
                         }
-                        let mut r = sh.ring.lock().unwrap();
+                        let mut r = sh.ring.lock_recover();
                         r.buf.extend(&data);
                         let over = r.buf.len().saturating_sub(RING_BYTES);
                         r.buf.drain(..over);
-                        r.subs.retain(|tx| tx.send(data.clone()).is_ok());
+                        // a subscriber that stopped reading loses output instead of making us buffer it without bound
+                        // (the ring still holds the recent part for a fresh subscribe); a gone one is dropped
+                        r.subs.retain(|tx| !matches!(tx.try_send(data.clone()), Err(TrySendError::Disconnected(_))));
                     }
                 }
             }
-            let mut r = sh.ring.lock().unwrap();
+            let mut r = sh.ring.lock_recover();
             sh.eof.store(true, Ordering::SeqCst);
             // dropping the senders tells subscribers the stream ended
             r.subs.clear();
         });
 
-        let (input, input_rx) = channel::<Vec<u8>>();
+        let (input, input_rx) = sync_channel::<Vec<u8>>(INPUT_QUEUE);
         let w = writer.clone();
         std::thread::spawn(move || {
             while let Ok(data) = input_rx.recv() {
-                let mut w = w.lock().unwrap();
+                let mut w = w.lock_recover();
                 if w.write_all(&data).and_then(|_| w.flush()).is_err() {
                     break;
                 }
@@ -151,8 +176,8 @@ impl Session {
 
     /// Replay of recent output plus a live stream; no byte is lost or duplicated.
     pub fn subscribe(&self) -> (Vec<u8>, Receiver<Vec<u8>>) {
-        let (tx, rx) = channel();
-        let mut r = self.shared.ring.lock().unwrap();
+        let (tx, rx) = sync_channel(SUB_QUEUE);
+        let mut r = self.shared.ring.lock_recover();
         let snap = r.buf.iter().copied().collect();
         if !self.shared.eof.load(Ordering::SeqCst) {
             r.subs.push(tx);
@@ -163,7 +188,7 @@ impl Session {
     /// Puts text in front of everything the session has printed, as if it had come first (the restored
     /// history of a previous run). Not sent to the program.
     pub fn seed(&self, text: &[u8]) {
-        let mut r = self.shared.ring.lock().unwrap();
+        let mut r = self.shared.ring.lock_recover();
         for b in text.iter().rev() {
             r.buf.push_front(*b);
         }
@@ -173,7 +198,7 @@ impl Session {
 
     /// The last `max` bytes of recent output.
     pub fn tail(&self, max: usize) -> Vec<u8> {
-        let r = self.shared.ring.lock().unwrap();
+        let r = self.shared.ring.lock_recover();
         let skip = r.buf.len().saturating_sub(max);
         r.buf.iter().skip(skip).copied().collect()
     }
@@ -194,29 +219,33 @@ impl Session {
     /// Writes text that did not come from the user (a notice, a report): it is not counted as typing,
     /// so the output it provokes still reads as the program working.
     pub fn write_system(&self, data: &[u8]) -> Result<()> {
-        let mut w = self.writer.lock().unwrap();
-        w.write_all(data)?;
-        w.flush()?;
-        Ok(())
+        self.queue_input(data)
     }
 
     pub fn write(&self, data: &[u8]) -> Result<()> {
         self.shared.last_in.store(now_ms(), Ordering::Relaxed);
-        self.input.send(data.to_vec()).map_err(|_| anyhow::anyhow!("session input closed"))
+        self.queue_input(data)
+    }
+
+    /// Everything the program receives goes through the writer thread, in order, so typing and notices never interleave.
+    fn queue_input(&self, data: &[u8]) -> Result<()> {
+        self.input.try_send(data.to_vec()).map_err(|e| match e {
+            TrySendError::Full(_) => anyhow::anyhow!("session input backlog is full (the program is not reading its input)"),
+            TrySendError::Disconnected(_) => anyhow::anyhow!("session input closed"),
+        })
     }
 
     /// The last `lines` non-empty lines as the terminal shows them (the recent output replayed through a terminal
     /// emulator at the session's real size), for reports and `read`.
     pub fn screen_lines(&self, lines: usize) -> Vec<String> {
-        let (cols, rows) = *self.size.lock().unwrap();
+        let (cols, rows) = *self.size.lock_recover();
         crate::screen::last_lines(&self.tail(256 * 1024), cols, rows, lines)
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<()> {
-        *self.size.lock().unwrap() = (cols, rows);
+        *self.size.lock_recover() = (cols, rows);
         self.master
-            .lock()
-            .unwrap()
+            .lock_recover()
             .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })?;
         Ok(())
     }
@@ -228,12 +257,12 @@ impl Session {
 
     /// Exit code once the process is gone (None while running).
     pub fn try_wait(&self) -> Option<i32> {
-        let st = self.child.lock().unwrap().try_wait().ok().flatten()?;
+        let st = self.child.lock_recover().try_wait().ok().flatten()?;
         Some(st.exit_code() as i32)
     }
 
     pub fn pid(&self) -> Option<u32> {
-        self.child.lock().unwrap().process_id()
+        self.child.lock_recover().process_id()
     }
 
     /// Private memory of everything the session runs, right now.
@@ -298,6 +327,34 @@ mod tests {
         s.write(line).unwrap();
         assert!(wait_for(&s, "er42"));
         s.kill();
+    }
+
+    #[test]
+    fn system_writes_share_the_input_queue_with_typing() {
+        let s = spawn_shell();
+        let eol = if cfg!(windows) { "\r\n" } else { "\n" };
+        s.write(format!("echo typed-aa{eol}").as_bytes()).unwrap();
+        s.write_system(format!("echo system-bb{eol}").as_bytes()).unwrap();
+        s.write(format!("echo typed-cc{eol}").as_bytes()).unwrap();
+        assert!(wait_for(&s, "typed-cc"));
+        let out = String::from_utf8_lossy(&s.tail(8192)).into_owned();
+        let (a, b, c) = (out.rfind("typed-aa"), out.rfind("system-bb"), out.rfind("typed-cc"));
+        assert!(a < b && b < c, "order lost: {out}");
+        s.kill();
+    }
+
+    #[test]
+    fn a_stalled_subscriber_cannot_grow_the_queue_without_bound() {
+        let s = spawn_cmd(if cfg!(windows) { "for /l %i in (1,1,30000) do @echo line-%i" } else { "i=0; while [ $i -lt 30000 ]; do echo line-$i; i=$((i+1)); done" });
+        // subscribed but never read: the producer must still finish and the session stay usable
+        let (_snap, rx) = s.subscribe();
+        let end = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < end && s.try_wait().is_none() {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(s.try_wait().is_some(), "output producer stalled behind an unread subscriber");
+        let queued = std::iter::from_fn(|| rx.try_recv().ok()).count();
+        assert!(queued <= SUB_QUEUE, "{queued} chunks queued");
     }
 
     #[test]

@@ -160,17 +160,17 @@ mod imp {
         pub fn spawn(&self, cmd: &mut Command) -> Result<Child> {
             cmd.process_group(0);
             let c = cmd.spawn()?;
-            self.0.lock().unwrap().push(c.id() as i32);
+            self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(c.id() as i32);
             Ok(c)
         }
 
         pub fn assign_pid(&self, pid: u32) -> Result<()> {
-            self.0.lock().unwrap().push(pid as i32);
+            self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(pid as i32);
             Ok(())
         }
 
         pub fn kill(&self) {
-            for pgid in self.0.lock().unwrap().iter() {
+            for pgid in self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter() {
                 // the group first (children), the leader itself in case it left the group
                 unsafe {
                     libc::killpg(*pgid, libc::SIGKILL);
@@ -181,7 +181,7 @@ mod imp {
 
         /// (resident memory bytes of the groups right now, cpu ticks: not tracked on unix)
         pub fn usage(&self) -> (u64, u64) {
-            let groups = self.0.lock().unwrap().clone();
+            let groups = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
             let Ok(o) = Command::new("ps").args(["-A", "-o", "pgid=,rss="]).output() else { return (0, 0) };
             let mut kib = 0u64;
             for l in String::from_utf8_lossy(&o.stdout).lines() {
