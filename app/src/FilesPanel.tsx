@@ -7,7 +7,7 @@ import { press } from "./a11y";
 import { FsEntry, GrepHit, fsCreate, fsDelete, fsGrep, fsList, fsRename, fsSearch } from "./api";
 import { MenuItem, showMenu } from "./ContextMenu";
 import { RightTabs } from "./RightTabs";
-import { changes, findWorktree, fsTick, guarded, openFile, selectedWorktree, setError, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban } from "./store";
+import { changes, findWorktree, fsTick, guarded, openFile, selectedWorktree, setError, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban, rightTab } from "./store";
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf("/")));
@@ -309,7 +309,7 @@ export function FilesPanel() {
   const rootName = () => info()?.wt.path.split(/[\\/]/).pop() ?? "";
 
   return (
-    <aside class="rightbar">
+    <aside class="rightbar" id="rpanel" role="tabpanel" aria-labelledby={`rtab-${rightTab()}`}>
       <RightTabs />
       <div class="rtools fp-head">
         <strong class="fp-title" title={info()?.project.name}>

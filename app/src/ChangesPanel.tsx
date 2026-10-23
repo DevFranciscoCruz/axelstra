@@ -20,6 +20,7 @@ import {
   setOpenDiff,
   setOpenFile,
   setShowKanban,
+  rightTab,
 } from "./store";
 
 const LABEL: Record<string, string> = { M: "alterado", A: "novo", D: "apagado", U: "conflito" };
@@ -141,7 +142,7 @@ export function ChangesPanel() {
     });
 
   return (
-    <aside class="rightbar">
+    <aside class="rightbar" id="rpanel" role="tabpanel" aria-labelledby={`rtab-${rightTab()}`}>
       <RightTabs />
 
       <div class="sc-head">

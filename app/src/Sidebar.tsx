@@ -456,11 +456,17 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                   <div
                     class="item wt"
                     classList={{ active: norm(selectedWorktree()) === norm(w.path) }}
-                    {...press(() => void openWorktree(p.id, w.path, w.is_main))}
-                    onKeyUp={(e) => e.key === "ContextMenu" && showMenuAt(e.currentTarget.getBoundingClientRect().left + 24, e.currentTarget.getBoundingClientRect().bottom, worktreeMenu(p, w, label()))}
+                    onKeyDown={(e) => {
+                      // the menu key and Shift+F10 open the row menu from the keyboard
+                      if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
+                      e.preventDefault();
+                      const r = e.currentTarget.getBoundingClientRect();
+                      showMenuAt(r.left + 24, r.bottom, worktreeMenu(p, w, label()));
+                    }}
                     onContextMenu={(e) => showMenu(e, worktreeMenu(p, w, label()))}
                     title={w.path}
                   >
+                    <button type="button" class="wt-open" aria-current={norm(selectedWorktree()) === norm(w.path) ? "true" : undefined} onClick={() => void openWorktree(p.id, w.path, w.is_main)}>
                     <StateDot state={dotOfWorktree({ queued: queued(), waiting: waiting(), working: working(), needs: needs(), live: live() })} />
                     <span class="name">{w.is_main ? (p.default_branch ?? "main") : label()}</span>
                     <Show when={!w.is_main && topic(w.path)?.title && topic(w.path)!.title !== label()}>
@@ -497,6 +503,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                     <Show when={isPinned(w.path)}>
                       <span class="pin" title="Fixado"><Icon name="pin" size={11} /></span>
                     </Show>
+                    </button>
                     <button
                       class="x"
                       title="Mais ações" aria-label="Mais ações"
