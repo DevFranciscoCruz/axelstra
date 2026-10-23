@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { NotifyMode, SettingsPatch, ShellChoice, Terse, call, daemonShutdown, diagnostics, getSettings, resetShellCache, setSettings } from "./api";
 import { radioKeys } from "./a11y";
 import { ask } from "./Confirm";
+import { HooksSection } from "./HooksSection";
 import { Modal } from "./Modal";
 import { S } from "./strings";
 import { classifySettingsError, diagnosticRows, errorText, waitUntil } from "./settingsLogic";
@@ -219,6 +220,8 @@ export function Settings() {
                   </label>
                 </div>
               </Section>
+
+              <HooksSection />
 
               <Diagnostics />
             </>
