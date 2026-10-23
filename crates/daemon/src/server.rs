@@ -262,8 +262,12 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
             };
             let msg = format!("[axelstra] worker \"{label}\" {status}. {body}");
             // an agent TUI takes a multi-line message as one paste; a plain shell gets the single line
-            let data = if agent { format!("\x1b[200~{msg}\x1b[201~\r") } else { format!("echo [axelstra] worker {label}: {status}\r") };
-            crate::msgbus::deliver(parent.1.clone(), data.into_bytes());
+            let data = if agent {
+                crate::msgbus::paste(&msg)
+            } else {
+                format!("echo [axelstra] worker {}: {}\r", crate::msgbus::echo_safe(&label), crate::msgbus::echo_safe(&status)).into_bytes()
+            };
+            crate::msgbus::deliver(parent.1.clone(), data);
         }
         s.kill();
         reg.sessions.lock_recover().remove(&id);
@@ -386,26 +390,38 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
 #[cfg(windows)]
 async fn accept_loop(pipe: &str, reg: Arc<Registry>, token: String) -> Result<()> {
     use tokio::net::windows::named_pipe::ServerOptions;
-    let mut server = ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(pipe)?;
+    // every instance gets the same explicit DACL (current user and SYSTEM), and remote clients are refused
+    let sec = crate::pipesec::PipeSecurity::current_user()?;
+    let make = |first: bool| -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
+        let mut attrs = sec.attributes();
+        unsafe {
+            ServerOptions::new()
+                .first_pipe_instance(first)
+                .reject_remote_clients(true)
+                .create_with_security_attributes_raw(pipe, (&mut attrs as *mut windows_sys::Win32::Security::SECURITY_ATTRIBUTES).cast())
+        }
+    };
+    let mut server = make(true)?;
     loop {
         // one failed accept (a client that vanished mid-connect) must not end the daemon: log, back off, go on
         if let Err(e) = server.connect().await {
             eprintln!("accept failed: {e}");
             tokio::time::sleep(Duration::from_millis(100)).await;
-            server = next_instance(pipe).await;
+            server = next_instance(&make).await;
             continue;
         }
         let conn = server;
-        server = next_instance(pipe).await;
+        server = next_instance(&make).await;
         tokio::spawn(handle(conn, reg.clone(), token.clone()));
     }
 }
 
-/// A fresh pipe instance to accept on, retrying with a short backoff while the system refuses to make one.
+/// A fresh pipe instance to accept on (same DACL as the first one), retrying with a short backoff while the system
+/// refuses to make one.
 #[cfg(windows)]
-async fn next_instance(pipe: &str) -> tokio::net::windows::named_pipe::NamedPipeServer {
+async fn next_instance(make: &impl Fn(bool) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer>) -> tokio::net::windows::named_pipe::NamedPipeServer {
     loop {
-        match tokio::net::windows::named_pipe::ServerOptions::new().reject_remote_clients(true).create(pipe) {
+        match make(false) {
             Ok(s) => return s,
             Err(e) => {
                 eprintln!("could not create a pipe instance: {e}");
@@ -488,6 +504,8 @@ impl Drop for ClientGuard {
     }
 }
 
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
 async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Registry>, token: String) {
     reg.clients.fetch_add(1, Ordering::SeqCst);
     let _guard = ClientGuard(reg.clone());
@@ -502,9 +520,21 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
     });
 
     let mut authed = false;
+    // set by a `hello` that says it comes from the CLI (what agents run); such a connection cannot switch screen control on
+    let mut cli = false;
     let mut subs: HashMap<u32, Arc<AtomicBool>> = HashMap::new();
 
-    while let Ok((kind, payload)) = read_frame(&mut rd).await {
+    loop {
+        // a connection that has not sent a valid `hello` yet must do so quickly, or it holds a task for nothing
+        let frame = if authed {
+            read_frame(&mut rd).await
+        } else {
+            match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_frame(&mut rd)).await {
+                Ok(f) => f,
+                Err(_) => break,
+            }
+        };
+        let Ok((kind, payload)) = frame else { break };
         match kind {
             JSON => {
                 let Ok(req) = serde_json::from_slice::<Req>(&payload) else { break };
@@ -516,7 +546,7 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
                 let t0 = std::time::Instant::now();
                 // a bug in one handler must not take every terminal down with the daemon
                 let res = tokio::task::block_in_place(|| {
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dispatch(&req, &reg, &tx, &mut subs, &mut authed, &token, &mut after)))
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dispatch(&req, &reg, &tx, &mut subs, &mut authed, &mut cli, &token, &mut after)))
                         .unwrap_or_else(|_| Err(anyhow::anyhow!("erro interno do daemon em {} (ver crash.log)", req.method)))
                 });
                 // calls that wait on purpose are not slow
@@ -654,6 +684,7 @@ fn dispatch(
     tx: &Tx,
     subs: &mut HashMap<u32, Arc<AtomicBool>>,
     authed: &mut bool,
+    cli: &mut bool,
     token: &str,
     after: &mut Vec<Box<dyn FnOnce() + Send>>,
 ) -> Result<Value> {
@@ -674,6 +705,7 @@ fn dispatch(
                 anyhow::bail!("bad token");
             }
             *authed = true;
+            *cli = p.get("client").and_then(Value::as_str) == Some("cli");
             Ok(json!({"proto": PROTO, "instance": *INSTANCE}))
         }
         "session.spawn" => {
@@ -912,6 +944,10 @@ fn dispatch(
         "codex.limits" => Ok(json!({"limits": tokio::task::block_in_place(crate::agentlog::codex_limits)})),
         "computer.status" => Ok(json!({"enabled": reg.computer.load(Ordering::SeqCst)})),
         "computer.enable" => {
+            // agents run the CLI: only the app (a connection that did not say it is the CLI) may turn it on
+            if *cli && p["on"].as_bool() == Some(true) {
+                anyhow::bail!("screen control can only be turned on by the user in the app");
+            }
             reg.computer.store(p["on"].as_bool() == Some(true), Ordering::SeqCst);
             Ok(json!({"enabled": reg.computer.load(Ordering::SeqCst)}))
         }
@@ -1362,16 +1398,15 @@ fn dispatch(
         }
         "open.editor" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
-            // only editors we know; never a program name from the client
-            let (prog, args): (&str, Vec<String>) = match p["app"].as_str().unwrap_or_default() {
-                "code" if cfg!(windows) => ("cmd", vec!["/d".into(), "/c".into(), "code".into(), wt.to_string_lossy().into_owned()]),
-                "code" => ("code", vec![wt.to_string_lossy().into_owned()]),
+            // only editors we know; never a program name from the client, and never through the shell
+            let (prog, args) = match p["app"].as_str().unwrap_or_default() {
+                "code" => crate::fsops::code_launch(&wt)?,
                 other => anyhow::bail!("unknown editor {other:?}"),
             };
-            axelstra_core::git::quiet(&mut std::process::Command::new(prog))
+            axelstra_core::git::quiet(&mut std::process::Command::new(&prog))
                 .args(args)
                 .spawn()
-                .map_err(|e| anyhow::anyhow!("could not start {prog}: {e}"))?;
+                .map_err(|e| anyhow::anyhow!("could not start {}: {e}", prog.display()))?;
             Ok(json!({}))
         }
         "gh.list" => {

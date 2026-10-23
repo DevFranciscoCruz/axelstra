@@ -2,13 +2,21 @@
 //! The webview records 16 kHz mono PCM and sends it as raw little-endian i16 bytes.
 use serde::Serialize;
 use sherpa_rs::whisper::{WhisperConfig, WhisperRecognizer};
+use sha2::Digest;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{ipc::Request, AppHandle, Emitter, Manager};
 
-const BASE: &str = "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/resolve/main/";
-const FILES: [&str; 3] = ["base-encoder.int8.onnx", "base-decoder.int8.onnx", "base-tokens.txt"];
+/// Pinned to one revision of the model repo, and every file to its SHA-256: a changed or swapped download is refused.
+const BASE: &str = "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base/resolve/bb53ee204431c90d314c1cc08d28d23e5b7927cc/";
+const FILES: [(&str, &str); 3] = [
+    ("base-encoder.int8.onnx", "0b8fb1304b6109976038efff5ace81720e00386f3ff6b54ee8c75291ca0a1e11"),
+    ("base-decoder.int8.onnx", "9759d217388a01b3a4c7c15533201067b48ae819c4daafc8624e64b9409dc02d"),
+    ("base-tokens.txt", "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126"),
+];
+/// Written once every file matched its hash; a model without it (older install) is checked again.
+const VERIFIED: &str = ".verified";
 /// Whisper reads at most 30 s at once.
 const CHUNK: usize = 16_000 * 28;
 
@@ -29,7 +37,24 @@ fn model_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn installed(dir: &std::path::Path) -> bool {
-    FILES.iter().all(|f| dir.join(f).is_file())
+    dir.join(VERIFIED).is_file() && FILES.iter().all(|(f, _)| dir.join(f).is_file())
+}
+
+fn sha256_of(r: &mut impl Read) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let n = r.read(&mut buf)?;
+        if n == 0 {
+            return Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect());
+        }
+        h.update(&buf[..n]);
+    }
+}
+
+fn file_matches(path: &std::path::Path, want: &str) -> bool {
+    std::fs::File::open(path).and_then(|mut f| sha256_of(&mut f)).is_ok_and(|h| h == want)
 }
 
 #[tauri::command]
@@ -43,29 +68,35 @@ pub async fn voice_download(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let mut sizes = Vec::new();
-        for f in FILES {
+        let _ = std::fs::remove_file(dir.join(VERIFIED));
+        for (f, _) in FILES {
             let r = ureq::head(&format!("{BASE}{f}")).call().map_err(|e| format!("{f}: {e}"))?;
             sizes.push(r.header("content-length").and_then(|v| v.parse::<u64>().ok()).unwrap_or(0));
         }
         let total: u64 = sizes.iter().sum();
         let mut done = 0u64;
         let mut last = 0u64;
-        for f in FILES {
+        for (f, want) in FILES {
             let target = dir.join(f);
             if target.is_file() {
-                done += std::fs::metadata(&target).map(|m| m.len()).unwrap_or(0);
-                continue;
+                if file_matches(&target, want) {
+                    done += std::fs::metadata(&target).map(|m| m.len()).unwrap_or(0);
+                    continue;
+                }
+                let _ = std::fs::remove_file(&target);
             }
             let part = dir.join(format!("{f}.part"));
             let resp = ureq::get(&format!("{BASE}{f}")).call().map_err(|e| format!("{f}: {e}"))?;
             let mut reader = resp.into_reader();
             let mut out = std::fs::File::create(&part).map_err(|e| e.to_string())?;
             let mut buf = vec![0u8; 256 * 1024];
+            let mut hasher = sha2::Sha256::new();
             loop {
                 let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
                 if n == 0 {
                     break;
                 }
+                hasher.update(&buf[..n]);
                 out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
                 done += n as u64;
                 if done - last > 512 * 1024 {
@@ -74,8 +105,14 @@ pub async fn voice_download(app: AppHandle) -> Result<(), String> {
                 }
             }
             drop(out);
+            let got: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+            if got != want {
+                let _ = std::fs::remove_file(&part);
+                return Err(format!("{f}: o ficheiro descarregado não corresponde ao hash esperado"));
+            }
             std::fs::rename(&part, &target).map_err(|e| e.to_string())?;
         }
+        std::fs::write(dir.join(VERIFIED), "").map_err(|e| e.to_string())?;
         let _ = app.emit("voice-progress", Progress { done: total, total });
         Ok(())
     })
@@ -102,9 +139,9 @@ pub async fn voice_transcribe(app: AppHandle, request: Request<'_>) -> Result<St
             }
             let p = |f: &str| dir.join(f).to_string_lossy().into_owned();
             let cfg = WhisperConfig {
-                encoder: p(FILES[0]),
-                decoder: p(FILES[1]),
-                tokens: p(FILES[2]),
+                encoder: p(FILES[0].0),
+                decoder: p(FILES[1].0),
+                tokens: p(FILES[2].0),
                 language: if lang == "auto" { String::new() } else { lang.clone() },
                 num_threads: Some(4),
                 ..Default::default()
@@ -118,4 +155,27 @@ pub async fn voice_transcribe(app: AppHandle, request: Request<'_>) -> Result<St
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sha256_matches_the_known_digest() {
+        // sha256("abc")
+        assert_eq!(sha256_of(&mut &b"abc"[..]).unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        let f = std::env::temp_dir().join(format!("axl-voice-{}", std::process::id()));
+        std::fs::write(&f, b"abc").unwrap();
+        assert!(file_matches(&f, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+        assert!(!file_matches(&f, FILES[2].1));
+        let _ = std::fs::remove_file(&f);
+    }
+
+    #[test]
+    fn every_pinned_hash_is_a_sha256_hex_digest() {
+        for (_, h) in FILES {
+            assert!(h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+    }
 }
