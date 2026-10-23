@@ -1,5 +1,5 @@
 import { K } from "./keyboard";
-import { Button, CheckboxInput, Textarea } from "./ui";
+import { Button, Checkbox, Textarea } from "./ui";
 import { Show, createEffect, createSignal, onCleanup } from "solid-js";
 import { Icon } from "./Icon";
 import { invoke } from "@tauri-apps/api/core";
@@ -249,9 +249,7 @@ export const VoiceDraft = (props: { target: number | null }) => {
             Enviar
           </Button>
         </Show>
-        <label class="voice-auto" title="Enviar para o terminal assim que parar de falar">
-          <CheckboxInput checked={autoSend()} onChange={(e) => setAutoSend(e.currentTarget.checked)} /> Enviar automático
-        </label>
+        <Checkbox labelClass="voice-auto" title="Enviar para o terminal assim que parar de falar" checked={autoSend()} onChange={(e) => setAutoSend(e.currentTarget.checked)} label="Enviar automático" />
         <Show when={needModel()}>
           <span class="voice-err">
             Ditado local precisa de um modelo (~160 MB, descarregado uma vez).{" "}
