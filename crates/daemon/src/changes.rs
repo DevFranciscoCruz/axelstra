@@ -29,12 +29,23 @@ pub struct Changes {
     pub files: Vec<FileChange>,
 }
 
+/// The commit a caller-supplied ref names. A ref starting with a dash would act as a git option, and anything
+/// that is not an existing commit is refused before it reaches another command.
+fn resolve_base(wt: &Path, b: &str) -> Result<String> {
+    if b.is_empty() || b.starts_with('-') || b.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        bail!("invalid base ref '{b}'");
+    }
+    git::must(wt, &["rev-parse", "--verify", "--quiet", "--end-of-options", &format!("{b}^{{commit}}")]).with_context(|| format!("unknown base ref '{b}'"))
+}
+
 /// Commit to diff against: HEAD, or the merge-base of HEAD and `base` for a branch-wide view.
 fn reference(wt: &Path, base: Option<&str>) -> Result<String> {
     match base {
         None => git::must(wt, &["rev-parse", "HEAD"]),
-        Some(b) => git::must(wt, &["merge-base", "HEAD", b])
-            .with_context(|| format!("no common history with '{b}'")),
+        Some(b) => {
+            let commit = resolve_base(wt, b)?;
+            git::must(wt, &["merge-base", "HEAD", &commit]).with_context(|| format!("no common history with '{b}'"))
+        }
     }
 }
 
@@ -176,11 +187,12 @@ pub struct Commit {
 
 /// Commits on HEAD that `base` does not have (newest first). Without a base: the last 50.
 pub fn log(wt: &Path, base: Option<&str>) -> Result<Vec<Commit>> {
-    let range = base.map(|b| format!("{b}..HEAD"));
+    let range = base.map(|b| resolve_base(wt, b).map(|c| format!("{c}..HEAD"))).transpose()?;
     let mut args = vec!["log", "--no-color", "--no-renames", "-n", "50", "--numstat", "--format=%x1e%H%x1f%h%x1f%an%x1f%aI%x1f%s"];
     if let Some(r) = &range {
         args.push(r);
     }
+    args.push("--");
     let o = git::run(wt, &args)?;
     if !o.ok {
         bail!("git log: {}", o.stderr);
@@ -235,4 +247,20 @@ pub fn show(wt: &Path, sha: &str) -> Result<String> {
         s.push_str("\n… diff truncated\n");
     }
     Ok(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_base_that_looks_like_an_option_is_refused() {
+        let here = std::env::temp_dir();
+        for bad in ["--output=/tmp/x", "-n1", "", "a b", "main\n--all"] {
+            let e = resolve_base(&here, bad).unwrap_err().to_string();
+            assert!(e.contains("invalid base ref"), "{bad:?}: {e}");
+            assert!(log(&here, Some(bad)).is_err());
+            assert!(changes(&here, Some(bad)).is_err());
+        }
+    }
 }

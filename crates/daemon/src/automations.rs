@@ -32,12 +32,18 @@ pub struct Automation {
     pub last_run: i64,
 }
 
+const MAX_INTERVAL_MINUTES: u32 = 60 * 24 * 366;
+
 pub fn store_path(projects_store: &Path) -> PathBuf {
     projects_store.with_file_name("automations.json")
 }
 
+/// Entries that do not parse or fail `validate` are skipped, so one bad entry cannot drop the rest.
 pub fn load(store: &Path) -> Vec<Automation> {
-    std::fs::read_to_string(store).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    let Some(items) = std::fs::read_to_string(store).ok().and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(&s).ok()) else {
+        return Vec::new();
+    };
+    items.into_iter().filter_map(|v| serde_json::from_value::<Automation>(v).ok()).filter(|a| validate(a).is_ok()).collect()
 }
 
 pub fn save_all(store: &Path, v: &[Automation]) -> Result<()> {
@@ -64,6 +70,7 @@ pub fn validate(a: &Automation) -> Result<()> {
     }
     match &a.schedule {
         Schedule::Interval { minutes } if *minutes < 5 => bail!("interval must be at least 5 minutes"),
+        Schedule::Interval { minutes } if *minutes > MAX_INTERVAL_MINUTES => bail!("interval must be at most a year"),
         Schedule::Interval { .. } => {}
         Schedule::Daily { time } => {
             parse_time(time)?;
@@ -119,9 +126,19 @@ pub fn now_ts() -> i64 {
     DateTime::<Local>::from(std::time::SystemTime::now()).timestamp()
 }
 
-/// `'` doubled, the way PowerShell single-quoted strings escape it.
+/// Every character PowerShell reads as a single quote (`'` and U+2018..U+201B) doubled, the way its
+/// single-quoted strings escape it.
 pub fn ps_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "''"))
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for c in s.chars() {
+        out.push(c);
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+    }
+    out.push('\'');
+    out
 }
 
 /// POSIX single-quote escaping.
@@ -203,8 +220,28 @@ mod tests {
     }
 
     #[test]
+    fn load_skips_bad_entries() {
+        let dir = std::env::temp_dir().join(format!("axl-auto-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("automations.json");
+        let good = serde_json::to_value(auto(Schedule::Daily { time: "10:00".into() })).unwrap();
+        let mut bad_agent = good.clone();
+        bad_agent["agent"] = "rm".into();
+        let mut bad_sched = good.clone();
+        bad_sched["schedule"] = serde_json::json!({"kind": "interval", "minutes": 1});
+        let items = serde_json::json!([good, bad_agent, bad_sched, {"nonsense": 1}]);
+        std::fs::write(&f, items.to_string()).unwrap();
+        assert_eq!(load(&f).len(), 1);
+        assert!(validate(&auto(Schedule::Interval { minutes: u32::MAX })).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn prompts_are_quoted_for_the_shell() {
         assert_eq!(ps_quote("it's $x"), "'it''s $x'");
+        // typographic quotes would end the string too if left single
+        assert_eq!(ps_quote("a\u{2019};calc;\u{2018}"), "'a\u{2019}\u{2019};calc;\u{2018}\u{2018}'");
+        assert_eq!(ps_quote("\u{201A}\u{201B}"), "'\u{201A}\u{201A}\u{201B}\u{201B}'");
         assert_eq!(sh_quote("it's $x"), "'it'\\''s $x'");
         let (_, args) = agent_command("claude", "a 'b'");
         assert!(args.last().unwrap().contains("claude"));

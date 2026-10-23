@@ -21,6 +21,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 sherpa-rs = { version = "0.6.8", default-features = false, features = ["download-binaries", "static"] }
 ureq = "2"
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.8"

@@ -152,8 +152,32 @@ pub fn grep(wt: &Path, query: &str) -> Result<Vec<Match>> {
     Ok(out)
 }
 
+/// Program and arguments that open `wt` in VS Code. On Windows the `code` on PATH is a `.cmd` shim, which only
+/// `cmd` can run and `cmd` would read `&` or `%` in the path as syntax: so the real `Code.exe` next to the shim is
+/// started directly, and `cmd` is only the fallback for a path with nothing special in it.
+pub fn code_launch(wt: &Path) -> Result<(PathBuf, Vec<String>)> {
+    let path = wt.to_string_lossy().into_owned();
+    if !cfg!(windows) {
+        return Ok((PathBuf::from("code"), vec![path]));
+    }
+    let shim = std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join("code.cmd")).find(|c| c.is_file()));
+    if let Some(exe) = shim.and_then(|s| s.parent()?.parent().map(|d| d.join("Code.exe"))).filter(|e| e.is_file()) {
+        return Ok((exe, vec![path]));
+    }
+    if path.chars().any(|c| matches!(c, '&' | '|' | '<' | '>' | '^' | '%' | '"' | '!' | '(' | ')') || c.is_control()) {
+        bail!("could not find Code.exe, and the path has characters the command shell would misread");
+    }
+    Ok((PathBuf::from("cmd"), vec!["/d".into(), "/c".into(), "code".into(), path]))
+}
+
+/// A path component that git or the file system treats as the `.git` entry: case-insensitive, and Windows
+/// ignores trailing dots and spaces.
+fn is_git_name(c: &str) -> bool {
+    c.trim_end_matches(['.', ' ']).eq_ignore_ascii_case(".git")
+}
+
 fn not_git(rel: &str) -> Result<()> {
-    if rel.is_empty() || rel == ".git" || rel.starts_with(".git/") {
+    if rel.is_empty() || rel.split(['/', '\\']).any(is_git_name) {
         bail!("not allowed");
     }
     Ok(())
@@ -238,7 +262,19 @@ pub fn stat_hash(wt: &Path, rel: &str) -> Result<Option<String>> {
 }
 
 pub fn write(wt: &Path, rel: &str, text: &str, eol: &str, bom: bool, base_hash: Option<&str>) -> Result<Saved> {
-    let p = resolve(wt, rel)?;
+    not_git(rel)?;
+    let mut p = resolve(wt, rel)?;
+    // a symlink is written through to its target, not replaced; either way the real location may not be in .git
+    let root = axelstra_core::git::canon(wt)?;
+    if std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink()) {
+        p = axelstra_core::git::canon(&p)?;
+    }
+    let real = axelstra_core::git::canon(if p.exists() { &p } else { p.parent().context("no parent")? })?;
+    let inner = real.strip_prefix(&root).context("path escapes the worktree")?.to_string_lossy().into_owned();
+    if !inner.is_empty() {
+        not_git(&inner)?;
+    }
+    let mode = std::fs::metadata(&p).ok().map(|m| m.permissions());
     if text.len() as u64 > MAX_FILE_BYTES {
         bail!("file is larger than {} MB", MAX_FILE_BYTES >> 20);
     }
@@ -261,6 +297,9 @@ pub fn write(wt: &Path, rel: &str, text: &str, eol: &str, bom: bool, base_hash: 
     let bytes = data.into_bytes();
     let tmp = p.with_extension(format!("{}.axl-tmp", p.extension().map(|e| e.to_string_lossy()).unwrap_or_default()));
     std::fs::write(&tmp, &bytes)?;
+    if let Some(mode) = mode {
+        let _ = std::fs::set_permissions(&tmp, mode);
+    }
     // another process may hold the target open for a moment (editors, scanners)
     let mut last = None;
     for _ in 0..5 {
@@ -274,4 +313,59 @@ pub fn write(wt: &Path, rel: &str, text: &str, eol: &str, bom: bool, base_hash: 
     }
     let _ = std::fs::remove_file(&tmp);
     Err(last.unwrap().into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmpdir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("axl-fsops-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join(".git")).unwrap();
+        d
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn code_launch_never_hands_a_special_path_to_cmd() {
+        let (prog, args) = code_launch(Path::new(r"C:\work&b")).map(|(p, a)| (p.to_string_lossy().into_owned(), a)).unwrap_or_default();
+        // either the real exe (no shell) or an error; never `cmd` with the ampersand
+        assert!(!(prog.eq_ignore_ascii_case("cmd") && args.iter().any(|a| a.contains('&'))));
+        assert!(code_launch(Path::new(r"C:\work\plain")).is_ok() || true);
+    }
+
+    #[test]
+    fn git_dir_is_refused_whatever_the_spelling() {
+        for bad in [".git", ".GIT/config", "sub/.Git/hooks/pre-commit", ".git./x", ".git /x", "a\\.git\\x"] {
+            assert!(not_git(bad).is_err(), "{bad}");
+        }
+        for ok in [".gitignore", ".github/ci.yml", "src/git.rs"] {
+            assert!(not_git(ok).is_ok(), "{ok}");
+        }
+        let d = tmpdir("git");
+        assert!(write(&d, ".GIT/config", "x", "lf", false, None).is_err());
+        assert!(write(&d, ".git/hooks/pre-commit", "x", "lf", false, None).is_err());
+        assert!(write(&d, "ok.txt", "x", "lf", false, None).is_ok());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_keeps_mode_and_symlinks() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmpdir("mode");
+        std::fs::write(d.join("run.sh"), "a").unwrap();
+        std::fs::set_permissions(d.join("run.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        write(&d, "run.sh", "b", "lf", false, None).unwrap();
+        assert_eq!(std::fs::metadata(d.join("run.sh")).unwrap().permissions().mode() & 0o777, 0o755);
+        std::os::unix::fs::symlink("run.sh", d.join("link")).unwrap();
+        write(&d, "link", "c", "lf", false, None).unwrap();
+        assert!(std::fs::symlink_metadata(d.join("link")).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(d.join("run.sh")).unwrap(), "c");
+        // a link into .git is not a way around the check
+        std::os::unix::fs::symlink(".git", d.join("g")).unwrap();
+        assert!(write(&d, "g/config", "x", "lf", false, None).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

@@ -8,6 +8,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+/// Ceiling for `--slots`: each slot is a file and a polling try-lock per round.
+pub const MAX_SLOTS: usize = 64;
+
 fn dir() -> Result<PathBuf> {
     let d = axelstra_daemon::proto::ensure_data_dir()?.join("locks");
     std::fs::create_dir_all(&d)?;
@@ -39,11 +42,18 @@ fn acquire(name: &str, slots: usize, timeout: Duration) -> Result<(File, usize)>
     }
 }
 
+fn clamp_slots(slots: usize) -> usize {
+    slots.clamp(1, MAX_SLOTS)
+}
+
 pub fn run(name: &str, slots: usize, timeout: u64, command: &[String]) -> Result<i32> {
     if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         bail!("lock name: letters, digits, - and _ only");
     }
-    let (_held, _slot) = acquire(name, slots.max(1), Duration::from_secs(timeout))?;
+    if command.is_empty() {
+        bail!("no command given");
+    }
+    let (_held, _slot) = acquire(name, clamp_slots(slots), Duration::from_secs(timeout))?;
     let status = Command::new(&command[0]).args(&command[1..]).status()?;
     Ok(status.code().unwrap_or(1))
 }
@@ -59,6 +69,13 @@ mod tests {
         assert!(acquire(&name, 1, Duration::from_millis(600)).is_err());
         drop(a);
         assert!(acquire(&name, 1, Duration::from_secs(1)).is_ok());
+    }
+
+    #[test]
+    fn slots_are_capped() {
+        assert_eq!(clamp_slots(0), 1);
+        assert_eq!(clamp_slots(3), 3);
+        assert_eq!(clamp_slots(usize::MAX), MAX_SLOTS);
     }
 
     #[test]

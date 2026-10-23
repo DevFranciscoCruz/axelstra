@@ -406,12 +406,12 @@ fn main() -> Result<()> {
         | Cmd::Wait { .. }
         | Cmd::Search { .. }) => {
             use axelstra_daemon::{client::Client, proto};
-            let c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
+            let c = Client::connect_cli(&proto::pipe_name(), &proto::load_or_create_token()?)?;
             ctl::run(cmd, c)?;
         }
         Cmd::Dispatch { cmd } => {
             use axelstra_daemon::{client::Client, proto};
-            let c = Client::connect(&proto::pipe_name(), &proto::load_or_create_token()?)?;
+            let c = Client::connect_cli(&proto::pipe_name(), &proto::load_or_create_token()?)?;
             dispatch::run(cmd, c)?;
         }
         Cmd::Lock { name, slots, timeout, command } => std::process::exit(lock::run(&name, slots, timeout, &command)?),

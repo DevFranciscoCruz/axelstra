@@ -208,9 +208,18 @@ fn open(path: &str) -> Result<Conn> {
 
 impl Client {
     pub fn connect(pipe: &str, token: &str) -> Result<Client> {
+        Self::connect_as(pipe, token, None)
+    }
+
+    /// For the CLI, which agents run: the daemon refuses to let such a connection turn screen control on.
+    pub fn connect_cli(pipe: &str, token: &str) -> Result<Client> {
+        Self::connect_as(pipe, token, Some("cli"))
+    }
+
+    fn connect_as(pipe: &str, token: &str, client: Option<&str>) -> Result<Client> {
         let f = open(pipe)?;
         let mut c = Client { rd: f.try_clone()?, wr: f, next: 0, proto: 0, instance: 0, timeout: None, broken: false };
-        let hello = c.call("hello", json!({"token": token}))?;
+        let hello = c.call("hello", json!({"token": token, "client": client}))?;
         c.proto = hello["proto"].as_u64().unwrap_or(1);
         c.instance = hello["instance"].as_u64().unwrap_or(0);
         Ok(c)
