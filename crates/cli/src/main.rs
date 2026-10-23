@@ -350,7 +350,13 @@ enum DispCmd {
 #[derive(Subcommand)]
 enum WtCmd {
     /// Create a worktree; prints its path
-    Create { project: String, name: String },
+    Create {
+        project: String,
+        name: String,
+        /// put the new worktree under this worktree of the same project in the sidebar
+        #[arg(long)]
+        parent: Option<PathBuf>,
+    },
     /// Remove a worktree
     Rm { path: PathBuf },
     /// Remove the ax/* worktrees whose work is merged (branch in the default branch, or its PR merged on GitHub)
