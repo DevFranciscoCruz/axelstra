@@ -9,9 +9,10 @@ export type Option = { value: string; label: string; icon?: string };
 /** Dropdown that matches the app instead of the system list, on Kobalte's Select (listbox, roving focus, type-ahead).
  *  While it is open it holds a layer (ContextMenu's `menuOpen`), so Esc and Tab close it before they reach a dialog
  *  underneath. */
-export function Select(props: { value: string; options: Option[]; onChange: (v: string) => void; class?: string; label?: string }) {
+export function Select(props: { value: string; options: Option[]; onChange: (v: string) => void; class?: string; label?: string; /** options that have an icon show only the icon (the name stays as tooltip and for screen readers) */ iconOnly?: boolean }) {
   const current = () => props.options.find((o) => o.value === props.value);
   const label = () => current()?.label ?? props.value;
+  const logoOnly = () => !!props.iconOnly && !!current()?.icon;
   const [open, setOpen] = createSignal(false);
   let trigger: HTMLButtonElement | undefined;
 
@@ -50,12 +51,13 @@ export function Select(props: { value: string; options: Option[]; onChange: (v: 
         return (
           <K.Item
             item={ip.item}
+            title={props.iconOnly && o().icon ? o().label : undefined}
             class="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-base text-popover-foreground outline-none data-[highlighted]:bg-accent"
           >
             <span class="inline-flex w-4 flex-none items-center justify-center text-muted-foreground">
               {hasIcon(icon()) ? <Icon name={icon()} size={13} /> : icon()}
             </span>
-            <K.ItemLabel class="flex-1">{o().label}</K.ItemLabel>
+            <K.ItemLabel class={cn("flex-1", props.iconOnly && o().icon && "sr-only")}>{o().label}</K.ItemLabel>
           </K.Item>
         );
       }}
@@ -67,13 +69,14 @@ export function Select(props: { value: string; options: Option[]; onChange: (v: 
           props.class,
         )}
         aria-label={props.label ? `${props.label}: ${label()}` : undefined}
+        title={logoOnly() ? label() : undefined}
         // a click that did not come from a pointer (assistive tech, scripts) opens it too; pointers open on press
         onClick={(e) => {
           if (!e.currentTarget.dataset.pointerType) setOpen(!open());
         }}
       >
-        <Show when={current()?.icon}>{(n) => <Icon name={n()} size={13} />}</Show>
-        <K.Value<Option> class="select-label min-w-0 flex-1 truncate">{() => label()}</K.Value>
+        <Show when={current()?.icon}>{(n) => <Icon name={n()} size={logoOnly() ? 16 : 13} />}</Show>
+        <K.Value<Option> class={cn("select-label min-w-0 flex-1 truncate", logoOnly() && "sr-only")}>{() => label()}</K.Value>
         <K.Icon class="chev text-muted-foreground">
           <Icon name="chevDown" size={11} />
         </K.Icon>

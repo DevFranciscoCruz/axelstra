@@ -569,6 +569,7 @@ export function App() {
                 <Select
                   value={choice()}
                   label="Agente"
+                  iconOnly
                   options={[...agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))]}
                   onChange={setChoice}
                 />

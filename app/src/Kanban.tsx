@@ -360,7 +360,8 @@ export function Kanban(props: { project: string }) {
                 <Field label="Agente" hint={agentWarning(agents(), d().agent) || undefined}>
                   <Select
                     value={d().agent}
-                    options={agentOptions(agents(), d().agent)}
+                    iconOnly
+                  options={agentOptions(agents(), d().agent)}
                     onChange={(v) => setDraft({ ...d(), agent: v })}
                   />
                 </Field>
