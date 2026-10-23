@@ -129,19 +129,24 @@ fn clean_message(raw: &str) -> String {
     unquoted.trim().to_string()
 }
 
+/// Flags of the suggestion call: a text answer only, so no tool (shell, file edits, web) is available to a diff
+/// that tries to talk the agent into using one.
+fn agent_args() -> [&'static str; 3] {
+    ["-p", "--tools=", "--no-session-persistence"]
+}
+
 fn run_agent(prompt: &str) -> Result<String> {
     use std::io::{Read, Write};
     use std::process::Stdio;
     // `cmd /C` so a `claude.cmd` shim is found on Windows too; the prompt goes through stdin, never the command line
     let mut cmd = if cfg!(windows) {
         let mut c = Command::new("cmd");
-        c.args(["/C", "claude", "-p"]);
+        c.args(["/C", "claude"]);
         c
     } else {
-        let mut c = Command::new("claude");
-        c.arg("-p");
-        c
+        Command::new("claude")
     };
+    cmd.args(agent_args());
     axelstra_core::git::quiet(&mut cmd);
     // outside the repo, so the agent works from the prompt alone and does not wander through the project
     let mut child = cmd
@@ -206,6 +211,15 @@ pub fn suggest_message(wt: &Path) -> Result<String> {
 
 #[cfg(test)]
 mod suggest_tests {
+    #[test]
+    fn the_agent_gets_no_tools() {
+        let a = super::agent_args();
+        assert!(a.contains(&"-p"));
+        // an empty tool list in one argument, so nothing after it is read as a tool name
+        assert!(a.contains(&"--tools="));
+        assert!(!a.iter().any(|x| x.contains("allowed") || x.contains("dangerously")));
+    }
+
     use super::*;
 
     #[test]
