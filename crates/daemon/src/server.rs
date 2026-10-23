@@ -1146,7 +1146,7 @@ fn dispatch(
             let (s, label, meta) = crate::docker::terminal(&reg.store, &req.method, p)?;
             Ok(json!({"id": reg.spawn(&s, Some(&label), Some(meta))?}))
         }
-        "docker.status" | "docker.containers" | "docker.stats" | "docker.images" | "docker.volumes" | "docker.action" => {
+        "docker.status" | "docker.containers" | "docker.stats" | "docker.images" | "docker.volumes" | "docker.networks" | "docker.inspect" | "docker.logs" | "docker.fs_list" | "docker.fs_read" | "docker.action" => {
             tokio::task::block_in_place(|| crate::docker::call(&reg.store, &req.method, p))
         }
         "fs.list" | "fs.read" | "fs.stat" | "fs.write" | "fs.search" | "fs.grep" | "fs.create" | "fs.rename" | "fs.delete" => {

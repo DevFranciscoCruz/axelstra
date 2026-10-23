@@ -48,6 +48,7 @@ pub struct Container {
     pub service: String,
     /// names of the volumes it mounts (bind mounts are left out)
     pub volumes: Vec<String>,
+    pub networks: Vec<String>,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -68,6 +69,8 @@ pub struct Image {
     pub size: String,
     pub created: String,
     pub containers: u32,
+    /// no repository or tag: left behind by a rebuild
+    pub dangling: bool,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -76,6 +79,33 @@ pub struct Volume {
     pub driver: String,
     pub mountpoint: String,
     pub used_by: Vec<String>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct Network {
+    pub id: String,
+    pub name: String,
+    pub driver: String,
+    pub scope: String,
+    pub containers: Vec<String>,
+}
+
+#[derive(Serialize, Debug, PartialEq, Default)]
+pub struct Inspect {
+    pub command: String,
+    pub workdir: String,
+    pub restart: String,
+    pub env: Vec<(String, String)>,
+    /// (kind, source, destination, writable)
+    pub mounts: Vec<(String, String, String, bool)>,
+    /// (network, ip address)
+    pub networks: Vec<(String, String)>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct FsEntry {
+    pub name: String,
+    pub dir: bool,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -107,6 +137,11 @@ fn name_arg<'a>(kind: &str, s: &'a str) -> Result<&'a str> {
 
 /// Runs docker; stdout on success, the trimmed stderr as the error. `NotFound` means docker is not installed.
 fn run(args: &[&str], limit: Duration) -> Result<String> {
+    run_full(args, limit).map(|(out, _)| out)
+}
+
+/// Same, keeping stderr too (`docker logs` prints the container's stderr there).
+fn run_full(args: &[&str], limit: Duration) -> Result<(String, String)> {
     let mut child = git::quiet(&mut Command::new("docker"))
         .args(args)
         .stdin(Stdio::null())
@@ -144,7 +179,7 @@ fn run(args: &[&str], limit: Duration) -> Result<String> {
         let msg = stderr.trim();
         bail!("{}", if msg.is_empty() { format!("docker {} failed", args.first().unwrap_or(&"")) } else { msg.to_string() });
     }
-    Ok(stdout)
+    Ok((stdout, stderr))
 }
 
 /// Not installed and engine not running are different problems with different fixes.
@@ -217,6 +252,7 @@ pub fn parse_containers(out: &str) -> Vec<Container> {
                 service: label(labels, "com.docker.compose.service").to_string(),
                 // Mounts mixes volume names and bind paths; a path never passes the name check
                 volumes: c["Mounts"].as_str().unwrap_or_default().split(',').filter(|m| valid_name(m)).map(String::from).collect(),
+                networks: c["Networks"].as_str().unwrap_or_default().split(',').filter(|m| valid_name(m)).map(String::from).collect(),
             }
         })
         .collect()
@@ -258,6 +294,7 @@ pub fn parse_images(out: &str) -> Vec<Image> {
             size: text(&i, "Size"),
             created: text(&i, "CreatedAt"),
             containers: text(&i, "Containers").parse().unwrap_or(0),
+            dangling: repo == "<none>",
         });
     }
     v
@@ -290,6 +327,123 @@ pub fn group_projects(containers: &[Container]) -> Vec<Project> {
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
+}
+
+pub fn parse_networks(out: &str, containers: &[Container]) -> Vec<Network> {
+    json_lines(out)
+        .iter()
+        .map(|n| {
+            let name = text(n, "Name");
+            let on = containers.iter().filter(|c| c.networks.contains(&name)).map(|c| c.name.clone()).collect();
+            Network { id: text(n, "ID"), name, driver: text(n, "Driver"), scope: text(n, "Scope"), containers: on }
+        })
+        .collect()
+}
+
+/// The parts of `docker inspect` the detail pane shows.
+pub fn parse_inspect(out: &str) -> Result<Inspect> {
+    let v: Value = serde_json::from_str(out).context("docker inspect returned invalid JSON")?;
+    let c = v.get(0).context("docker inspect returned nothing")?;
+    fn words(a: &Value) -> Vec<&str> {
+        a.as_array().map(|l| l.iter().filter_map(Value::as_str).collect()).unwrap_or_default()
+    }
+    let mut cmd = vec![c["Path"].as_str().unwrap_or_default()];
+    cmd.extend(words(&c["Args"]));
+    let mut env: Vec<(String, String)> = words(&c["Config"]["Env"]).iter().map(|e| e.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())).unwrap_or((e.to_string(), String::new()))).collect();
+    env.sort();
+    let mounts = c["Mounts"]
+        .as_array()
+        .map(|l| {
+            l.iter()
+                .map(|m| {
+                    let src = if m["Type"] == "volume" { m["Name"].as_str() } else { m["Source"].as_str() };
+                    (text(m, "Type"), src.unwrap_or_default().to_string(), text(m, "Destination"), m["RW"].as_bool().unwrap_or(true))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let networks = c["NetworkSettings"]["Networks"].as_object().map(|o| o.iter().map(|(k, n)| (k.clone(), text(n, "IPAddress"))).collect()).unwrap_or_default();
+    Ok(Inspect {
+        command: cmd.join(" ").trim().to_string(),
+        workdir: text(&c["Config"], "WorkingDir"),
+        restart: text(&c["HostConfig"]["RestartPolicy"], "Name"),
+        env,
+        mounts,
+        networks,
+    })
+}
+
+/// `ls -1Ap` lines: a trailing slash marks a directory. Folders first, then by name.
+pub fn parse_ls(out: &str) -> Vec<FsEntry> {
+    let mut v: Vec<FsEntry> = out
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| match l.strip_suffix('/') {
+            Some(n) => FsEntry { name: n.to_string(), dir: true },
+            None => FsEntry { name: l.to_string(), dir: false },
+        })
+        .collect();
+    v.sort_by(|a, b| b.dir.cmp(&a.dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    v
+}
+
+/// A path inside a container: absolute, no control characters (it is one argument, never parsed by a shell).
+pub fn valid_container_path(p: &str) -> bool {
+    p.starts_with('/') && p.len() <= 4096 && !p.chars().any(char::is_control)
+}
+
+fn path_arg(p: &str) -> Result<&str> {
+    if !valid_container_path(p) {
+        bail!("invalid path {p:?}: it must be absolute");
+    }
+    Ok(p)
+}
+
+pub fn networks() -> Result<Vec<Network>> {
+    let list = containers()?;
+    Ok(parse_networks(&run(&["network", "ls", "--no-trunc", "--format", "json"], QUERY)?, &list))
+}
+
+pub fn inspect(id: &str) -> Result<Inspect> {
+    parse_inspect(&run(&["inspect", "--type", "container", name_arg("container", id)?], QUERY)?)
+}
+
+/// Last lines of a container's log, stdout and stderr together.
+pub fn logs(id: &str, tail: u32) -> Result<String> {
+    let tail = tail.clamp(1, 2000).to_string();
+    let (out, err) = run_full(&["logs", "--tail", &tail, name_arg("container", id)?], QUERY)?;
+    Ok(if err.is_empty() { out } else { format!("{out}{err}") })
+}
+
+pub fn fs_list(id: &str, path: &str) -> Result<Vec<FsEntry>> {
+    Ok(parse_ls(&run(&["exec", name_arg("container", id)?, "ls", "-1Ap", "--", path_arg(path)?], QUERY)?))
+}
+
+const READ_MAX: u64 = 512 * 1024;
+
+/// Copies one file out with `docker cp` into a throwaway folder, reads it as text and deletes the copy.
+pub fn fs_read(id: &str, path: &str) -> Result<String> {
+    let src = format!("{}:{}", name_arg("container", id)?, path_arg(path)?);
+    let mut r = [0u8; 8];
+    getrandom::getrandom(&mut r).map_err(|e| anyhow::anyhow!("no randomness: {e}"))?;
+    let dir = std::env::temp_dir().join(format!("axelstra-docker-{}", r.iter().map(|b| format!("{b:02x}")).collect::<String>()));
+    std::fs::create_dir_all(&dir)?;
+    let result = (|| {
+        run(&["cp", &src, &dir.to_string_lossy()], QUERY)?;
+        let file = std::fs::read_dir(&dir)?.flatten().next().context("nothing was copied")?.path();
+        if !file.is_file() {
+            bail!("that is a folder, not a file");
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(&file)?.take(READ_MAX).read_to_end(&mut bytes)?;
+        if bytes.contains(&0) {
+            bail!("binary file, not shown");
+        }
+        let truncated = std::fs::metadata(&file)?.len() > READ_MAX;
+        Ok(format!("{}{}", String::from_utf8_lossy(&bytes), if truncated { "\n… (cut at 512 KB)" } else { "" }))
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    result
 }
 
 pub fn containers() -> Result<Vec<Container>> {
@@ -395,6 +549,11 @@ pub fn call(store: &Path, method: &str, p: &Value) -> Result<Value> {
             json!({"projects": group_projects(&list), "containers": list, "compose": compose})
         }
         "docker.stats" => json!({"stats": stats()?}),
+        "docker.networks" => json!({"networks": networks()?}),
+        "docker.inspect" => serde_json::to_value(inspect(p["id"].as_str().unwrap_or_default())?)?,
+        "docker.logs" => json!({"text": logs(p["id"].as_str().unwrap_or_default(), p["tail"].as_u64().unwrap_or(500) as u32)?}),
+        "docker.fs_list" => json!({"entries": fs_list(p["id"].as_str().unwrap_or_default(), p["path"].as_str().unwrap_or("/"))?}),
+        "docker.fs_read" => json!({"text": fs_read(p["id"].as_str().unwrap_or_default(), p["path"].as_str().unwrap_or_default())?}),
         "docker.images" => json!({"images": images()?}),
         "docker.volumes" => json!({"volumes": volumes()?}),
         "docker.action" => {
@@ -531,7 +690,47 @@ mod tests {
         assert_eq!(v.len(), 2);
         assert_eq!(v[0].tags, vec!["redis:8-alpine", "redis:8"]);
         assert_eq!((v[0].containers, v[0].size.as_str()), (7, "161MB"));
-        assert!(v[1].tags.is_empty());
+        assert!(v[1].tags.is_empty() && v[1].dangling && !v[0].dangling);
+    }
+
+    #[test]
+    fn parses_networks_with_their_containers() {
+        let mut c = parse_containers(PS);
+        c[0].networks = vec!["demo_default".into()];
+        let out = r#"{"Driver":"bridge","ID":"abc","Name":"demo_default","Scope":"local"}"#;
+        let n = parse_networks(out, &c);
+        assert_eq!((n[0].name.as_str(), n[0].driver.as_str(), n[0].containers.clone()), ("demo_default", "bridge", vec!["demo-postgres-1".to_string()]));
+    }
+
+    #[test]
+    fn parses_inspect() {
+        let j = r#"[{"Path":"docker-entrypoint.sh","Args":["postgres","-c","x=1"],"Config":{"Env":["B=2","A=1=1","BARE"],"WorkingDir":"/app"},
+            "HostConfig":{"RestartPolicy":{"Name":"always"}},
+            "Mounts":[{"Type":"volume","Name":"pgdata","Source":"/var/lib/docker/volumes/pgdata/_data","Destination":"/data","RW":true},{"Type":"bind","Source":"/host","Destination":"/h","RW":false}],
+            "NetworkSettings":{"Networks":{"demo_default":{"IPAddress":"172.18.0.2"}}}}]"#;
+        let i = parse_inspect(j).unwrap();
+        assert_eq!(i.command, "docker-entrypoint.sh postgres -c x=1");
+        assert_eq!(i.env, vec![("A".into(), "1=1".into()), ("B".into(), "2".into()), ("BARE".into(), "".into())]);
+        assert_eq!(i.mounts[0], ("volume".into(), "pgdata".into(), "/data".into(), true));
+        assert!(!i.mounts[1].3);
+        assert_eq!(i.networks, vec![("demo_default".to_string(), "172.18.0.2".to_string())]);
+        assert_eq!((i.workdir.as_str(), i.restart.as_str()), ("/app", "always"));
+        assert!(parse_inspect("[]").is_err() && parse_inspect("x").is_err());
+    }
+
+    #[test]
+    fn lists_container_files_folders_first() {
+        let v = parse_ls("zeta\nbin/\n.env\nApp/\n");
+        assert_eq!(v.iter().map(|e| (e.name.as_str(), e.dir)).collect::<Vec<_>>(), [("App", true), ("bin", true), (".env", false), ("zeta", false)]);
+    }
+
+    #[test]
+    fn container_paths_must_be_absolute_and_plain() {
+        assert!(valid_container_path("/") && valid_container_path("/etc/my file.conf"));
+        for bad in ["", "etc", "-la", "/a\nb", "/a\0b"] {
+            assert!(!valid_container_path(bad), "{bad:?}");
+        }
+        assert!(fs_list("web", "relative").is_err() && fs_read("-x", "/etc/passwd").is_err());
     }
 
     #[test]
