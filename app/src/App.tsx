@@ -122,7 +122,7 @@ export function App() {
         setComputerOn(await computerEnable(false));
         return;
       }
-      const ok = await ask("Permitir que os agentes vejam o ecrã e controlem o rato e o teclado?\n\nPodem tirar capturas de qualquer janela e clicar ou escrever em nome de si. Fica ligado até o desligar aqui ou fechar a aplicação.", {
+      const ok = await ask("Permitir que os agentes vejam o ecrã e controlem o rato e o teclado?\n\nPodem tirar capturas de qualquer janela e clicar ou escrever em teu nome. Fica ligado até o desligar aqui ou fechar a aplicação.", {
         title: "Controlo do ecrã",
         kind: "warning",
         okLabel: "Permitir",
@@ -624,7 +624,7 @@ export function App() {
                   <PanelIcon side="left" on={false} />
                 </button>
               </Show>
-              <div>Adicione um projeto e escolha um worktree.</div>
+              <div>Adiciona um projeto e escolhe um worktree.</div>
               <Show when={projects().length === 0}>
                 <button class="primary" onClick={() => void pickProject()}>Adicionar projeto</button>
               </Show>
@@ -733,7 +733,7 @@ export function App() {
             <span class="grow" />
             <UsageChip />
             <Show when={computerOn()}>
-              <span class="computer-on" title="Os agentes podem ver o ecrã e controlar o rato e o teclado. Desligue em: paleta de comandos, «Controlo do ecrã»"><i class="bdot" /> ecrã</span>
+              <span class="computer-on" title="Os agentes podem ver o ecrã e controlar o rato e o teclado. Desliga em: paleta de comandos, «Controlo do ecrã»"><i class="bdot" /> ecrã</span>
             </Show>
             <For each={ports()}>
               {(port) => (

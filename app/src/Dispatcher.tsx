@@ -16,7 +16,7 @@ export function Dispatcher() {
       for (const w of p.worktrees) {
         const m = meta()[norm(w.path)];
         if (!m || w.is_main) continue;
-        out.push({ project: p.name, path: w.path, branch: w.branch ?? "(detached)", title: m.title ?? w.branch ?? w.path, requests: m.requests ?? [], archived: !!m.archived, updated: m.updated ?? 0 });
+        out.push({ project: p.name, path: w.path, branch: w.branch ?? "(destacado)", title: m.title ?? w.branch ?? w.path, requests: m.requests ?? [], archived: !!m.archived, updated: m.updated ?? 0 });
       }
     }
     return out.sort((a, b) => Number(a.archived) - Number(b.archived) || b.updated - a.updated);
@@ -37,9 +37,9 @@ export function Dispatcher() {
         <span class="grow" />
         <button onClick={() => setShowDispatcher(false)}>Fechar</button>
       </div>
-      <p class="auto-note">Cada pedido feito na main vai para o worktree do seu tópico. Aqui vê para onde foi cada um.</p>
+      <p class="auto-note">Cada pedido feito na main vai para o worktree do seu tópico. Aqui vês para onde foi cada um.</p>
       <div class="disp-list">
-        <For each={topics()} fallback={<div class="auto-note">Ainda não há pedidos despachados. Peça algo ao agente da main.</div>}>
+        <For each={topics()} fallback={<div class="auto-note">Ainda não há pedidos despachados. Pede algo ao agente da main.</div>}>
           {(t) => {
             const st = () => stateOf(t.path);
             return (

@@ -1,15 +1,11 @@
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 import { AgentHit, agentSearch, launchDefaultAgent } from "./api";
 import { moveIndex } from "./a11y";
+import { ago } from "./time";
 import { Modal } from "./Modal";
 import { findWorktree, projectTerse, refreshSessions, setError, setShowAgentSearch, setActiveSession, selectWorktree } from "./store";
 
 const baseName = (p: string) => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
-const ago = (ts: number) => {
-  const d = Math.max(0, Date.now() / 1000 - ts);
-  return d < 3600 ? `${Math.max(1, Math.round(d / 60))} min` : d < 86400 ? `${Math.round(d / 3600)} h` : `${Math.round(d / 86400)} d`;
-};
-
 /** full-text search over past Claude/Codex conversations; a hit in a known worktree reopens that conversation */
 export function AgentSearch() {
   const [q, setQ] = createSignal("");
@@ -35,7 +31,7 @@ export function AgentSearch() {
           setDone(true);
         }
       } catch (e) {
-        if (mine === seq) setError(String(e).includes("unknown method") ? "Reinicie o daemon para usar a pesquisa de conversas." : String(e));
+        if (mine === seq) setError(String(e).includes("unknown method") ? "Reinicia o daemon para usar a pesquisa de conversas." : String(e));
       } finally {
         if (mine === seq) setBusy(false);
       }
@@ -112,7 +108,7 @@ export function AgentSearch() {
             >
               <div class="auto-main">
                 <div class="auto-name">
-                  {h.agent} · {baseName(h.cwd || "?")} <span class="auto-note">há {ago(h.ts)}</span>
+                  {h.agent} · {baseName(h.cwd || "?")} <span class="auto-note">{ago(Date.now() / 1000 - h.ts)}</span>
                 </div>
                 <div class="auto-note">{h.snippet}</div>
               </div>

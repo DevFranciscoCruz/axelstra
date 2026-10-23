@@ -159,7 +159,7 @@ export async function toggleVoice() {
         // nothing crossed the threshold: a dead microphone is dropped, anything else still goes to Whisper
         if (peak < 0.002) {
           cancelVoice();
-          setVoiceError("Sem sinal do microfone. Verifique o microfone selecionado no Windows.");
+          setVoiceError("Sem sinal do microfone. Verifica o microfone selecionado no Windows.");
         } else void stopVoice();
       } else if (elapsed >= MAX_MS) void stopVoice();
     };
