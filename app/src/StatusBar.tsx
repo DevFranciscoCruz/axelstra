@@ -2,6 +2,8 @@ import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { sessions } from "./store";
 import { LimitsBar } from "./LimitsBar";
+import { pollWtUsage, wtUsageTip } from "./Usage";
+import { ranked, spentOf, totalOf, fmtTokens } from "./usageFormat";
 
 type Usage = { app: number; daemon: number; sessions: number; ports: { port: number; pid: number }[]; cpu: number | null; gpu: number | null; gpu_adapters: [string, number][] };
 
@@ -23,6 +25,8 @@ export function StatusBar() {
   const [awake, setAwake] = createSignal(stored());
   const [usage, setUsage] = createSignal<Usage | null>(null);
   const running = () => sessions().filter((s) => s.running).length;
+  const tokens = pollWtUsage();
+  const [awakeOk, setAwakeOk] = createSignal(true);
 
   const toggle = () => {
     const on = !awake();
@@ -32,7 +36,9 @@ export function StatusBar() {
     } catch {
       /* storage unavailable */
     }
-    void invoke("keep_awake", { on }).catch(() => 0);
+    void invoke<boolean>("keep_awake", { on })
+      .then((held) => setAwakeOk(held || !on))
+      .catch(() => 0);
   };
 
   const poll = async () => {
@@ -45,7 +51,7 @@ export function StatusBar() {
   };
 
   onMount(() => {
-    if (awake()) void invoke("keep_awake", { on: true }).catch(() => 0);
+    if (awake()) void invoke<boolean>("keep_awake", { on: true }).then(setAwakeOk).catch(() => 0);
     void poll();
     const t = setInterval(() => void poll(), 5000);
     const vis = () => void poll();
@@ -70,11 +76,11 @@ export function StatusBar() {
 
   return (
     <div class="statusbar">
-      <button class="sb-item" classList={{ on: awake() }} title="Impedir que o computador adormeça" aria-pressed={awake()} onClick={toggle}>
+      <button class="sb-item" classList={{ on: awake() }} title={awakeOk() ? "Impedir que o computador adormeça" : "Não disponível neste sistema: falta o systemd-inhibit"} aria-pressed={awake()} onClick={toggle}>
         <svg {...svg}>
           <path d="M3 7h8v3a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7zM11 8h1a1.5 1.5 0 0 1 0 3h-1M5 2.5v2M8 2.5v2" />
         </svg>
-        <span>{awake() ? "On" : "Off"}</span>
+        <span>{awake() ? (awakeOk() ? "On" : "n/d") : "Off"}</span>
       </button>
       <span class="sb-item" title={memTip()}>
         <svg {...svg}>
@@ -100,6 +106,11 @@ export function StatusBar() {
             <path d="M4 11.5v2M12 11.5v2" />
           </svg>
           <span>{pct(usage()!.gpu!)}%</span>
+        </span>
+      </Show>
+      <Show when={ranked(tokens()).length}>
+        <span class="sb-item" title={wtUsageTip(tokens())}>
+          <span>Σ {fmtTokens(spentOf(totalOf(tokens())))}</span>
         </span>
       </Show>
       <span class="sb-item" title={`${running()} terminais e agentes a correr`}>
