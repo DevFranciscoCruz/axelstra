@@ -12,7 +12,7 @@ Your own session id is `$AXELSTRA_SESSION` (PowerShell: `$env:AXELSTRA_SESSION`)
 
 ## Isolate the work
 
-One worktree per independent task, so workers never edit the same files:
+One worktree per **theme**, not per task. Workers on the same theme go into the same worktree, as several agents (`axelstra agent <worktree> ...` can be run many times on one path) that own different files; each commits only its own paths (`git add <paths>`, never `git add -A`). Open a second worktree only when the work is unrelated or two tasks must edit the same files. Never create a separate worktree just to integrate: integrate in the theme's worktree (or the main one) and remove the worktrees you created when done (`worktree rm`, or `--cleanup` with `flow`). A pile of worktrees with no agent in them is a mistake, not a record of the work:
 
 ```
 axelstra worktree create <project> <name>     # prints the new worktree path
@@ -114,7 +114,7 @@ Take a screenshot before and after acting, and prefer a CLI or API when the app 
 ## Rules
 
 - Do not start more workers than the machine can carry; the limit protects it, 3–5 at once is usually the ceiling.
-- Never give two workers the same files.
+- Never give two workers the same files (same worktree is fine when their files are disjoint).
 - Prefer `run` for commands and `agent` only when judgement is needed.
 - Look back through earlier conversations with `axelstra search "<text>"`.
 
