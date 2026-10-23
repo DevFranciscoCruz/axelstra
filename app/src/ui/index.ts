@@ -3,4 +3,5 @@
 export { Button, buttonVariants } from "./button";
 export { Input, Textarea } from "./input";
 export { Field } from "./field";
+export { Checkbox } from "./checkbox";
 export { cn } from "./cn";

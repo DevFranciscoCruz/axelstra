@@ -1,4 +1,5 @@
 import { ask } from "./Confirm";
+import { Button, Input } from "./ui";
 import { Icon } from "./Icon";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -71,7 +72,7 @@ function NameInput(props: { initial: string; depth: number; dir: boolean; onSubm
     <div class="file editing" style={{ "padding-left": `${8 + props.depth * 12}px` }}>
       <span class="twisty" />
       {props.dir ? <Folder open={false} /> : <FileGlyph />}
-      <input
+      <Input
         class="fname-input"
         value={props.initial}
         onKeyDown={(e) => {
@@ -164,9 +165,9 @@ function Dir(props: { wt: string; path: string; depth: number }) {
       <Show when={newHere()}>{(e) => <NameInput initial="" depth={props.depth} dir={e().mode === "dir"} onSubmit={(n) => void submitNew(n)} />}</Show>
       <For each={page().shown}>{(e) => <Node wt={props.wt} dir={props.path} e={e} depth={props.depth} />}</For>
       <Show when={page().hidden > 0}>
-        <button class="show-more" style={{ "margin-left": `${8 + props.depth * 12}px` }} onClick={() => setLimit(limit() + PAGE)}>
+        <Button variant="outline" size="sm" class="show-more" style={{ "margin-left": `${8 + props.depth * 12}px` }} onClick={() => setLimit(limit() + PAGE)}>
           Mostrar mais ({page().hidden})
-        </button>
+        </Button>
       </Show>
       <Show when={entries() !== null && entries()!.length === 0 && !newHere()}>
         <div class="empty" style={{ "padding-left": `${8 + props.depth * 12}px` }}>
@@ -352,17 +353,17 @@ export function FilesPanel() {
           {info()?.project.name ?? "Ficheiros"}
         </strong>
         <span class="grow" />
-        <button class="icon" title="Recolher tudo" aria-label="Recolher tudo" onClick={() => setExpanded(new Set([""]))}>
+        <Button variant="ghost" size="icon" class="icon" title="Recolher tudo" aria-label="Recolher tudo" onClick={() => setExpanded(new Set([""]))}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 5h10M5 8.5h6M7 12h2" />
           </svg>
-        </button>
-        <button class="icon" title="Atualizar" aria-label="Atualizar" onClick={() => setGen(gen() + 1)}>
+        </Button>
+        <Button variant="ghost" size="icon" class="icon" title="Atualizar" aria-label="Atualizar" onClick={() => setGen(gen() + 1)}>
           <Icon name="refresh" />
-        </button>
+        </Button>
       </div>
       <div class="fp-search">
-        <input
+        <Input
           class="fsearch"
           type="search"
           placeholder="Procurar ficheiros…"

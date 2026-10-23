@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { Button, Input } from "./ui";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -316,7 +317,7 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
     <div class="term-host" ref={host}>
       <Show when={finding()}>
         <div class="term-find" role="search" on:contextmenu={(e) => e.stopPropagation()}>
-          <input
+          <Input
             ref={findInput}
             type="text"
             placeholder={S.findPlaceholder}
@@ -333,17 +334,17 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
               }
             }}
           />
-          <button title={S.findPrev} aria-label={S.findPrev} onClick={() => findHandlers?.run(true)}>
+          <Button variant="ghost" size="icon" title={S.findPrev} aria-label={S.findPrev} onClick={() => findHandlers?.run(true)}>
             <span class="flip">
               <Icon name="chevDown" />
             </span>
-          </button>
-          <button title={S.findNext} aria-label={S.findNext} onClick={() => findHandlers?.run(false)}>
+          </Button>
+          <Button variant="ghost" size="icon" title={S.findNext} aria-label={S.findNext} onClick={() => findHandlers?.run(false)}>
             <Icon name="chevDown" />
-          </button>
-          <button title={S.findClose} aria-label={S.findClose} onClick={() => findHandlers?.close()}>
+          </Button>
+          <Button variant="ghost" size="icon" title={S.findClose} aria-label={S.findClose} onClick={() => findHandlers?.close()}>
             <Icon name="x" />
-          </button>
+          </Button>
         </div>
       </Show>
     </div>

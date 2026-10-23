@@ -1,4 +1,5 @@
 import { K } from "./keyboard";
+import { Button, Input, Textarea } from "./ui";
 import { RightTabs } from "./RightTabs";
 import { ShipPanel } from "./ShipPanel";
 import { Icon } from "./Icon";
@@ -148,11 +149,11 @@ export function ChangesPanel() {
       <RightTabs />
 
       <div class="sc-head">
-        <button class="pill" disabled={busy()} onClick={() => setPrOpen(!prOpen())}>
+        <Button variant="secondary" size={null} class="pill rounded-full px-3 py-1 border-border" disabled={busy()} onClick={() => setPrOpen(!prOpen())}>
           <Icon name="branch" size={13} /> Criar PR
-        </button>
+        </Button>
         <span class="grow" />
-        <button
+        <Button variant="ghost" size="icon"
           class="icon"
           title="Atualizar" aria-label="Atualizar"
           onClick={() => {
@@ -161,8 +162,8 @@ export function ChangesPanel() {
           }}
         >
           <Icon name="refresh" />
-        </button>
-        <button
+        </Button>
+        <Button variant="ghost" size="icon"
           class="icon"
           title="Mais ações" aria-label="Mais ações"
           onClick={(e) =>
@@ -189,7 +190,7 @@ export function ChangesPanel() {
           }
         >
           <Icon name="more" />
-        </button>
+        </Button>
       </div>
       <div class="sc-branch" title={branch()}>
         <div class="sc-name">{branch() || "(destacado)"}</div>
@@ -198,22 +199,22 @@ export function ChangesPanel() {
 
       <Show when={prOpen()}>
         <div class="prow sc-pr">
-          <input
+          <Input
             placeholder="Título do pull request"
             value={prTitle()}
             onInput={(e) => setPrTitle(e.currentTarget.value)}
             onKeyDown={(e) => e.key === "Enter" && prTitle().trim() && void doPr()}
             ref={(el) => queueMicrotask(() => el.focus())}
           />
-          <button disabled={busy() || !prTitle().trim()} onClick={() => void doPr()}>
+          <Button size="sm" disabled={busy() || !prTitle().trim()} onClick={() => void doPr()}>
             Criar
-          </button>
+          </Button>
         </div>
       </Show>
 
       <div class="sc-commit">
         <div class="sc-msg">
-          <textarea
+          <Textarea
             placeholder={suggesting() ? "A gerar mensagem…" : K("Mensagem (Ctrl+Enter para fazer commit)")}
             rows={3}
             value={message()}
@@ -222,7 +223,7 @@ export function ChangesPanel() {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && canCommit()) void doCommit();
             }}
           />
-          <button
+          <Button variant="ghost" size="icon"
             class="icon sc-ai"
             classList={{ busy: suggesting() }}
             disabled={suggesting() || busy() || files().length === 0}
@@ -231,14 +232,16 @@ export function ChangesPanel() {
             onClick={() => void suggest()}
           >
             <Icon name="sparkle" size={14} />
-          </button>
+          </Button>
         </div>
         <div class="sc-split">
-          <button class="sc-main" disabled={!canCommit()} title={canCommit() ? K("Commit (Ctrl+Enter)") : files().length === 0 ? "Sem alterações para commit" : message().trim() ? "A trabalhar…" : "Escreve uma mensagem"} onClick={() => void doCommit()}>
+          <Button variant="secondary" size={null} class="sc-main flex-1 p-2 rounded-l-lg rounded-r-none border-border" disabled={!canCommit()} title={canCommit() ? K("Commit (Ctrl+Enter)") : files().length === 0 ? "Sem alterações para commit" : message().trim() ? "A trabalhar…" : "Escreve uma mensagem"} onClick={() => void doCommit()}>
             <Icon name="check" /> Commit
-          </button>
-          <button
-            class="sc-drop"
+          </Button>
+          <Button
+            variant="secondary"
+            size={null}
+            class="sc-drop w-8 p-0 rounded-r-lg rounded-l-none border-l-0 border-border"
             disabled={busy()}
             title="Mais opções de commit" aria-label="Mais opções de commit"
             onClick={(e) =>
@@ -250,7 +253,7 @@ export function ChangesPanel() {
             }
           >
             <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-          </button>
+          </Button>
         </div>
         <Show when={note()}>
           {(n) => (

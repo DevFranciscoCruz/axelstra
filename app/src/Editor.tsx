@@ -1,4 +1,5 @@
 import { K } from "./keyboard";
+import { Button } from "./ui";
 import { Compartment, EditorState, Extension } from "@codemirror/state";
 import { Icon } from "./Icon";
 import { EditorView, drawSelection, highlightActiveLine, keymap, lineNumbers } from "@codemirror/view";
@@ -208,25 +209,25 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
           </span>
         </Show>
         <span class="emsg" role="status" aria-live="polite">{msg()}</span>
-        <button class="icon" disabled={!dirty()} title={K("Guardar (Ctrl+S)")} onClick={() => void save()}>
+        <Button variant="ghost" size="icon" class="icon" disabled={!dirty()} title={K("Guardar (Ctrl+S)")} onClick={() => void save()}>
           Guardar
-        </button>
-        <button class="icon" title="Fechar" aria-label="Fechar" onClick={() => guarded(() => setOpenFile(null))}>
+        </Button>
+        <Button variant="ghost" size="icon" class="icon" title="Fechar" aria-label="Fechar" onClick={() => guarded(() => setOpenFile(null))}>
           <Icon name="x" />
-        </button>
+        </Button>
       </div>
       <Show when={conflict()}>
         <div class="econflict">
           O ficheiro mudou no disco.
-          <button onClick={() => void load().catch((e) => setMsg(String(e.message ?? e)))}>Recarregar (perde as minhas alterações)</button>
-          <button onClick={() => void save(true)}>Sobrescrever</button>
+          <Button size="sm" onClick={() => void load().catch((e) => setMsg(String(e.message ?? e)))}>Recarregar (perde as minhas alterações)</Button>
+          <Button size="sm" onClick={() => void save(true)}>Sobrescrever</Button>
         </div>
       </Show>
       <Show when={bigSize() > 0}>
         <div class="econflict">
           Ficheiro grande ({sizeLabel(bigSize())}): abrir pode deixar o editor lento.
-          <button onClick={openBig}>Abrir mesmo assim</button>
-          <button onClick={() => guarded(() => setOpenFile(null))}>Fechar</button>
+          <Button size="sm" onClick={openBig}>Abrir mesmo assim</Button>
+          <Button size="sm" onClick={() => guarded(() => setOpenFile(null))}>Fechar</Button>
         </div>
       </Show>
       <div class="editor-host" ref={host} style={refused() || bigSize() > 0 ? { display: "none" } : undefined} />

@@ -1,4 +1,5 @@
 import { For, Match, Show, Switch, createResource, createSignal } from "solid-js";
+import { Button } from "./ui";
 import { Modal } from "./Modal";
 import { ask } from "./Confirm";
 import { notesExport, notesRead, notesReadFile } from "./api";
@@ -86,10 +87,10 @@ function Body(props: { target: Target }) {
         {(s) => <div class="note-status" classList={{ bad: !s().ok }} role={s().ok ? "status" : "alert"}>{s().text}</div>}
       </Show>
       <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-        <button onClick={close}>Fechar</button>
-        <button class="primary" hidden={session === null} disabled={busy() || !note()} onClick={() => void exportIt(false)}>
+        <Button size="sm" onClick={close}>Fechar</Button>
+        <Button variant="default" size="sm" hidden={session === null} disabled={busy() || !note()} onClick={() => void exportIt(false)}>
           Exportar para o repositório
-        </button>
+        </Button>
       </div>
     </Modal>
   );
