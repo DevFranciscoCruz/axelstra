@@ -2,10 +2,15 @@ import { Select } from "./Select";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
-import { Board, KCard, OrchRun, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchStart, orchStatus } from "./api";
+import { Board, KCard, OrchRun, gitPr, gitPush, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchRetry, orchStart, orchStatus } from "./api";
 import { Modal } from "./Modal";
-import { AGENTS, agentKeys, refreshProjects } from "./store";
+import { agentKeys, refreshProjects, selectWorktree, setShowKanban } from "./store";
 import { press } from "./a11y";
+
+/** only cards are accepted by the columns: a terminal tab or a file dragged over is ignored */
+const CARD_MIME = "application/x-axelstra-card";
+/** agents the orchestrator can run unattended */
+const RUNNABLE = ["claude", "chatgpt", "codex"];
 
 const COLS: { id: string; label: string }[] = [
   { id: "backlog", label: "Ideias" },
@@ -23,6 +28,8 @@ export function Kanban(props: { project: string }) {
   const [draft, setDraft] = createSignal<Draft | null>(null);
   const [over, setOver] = createSignal<string | null>(null);
   const [dragId, setDragId] = createSignal<string | null>(null);
+  const [menu, setMenu] = createSignal<string | null>(null);
+  let draftBase = "";
   const [run, setRun] = createSignal<OrchRun>({ state: "idle" });
 
   const pollRun = async () => {
@@ -38,15 +45,18 @@ export function Kanban(props: { project: string }) {
   };
   const start = async () => {
     const n = inCol("todo").length;
+    // acceptance commands run in a shell: a card from a cloned repo could carry anything
+    const cmds = inCol("todo").filter((c) => c.meta.acceptance).map((c) => `${c.meta.id}: ${c.meta.acceptance}`);
     if (
       !(await ask(
-        `Despachar ${n} agente(s) para os cartões em "Para fazer"? Cada um corre num worktree isolado e o resultado é integrado num branch novo (orch/…). Nada é enviado para o remote.`,
-        { title: "Executar orquestração", kind: "info" },
+        `Despachar ${n} agente(s) para os cartões em "Para fazer"? Cada um corre num worktree isolado e o resultado é integrado num branch novo (orch/…). Nada é enviado para o remote.` +
+          (cmds.length ? `\n\nEstes comandos de aceitação vão correr na sua máquina:\n${cmds.join("\n")}\n\nSó confirme se confia nestes cartões.` : ""),
+        { title: "Executar orquestração", kind: cmds.length ? "warning" : "info" },
       ))
     )
       return;
     try {
-      setRun(await orchStart(props.project));
+      setRun(await orchStart(props.project, 3, cmds.length > 0));
       void refreshProjects();
     } catch (e) {
       setErr(String(e));
@@ -80,12 +90,21 @@ export function Kanban(props: { project: string }) {
   const colCards = (id: string) =>
     id === "backlog" ? board().cards.filter((c) => !known.has(c.meta.status) || c.meta.status === "backlog") : inCol(id);
 
-  const edit = (c?: KCard, status = "backlog") =>
+  const edit = (c?: KCard, status = "backlog") => {
     setDraft(
       c
         ? { id: c.meta.id, title: c.meta.title, body: c.body, status: c.meta.status, depends: c.meta.depends_on.join(", "), agent: c.meta.agent, priority: c.meta.priority }
         : { title: "", body: "", status, depends: "", agent: "claude", priority: 0 },
     );
+    draftBase = JSON.stringify(draft());
+  };
+  // Esc, Cancel and the backdrop all end here: a draft with edits asks first
+  const closeDraft = async () => {
+    const d = draft();
+    if (!d) return;
+    if (JSON.stringify(d) !== draftBase && !(await ask("Descartar as alterações a este cartão?", { title: "Descartar", kind: "warning", okLabel: "Descartar" }))) return;
+    setDraft(null);
+  };
 
   const save = async () => {
     const d = draft();
@@ -124,8 +143,13 @@ export function Kanban(props: { project: string }) {
     e.preventDefault();
     setOver(null);
     setDragId(null);
-    const id = e.dataTransfer?.getData("text/plain");
+    const id = e.dataTransfer?.getData(CARD_MIME);
     if (!id) return;
+    await moveTo(id, status);
+  };
+
+  const moveTo = async (id: string, status: string) => {
+    setMenu(null);
     try {
       await kanbanMove(props.project, id, status);
     } catch (x) {
@@ -133,6 +157,44 @@ export function Kanban(props: { project: string }) {
     }
     await reload();
   };
+
+  // a needs-review card keeps its task worktree: it sits next to the integration one
+  const taskWt = (id: string) => {
+    const r = run();
+    if (!r.integ_wt || !r.name) return null;
+    const i = Math.max(r.integ_wt.lastIndexOf("/"), r.integ_wt.lastIndexOf("\\"));
+    return `${r.integ_wt.slice(0, i + 1)}${r.name}-${id}`;
+  };
+  const reason = (id: string) => run().needs_review?.find((r) => r[0] === id)?.[1] ?? "aguarda revisão";
+  const act = async (fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+    } catch (x) {
+      setErr(String(x));
+    }
+    await reload();
+    await pollRun();
+  };
+  const openWt = (id: string) => {
+    const wt = taskWt(id);
+    if (!wt) return setErr("O worktree desta execução já não é conhecido: inicie a orquestração de novo.");
+    setShowKanban(false);
+    void selectWorktree(wt);
+  };
+  const retry = (c: KCard) =>
+    act(async () => {
+      const acc = c.meta.acceptance;
+      if (acc && !(await ask(`Integrar "${c.meta.title || c.meta.id}" outra vez? Corre o comando de aceitação na sua máquina:\n${acc}`, { title: "Integrar de novo", kind: "warning" }))) return;
+      await orchRetry(props.project, c.meta.id, !!acc);
+    });
+  const openPr = (c: KCard) =>
+    act(async () => {
+      const wt = taskWt(c.meta.id);
+      if (!wt) throw new Error("worktree desconhecido");
+      if (!(await ask(`Enviar o branch de "${c.meta.title || c.meta.id}" e criar um pull request no GitHub?`, { title: "Pull request", kind: "warning" }))) return;
+      await gitPush(wt);
+      setErr(`Pull request criado: ${await gitPr(wt, c.meta.title || c.meta.id, c.body)}`);
+    });
 
   return (
     <div class="kanban">
@@ -178,6 +240,7 @@ export function Kanban(props: { project: string }) {
               class="kcol"
               classList={{ over: over() === col.id }}
               onDragOver={(e) => {
+                if (!e.dataTransfer?.types.includes(CARD_MIME)) return;
                 e.preventDefault();
                 setOver(col.id);
               }}
@@ -199,7 +262,7 @@ export function Kanban(props: { project: string }) {
                       classList={{ dragging: dragId() === c.meta.id }}
                       draggable={true}
                       onDragStart={(e) => {
-                        e.dataTransfer?.setData("text/plain", c.meta.id);
+                        e.dataTransfer?.setData(CARD_MIME, c.meta.id);
                         setDragId(c.meta.id);
                       }}
                       onDragEnd={() => setDragId(null)}
@@ -223,6 +286,41 @@ export function Kanban(props: { project: string }) {
                         </Show>
                         <span class="chip id" title="Id do ficheiro .kanban">{c.meta.id}</span>
                       </div>
+                      <Show when={col.id === "needs-review"}>
+                        <div class="kcard-body">Motivo: {reason(c.meta.id)}</div>
+                        <div class="kchips" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                          <button onClick={() => openWt(c.meta.id)}>Abrir worktree</button>
+                          <button onClick={() => void retry(c)}>Tentar integrar de novo</button>
+                          <button onClick={() => void openPr(c)}>Abrir pull request</button>
+                        </div>
+                      </Show>
+                      <div
+                        style={{ position: "relative" }}
+                        onClick={(e) => e.stopPropagation()}
+                        onFocusOut={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && menu() === c.meta.id && setMenu(null)}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === "Escape" && menu() === c.meta.id) {
+                            setMenu(null);
+                            e.currentTarget.querySelector("button")?.focus();
+                          }
+                        }}
+                      >
+                        <button aria-haspopup="menu" aria-expanded={menu() === c.meta.id} onClick={() => setMenu(menu() === c.meta.id ? null : c.meta.id)}>
+                          Mover para…
+                        </button>
+                        <Show when={menu() === c.meta.id}>
+                          <div role="menu" style={{ display: "flex", "flex-direction": "column", gap: "2px", "margin-top": "4px" }}>
+                            <For each={COLS.filter((x) => x.id !== col.id)}>
+                              {(x, i) => (
+                                <button role="menuitem" ref={(el) => queueMicrotask(() => i() === 0 && el.focus())} onClick={() => void moveTo(c.meta.id, x.id)}>
+                                  {x.label}
+                                </button>
+                              )}
+                            </For>
+                          </div>
+                        </Show>
+                      </div>
                     </div>
                   )}
                 </For>
@@ -234,7 +332,7 @@ export function Kanban(props: { project: string }) {
 
       <Show when={draft()}>
         {(d) => (
-          <Modal label={d().id ? "Editar cartão" : "Novo cartão"} dirty onClose={() => setDraft(null)}>
+          <Modal label={d().id ? "Editar cartão" : "Novo cartão"} dirty onClose={() => void closeDraft()}>
               <input
                 class="m-title"
                 placeholder="Título"
@@ -261,7 +359,7 @@ export function Kanban(props: { project: string }) {
                   Agente
                   <Select
                     value={d().agent}
-                    options={[...new Set([...agentKeys(), d().agent])].map((a) => ({ value: a, label: a }))}
+                    options={[...new Set([...agentKeys().filter((a) => RUNNABLE.includes(a)), d().agent])].map((a) => ({ value: a, label: a }))}
                     onChange={(v) => setDraft({ ...d(), agent: v })}
                   />
                 </label>
@@ -285,7 +383,7 @@ export function Kanban(props: { project: string }) {
                   </button>
                 </Show>
                 <span class="grow" />
-                <button onClick={() => setDraft(null)}>Cancelar</button>
+                <button onClick={() => void closeDraft()}>Cancelar</button>
                 <button class="primary" disabled={!d().title.trim()} onClick={() => void save()}>
                   Guardar
                 </button>
