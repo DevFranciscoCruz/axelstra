@@ -19,7 +19,18 @@ export type MenuItem =
 type Open = { x: number; y: number; items: MenuItem[]; minWidth?: number; listbox?: boolean; onClose?: () => void };
 const [menu, setMenu] = createSignal<Open | null>(null);
 /** a menu or dropdown is open: it is the topmost layer, so Esc and Tab belong to it and not to a dialog underneath */
-export const menuOpen = () => menu() !== null;
+export const menuOpen = () => menu() !== null || layers() > 0;
+/** other topmost layers (an open Select) count as an open menu; `holdLayer` registers one and returns its release */
+const [layers, setLayers] = createSignal(0);
+export const holdLayer = () => {
+  setLayers((n) => n + 1);
+  let held = true;
+  return () => {
+    if (!held) return;
+    held = false;
+    setLayers((n) => n - 1);
+  };
+};
 /** where focus was when the menu opened; it goes back there when the menu closes from the keyboard */
 let opener: HTMLElement | null = null;
 const openMenu = (m: Open) => {
