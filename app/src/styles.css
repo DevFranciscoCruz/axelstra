@@ -905,7 +905,8 @@ button.icon, button.x, button.split-x, button.cbtn { display: inline-flex; align
 .wt-badge .bd { display: inline-flex; align-items: center; gap: 1px; }
 .side-link { display: flex; align-items: center; gap: 6px; }
 .pill { display: inline-flex; align-items: center; gap: 6px; }
-.modal.settings { width: min(520px, 92vw); }
+.modal.settings { width: min(520px, 92vw); overflow-y: auto; }
+.modal.settings > * { flex-shrink: 0; }
 .set-sec { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
 .set-sec h4 { margin: 0; font-size: 13px; }
 .set-sec .auto-note { margin: 0; }
