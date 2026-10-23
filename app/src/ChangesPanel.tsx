@@ -1,5 +1,6 @@
 import { K } from "./keyboard";
 import { RightTabs } from "./RightTabs";
+import { ShipPanel } from "./ShipPanel";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
 import { For, Show, createResource, createSignal } from "solid-js";
@@ -259,6 +260,8 @@ export function ChangesPanel() {
           )}
         </Show>
       </div>
+
+      <ShipPanel />
 
       <div class="sc-body">
         <div class="sc-title" {...press(() => setShowChanges(!showChanges()))} aria-expanded={showChanges()}>

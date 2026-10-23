@@ -1,6 +1,7 @@
 pub mod agentlog;
 pub mod automations;
 pub mod changes;
+pub mod checks;
 pub mod client;
 pub mod docker;
 pub mod fsops;

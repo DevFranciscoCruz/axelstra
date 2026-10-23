@@ -1305,6 +1305,17 @@ fn dispatch(
                 })
             })
         }
+        "git.checks" | "git.merge" => {
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            tokio::task::block_in_place(|| -> Result<Value> {
+                use crate::checks;
+                Ok(if req.method == "git.checks" {
+                    serde_json::to_value(checks::status(&wt))?
+                } else {
+                    json!({"output": checks::merge(&wt, p["auto"].as_bool().unwrap_or(false), p["delete_branch"].as_bool().unwrap_or(false))?})
+                })
+            })
+        }
         "docker.open_logs" | "docker.open_shell" => {
             let (s, label, meta) = crate::docker::terminal(&reg.store, &req.method, p)?;
             Ok(json!({"id": reg.spawn(&s, Some(&label), Some(meta))?}))
