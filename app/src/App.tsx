@@ -30,6 +30,8 @@ import { StatusBar } from "./StatusBar";
 import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
 import { ErrorToast } from "./ErrorToast";
 import { Modal } from "./Modal";
+import { StateDot } from "./StateDot";
+import { dotOfSession } from "./agentState";
 import { press } from "./a11y";
 import { ask } from "./Confirm";
 import { PullsPanel } from "./PullsPanel";
@@ -661,7 +663,7 @@ export function App() {
                   }}
                   {...press(() => showTab(s), "tab")}
                 >
-                  <span class="dot" classList={{ on: s.running, work: sessionState(s) === "working" && s.meta?.kind === "agent", wait: sessionState(s) === "waiting" }} />
+                  <StateDot state={dotOfSession(s)} />
                   <Show
                     when={renaming() === s.id}
                     fallback={<span>{s.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{tabLabel(s)}</span>}

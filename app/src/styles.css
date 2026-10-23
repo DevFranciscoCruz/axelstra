@@ -948,3 +948,11 @@ button.icon, button.x, button.split-x, button.cbtn { display: inline-flex; align
   .app.no-left.with-right { grid-template-columns: minmax(0, 1fr); }
   .rightbar, .resizer.right-edge { display: none; }
 }
+
+/* status dots carry a glyph as well as a colour (working, idle, waiting, done, attention, queued) */
+.dot.glyph { width: 12px; height: 12px; display: inline-grid; place-items: center; color: #15121f; }
+.dot.glyph.queued { color: var(--muted); }
+.dot.glyph.done { background: var(--muted); }
+.dot.glyph:not(.on):not(.queued) { background: var(--muted); }
+.dot.glyph.work svg { animation: spin 1.1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
