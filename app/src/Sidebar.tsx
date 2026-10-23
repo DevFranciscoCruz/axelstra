@@ -405,7 +405,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
       icon: "sparkle",
       children: [
         { label: "Seguir o global", icon: projectPrefsOf(p.id).agent ? undefined : "check", run: () => setProjectPref(p.id, { agent: undefined }) },
-        ...agentKeys().map((a) => ({ label: a, icon: projectPrefsOf(p.id).agent && canonAgent(projectPrefsOf(p.id).agent!) === a ? "check" : undefined, run: () => setProjectPref(p.id, { agent: a }) })),
+        ...agentKeys().map((a) => ({ label: projectPrefsOf(p.id).agent && canonAgent(projectPrefsOf(p.id).agent!) === a ? `${a} ✓` : a, icon: hasIcon(a) ? a : undefined, run: () => setProjectPref(p.id, { agent: a }) })),
       ],
     },
     { separator: true },
