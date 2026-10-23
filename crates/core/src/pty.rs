@@ -59,7 +59,6 @@ fn now_ms() -> u64 {
 
 pub struct Session {
     master: Mutex<Box<dyn MasterPty + Send>>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     job: Job,
     shared: Arc<Shared>,
@@ -165,7 +164,6 @@ impl Session {
 
         Ok(Session {
             master: Mutex::new(pair.master),
-            writer,
             input,
             child: Mutex::new(child),
             job,

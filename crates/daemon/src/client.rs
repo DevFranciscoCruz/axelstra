@@ -7,7 +7,6 @@ use serde_json::{json, Value};
 #[cfg(windows)]
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
-#[cfg(windows)]
 use std::time::Duration;
 
 pub enum Frame {
@@ -90,6 +89,86 @@ impl std::fmt::Display for NotSent {
 
 impl std::error::Error for NotSent {}
 
+/// The daemon did not answer a request in time. The connection is unusable afterwards (a late reply could
+/// arrive half way through the next one), so the caller must reconnect.
+#[derive(Debug)]
+pub struct CallTimeout(pub String);
+
+impl std::fmt::Display for CallTimeout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for CallTimeout {}
+
+/// How long `call` waits for the reply. Calls that run git, the network or an agent CLI get longer; none wait forever.
+fn default_timeout(method: &str) -> Duration {
+    match method {
+        "git.push" | "git.pr" | "git.suggest" | "git.commit" | "worktree.create" | "worktree.from_pr" | "worktree.sweep" | "project.add" | "automation.run" | "orch.start" | "gh.list"
+        | "agent.search" => Duration::from_secs(600),
+        _ => Duration::from_secs(60),
+    }
+}
+
+/// True for the error a read gets when its deadline fires: a socket timeout (Unix) or the pipe read cancelled by
+/// the watchdog (Windows, ERROR_OPERATION_ABORTED).
+fn is_timeout(e: &anyhow::Error) -> bool {
+    e.chain().filter_map(|c| c.downcast_ref::<std::io::Error>()).any(|io| {
+        matches!(io.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) || io.raw_os_error() == Some(995)
+    })
+}
+
+/// Bounds the blocking reads on one connection until `finish`.
+struct Deadline {
+    #[cfg(windows)]
+    state: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+    #[cfg(unix)]
+    sock: std::os::unix::net::UnixStream,
+}
+
+#[cfg(windows)]
+impl Deadline {
+    fn start(conn: &Conn, limit: Duration) -> std::io::Result<Deadline> {
+        use std::os::windows::io::AsRawHandle;
+        let Conn::File(f) = conn;
+        let handle = f.as_raw_handle() as isize;
+        let state = std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let st = state.clone();
+        std::thread::spawn(move || {
+            let (lock, cv) = &*st;
+            let done = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let (done, _) = cv.wait_timeout_while(done, limit, |d| !*d).unwrap_or_else(std::sync::PoisonError::into_inner);
+            // still waiting after `limit`: abort the read. `finish` takes this lock, so it cannot run in between
+            // and a cancel never lands on a later call's read.
+            if !*done {
+                unsafe { windows_sys::Win32::System::IO::CancelIoEx(handle as _, std::ptr::null()) };
+            }
+        });
+        Ok(Deadline { state })
+    }
+
+    fn finish(self) {
+        let (lock, cv) = &*self.state;
+        *lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        cv.notify_all();
+    }
+}
+
+#[cfg(unix)]
+impl Deadline {
+    fn start(conn: &Conn, limit: Duration) -> std::io::Result<Deadline> {
+        let Conn::Unix(s) = conn;
+        let sock = s.try_clone()?;
+        sock.set_read_timeout(Some(limit))?;
+        Ok(Deadline { sock })
+    }
+
+    fn finish(self) {
+        let _ = self.sock.set_read_timeout(None);
+    }
+}
+
 pub struct Client {
     rd: Conn,
     wr: Conn,
@@ -98,6 +177,10 @@ pub struct Client {
     pub proto: u64,
     /// which daemon run answered `hello`; a different value on reconnect means the daemon restarted
     pub instance: u64,
+    /// when set, every `call` waits this long for its reply instead of the per-method default
+    pub timeout: Option<Duration>,
+    /// a call timed out: the stream may hold a late reply, so this connection must not be reused
+    broken: bool,
 }
 
 #[cfg(windows)]
@@ -126,7 +209,7 @@ fn open(path: &str) -> Result<Conn> {
 impl Client {
     pub fn connect(pipe: &str, token: &str) -> Result<Client> {
         let f = open(pipe)?;
-        let mut c = Client { rd: f.try_clone()?, wr: f, next: 0, proto: 0, instance: 0 };
+        let mut c = Client { rd: f.try_clone()?, wr: f, next: 0, proto: 0, instance: 0, timeout: None, broken: false };
         let hello = c.call("hello", json!({"token": token}))?;
         c.proto = hello["proto"].as_u64().unwrap_or(1);
         c.instance = hello["instance"].as_u64().unwrap_or(0);
@@ -135,14 +218,36 @@ impl Client {
 
     /// Independent handle for a second thread (e.g. one reads while one writes).
     pub fn try_clone(&self) -> Result<Client> {
-        Ok(Client { rd: self.rd.try_clone()?, wr: self.wr.try_clone()?, next: 1 << 40, proto: self.proto, instance: self.instance })
+        Ok(Client { rd: self.rd.try_clone()?, wr: self.wr.try_clone()?, next: 1 << 40, proto: self.proto, instance: self.instance, timeout: self.timeout, broken: self.broken })
     }
 
+    /// Sends a request and waits for its reply, at most `timeout` (or the method's default): a hung daemon
+    /// gives a `CallTimeout` error instead of freezing the caller. Streaming reads (`read`) are not bounded.
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value> {
+        if self.broken {
+            return Err(anyhow::Error::new(CallTimeout(format!("{method}: the connection to the daemon timed out earlier; reconnect"))));
+        }
         self.next += 1;
         let id = self.next;
         let req = json!({"id": id, "method": method, "params": params});
         self.wr.write_all(&encode(JSON, req.to_string().as_bytes())).map_err(|e| anyhow::Error::new(NotSent(e)))?;
+        let limit = self.timeout.unwrap_or_else(|| default_timeout(method));
+        let deadline = Deadline::start(&self.rd, limit).ok();
+        let res = self.reply(method, id);
+        if let Some(d) = deadline {
+            d.finish();
+        }
+        match res {
+            Err(e) if is_timeout(&e) => {
+                self.broken = true;
+                let msg = format!("{method}: the daemon did not answer within {limit:?} (it may be hung); reconnect or restart it");
+                Err(anyhow::Error::new(CallTimeout(msg)))
+            }
+            r => r,
+        }
+    }
+
+    fn reply(&mut self, method: &str, id: u64) -> Result<Value> {
         loop {
             match self.read()? {
                 Frame::Response(v) if v["id"].as_u64() == Some(id) => {
