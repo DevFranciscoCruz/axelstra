@@ -7,6 +7,8 @@ use axelstra_core::card::{self, Card, Meta};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
+/// Agents a card may name. A single list so it is easy to replace by the shared agent registry.
+pub const AGENTS: [&str; 5] = ["claude", "codex", "gemini", "opencode", "aider"];
 pub const STATUSES: [&str; 5] = ["backlog", "todo", "in-progress", "needs-review", "done"];
 
 #[derive(Serialize)]
@@ -101,6 +103,12 @@ pub fn save(repo: &Path, id: Option<&str>, title: &str, body: &str, status: Opti
             bail!("unknown status {s:?}");
         }
     }
+    // checked before anything is written: a bad agent must not leave a card file that no longer parses
+    if let Some(a) = extra["agent"].as_str() {
+        if !AGENTS.contains(&a) {
+            bail!("unknown agent {a:?} (expected one of: {})", AGENTS.join(", "));
+        }
+    }
     let d = dir(repo);
     std::fs::create_dir_all(&d)?;
     exclude_kanban(repo)?;
@@ -167,6 +175,21 @@ pub fn delete(repo: &Path, id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_rejects_an_unknown_agent_and_writes_nothing() {
+        let repo = std::env::temp_dir().join(format!("axl-kanban-agent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        std::fs::create_dir_all(&repo).unwrap();
+        axelstra_core::git::must(&repo, &["init", "-q"]).unwrap();
+        let e = save(&repo, None, "T", "b", None, &serde_json::json!({"agent": "rm -rf"})).unwrap_err().to_string();
+        assert!(e.contains("unknown agent"), "{e}");
+        assert!(!repo.join(".kanban").exists());
+        for a in AGENTS {
+            save(&repo, None, "T", "b", None, &serde_json::json!({"agent": a})).unwrap();
+        }
+        let _ = std::fs::remove_dir_all(&repo);
+    }
 
     #[test]
     fn an_unreadable_card_is_reported_not_fatal() {

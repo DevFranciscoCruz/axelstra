@@ -125,6 +125,17 @@ impl Registry {
         hit || alive.iter().any(|id| specs.get(id).and_then(|sp| sp["cwd"].as_str()).map(|c| within(&norm(c), &want)).unwrap_or(false))
     }
 
+    /// True while a live session in this worktree is not idle (output in the last 5 s). A prompt waiting for
+    /// input does not count: renaming the worktree is fine then.
+    fn worktree_working(&self, path: &str) -> bool {
+        let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
+        let want = norm(path);
+        let working: Vec<u32> =
+            self.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none() && s.idle_ms() < 5000).map(|(id, _)| *id).collect();
+        let metas = self.metas.lock_recover();
+        working.iter().any(|id| metas.get(id).and_then(|m| m["worktree"].as_str()).map(|w| norm(w) == want).unwrap_or(false))
+    }
+
     fn get(&self, id: u32) -> Option<Arc<Session>> {
         self.sessions.lock_recover().get(&id).cloned()
     }
@@ -1389,7 +1400,38 @@ fn dispatch(
         "worktree.create" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
-            Ok(serde_json::to_value(tokio::task::block_in_place(|| crate::projects::worktree_create(&pr, name))?)?)
+            let (wt, env) = tokio::task::block_in_place(|| crate::projects::worktree_create_report(&pr, name))?;
+            // the worktree plus what .worktreeinclude copied (env_copied) and left out (env_skipped)
+            let mut v = serde_json::to_value(wt)?;
+            v["env_copied"] = json!(env.copied);
+            v["env_skipped"] = json!(env.skipped);
+            Ok(v)
+        }
+        "worktree.rename" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
+            let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
+            let busy = reg.worktree_working(path);
+            let wt = tokio::task::block_in_place(|| crate::projects::worktree_rename(&pr, path, name, busy))?;
+            // the dispatcher's notes (title, requests) are keyed by path: they follow the folder
+            let f = reg.saved.with_file_name("dispatch.json");
+            let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
+            if let Some(mut meta) = std::fs::read_to_string(&f).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+                if let Some(e) = meta.as_object_mut().and_then(|m| m.remove(&norm(path))) {
+                    meta[norm(&wt.path)] = e;
+                    write_atomic(&f, &serde_json::to_vec_pretty(&meta)?)?;
+                }
+            }
+            Ok(serde_json::to_value(wt)?)
+        }
+        "project.env_preview" => {
+            // what .worktreeinclude would copy into the next worktree, for the project settings dialog
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            Ok(serde_json::to_value(tokio::task::block_in_place(|| crate::wtenv::plan(std::path::Path::new(&pr.path)))?)?)
+        }
+        "dispatch.overlaps" => {
+            let f = reg.saved.with_file_name("dispatch.json");
+            Ok(tokio::task::block_in_place(|| crate::overlaps::overlaps(&reg.store, &f)))
         }
         "ports.list" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;

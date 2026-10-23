@@ -157,6 +157,11 @@ pub fn find(store: &Path, id: &str) -> Result<Project> {
 /// New worktree on a new branch `ax/<name>` from the repo's current HEAD.
 /// Lives next to the repo in `.axelstra-wt/` so paths stay short.
 pub fn worktree_create(p: &Project, name: &str) -> Result<git::Worktree> {
+    Ok(create_at(p, name, "HEAD")?.0)
+}
+
+/// Like `worktree_create`, plus what `.worktreeinclude` copied into the new worktree (and what it left out).
+pub fn worktree_create_report(p: &Project, name: &str) -> Result<(git::Worktree, crate::wtenv::Report)> {
     create_at(p, name, "HEAD")
 }
 
@@ -165,10 +170,16 @@ pub fn worktree_from_pr(p: &Project, number: u64) -> Result<git::Worktree> {
     let repo = Path::new(&p.path);
     git::must(repo, &["fetch", "origin", &format!("pull/{number}/head")])
         .with_context(|| format!("could not fetch pull request {number} from origin"))?;
-    create_at(p, &format!("pr-{number}"), "FETCH_HEAD")
+    Ok(create_at(p, &format!("pr-{number}"), "FETCH_HEAD")?.0)
 }
 
-fn create_at(p: &Project, name: &str, base: &str) -> Result<git::Worktree> {
+/// Folder of the worktree `name` of project `p`.
+fn wt_dir(p: &Project, name: &str) -> Result<PathBuf> {
+    let repo = Path::new(&p.path);
+    Ok(repo.parent().context("repo has no parent directory")?.join(".axelstra-wt").join(format!("{}-{}", slug(&p.name), name)))
+}
+
+fn create_at(p: &Project, name: &str, base: &str) -> Result<(git::Worktree, crate::wtenv::Report)> {
     let n = slug(name);
     if n.is_empty() {
         bail!("worktree name is empty");
@@ -177,16 +188,56 @@ fn create_at(p: &Project, name: &str, base: &str) -> Result<git::Worktree> {
     if !git::is_repo(repo) {
         bail!("este projeto ainda não é um repositório git: corre `git init` na pasta para poderes criar worktrees");
     }
-    let dir = repo.parent().context("repo has no parent directory")?.join(".axelstra-wt").join(format!("{}-{}", slug(&p.name), n));
+    let dir = wt_dir(p, &n)?;
     if dir.exists() {
         bail!("{} already exists", dir.display());
     }
     std::fs::create_dir_all(dir.parent().unwrap())?;
     git::worktree_add(repo, &dir, &format!("ax/{n}"), base)?;
-    git::worktree_list(repo)?
+    // untracked config (.env...) the project asked for: a failure here never undoes the worktree
+    let report = crate::wtenv::copy_into(repo, &dir);
+    let wt = git::worktree_list(repo)?
         .into_iter()
         .find(|w| Path::new(&w.path).file_name() == dir.file_name())
-        .context("worktree created but not listed")
+        .context("worktree created but not listed")?;
+    Ok((wt, report))
+}
+
+/// Renames a worktree: its folder and its branch move together to `ax/<name>`. Not for the main worktree, not while
+/// an agent or terminal in it is busy (`busy`, known to the caller), and never over something that exists.
+/// Returns the renamed worktree.
+pub fn worktree_rename(p: &Project, path: &str, name: &str, busy: bool) -> Result<git::Worktree> {
+    let repo = Path::new(&p.path);
+    if !axelstra_core::card::valid_slug(name) {
+        bail!("nome inválido: usa só letras, números, ponto, _ e - (sem começar por ponto)");
+    }
+    let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
+    let wt = git::worktree_list(repo)?.into_iter().find(|w| norm(&w.path) == norm(path)).context("not a worktree of this project")?;
+    if wt.is_main {
+        bail!("cannot rename the main worktree");
+    }
+    if busy {
+        bail!("há uma sessão ativa neste worktree: espera que fique inativa antes de mudar o nome");
+    }
+    let old_branch = wt.branch.clone().context("o worktree não tem ramo (detached HEAD)")?;
+    let new_branch = format!("ax/{name}");
+    let to = wt_dir(p, name)?;
+    if to.exists() {
+        bail!("{} already exists", to.display());
+    }
+    if git::run(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{new_branch}")])?.ok {
+        bail!("o ramo {new_branch} já existe");
+    }
+    git::forget_worktree_lists();
+    git::must(repo, &["worktree", "move", &wt.path, &to.to_string_lossy()])?;
+    if let Err(e) = git::must(repo, &["branch", "-m", &old_branch, &new_branch]) {
+        // keep folder and branch in step: put the folder back
+        let _ = git::must(repo, &["worktree", "move", &to.to_string_lossy(), &wt.path]);
+        git::forget_worktree_lists();
+        return Err(e);
+    }
+    git::forget_worktree_lists();
+    git::worktree_list(repo)?.into_iter().find(|w| w.branch.as_deref() == Some(new_branch.as_str())).context("renamed worktree not listed")
 }
 
 pub fn worktree_remove(p: &Project, path: &str) -> Result<()> {
@@ -348,5 +399,71 @@ mod store_tests {
         }
         assert_eq!(load(&store).len(), 8);
         let _ = std::fs::remove_dir_all(&r);
+    }
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+
+    fn setup(tag: &str) -> (PathBuf, Project) {
+        let root = std::env::temp_dir().join(format!("axl-rename-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let repo = root.join("proj");
+        std::fs::create_dir_all(&repo).unwrap();
+        git::must(&repo, &["init", "-q", "-b", "main"]).unwrap();
+        std::fs::write(repo.join("a.txt"), "1").unwrap();
+        git::must(&repo, &["add", "."]).unwrap();
+        git::must(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"]).unwrap();
+        let path = git::canon(&repo).unwrap().to_string_lossy().to_string();
+        (root, Project { id: "p".into(), name: "proj".into(), path, setup: None })
+    }
+
+    #[test]
+    fn rename_moves_folder_and_branch_together() {
+        let (root, p) = setup("ok");
+        let w = worktree_create(&p, "old").unwrap();
+        let r = worktree_rename(&p, &w.path, "fresh", false).unwrap();
+        assert_eq!(r.branch.as_deref(), Some("ax/fresh"));
+        assert!(Path::new(&r.path).ends_with("proj-fresh"));
+        assert!(Path::new(&r.path).join("a.txt").is_file());
+        assert!(!Path::new(&w.path).exists());
+        assert!(!git::run(Path::new(&p.path), &["rev-parse", "--verify", "--quiet", "refs/heads/ax/old"]).unwrap().ok);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rename_refuses_bad_cases() {
+        let (root, p) = setup("no");
+        let a = worktree_create(&p, "a").unwrap();
+        let b = worktree_create(&p, "b").unwrap();
+        let err = |r: Result<git::Worktree>| r.unwrap_err().to_string();
+        assert!(err(worktree_rename(&p, &a.path, "b", false)).contains("already exists"));
+        assert!(err(worktree_rename(&p, &a.path, "../x", false)).contains("inválido"));
+        assert!(err(worktree_rename(&p, &a.path, ".hidden", false)).contains("inválido"));
+        assert!(err(worktree_rename(&p, &a.path, "", false)).contains("inválido"));
+        assert!(err(worktree_rename(&p, &a.path, "busy", true)).contains("sessão ativa"));
+        assert!(err(worktree_rename(&p, &p.path, "main2", false)).contains("main worktree"));
+        assert!(err(worktree_rename(&p, "C:/nowhere", "z", false)).contains("not a worktree"));
+        // a branch of that name without a folder blocks it too
+        git::must(Path::new(&p.path), &["branch", "ax/taken"]).unwrap();
+        assert!(err(worktree_rename(&p, &b.path, "taken", false)).contains("já existe"));
+        assert!(Path::new(&a.path).exists() && Path::new(&b.path).exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn create_copies_worktreeinclude_files() {
+        let (root, p) = setup("env");
+        let repo = Path::new(&p.path);
+        std::fs::write(repo.join(".gitignore"), ".env\n").unwrap();
+        std::fs::write(repo.join(".env"), "KEY=1").unwrap();
+        std::fs::write(repo.join(crate::wtenv::INCLUDE_FILE), ".env\n").unwrap();
+        git::must(repo, &["add", ".gitignore", ".worktreeinclude"]).unwrap();
+        git::must(repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "env"]).unwrap();
+        let (w, rep) = worktree_create_report(&p, "withenv").unwrap();
+        assert_eq!(rep.copied, vec![".env"]);
+        assert_eq!(std::fs::read_to_string(Path::new(&w.path).join(".env")).unwrap(), "KEY=1");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

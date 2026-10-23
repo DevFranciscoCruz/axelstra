@@ -261,7 +261,13 @@ export const detectPackageManagers = (id: string) => call<{ installed: string[];
 export type DispatchMeta = Record<string, { title?: string; archived?: boolean; requests?: string[]; updated?: number }>;
 export const dispatchMeta = () => call<DispatchMeta>("dispatch.meta");
 export const removeProject = (id: string) => call("project.remove", { id });
-export const createWorktree = (project: string, name: string) => call<Worktree>("worktree.create", { project, name });
+export type EnvSkip = { path: string; reason: string };
+/** worktree.create also says what .worktreeinclude copied into the new worktree and what it left out */
+export type WorktreeCreated = Worktree & { env_copied?: string[]; env_skipped?: EnvSkip[] };
+export const createWorktree = (project: string, name: string) => call<WorktreeCreated>("worktree.create", { project, name });
+/** the ignored files .worktreeinclude would copy into the next worktree of the project */
+export type EnvPreview = { has_file: boolean; files: string[]; skipped: EnvSkip[] };
+export const projectEnvPreview = (project: string) => call<EnvPreview>("project.env_preview", { project });
 export type GhItem = { number: number; title: string; author: string; url: string; state: string; draft: boolean; branch: string; checks: string; review: string };
 export const ghList = (project: string, kind: "pr" | "issue") => call<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
 export const ghListBg = (project: string, kind: "pr" | "issue") => callBg<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
