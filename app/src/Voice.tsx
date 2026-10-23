@@ -1,4 +1,5 @@
 import { K } from "./keyboard";
+import { Button, CheckboxInput, Textarea } from "./ui";
 import { Show, createEffect, createSignal, onCleanup } from "solid-js";
 import { Icon } from "./Icon";
 import { invoke } from "@tauri-apps/api/core";
@@ -224,7 +225,7 @@ export const VoiceDraft = (props: { target: number | null }) => {
           <span class="voice-status">{listening() ? "A ouvir… fale; envia ao parar de falar (Esc cancela)" : voiceState() === "transcribing" ? "A transcrever…" : ""}</span>
         </Show>
         <Show when={draft() !== null && showText()}>
-          <textarea
+          <Textarea
             ref={ta}
             class="voice-text"
             rows={Math.min(5, Math.max(1, (draft() ?? "").split("\n").length))}
@@ -238,33 +239,33 @@ export const VoiceDraft = (props: { target: number | null }) => {
               } else if (e.key === "Escape") close();
             }}
           />
-          <button onClick={() => void toggleVoice()} disabled={voiceState() === "transcribing"} title={K("Ditado (Ctrl+Shift+M)")}>
+          <Button size="sm" onClick={() => void toggleVoice()} disabled={voiceState() === "transcribing"} title={K("Ditado (Ctrl+Shift+M)")}>
             {listening() ? "Parar" : voiceState() === "transcribing" ? "…" : "Ditar"}
-          </button>
-          <button onClick={() => void send(false)} title="Colar no terminal sem Enter">
+          </Button>
+          <Button size="sm" onClick={() => void send(false)} title="Colar no terminal sem Enter">
             Colar
-          </button>
-          <button class="primary" onClick={() => void send(true)}>
+          </Button>
+          <Button variant="default" size="sm" onClick={() => void send(true)}>
             Enviar
-          </button>
+          </Button>
         </Show>
         <label class="voice-auto" title="Enviar para o terminal assim que parar de falar">
-          <input type="checkbox" checked={autoSend()} onChange={(e) => setAutoSend(e.currentTarget.checked)} /> Enviar automático
+          <CheckboxInput checked={autoSend()} onChange={(e) => setAutoSend(e.currentTarget.checked)} /> Enviar automático
         </label>
         <Show when={needModel()}>
           <span class="voice-err">
             Ditado local precisa de um modelo (~160 MB, descarregado uma vez).{" "}
-            <button class="primary" disabled={dlProgress() !== null} onClick={() => void downloadModel()}>
+            <Button variant="default" size="sm" disabled={dlProgress() !== null} onClick={() => void downloadModel()}>
               {dlProgress() === null ? "Descarregar" : `${Math.round(dlProgress()! * 100)}%`}
-            </button>
+            </Button>
           </span>
         </Show>
         <Show when={voiceError()}>
           <span class="voice-err">{voiceError()}</span>
         </Show>
-        <button class="icon" title="Fechar (Esc)" aria-label="Fechar (Esc)" onClick={close}>
+        <Button variant="ghost" size="icon" class="icon" title="Fechar (Esc)" aria-label="Fechar (Esc)" onClick={close}>
           <Icon name="x" />
-        </button>
+        </Button>
       </div>
     </Show>
   );

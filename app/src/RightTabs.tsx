@@ -1,4 +1,5 @@
 import { Show } from "solid-js";
+import { Button } from "./ui";
 import { tabKeys } from "./a11y";
 import { K } from "./keyboard";
 import { PanelIcon } from "./PanelIcon";
@@ -31,9 +32,9 @@ export function RightTabs() {
         {tab("pulls", "PRs")}
       </div>
       <span class="grow" />
-      <button class="icon add on" title={K("Esconder painel direito (Ctrl+Shift+B)")} aria-label={K("Esconder painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>
+      <Button variant="ghost" size="icon" class="icon add on" title={K("Esconder painel direito (Ctrl+Shift+B)")} aria-label={K("Esconder painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>
         <PanelIcon side="right" on={true} />
-      </button>
+      </Button>
     </div>
   );
 }
