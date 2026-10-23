@@ -44,7 +44,8 @@ fn measure() -> Usage {
     }
     let cpu = imp::cpu_percent(&all);
     // the GPU counters are the costliest query here and move slowly: sampled every 15 s, the chip keeps the last value
-    static LAST_GPU: std::sync::Mutex<Option<(std::time::Instant, Option<f64>, Vec<(String, f64)>)>> = std::sync::Mutex::new(None);
+    type GpuSample = (std::time::Instant, Option<f64>, Vec<(String, f64)>);
+    static LAST_GPU: std::sync::Mutex<Option<GpuSample>> = std::sync::Mutex::new(None);
     let cached = LAST_GPU.lock().ok().and_then(|g| g.as_ref().filter(|(at, ..)| at.elapsed().as_secs() < 15).map(|(_, v, a)| (*v, a.clone())));
     let (gpu, gpu_adapters) = cached.unwrap_or_else(|| {
         let fresh = imp::gpu(&all);
@@ -284,16 +285,6 @@ mod imp {
         Some((pid.parse().ok()?, luid.to_string(), ty.to_string()))
     }
 
-    #[cfg(test)]
-    mod tests {
-        #[test]
-        fn engine_names_parse() {
-            let r = super::parse_engine("pid_1234_luid_0x00000000_0x0000D6B2_phys_0_eng_3_engtype_3D").unwrap();
-            assert_eq!(r, (1234, "0x00000000_0x0000D6B2".to_string(), "3D".to_string()));
-            assert!(super::parse_engine("junk").is_none());
-        }
-    }
-
     /// The daemon's pid, read off its named pipe (cached while that process lives).
     pub fn daemon_pid() -> u32 {
         let cached = DAEMON.load(Ordering::Relaxed);
@@ -307,6 +298,16 @@ mod imp {
         let pid = if ok != 0 { pid } else { 0 };
         DAEMON.store(pid, Ordering::Relaxed);
         pid
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn engine_names_parse() {
+            let r = super::parse_engine("pid_1234_luid_0x00000000_0x0000D6B2_phys_0_eng_3_engtype_3D").unwrap();
+            assert_eq!(r, (1234, "0x00000000_0x0000D6B2".to_string(), "3D".to_string()));
+            assert!(super::parse_engine("junk").is_none());
+        }
     }
 }
 
@@ -355,11 +356,17 @@ mod imp {
 /// Prevent the computer from sleeping while the app is open. One holder at a time.
 static AWAKE: Mutex<Option<std::sync::mpsc::Sender<()>>> = Mutex::new(None);
 
+#[cfg(target_os = "linux")]
+static INHIBIT: Mutex<Option<std::process::Child>> = Mutex::new(None);
+
 #[cfg(target_os = "macos")]
 static CAFFEINATE: Mutex<Option<std::process::Child>> = Mutex::new(None);
 
+/// Whether the request took effect: false where nothing can hold the computer awake (Linux without systemd-inhibit).
 #[tauri::command]
-pub fn keep_awake(on: bool) {
+pub fn keep_awake(on: bool) -> bool {
+    #[allow(unused_mut)]
+    let mut held = true;
     #[cfg(windows)]
     {
         use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
@@ -390,8 +397,48 @@ pub fn keep_awake(on: bool) {
             *g = std::process::Command::new("caffeinate").args(["-i", "-w", &std::process::id().to_string()]).spawn().ok();
         }
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(target_os = "linux")]
     {
-        let _ = (on, &AWAKE);
+        let _ = &AWAKE;
+        let mut g = INHIBIT.lock().unwrap();
+        if let Some(mut c) = g.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        if on {
+            // the lock lives as long as the child; no systemd-inhibit on PATH leaves this a no-op
+            *g = linux_inhibit_command(std::process::id()).and_then(|mut c| c.spawn().ok());
+            held = g.is_some();
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    {
+        let _ = &AWAKE;
+        held = !on;
+    }
+    held
+}
+
+/// `systemd-inhibit` holding an idle and sleep lock for as long as `pid` runs (`tail --pid` is what ends
+/// it with the app, like `caffeinate -w`). `None` when systemd-inhibit is not installed.
+#[cfg(target_os = "linux")]
+fn linux_inhibit_command(pid: u32) -> Option<std::process::Command> {
+    let exe = std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join("systemd-inhibit")).find(|f| f.is_file()))?;
+    let mut c = std::process::Command::new(exe);
+    c.args(["--what=idle:sleep", "--who=Axelstra", "--why=Keep awake is on", "--mode=block", "tail", &format!("--pid={pid}"), "-f", "/dev/null"]);
+    c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    Some(c)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod awake_tests {
+    #[test]
+    fn inhibit_command_ties_the_lock_to_the_app() {
+        // only checks the arguments; whether systemd-inhibit exists depends on the machine
+        if let Some(c) = super::linux_inhibit_command(4242) {
+            let args: Vec<_> = c.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+            assert!(args.contains(&"--pid=4242".to_string()));
+            assert!(args.contains(&"--what=idle:sleep".to_string()));
+        }
     }
 }
