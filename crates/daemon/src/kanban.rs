@@ -50,15 +50,15 @@ pub fn list(repo: &Path) -> Result<Board> {
     let mut broken = Vec::new();
     if dir(repo).is_dir() {
         for e in std::fs::read_dir(dir(repo))? {
-            let p = e?.path();
+            let Ok(e) = e else { continue };
+            let p = e.path();
             if p.extension().is_some_and(|x| x == "md") {
-                let t = std::fs::read_to_string(&p)?;
-                match card::parse(&t, &p) {
+                let file = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                // an unreadable file (permissions, not UTF-8) is reported, it does not hide the other cards
+                let parsed = std::fs::read_to_string(&p).map_err(anyhow::Error::from).and_then(|t| card::parse(&t, &p));
+                match parsed {
                     Ok(c) => cards.push(c),
-                    Err(e) => broken.push(Broken {
-                        file: p.file_name().unwrap_or_default().to_string_lossy().to_string(),
-                        error: format!("{e:#}"),
-                    }),
+                    Err(e) => broken.push(Broken { file, error: format!("{e:#}") }),
                 }
             }
         }
@@ -164,4 +164,23 @@ pub fn delete(repo: &Path, id: &str) -> Result<()> {
     let c = list(repo)?.cards.into_iter().find(|c| c.meta.id == id).with_context(|| format!("card {id} not found"))?;
     std::fs::remove_file(c.path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unreadable_card_is_reported_not_fatal() {
+        let repo = std::env::temp_dir().join(format!("axl-kanban-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        std::fs::create_dir_all(repo.join(".kanban")).unwrap();
+        // not UTF-8: read_to_string fails
+        std::fs::write(repo.join(".kanban/bad.md"), [0xff, 0xfe, 0xfd]).unwrap();
+        let b = list(&repo).unwrap();
+        assert!(b.cards.is_empty());
+        assert_eq!(b.broken.len(), 1);
+        assert_eq!(b.broken[0].file, "bad.md");
+        let _ = std::fs::remove_dir_all(&repo);
+    }
 }
