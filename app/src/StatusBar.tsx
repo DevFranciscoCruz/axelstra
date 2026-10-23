@@ -11,6 +11,7 @@ import { hoverIntent, keepInside } from "./hoverIntent";
 import { NotificationBell } from "./NotificationBell";
 import { pollWtUsage, wtUsageTip } from "./Usage";
 import { ranked, spentOf, totalOf, fmtTokens } from "./usageFormat";
+import { PlainButton } from "./ui";
 
 type Usage = { app: number; daemon: number; sessions: number; ports: { port: number; pid: number }[]; cpu: number | null; gpu: number | null; gpu_adapters: [string, number][] };
 
@@ -71,7 +72,7 @@ function Popover(props: { chip: JSX.Element; label: string; onOpen?: () => void;
       onFocusIn={(e) => e.target instanceof HTMLElement && e.target.matches(":focus-visible") && setOpen(true)}
       onFocusOut={(e) => !box.contains(e.relatedTarget as Node | null) && close()}
     >
-      <button
+      <PlainButton
         class="sb-item"
         aria-haspopup="true"
         aria-expanded={open()}
@@ -85,7 +86,7 @@ function Popover(props: { chip: JSX.Element; label: string; onOpen?: () => void;
         }}
       >
         {props.chip}
-      </button>
+      </PlainButton>
       <Show when={open()}>
         <div class="sb-pop" id={id} ref={pop} role="group" aria-label={props.label} style={shift() ? { left: `${shift()}px` } : undefined}>
           {props.children(close)}
@@ -173,12 +174,12 @@ export function StatusBar() {
 
   return (
     <div class="statusbar">
-      <button class="sb-item" classList={{ on: awake() }} title={awakeOk() ? "Impedir que o computador adormeça" : "Não disponível neste sistema: falta o systemd-inhibit"} aria-pressed={awake()} onClick={toggle}>
+      <PlainButton class="sb-item" classList={{ on: awake() }} title={awakeOk() ? "Impedir que o computador adormeça" : "Não disponível neste sistema: falta o systemd-inhibit"} aria-pressed={awake()} onClick={toggle}>
         <svg {...svg}>
           <path d="M3 7h8v3a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7zM11 8h1a1.5 1.5 0 0 1 0 3h-1M5 2.5v2M8 2.5v2" />
         </svg>
         <span>{awake() ? (awakeOk() ? "Ligado" : "n/d") : "Desligado"}</span>
-      </button>
+      </PlainButton>
       <span class="sb-item" title={memTip()}>
         <svg {...svg}>
           <rect x="2" y="5" width="12" height="6" rx="1" />
@@ -238,7 +239,7 @@ export function StatusBar() {
                 </div>
                 <For each={list} fallback={<div class="sb-empty">Nenhum</div>}>
                   {(a) => (
-                    <button
+                    <PlainButton
                       class="sb-entry"
                       onClick={() => {
                         close();
@@ -248,7 +249,7 @@ export function StatusBar() {
                       <StateDot state={state} />
                       <span class="sb-name">{a.name}</span>
                       <span class="lim-dim sb-wt">{a.worktree}</span>
-                    </button>
+                    </PlainButton>
                   )}
                 </For>
               </div>
@@ -310,9 +311,9 @@ export function StatusBar() {
                   )}
                 </For>
               </ul>
-              <button class="sb-clean" onClick={() => void clean()}>
+              <PlainButton class="sb-clean" onClick={() => void clean()}>
                 Limpar merged
-              </button>
+              </PlainButton>
             </Show>
           </>
         )}
