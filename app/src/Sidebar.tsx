@@ -356,12 +356,12 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
             <div class="project-head" title={p.path} onContextMenu={(e) => showMenu(e, projectMenu(p))}>
               <ProjectIcon id={p.id} name={p.name} url={p.icon_url} />
               <span class="pname" title={p.slug ?? p.path}>{p.name}</span>
-              <button class="icon" title="Novo worktree" onClick={() => setCreating(creating() === p.id ? null : p.id)}>
+              <button class="icon" title="Novo worktree" aria-label="Novo worktree" onClick={() => setCreating(creating() === p.id ? null : p.id)}>
                 <Icon name="plus" />
               </button>
               <button
                 class="icon"
-                title={p.setup ? `Setup: ${p.setup}` : "Comando de setup para novos worktrees"}
+                title={p.setup ? `Setup: ${p.setup}` : "Comando de setup para novos worktrees"} aria-label={p.setup ? `Setup: ${p.setup}` : "Comando de setup para novos worktrees"}
                 onClick={() => {
                   setSetupText(p.setup ?? "");
                   setEditSetup(editSetup() === p.id ? null : p.id);
@@ -478,7 +478,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                     </Show>
                     <button
                       class="x"
-                      title="Mais ações"
+                      title="Mais ações" aria-label="Mais ações"
                       onClick={(e) => {
                         e.stopPropagation();
                         const r = e.currentTarget.getBoundingClientRect();
@@ -490,7 +490,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                     <Show when={!w.is_main}>
                       <button
                         class="x"
-                        title="Remover worktree"
+                        title="Remover worktree" aria-label="Remover worktree"
                         onClick={(e) => {
                           e.stopPropagation();
                           void dropWorktree(p.id, w.path, label());

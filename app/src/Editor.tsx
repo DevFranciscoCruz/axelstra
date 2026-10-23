@@ -203,7 +203,7 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
         <button class="icon" disabled={!dirty()} title="Guardar (Ctrl+S)" onClick={() => void save()}>
           Guardar
         </button>
-        <button class="icon" title="Fechar" onClick={() => guarded(() => setOpenFile(null))}>
+        <button class="icon" title="Fechar" aria-label="Fechar" onClick={() => guarded(() => setOpenFile(null))}>
           <Icon name="x" />
         </button>
       </div>

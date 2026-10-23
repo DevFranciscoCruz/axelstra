@@ -134,7 +134,7 @@ export function ChangesPanel() {
         <span class="grow" />
         <button
           class="icon"
-          title="Atualizar"
+          title="Atualizar" aria-label="Atualizar"
           onClick={() => {
             void refreshChanges();
             void refetchLog();
@@ -144,7 +144,7 @@ export function ChangesPanel() {
         </button>
         <button
           class="icon"
-          title="Mais ações"
+          title="Mais ações" aria-label="Mais ações"
           onClick={(e) =>
             showMenu(e, [
               {
@@ -208,7 +208,7 @@ export function ChangesPanel() {
           <button
             class="sc-drop"
             disabled={busy()}
-            title="Mais opções de commit"
+            title="Mais opções de commit" aria-label="Mais opções de commit"
             onClick={(e) =>
               showMenu(e, [
                 { label: "Commit", icon: "check", disabled: !canCommit(), run: () => doCommit() },
