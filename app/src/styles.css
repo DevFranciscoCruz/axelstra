@@ -3,7 +3,10 @@
   --panel: #24262c;
   --line: #33363f;
   --text: #d7dae0;
-  --muted: #8b90a0;
+  /* 4.5:1 or better on the panel, modal, hover and active-row backgrounds */
+  --muted: #9aa0b2;
+  /* borders of inputs and outlined buttons: 3:1 against the dialog and page backgrounds */
+  --line-ctl: #6b7084;
   --accent: #a78bfa;
   --ok: #4ade80;
   --danger: #f87171;
@@ -518,15 +521,15 @@ button.icon:hover {
 }
 
 .picon { width: 16px; height: 16px; border-radius: 4px; flex: none; margin-right: 6px; object-fit: cover; }
-.picon.letter { display: inline-grid; place-items: center; font-size: 10px; font-weight: 700; background: var(--accent, var(--accent)); color: #fff; }
+.picon.letter { display: inline-grid; place-items: center; font-size: 10px; font-weight: 700; background: var(--accent); color: #15121f; }
 
-.twisty { width: 12px; flex: none; color: #888; font-size: 10px; }
+.twisty { width: 12px; flex: none; color: var(--muted); font-size: 10px; }
 .grow { flex: 1; }
 .editor { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .editor-bar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--line-2); font-size: 12px; }
 .epath { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edirty { color: #e5c07b; }
-.emsg { color: #8a8a99; }
+.emsg { color: var(--muted); }
 .econflict { display: flex; gap: 8px; align-items: center; padding: 6px 10px; background: #4a3a1a; font-size: 12px; }
 .editor-host { flex: 1; min-height: 0; overflow: hidden; }
 .editor-host .cm-editor { height: 100%; }
@@ -553,15 +556,15 @@ button.icon:hover {
 .modal { width: min(560px, 92vw); max-height: 88vh; display: flex; flex-direction: column; gap: 8px; background: #2a2a32; border: 1px solid var(--line-3); border-radius: 10px; padding: 14px; overflow-y: auto; }
 /* every dialog scrolls inside its max-height instead of squashing its children or running off the window */
 .modal > * { flex-shrink: 0; }
-.modal input, .modal textarea, .modal select { background: #22222a; color: inherit; border: 1px solid var(--line-2); border-radius: 4px; padding: 5px 7px; font: inherit; font-size: 13px; box-sizing: border-box; }
+.modal input, .modal textarea, .modal select { background: #22222a; color: inherit; border: 1px solid var(--line-ctl); border-radius: 4px; padding: 5px 7px; font: inherit; font-size: 13px; box-sizing: border-box; }
 .m-title { font-size: 15px !important; }
 .m-body { min-height: 180px; resize: vertical; font-family: "Cascadia Code", Consolas, monospace !important; }
 .m-row { display: flex; gap: 8px; }
-.m-row label, .m-full { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #8a8a99; flex: 1; min-width: 0; }
+.m-row label, .m-full { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); flex: 1; min-width: 0; }
 .m-actions { display: flex; gap: 8px; align-items: center; }
 /* dialog buttons: same size and shape, the secondary one outlined instead of the browser grey */
 .modal .auto-head button, .modal .m-actions button { padding: 7px 12px; border-radius: 6px; font-size: 13px; line-height: 1.2; }
-.modal .auto-head button:not(.primary), .modal .m-actions button:not(.primary) { background: transparent; border: 1px solid var(--line-3); color: var(--text); }
+.modal .auto-head button:not(.primary), .modal .m-actions button:not(.primary) { background: transparent; border: 1px solid var(--line-ctl); color: var(--text); }
 .modal .auto-head button:not(.primary):hover, .modal .m-actions button:not(.primary):hover { border-color: var(--accent); color: var(--accent); }
 .modal .auto-head button.primary:disabled, .modal .m-actions button.primary:disabled { opacity: .5; cursor: default; }
 button.danger { color: var(--danger); }
@@ -731,7 +734,7 @@ tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: v
 .st-D { color: var(--danger); }
 .st-U { color: #ff9e64; }
 
-.select-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px 5px 10px; font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+.select-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line-ctl); border-radius: 7px; padding: 5px 8px 5px 10px; font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
 .select-btn:hover { border-color: var(--accent); }
 .select-btn .chev { color: var(--muted); font-size: 10px; }
 .select-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -801,7 +804,7 @@ kbd { font: inherit; font-size: 11px; border: 1px solid var(--line-3); border-bo
 
 .row:focus-within .cbtn, tr:focus-within .cbtn { opacity: 1; visibility: visible; }
 
-.fsearch { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 12px; }
+.fsearch { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--line-ctl); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 12px; }
 .fsearch::placeholder { color: var(--muted); }
 
 /* ---- file explorer ---- */
@@ -966,3 +969,8 @@ button.icon, button.x, button.split-x, button.cbtn { display: inline-flex; align
 button.rtab { background: none; border: 0; font: inherit; cursor: pointer; }
 .show-more { margin: 6px 8px; padding: 4px 10px; background: transparent; border: 1px solid var(--line-3); border-radius: 6px; color: var(--text); font-size: 12px; }
 .show-more:hover { border-color: var(--accent); color: var(--accent); }
+
+/* motion: pulses, spinners and transitions stop for people who asked the system for less of it (the shapes of the status dots remain) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}
