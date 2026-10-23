@@ -1,4 +1,4 @@
-import { Button, Field, Input, Textarea } from "./ui";
+import { Badge, Button, Field, Input, Textarea } from "./ui";
 import { Select } from "./Select";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
@@ -252,7 +252,7 @@ export function Kanban(props: { project: string }) {
               <div class="kcol-head">
                 <span>{col.label}</span>
                 <span class="kcount">{colCards(col.id).length}</span>
-                <Button variant="ghost" size="icon" class="icon" title="Novo cartão" aria-label="Novo cartão" onClick={() => edit(undefined, col.id)}>
+                <Button variant="icon" size="icon" title="Novo cartão" aria-label="Novo cartão" onClick={() => edit(undefined, col.id)}>
                   <Icon name="plus" />
                 </Button>
               </div>
@@ -275,18 +275,18 @@ export function Kanban(props: { project: string }) {
                         <div class="kcard-body">{c.body.trim().slice(0, 160)}</div>
                       </Show>
                       <div class="kchips">
-                        <span class="chip agent" title="Agente">{c.meta.agent}</span>
+                        <Badge variant="agent" title="Agente">{c.meta.agent}</Badge>
                         <Show when={c.meta.priority !== 0}>
-                          <span class="chip prio" classList={{ high: c.meta.priority > 0 }} title="Prioridade">
+                          <Badge variant={c.meta.priority > 0 ? "high" : "default"} title="Prioridade">
                             <Icon name={c.meta.priority > 0 ? "triUp" : "triDown"} size={9} inline /> {Math.abs(c.meta.priority)}
-                          </span>
+                          </Badge>
                         </Show>
                         <Show when={c.meta.depends_on.length > 0}>
-                          <span class="chip dep" title={`Depende de ${c.meta.depends_on.join(", ")}`}>
+                          <Badge variant="agent" title={`Depende de ${c.meta.depends_on.join(", ")}`}>
                             <Icon name="link" size={11} inline /> {c.meta.depends_on.length}
-                          </span>
+                          </Badge>
                         </Show>
-                        <span class="chip id" title="Id do ficheiro .kanban">{c.meta.id}</span>
+                        <Badge variant="id" title="Id do ficheiro .kanban">{c.meta.id}</Badge>
                       </div>
                       <Show when={col.id === "needs-review"}>
                         <div class="kcard-body">Motivo: {reason(c.meta.id)}</div>

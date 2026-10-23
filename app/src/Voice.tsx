@@ -263,7 +263,7 @@ export const VoiceDraft = (props: { target: number | null }) => {
         <Show when={voiceError()}>
           <span class="voice-err">{voiceError()}</span>
         </Show>
-        <Button variant="ghost" size="icon" class="icon" title="Fechar (Esc)" aria-label="Fechar (Esc)" onClick={close}>
+        <Button variant="icon" size="icon" title="Fechar (Esc)" aria-label="Fechar (Esc)" onClick={close}>
           <Icon name="x" />
         </Button>
       </div>

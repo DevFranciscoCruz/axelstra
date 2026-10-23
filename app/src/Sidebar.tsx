@@ -17,7 +17,7 @@ import { press } from "./a11y";
 import { S } from "./strings";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import logo from "./assets/logo.png";
-import { Button, Field, Input, PlainButton, PlainInput } from "./ui";
+import { Badge, Button, Field, Input, cn } from "./ui";
 import {
   AGENTS,
   canonAgent,
@@ -491,23 +491,26 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
           return (
           <div class="project" classList={{ collapsed: projFolded(p.id) }}>
             <div class="project-head" title={p.path} onContextMenu={(e) => showMenu(e, projectMenu(p))}>
-              <PlainButton
+              <Button
                 type="button"
-                class="icon proj-fold"
+                variant="icon"
+                size="icon"
+                class="size-5 flex-none opacity-80"
                 aria-expanded={!projFolded(p.id)}
                 aria-label={projFolded(p.id) ? `Abrir o projeto ${p.name}` : `Fechar o projeto ${p.name}`}
                 title={projFolded(p.id) ? "Mostrar os worktrees" : "Esconder os worktrees"}
                 onClick={() => toggleProject(p.id)}
               >
                 <Icon name={projFolded(p.id) ? "chevRight" : "chevDown"} size={12} />
-              </PlainButton>
+              </Button>
               <ProjectIcon id={p.id} name={p.name} url={p.icon_url} />
               <span class="pname" title={p.slug ?? p.path}>{p.name}</span>
-              <PlainButton class="icon" title="Novo worktree" aria-label="Novo worktree" onClick={() => setCreating(creating() === p.id ? null : p.id)}>
+              <Button variant="icon" size="glyph" title="Novo worktree" aria-label="Novo worktree" onClick={() => setCreating(creating() === p.id ? null : p.id)}>
                 <Icon name="plus" />
-              </PlainButton>
-              <PlainButton
-                class="icon"
+              </Button>
+              <Button
+                variant="icon"
+                size="glyph"
                 title={p.setup ? `Setup: ${p.setup}` : "Comando de setup para novos worktrees"} aria-label={p.setup ? `Setup: ${p.setup}` : "Comando de setup para novos worktrees"}
                 onClick={() => {
                   setSetupText(p.setup ?? "");
@@ -515,14 +518,14 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 }}
               >
                 <Icon name="gear" />
-              </PlainButton>
-              <PlainButton class="icon" title="Tirar da lista (não apaga ficheiros)" aria-label="Tirar projeto da lista" onClick={() => void dropProject(p.id, p.name)}>
+              </Button>
+              <Button variant="icon" size="glyph" title="Tirar da lista (não apaga ficheiros)" aria-label="Tirar projeto da lista" onClick={() => void dropProject(p.id, p.name)}>
                 <Icon name="x" />
-              </PlainButton>
+              </Button>
             </div>
             <Show when={editSetup() === p.id}>
-              <PlainInput
-                class="wt-input"
+              <Input
+                class="mx-1.5 mb-1.5 mt-0.5 w-[calc(100%-12px)] border-primary bg-background"
                 placeholder="setup, ex.: bun install (vazio = nenhum)"
                 value={setupText()}
                 onInput={(e) => setSetupText(e.currentTarget.value)}
@@ -536,15 +539,16 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                 <div class="pm-row">
                   <For each={pms().installed}>
                     {(m) => (
-                      <PlainButton
-                        class="pill"
-                        classList={{ active: setupText() === `${m} install` }}
+                      <Button
+                        variant="secondary"
+                        size="pill"
+                        class={cn("border-border px-2.5 py-0.5 text-sm", setupText() === `${m} install` && "border-primary text-primary")}
                         title={m === pms().suggested ? "Sugerido pelo lockfile do projeto" : `Usar ${m} install`}
                         onClick={() => setSetupText(`${m} install`)}
                       >
                         {m}
                         {m === pms().suggested ? <Icon name="star" size={10} inline /> : null}
-                      </PlainButton>
+                      </Button>
                     )}
                   </For>
                 </div>
@@ -598,9 +602,11 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                     title={w.path}
                   >
                     <Show when={kids() > 0}>
-                      <PlainButton
+                      <Button
                         type="button"
-                        class="wt-fold"
+                        variant="link"
+                        size="bare"
+                        class="h-[18px] w-4 flex-none rounded-sm"
                         aria-expanded={!isFolded()}
                         aria-label={isFolded() ? `Abrir o grupo de ${label()}` : `Fechar o grupo de ${label()}`}
                         title={isFolded() ? "Mostrar os worktrees do grupo" : "Esconder os worktrees do grupo"}
@@ -610,43 +616,42 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                         }}
                       >
                         <Icon name={isFolded() ? "chevRight" : "chevDown"} size={11} />
-                      </PlainButton>
+                      </Button>
                     </Show>
-                    <PlainButton type="button" class="wt-open" aria-current={norm(selectedWorktree()) === norm(w.path) ? "true" : undefined} onClick={() => void openWorktree(p.id, w.path, w.is_main)}>
+                    <Button type="button" variant="row" size="bare" class="min-w-0 flex-1 gap-2" aria-current={norm(selectedWorktree()) === norm(w.path) ? "true" : undefined} onClick={() => void openWorktree(p.id, w.path, w.is_main)}>
                     <StateDot state={dotOfWorktree({ queued: queued(), waiting: waiting(), working: working(), needs: needs(), live: live() })} />
                     <span class="name">{w.is_main ? (p.default_branch ?? "main") : label()}</span>
                     <Show when={!w.is_main && topic(w.path)?.title && topic(w.path)!.title !== label()}>
                       <span class="wt-topic" title={topic(w.path)!.title}>{topic(w.path)!.title}</span>
                     </Show>
                     <Show when={topic(w.path)?.archived}>
-                      <span class="wt-badge" title="Arquivado: o despachante já não envia pedidos para aqui">arquivado</span>
+                      <Badge variant="quiet" title="Arquivado: o despachante já não envia pedidos para aqui">arquivado</Badge>
                     </Show>
                     <Show when={w.is_main && w.branch !== (p.default_branch ?? "main")}>
                       <span class="off-main" title={`O worktree principal está em "${label()}", não em ${p.default_branch ?? "main"}`}><Icon name="warning" size={12} /></span>
                     </Show>
                     <Show when={st()?.dirty}>
-                      <span class="wt-badge" title={`${st()!.dirty} ficheiro(s) com alterações por guardar`}><i class="bdot" />{st()!.dirty}</span>
+                      <Badge variant="quiet" title={`${st()!.dirty} ficheiro(s) com alterações por guardar`}><i class="size-1.5 flex-none rounded-full bg-current opacity-70" />{st()!.dirty}</Badge>
                     </Show>
                     <Show when={overlapTitle(overlapsOf(overlaps(), w.path))}>
                       {(t) => (
-                        <span class="wt-badge overlap" role="img" title={t()} aria-label={t()}><Icon name="warning" size={11} /></span>
+                        <Badge variant="overlap" role="img" title={t()} aria-label={t()}><Icon name="warning" size={11} /></Badge>
                       )}
                     </Show>
                     <Show when={st()?.ahead || st()?.behind}>
-                      <span class="wt-badge" title={`${st()!.ahead} commit(s) à frente e ${st()!.behind} atrás do remoto`}>
-                        {st()!.ahead ? <span class="bd"><Icon name="arrowUp" size={10} />{st()!.ahead}</span> : null}
-                        {st()!.behind ? <span class="bd"><Icon name="arrowDown" size={10} />{st()!.behind}</span> : null}
-                      </span>
+                      <Badge variant="quiet" title={`${st()!.ahead} commit(s) à frente e ${st()!.behind} atrás do remoto`}>
+                        {st()!.ahead ? <span class="inline-flex items-center gap-px"><Icon name="arrowUp" size={10} />{st()!.ahead}</span> : null}
+                        {st()!.behind ? <span class="inline-flex items-center gap-px"><Icon name="arrowDown" size={10} />{st()!.behind}</span> : null}
+                      </Badge>
                     </Show>
                     <Show when={pr()}>
-                      <span
-                        class="wt-badge pr"
-                        classList={{ pass: pr()!.checks === "pass", fail: pr()!.checks === "fail", pend: pr()!.checks === "pending" }}
+                      <Badge
+                        variant={pr()!.checks === "pass" ? "prOk" : pr()!.checks === "fail" ? "prErr" : pr()!.checks === "pending" ? "prPend" : "pr"}
                         title={`PR #${pr()!.number}: ${pr()!.title}${pr()!.checks ? ` (CI: ${pr()!.checks})` : ""}`}
                       >
                         #{pr()!.number}
                         {pr()!.checks === "pass" ? <Icon name="check" size={10} inline /> : pr()!.checks === "fail" ? <Icon name="x" size={10} inline /> : pr()!.checks === "pending" ? <Icon name="ellipsis" size={10} inline /> : null}
-                      </span>
+                      </Badge>
                     </Show>
                     <Show when={isFolded() && groupLive() > 0} fallback={<Show when={live() > 0}><span class="count">{live()}</span></Show>}>
                       <span class="count group" title={`${groupLive()} a correr neste grupo (${kids()} ${kids() === 1 ? "worktree" : "worktrees"} dentro)`}>{groupLive()}</span>
@@ -654,8 +659,10 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                     <Show when={isPinned(w.path)}>
                       <span class="pin" title="Fixado"><Icon name="pin" size={11} /></span>
                     </Show>
-                    </PlainButton>
-                    <PlainButton
+                    </Button>
+                    <Button
+                      variant="icon"
+                      size="glyph"
                       class="x"
                       title="Mais ações" aria-label="Mais ações"
                       onClick={(e) => {
@@ -665,9 +672,11 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                       }}
                     >
                       <Icon name="more" />
-                    </PlainButton>
+                    </Button>
                     <Show when={!w.is_main}>
-                      <PlainButton
+                      <Button
+                        variant="icon"
+                        size="glyph"
                         class="x"
                         title="Remover worktree" aria-label="Remover worktree"
                         onClick={(e) => {
@@ -676,15 +685,15 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                         }}
                       >
                         <Icon name="x" />
-                      </PlainButton>
+                      </Button>
                     </Show>
                   </div>
                   <Show when={agents().length > 0}>
                     <div class="wt-agents" style={depth() > 0 ? { "margin-left": `${14 + depth() * 14}px` } : undefined}>
-                      <PlainButton class="wt-agents-head" onClick={() => toggleAgents(w.path)} aria-expanded={!agentsHidden().has(norm(w.path))}>
+                      <Button variant="link" size="bare" class="w-full justify-between px-1.5 pb-1 pt-0.5 text-xs" onClick={() => toggleAgents(w.path)} aria-expanded={!agentsHidden().has(norm(w.path))}>
                         <span>{agents().length} {agents().length === 1 ? "agente" : "agentes"}</span>
                         <Icon name={agentsHidden().has(norm(w.path)) ? "chevRight" : "chevDown"} size={11} />
-                      </PlainButton>
+                      </Button>
                       <Show when={!agentsHidden().has(norm(w.path))}>
                         <For each={agents()}>
                           {(a) => {
@@ -696,8 +705,8 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                                 <Show
                                   when={renamingAgent() !== a.id}
                                   fallback={
-                                    <PlainInput
-                                      class="wt-agent-edit"
+                                    <Input
+                                      class="mx-1 my-0.5 h-auto min-w-0 flex-1 px-1.5 py-[3px] text-sm"
                                       aria-label="Nome do agente"
                                       value={info().name}
                                       ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
@@ -709,9 +718,11 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                                     />
                                   }
                                 >
-                                  <PlainButton
+                                  <Button
                                     type="button"
-                                    class="wt-agent-open"
+                                    variant="row"
+                                    size="bare"
+                                    class="min-w-0 flex-1 gap-2 px-1.5 py-1"
                                     data-agent-row={a.id}
                                     aria-label={agentRowLabel(info(), state())}
                                     aria-current={active() ? "true" : undefined}
@@ -738,12 +749,12 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                                     <Show when={info().worktree}>
                                       <span class="wt-agent-wt" title={a.meta?.worktree}>{info().worktree}</span>
                                     </Show>
-                                  </PlainButton>
+                                  </Button>
                                 </Show>
                                 <Show when={info().hasReport && renamingAgent() !== a.id}>
-                                  <PlainButton type="button" class="wt-agent-report" aria-label={`Relatório de ${info().name}`} title="Abrir o relatório deste agente" onClick={() => openNote(a.id, info().name)}>
+                                  <Button type="button" variant="chip" size="chip" class="mr-1 flex-none gap-1 px-[7px]" aria-label={`Relatório de ${info().name}`} title="Abrir o relatório deste agente" onClick={() => openNote(a.id, info().name)}>
                                     <Icon name="file" size={11} /> Relatório
-                                  </PlainButton>
+                                  </Button>
                                 </Show>
                                 <span class="wt-agent-time">{a.running ? idleLabel(a.idle_ms) : "fim"}</span>
                               </div>
@@ -760,13 +771,13 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
             <Show when={lay().finished.length > 0}>
               <div class="wt-done">
                 <div class="wt-done-head">
-                  <PlainButton type="button" class="wt-done-toggle" aria-expanded={doneOpen().has(p.id)} onClick={() => toggleDone(p.id)}>
+                  <Button type="button" variant="link" size="bare" class="gap-[5px] py-[3px] text-xs" aria-expanded={doneOpen().has(p.id)} onClick={() => toggleDone(p.id)}>
                     <Icon name={doneOpen().has(p.id) ? "chevDown" : "chevRight"} size={11} />
                     <span>Concluídos ({lay().finished.length})</span>
-                  </PlainButton>
-                  <PlainButton type="button" class="wt-done-clean" title="Remover os worktrees já merged" onClick={() => void cleanFinished(lay().finished.map((w) => `${p.name}: ${w.branch ?? w.path}`))}>
+                  </Button>
+                  <Button type="button" variant="chip" size="chip" class="py-px" title="Remover os worktrees já merged" onClick={() => void cleanFinished(lay().finished.map((w) => `${p.name}: ${w.branch ?? w.path}`))}>
                     Limpar
-                  </PlainButton>
+                  </Button>
                 </div>
                 <Show when={doneOpen().has(p.id)}>
                   <For each={lay().finished}>
@@ -774,11 +785,13 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                       const label = () => w.branch ?? "(destacado)";
                       return (
                         <div class="item wt finished" classList={{ active: norm(selectedWorktree()) === norm(w.path) }} onContextMenu={(e) => showMenu(e, worktreeMenu(p, w, label()))} title={w.path}>
-                          <PlainButton type="button" class="wt-open" aria-current={norm(selectedWorktree()) === norm(w.path) ? "true" : undefined} onClick={() => void openWorktree(p.id, w.path, w.is_main)}>
+                          <Button type="button" variant="row" size="bare" class="min-w-0 flex-1 gap-2" aria-current={norm(selectedWorktree()) === norm(w.path) ? "true" : undefined} onClick={() => void openWorktree(p.id, w.path, w.is_main)}>
                             <StateDot state="done" />
                             <span class="name">{label()}</span>
-                          </PlainButton>
-                          <PlainButton
+                          </Button>
+                          <Button
+                            variant="icon"
+                            size="glyph"
                             class="x"
                             title="Remover worktree" aria-label={`Remover ${label()}`}
                             onClick={(e) => {
@@ -787,7 +800,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                             }}
                           >
                             <Icon name="x" />
-                          </PlainButton>
+                          </Button>
                         </div>
                       );
                     }}
@@ -801,15 +814,15 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
       </For>
 
       <div class="grow" />
-      <PlainButton class="side-link" onClick={() => setShowAutomations(true)}>
+      <Button variant="link" size="bare" class="justify-start gap-1.5 rounded-md px-2.5 py-2 text-sm hover:bg-foreground/5" onClick={() => setShowAutomations(true)}>
         <Icon name="clock" size={13} /> Automatizações
-      </PlainButton>
-      <PlainButton class="side-link" onClick={() => setShowDispatcher(true)} title="Para onde foi cada pedido feito na main">
+      </Button>
+      <Button variant="link" size="bare" class="justify-start gap-1.5 rounded-md px-2.5 py-2 text-sm hover:bg-foreground/5" onClick={() => setShowDispatcher(true)} title="Para onde foi cada pedido feito na main">
         <Icon name="branch" size={13} /> Despachante
-      </PlainButton>
-      <PlainButton class="side-link" onClick={() => setShowSettings(true)}>
+      </Button>
+      <Button variant="link" size="bare" class="justify-start gap-1.5 rounded-md px-2.5 py-2 text-sm hover:bg-foreground/5" onClick={() => setShowSettings(true)}>
         <Icon name="gear" size={13} /> Definições
-      </PlainButton>
+      </Button>
       <Show when={creating()}>
         {(pid) => {
           const proj = () => projects().find((x) => x.id === pid());
