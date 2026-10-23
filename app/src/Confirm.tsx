@@ -13,28 +13,34 @@ export const ask = (message: string, opts: Opts = {}) =>
     setPending({ message, opts, resolve });
   });
 
+/** discarding unsaved text (a draft, an edited form) */
+export const askDiscard = (what: string) => ask(`${what} Descartar as alterações?`, { title: "Descartar alterações", kind: "warning", okLabel: "Descartar", cancelLabel: "Continuar a editar" });
+
+/** a warning or an error is about something that cannot be undone: the safe button gets the focus, not the one that proceeds */
+export const focusesCancel = (kind: Opts["kind"]) => kind === "warning" || kind === "error";
+
 const answer = (ok: boolean) => {
   const p = pending();
   setPending(null);
   p?.resolve(ok);
 };
 
-/** mounted once; renders whatever `ask` queued */
+/** mounted once; renders whatever `ask` queued (keyed: a question asked while another is open gets a fresh dialog and focus) */
 export function ConfirmHost() {
   return (
-    <Show when={pending()}>
+    <Show when={pending()} keyed>
       {(p) => (
-        <Modal label={p().opts.title ?? "Confirmar"} onClose={() => answer(false)}>
+        <Modal label={p.opts.title ?? "Confirmar"} onClose={() => answer(false)}>
           <div class="m-title" style={{ "font-weight": "600" }}>
-            {p().opts.title ?? "Confirmar"}
+            {p.opts.title ?? "Confirmar"}
           </div>
           <div class="auto-note" style={{ "white-space": "pre-wrap" }}>
-            {p().message}
+            {p.message}
           </div>
           <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-            <button onClick={() => answer(false)}>{p().opts.cancelLabel ?? "Cancelar"}</button>
-            <button class="primary" ref={(el) => queueMicrotask(() => el.focus())} onClick={() => answer(true)}>
-              {p().opts.okLabel ?? "Sim"}
+            <button ref={(el) => focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(false)}>{p.opts.cancelLabel ?? "Cancelar"}</button>
+            <button class="primary" classList={{ "kind-warn": focusesCancel(p.opts.kind) }} ref={(el) => !focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(true)}>
+              {p.opts.okLabel ?? "Sim"}
             </button>
           </div>
         </Modal>

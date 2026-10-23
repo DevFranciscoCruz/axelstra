@@ -3,7 +3,7 @@ import { Icon } from "./Icon";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { GhItem, ghList, worktreeFromPr } from "./api";
 import { RightTabs } from "./RightTabs";
-import { findWorktree, refreshProjects, selectWorktree, selectedWorktree, setError } from "./store";
+import { findWorktree, refreshProjects, selectWorktree, selectedWorktree, setError, rightTab } from "./store";
 
 const CHECK: Record<string, [string, string]> = { pass: ["check", "Checks a passar"], fail: ["x", "Checks a falhar"], pending: ["ellipsis", "Checks a correr"] };
 const REVIEW: Record<string, string> = { approved: "aprovado", changes: "alterações pedidas", review: "falta revisão" };
@@ -43,14 +43,14 @@ export function PullsPanel() {
   };
 
   return (
-    <aside class="rightbar">
+    <aside class="rightbar" id="rpanel" role="tabpanel" aria-labelledby={`rtab-${rightTab()}`}>
       <RightTabs />
       <div class="rtools">
-        <button class="icon" classList={{ on: kind() === "pr" }} onClick={() => setKind("pr")}>
+        <button class="icon" classList={{ on: kind() === "pr" }} aria-pressed={kind() === "pr"} onClick={() => setKind("pr")}>
           PRs
         </button>
-        <button class="icon" classList={{ on: kind() === "issue" }} onClick={() => setKind("issue")}>
-          Issues
+        <button class="icon" classList={{ on: kind() === "issue" }} aria-pressed={kind() === "issue"} onClick={() => setKind("issue")}>
+          Problemas
         </button>
         <span class="grow" />
         <button class="icon" title="Atualizar" aria-label="Atualizar" onClick={() => void refetch()}>

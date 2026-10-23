@@ -15,7 +15,8 @@ import { Automations } from "./Automations";
 import { Dispatcher } from "./Dispatcher";
 import { Settings } from "./Settings";
 import { Shortcuts } from "./Shortcuts";
-import { isTextTarget, overlayOpen } from "./keyboard";
+import { LEFT, RIGHT, resizeTo, splitTo } from "./layout";
+import { K, isTextTarget, overlayOpen } from "./keyboard";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
 import { PanelIcon } from "./PanelIcon";
@@ -29,7 +30,11 @@ import { StatusBar } from "./StatusBar";
 import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
 import { ErrorToast } from "./ErrorToast";
 import { Modal } from "./Modal";
-import { press } from "./a11y";
+import { Tab } from "./Tab";
+import { pickProject } from "./projectActions";
+import { StateDot } from "./StateDot";
+import { dotOfSession } from "./agentState";
+import { tabKeys } from "./a11y";
 import { ask } from "./Confirm";
 import { PullsPanel } from "./PullsPanel";
 import { TerminalView } from "./TerminalView";
@@ -72,6 +77,9 @@ import {
   splitSession,
   setSplitSession,
   setFsTick,
+  projects,
+  setCreatingWorktree,
+  setRemoveRequest,
   norm,
   findWorktree,
   openDiff,
@@ -114,7 +122,7 @@ export function App() {
         setComputerOn(await computerEnable(false));
         return;
       }
-      const ok = await ask("Permitir que os agentes vejam o ecrã e controlem o rato e o teclado?\n\nPodem tirar capturas de qualquer janela e clicar ou escrever em nome de si. Fica ligado até o desligar aqui ou fechar a aplicação.", {
+      const ok = await ask("Permitir que os agentes vejam o ecrã e controlem o rato e o teclado?\n\nPodem tirar capturas de qualquer janela e clicar ou escrever em teu nome. Fica ligado até o desligar aqui ou fechar a aplicação.", {
         title: "Controlo do ecrã",
         kind: "warning",
         okLabel: "Permitir",
@@ -470,6 +478,27 @@ export function App() {
     window.addEventListener("mouseup", up);
   };
 
+  // the dialogs for a new or removed worktree belong to the sidebar: show it first
+  const showSidebarNow = () => {
+    if (!showSidebar()) toggleSidebar();
+  };
+
+  // the same resize from the keyboard (arrows, Shift for bigger steps, Home/End)
+  const resizeKey = (e: KeyboardEvent, dir: 1 | -1, w: number, range: { min: number; max: number }, set: (w: number) => void) => {
+    const to = resizeTo(w, e.key, e.shiftKey, dir, range);
+    if (to === null) return;
+    e.preventDefault();
+    set(to);
+  };
+
+  const anyTabSelected = () => showKanban() || openDiff() !== null || openFile() !== null || openCommit() !== null || activeSession() !== null;
+  // renaming ends with the new name (null = cancelled); focus goes back to the tab, not to the page
+  const finishRename = (id: number, name: string | null, refocus = true) => {
+    if (name !== null) renameTab(id, name);
+    setRenaming(null);
+    if (refocus) queueMicrotask(() => document.querySelector<HTMLElement>(`[data-tab="tab-${id}"]`)?.focus());
+  };
+
   const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
   return (
@@ -479,10 +508,34 @@ export function App() {
       style={{ "--left-w": `${leftW()}px`, "--right-w": `${rightW()}px` }}
     >
       <Show when={showSidebar()}>
-        <div class="resizer" style={{ left: "var(--left-w)" }} onMouseDown={(e) => drag(e, 1, leftW(), setLeftW)} />
+        <div
+          class="resizer"
+          style={{ left: "var(--left-w)" }}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Largura da lista de projetos"
+          aria-valuenow={leftW()}
+          aria-valuemin={LEFT.min}
+          aria-valuemax={LEFT.max}
+          tabindex="0"
+          onKeyDown={(e) => resizeKey(e, 1, leftW(), LEFT, setLeftW)}
+          onMouseDown={(e) => drag(e, 1, leftW(), setLeftW)}
+        />
       </Show>
       <Show when={current() && showRightPanel()}>
-        <div class="resizer right-edge" style={{ right: "var(--right-w)" }} onMouseDown={(e) => drag(e, -1, rightW(), setRightW)} />
+        <div
+          class="resizer right-edge"
+          style={{ right: "var(--right-w)" }}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Largura do painel direito"
+          aria-valuenow={rightW()}
+          aria-valuemin={RIGHT.min}
+          aria-valuemax={RIGHT.max}
+          tabindex="0"
+          onKeyDown={(e) => resizeKey(e, -1, rightW(), RIGHT, setRightW)}
+          onMouseDown={(e) => drag(e, -1, rightW(), setRightW)}
+        />
       </Show>
       <Show when={agentPrompt()}>
         {(done) => (
@@ -514,16 +567,24 @@ export function App() {
                 { label: `Novo agente (${projectAgent(current()!.project.id)})`, run: () => void newAgent() },
                 { label: "Novo terminal", run: () => void newTerminal() },
                 { label: "Dividir terminal", run: () => void toggleSplit() },
-                { label: "Reabrir último separador fechado", hint: "Ctrl+Shift+T", run: () => void reopenClosed() },
+                { label: "Reabrir último separador fechado", hint: K("Ctrl+Shift+T"), run: () => void reopenClosed() },
+                ...(activeSession() !== null ? [{ label: "Mudar o nome do separador", hint: "F2", run: () => setRenaming(activeSession()) }] : []),
+                ...(current()!.wt.is_main
+                  ? []
+                  : [{ label: "Remover worktree atual", hint: "worktree", run: () => { showSidebarNow(); setRemoveRequest({ project: current()!.project.id, path: current()!.wt.path, name: current()!.wt.branch ?? current()!.wt.path }); } }]),
               ]
             : []),
-          { label: "Pesquisar conversas", hint: "Ctrl+Shift+F", run: () => setShowAgentSearch(true) },
+          ...(projects().length > 0
+            ? [{ label: "Novo worktree", hint: "worktree", run: () => { showSidebarNow(); setCreatingWorktree(current()?.project.id ?? projects()[0].id); } }]
+            : []),
+          { label: "Pesquisar conversas", hint: K("Ctrl+Shift+F"), run: () => setShowAgentSearch(true) },
           { label: "Orquestração: agentes e workers", run: () => setShowOrchestra(true) },
-          { label: "Definições", hint: "Ctrl+,", run: () => setShowSettings(true) },
+          { label: "Definições", hint: K("Ctrl+,"), run: () => setShowSettings(true) },
           { label: "Despachante", hint: "pedidos enviados a cada worktree", run: () => setShowDispatcher(true) },
           { label: "Automatizações", hint: "agendamento", run: () => setShowAutomations(true) },
           { label: "Atalhos de teclado", hint: "?", run: () => setShowShortcuts(true) },
-          { label: showSidebar() ? "Ocultar projetos" : "Mostrar projetos", hint: "Ctrl+B", run: toggleSidebar },
+          { label: showSidebar() ? "Ocultar projetos" : "Mostrar projetos", hint: K("Ctrl+B"), run: toggleSidebar },
+          { label: showRightPanel() ? "Ocultar painel direito" : "Mostrar painel direito", hint: K("Ctrl+Shift+B"), run: toggleRightPanel },
           { label: computerOn() ? "Controlo do ecrã pelos agentes: desligar" : "Controlo do ecrã pelos agentes: ligar", run: () => void toggleComputer() },
         ]}
       />
@@ -559,134 +620,120 @@ export function App() {
           fallback={
             <div class="placeholder">
               <Show when={!showSidebar()}>
-                <button class="icon add" title="Mostrar projetos (Ctrl+B)" aria-label="Mostrar projetos (Ctrl+B)" onClick={toggleSidebar}>
+                <button class="icon add" title={K("Mostrar projetos (Ctrl+B)")} aria-label={K("Mostrar projetos (Ctrl+B)")} onClick={toggleSidebar}>
                   <PanelIcon side="left" on={false} />
                 </button>
               </Show>
-              Adicione um projeto e escolha um worktree.
+              <div>Adiciona um projeto e escolhe um worktree.</div>
+              <Show when={projects().length === 0}>
+                <button class="primary" onClick={() => void pickProject()}>Adicionar projeto</button>
+              </Show>
             </div>
           }
         >
           <div class="tabbar">
-            <button class="icon add" title="Projetos (Ctrl+B)" aria-label="Projetos (Ctrl+B)" classList={{ on: showSidebar() }} onClick={toggleSidebar}>
+            <button class="icon add" title={K("Projetos (Ctrl+B)")} aria-label={K("Projetos (Ctrl+B)")} classList={{ on: showSidebar() }} onClick={toggleSidebar}>
               <PanelIcon side="left" on={showSidebar()} />
             </button>
-            <div class="tabs">
-            <div class="tab" classList={{ active: showKanban() }} {...press(() => guarded(() => setShowKanban(true)), "tab")}>
+            <div class="tabs" role="tablist" aria-label="Separadores" onKeyDown={(e) => tabKeys(e)}>
+            <Tab selected={showKanban()} tabbable={!anyTabSelected()} onSelect={() => guarded(() => setShowKanban(true))}>
               <span class="dtag"><Icon name="grid" size={11} /></span>
               <span>Kanban</span>
-            </div>
+            </Tab>
             <For each={tabs()}>
               {(s) => (
-                <div
-                  class="tab"
-                  classList={{ active: !showKanban() && openDiff() === null && openFile() === null && openCommit() === null && activeSession() === s.id }}
-                  style={dropOn() === s.id && dragTab() !== s.id ? { "box-shadow": "inset 2px 0 0 var(--accent, #7aa2f7)" } : undefined}
-                  draggable={renaming() !== s.id}
-                  onDragStart={(e) => {
-                    setDragTab(s.id);
-                    e.dataTransfer?.setData("text/plain", String(s.id));
-                  }}
-                  onDragOver={(e) => {
-                    if (dragTab() === null) return;
-                    e.preventDefault();
-                    setDropOn(s.id);
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const from = dragTab();
-                    if (from !== null) moveTab(tabs().map((t) => t.id), from, s.id);
-                    setDragTab(null);
-                    setDropOn(null);
-                  }}
-                  onDragEnd={() => {
-                    setDragTab(null);
-                    setDropOn(null);
-                  }}
-                  onDblClick={() => setRenaming(s.id)}
-                  onMouseDown={(e) => e.button === 1 && e.preventDefault()}
-                  onAuxClick={(e) => {
-                    if (e.button !== 1) return;
-                    e.preventDefault();
-                    void close(s);
-                  }}
-                  {...press(() => showTab(s), "tab")}
-                >
-                  <span class="dot" classList={{ on: s.running, work: sessionState(s) === "working" && s.meta?.kind === "agent", wait: sessionState(s) === "waiting" }} />
-                  <Show
-                    when={renaming() === s.id}
-                    fallback={<span>{s.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{tabLabel(s)}</span>}
-                  >
-                    <input
-                      style={{ width: "120px", font: "inherit", color: "inherit", background: "transparent", border: "1px solid var(--line-3)", "border-radius": "4px", padding: "0 4px" }}
-                      value={tabLabel(s)}
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === "Enter") {
-                          renameTab(s.id, e.currentTarget.value);
-                          setRenaming(null);
-                        } else if (e.key === "Escape") setRenaming(null);
-                      }}
-                      onBlur={(e) => {
-                        if (renaming() !== s.id) return;
-                        renameTab(s.id, e.currentTarget.value);
-                        setRenaming(null);
-                      }}
-                      ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
-                    />
-                  </Show>
-                  <button
-                    class="x"
-                    title="Fechar" aria-label="Fechar"
-                    onClick={(e) => {
-                      e.stopPropagation();
+                <Tab
+                  id={`tab-${s.id}`}
+                  selected={!showKanban() && openDiff() === null && openFile() === null && openCommit() === null && activeSession() === s.id}
+                  onSelect={() => showTab(s)}
+                  onClose={() => void close(s)}
+                  onRename={() => setRenaming(s.id)}
+                  wrap={{
+                    style: dropOn() === s.id && dragTab() !== s.id ? { "box-shadow": "inset 2px 0 0 var(--accent, #7aa2f7)" } : undefined,
+                    draggable: renaming() !== s.id,
+                    onDragStart: (e) => {
+                      setDragTab(s.id);
+                      e.dataTransfer?.setData("text/plain", String(s.id));
+                    },
+                    onDragOver: (e) => {
+                      if (dragTab() === null) return;
+                      e.preventDefault();
+                      setDropOn(s.id);
+                    },
+                    onDrop: (e) => {
+                      e.preventDefault();
+                      const from = dragTab();
+                      if (from !== null) moveTab(tabs().map((t) => t.id), from, s.id);
+                      setDragTab(null);
+                      setDropOn(null);
+                    },
+                    onDragEnd: () => {
+                      setDragTab(null);
+                      setDropOn(null);
+                    },
+                    onDblClick: () => setRenaming(s.id),
+                    onMouseDown: (e) => e.button === 1 && e.preventDefault(),
+                    onAuxClick: (e) => {
+                      if (e.button !== 1) return;
+                      e.preventDefault();
                       void close(s);
-                    }}
-                  >
-                    <Icon name="x" />
-                  </button>
-                </div>
+                    },
+                  }}
+                  editing={
+                    renaming() === s.id ? (
+                      <>
+                        <StateDot state={dotOfSession(s)} />
+                        <input
+                          class="tab-rename"
+                          aria-label="Nome do separador"
+                          value={tabLabel(s)}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === "Enter") finishRename(s.id, e.currentTarget.value);
+                            else if (e.key === "Escape") finishRename(s.id, null);
+                          }}
+                          onBlur={(e) => renaming() === s.id && finishRename(s.id, e.currentTarget.value, false)}
+                          ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
+                        />
+                      </>
+                    ) : undefined
+                  }
+                >
+                  <StateDot state={dotOfSession(s)} />
+                  <span>{s.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{tabLabel(s)}</span>
+                </Tab>
               )}
             </For>
             <Show when={openCommit()}>
               {(c) => (
-                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={c().subject} {...press(() => setShowKanban(false), "tab")}>
+                <Tab class="diff-tab" selected={!showKanban()} title={c().subject} onSelect={() => setShowKanban(false)} onClose={() => setOpenCommit(null)} closeLabel="Fechar commit">
                   <span class="dtag"><Icon name="branch" size={11} /></span>
                   <span>{c().short}</span>
-                  <button class="x" title="Fechar commit" aria-label="Fechar commit" onClick={() => setOpenCommit(null)}>
-                    <Icon name="x" />
-                  </button>
-                </div>
+                </Tab>
               )}
             </Show>
             <Show when={openFile()}>
               {(p) => (
-                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} {...press(() => setShowKanban(false), "tab")}>
+                <Tab class="diff-tab" selected={!showKanban()} title={p()} onSelect={() => setShowKanban(false)} onClose={() => guarded(() => setOpenFile(null))} closeLabel="Fechar ficheiro">
                   <span class="dtag"><Icon name="pencil" size={11} /></span>
                   <span>{baseName(p())}</span>
-                  <button class="x" title="Fechar ficheiro" aria-label="Fechar ficheiro" onClick={(e) => { e.stopPropagation(); guarded(() => setOpenFile(null)); }}>
-                    <Icon name="x" />
-                  </button>
-                </div>
+                </Tab>
               )}
             </Show>
             <Show when={openDiff()}>
               {(p) => (
-                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} {...press(() => setShowKanban(false), "tab")}>
+                <Tab class="diff-tab" selected={!showKanban()} title={p()} onSelect={() => setShowKanban(false)} onClose={() => setOpenDiff(null)} closeLabel="Fechar diff">
                   <span class="dtag">Δ</span>
                   <span>{baseName(p())}</span>
-                  <button class="x" title="Fechar diff" aria-label="Fechar diff" onClick={() => setOpenDiff(null)}>
-                    <Icon name="x" />
-                  </button>
-                </div>
+                </Tab>
               )}
             </Show>
             </div>
             <span class="grow" />
             <UsageChip />
             <Show when={computerOn()}>
-              <span class="computer-on" title="Os agentes podem ver o ecrã e controlar o rato e o teclado. Desligue em: paleta de comandos, «Controlo do ecrã»"><i class="bdot" /> ecrã</span>
+              <span class="computer-on" title="Os agentes podem ver o ecrã e controlar o rato e o teclado. Desliga em: paleta de comandos, «Controlo do ecrã»"><i class="bdot" /> ecrã</span>
             </Show>
             <For each={ports()}>
               {(port) => (
@@ -695,7 +742,7 @@ export function App() {
                 </button>
               )}
             </For>
-            <button class="icon add" title="Ditado por voz (Ctrl+Shift+M)" aria-label="Ditado por voz (Ctrl+Shift+M)" classList={{ on: listening(), rec: listening() }} onClick={() => void toggleVoice()} hidden={!voiceSupported}>
+            <button class="icon add" title={K("Ditado por voz (Ctrl+Shift+M)")} aria-label={K("Ditado por voz (Ctrl+Shift+M)")} classList={{ on: listening(), rec: listening() }} onClick={() => void toggleVoice()} hidden={!voiceSupported}>
               <MicIcon />
             </button>
             <button class="icon add" title="Dividir: ver dois terminais lado a lado" aria-label="Dividir: ver dois terminais lado a lado" classList={{ on: splitSession() !== null }} onClick={() => void toggleSplit()}>
@@ -714,7 +761,7 @@ export function App() {
               </svg>
             </button>
             <Show when={!showRightPanel()}>
-              <button class="icon add" title="Mostrar painel direito (Ctrl+Shift+B)" aria-label="Mostrar painel direito (Ctrl+Shift+B)" onClick={toggleRightPanel}>
+              <button class="icon add" title={K("Mostrar painel direito (Ctrl+Shift+B)")} aria-label={K("Mostrar painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>
                 <PanelIcon side="right" on={false} />
               </button>
             </Show>
@@ -747,7 +794,7 @@ export function App() {
                       <button onClick={() => void newTerminal()}>+ Terminal</button>
                     </div>
                     <div class="hints">
-                      <kbd>Ctrl+K</kbd> paleta · <kbd>Ctrl+B</kbd> projetos · <kbd>Ctrl+Shift+B</kbd> painel direito
+                      <kbd>{K("Ctrl+K")}</kbd> paleta · <kbd>{K("Ctrl+B")}</kbd> projetos · <kbd>{K("Ctrl+Shift+B")}</kbd> painel direito
                     </div>
                   </div>
                 }
@@ -762,6 +809,19 @@ export function App() {
                 <Show when={splitSession() !== null && splitSession() !== activeSession() && tabs().some((s) => s.id === splitSession())}>
                   <div
                     class="split-sep"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Largura do terminal dividido"
+                    aria-valuenow={Math.round(splitFrac() * 100)}
+                    aria-valuemin={20}
+                    aria-valuemax={80}
+                    tabindex="0"
+                    onKeyDown={(e) => {
+                      const to = splitTo(splitFrac(), e.key);
+                      if (to === null) return;
+                      e.preventDefault();
+                      setSplitFrac(to);
+                    }}
                     onMouseDown={(e) => {
                       e.preventDefault();
                       const area = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();

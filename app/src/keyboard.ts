@@ -25,3 +25,9 @@ export const isTextTarget = (el: EventTarget | null): boolean => {
 
 /** a dialog or the palette is open: shortcuts that act on the page underneath must leave the keys alone */
 export const overlayOpen = (): boolean => !!document.querySelector('[role="dialog"], .pal-back');
+
+/** the Mac keeps its shortcuts on Cmd where Windows and Linux use Ctrl */
+export const isMac = (platform: string = typeof navigator === "undefined" ? "" : navigator.platform || navigator.userAgent): boolean => /mac|iphone|ipad/i.test(platform);
+
+/** shortcut text as this platform names it: "Ctrl+Shift+B" reads "Cmd+Shift+B" on a Mac */
+export const K = (text: string, mac: boolean = isMac()): string => (mac ? text.replace(/\bCtrl\b/g, "Cmd") : text);

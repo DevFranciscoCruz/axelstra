@@ -81,7 +81,7 @@ export function UpdateToast() {
             </svg>
             <div>
               <p class="ut-title">Versão {i().version} pronta</p>
-              <p class="ut-sub">Os terminais e agentes continuam a correr. Se preferir, a atualização instala ao fechar a app.</p>
+              <p class="ut-sub">Os terminais e agentes continuam a correr. Se preferires, a atualização instala ao fechar a app.</p>
             </div>
           </div>
           <div class="ut-actions">

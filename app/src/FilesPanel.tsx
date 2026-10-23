@@ -2,12 +2,13 @@ import { ask } from "./Confirm";
 import { Icon } from "./Icon";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { For, Show, createEffect, createMemo, createResource, createSignal, on } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup } from "solid-js";
+import { PAGE, capList, sameListing } from "./listing";
 import { press } from "./a11y";
 import { FsEntry, GrepHit, fsCreate, fsDelete, fsGrep, fsList, fsRename, fsSearch } from "./api";
 import { MenuItem, showMenu } from "./ContextMenu";
 import { RightTabs } from "./RightTabs";
-import { changes, findWorktree, fsTick, guarded, openFile, selectedWorktree, setError, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban } from "./store";
+import { changes, findWorktree, fsTick, guarded, openFile, selectedWorktree, setError, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban, rightTab } from "./store";
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf("/")));
@@ -99,12 +100,42 @@ function Dir(props: { wt: string; path: string; depth: number }) {
   const load = () => {
     const r = ++req;
     void fsList(props.wt, props.path)
-      .then((list) => r === req && setEntries(list))
+      .then((list) => {
+        if (r !== req) return;
+        setErr("");
+        // an unchanged listing keeps its rows (and their open folders) as they are
+        if (!sameListing(entries(), list)) setEntries(list);
+      })
       .catch((e) => r === req && setErr(String(e)));
   };
   load();
-  // the daemon reports file changes: keep the visible folders current
-  createEffect(on([fsTick, gen], load, { defer: true }));
+  // the daemon reports file changes: keep the visible folders current. A burst of events asks once, and a hidden window not at all
+  // (it asks again when the window is shown).
+  let tickTimer: ReturnType<typeof setTimeout> | undefined;
+  let stale = false;
+  createEffect(
+    on(
+      [fsTick, gen],
+      () => {
+        clearTimeout(tickTimer);
+        tickTimer = setTimeout(() => (document.hidden ? (stale = true) : load()), 250);
+      },
+      { defer: true },
+    ),
+  );
+  const onVisible = () => {
+    if (!document.hidden && stale) {
+      stale = false;
+      load();
+    }
+  };
+  document.addEventListener("visibilitychange", onVisible);
+  onCleanup(() => {
+    clearTimeout(tickTimer);
+    document.removeEventListener("visibilitychange", onVisible);
+  });
+  const [limit, setLimit] = createSignal(PAGE);
+  const page = () => capList(entries() ?? [], limit());
 
   const newHere = () => {
     const e = editing();
@@ -131,7 +162,12 @@ function Dir(props: { wt: string; path: string; depth: number }) {
         <div class="empty">A carregar…</div>
       </Show>
       <Show when={newHere()}>{(e) => <NameInput initial="" depth={props.depth} dir={e().mode === "dir"} onSubmit={(n) => void submitNew(n)} />}</Show>
-      <For each={entries() ?? []}>{(e) => <Node wt={props.wt} dir={props.path} e={e} depth={props.depth} />}</For>
+      <For each={page().shown}>{(e) => <Node wt={props.wt} dir={props.path} e={e} depth={props.depth} />}</For>
+      <Show when={page().hidden > 0}>
+        <button class="show-more" style={{ "margin-left": `${8 + props.depth * 12}px` }} onClick={() => setLimit(limit() + PAGE)}>
+          Mostrar mais ({page().hidden})
+        </button>
+      </Show>
       <Show when={entries() !== null && entries()!.length === 0 && !newHere()}>
         <div class="empty" style={{ "padding-left": `${8 + props.depth * 12}px` }}>
           (vazio)
@@ -309,7 +345,7 @@ export function FilesPanel() {
   const rootName = () => info()?.wt.path.split(/[\\/]/).pop() ?? "";
 
   return (
-    <aside class="rightbar">
+    <aside class="rightbar" id="rpanel" role="tabpanel" aria-labelledby={`rtab-${rightTab()}`}>
       <RightTabs />
       <div class="rtools fp-head">
         <strong class="fp-title" title={info()?.project.name}>

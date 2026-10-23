@@ -1,4 +1,5 @@
 import { JSX, onCleanup, onMount } from "solid-js";
+import { menuOpen } from "./ContextMenu";
 import { isTopModal, popModal, pushModal } from "./modalStack";
 
 const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
@@ -11,6 +12,8 @@ export function Modal(props: { label: string; onClose: () => void; dirty?: boole
   const id = pushModal();
   const onKey = (e: KeyboardEvent) => {
     if (!isTopModal(id)) return;
+    // a Select or menu opened inside the dialog is the top layer: it takes Esc and Tab itself
+    if (menuOpen()) return;
     if (e.key === "Escape") {
       e.stopImmediatePropagation();
       props.onClose();

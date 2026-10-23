@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { isTextTarget, overlayOpen } from "./keyboard";
+import { K, isMac, isTextTarget, overlayOpen } from "./keyboard";
 
 afterEach(() => (document.body.innerHTML = ""));
 
@@ -23,5 +23,18 @@ describe("overlayOpen", () => {
     expect(overlayOpen()).toBe(true);
     document.body.innerHTML = '<div class="pal-back"></div>';
     expect(overlayOpen()).toBe(true);
+  });
+});
+
+describe("K", () => {
+  it("names Ctrl as Cmd on a Mac and leaves other platforms alone", () => {
+    expect(K("Ctrl+Shift+B", true)).toBe("Cmd+Shift+B");
+    expect(K("Guardar (Ctrl+S) · Ctrl+Z", true)).toBe("Guardar (Cmd+S) · Cmd+Z");
+    expect(K("Ctrl+Shift+B", false)).toBe("Ctrl+Shift+B");
+    expect(K("Controlo", true)).toBe("Controlo");
+  });
+  it("recognises a Mac from the platform string", () => {
+    expect(isMac("MacIntel")).toBe(true);
+    expect(isMac("Win32")).toBe(false);
   });
 });

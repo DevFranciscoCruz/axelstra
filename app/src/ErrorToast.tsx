@@ -7,13 +7,15 @@ const FLOW = { position: "static", transform: "none" } as const;
 
 /** Failures from any action stay until dismissed; plain notices go away by themselves. Both show at once, stacked (at most one of each). */
 export function ErrorToast() {
+  // the stack is a polite live region that is always on the page, so a notice that appears is announced
   return (
+    <div aria-live="polite" aria-atomic="false">
     <Show when={error() || notice() || daemonReconnecting()}>
       <div
         style={{
           position: "fixed",
           left: "50%",
-          bottom: "16px",
+          bottom: "36px", // above the status bar (24px)
           transform: "translateX(-50%)",
           "z-index": 60,
           display: "flex",
@@ -46,5 +48,6 @@ export function ErrorToast() {
         </Show>
       </div>
     </Show>
+    </div>
   );
 }
