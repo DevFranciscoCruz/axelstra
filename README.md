@@ -4,15 +4,19 @@
 
 Lightweight desktop workbench for parallel coding agents on git worktrees (Windows and macOS, Tauri + Rust).
 
-<p align="center"><img src="assets/demo/demo.gif" width="820" alt="Axelstra tour: new worktree with an agent, notification, Ctrl+K, AI commit message, files and editor, Kanban, automations and dispatcher"></p>
+<p align="center"><img src="assets/demo/demo.gif" width="820" alt="Axelstra tour: new worktree with an agent, notification, Ctrl+K, AI commit message, files and editor, Kanban, automations, dispatcher, sidebar groups and task reports, status bar overview, Docker, notification center and merge from the panel"></p>
 
-<sub>Scripted mock with fake data: source in [`assets/demo/index.html`](assets/demo/index.html), open it in a browser to watch it live. The tour: create a worktree and start an agent, get notified when another one finishes, jump with `Ctrl+K`, write the commit message with AI, browse and edit files, run the Kanban, scheduled automations and the dispatcher.</sub>
+<sub>Scripted mock with fake data: source in [`assets/demo/index.html`](assets/demo/index.html), open it in a browser to watch it live. The tour: create a worktree and start an agent, get notified when another one finishes, jump with `Ctrl+K`, write the commit message with AI, browse and edit files, run the Kanban, scheduled automations and the dispatcher, then the sidebar groups with task reports, the status bar overview, the Docker screen, the notification center and the CI and merge flow in the right panel.</sub>
 
 - **Projects and worktrees:** one sidebar entry per repo, one worktree per task, each with its own terminals.
-- **Agents:** open Claude Code or Codex in a worktree with one click; a dot shows working / idle / done and you get a notification when an agent stops.
+- **Agents:** open Claude Code, Codex or Gemini in a worktree with one click; a dot shows working / idle / done and you get a notification when an agent stops.
 - **Terminals:** split view, command palette (`Ctrl+K`), dev-server ports shown as chips that open in the browser.
 - **Session restore:** terminals live in a background daemon. After a reboot or an update they reopen where they were, and Claude Code resumes its conversation (a `/clear` is followed, so you get the new one).
 - **Code:** file tree and editor, changes panel with diff and line comments sent to a running agent, commit box with an AI-suggested message, pull requests and issues (needs `gh`).
+- **Agent names and task reports:** each agent gets a name ("Tarefa 1", "Tarefa 2", ...) with its state dot in the sidebar. When one finishes, a *Relatório* button opens the note it wrote about what it did, what passed and what is left.
+- **Worktree groups:** a worktree can have a parent, and its children are nested under it. Finished worktrees fold into a collapsed *Concluídos (N)* list with *Limpar*, *Mover para…* changes a worktree's parent, and each project collapses with its arrow.
+- **Worktree env files:** list the untracked files a new worktree needs (`.env`, local config) in a `.worktreeinclude` at the repo root; they are copied in when the worktree is created.
+- **Docker:** a *Docker* tab next to Kanban lists containers (compose groups with start, stop and restart for the whole group), state, ports that open in the browser, CPU and memory, with info, logs, terminal and files per container, plus volumes, images and networks.
 - **Ship flow with CI:** once the worktree's branch has a pull request, the Changes panel shows its CI state (passing, failing, running, none) with every check and its link, the review decision and mergeability, refreshed every 20 seconds while the panel is visible and the window focused. Buttons open it in the browser, enable auto-merge or squash-merge it (always behind a confirmation, with an option to delete the branch). Needs `gh` logged in.
 - **Notification center:** a bell with an unread badge lists the last 100 events, newest first: agent finished or waiting, CI turned failing or passing, merge done, errors. Click an entry to jump to its worktree. Kept across restarts; `Esc` closes it.
 - **Kanban and orchestrator:** a markdown board of ideas; the orchestrator dispatches one agent per card and merges the results into an integration branch.
@@ -22,7 +26,7 @@ Lightweight desktop workbench for parallel coding agents on git worktrees (Windo
 - **Voice:** dictate a prompt with `Ctrl+Shift+M`. Speech is recognized locally (Whisper, downloaded once, about 160 MB), stops by itself when you pause and goes straight to the active terminal.
 - **Orchestration:** a coordinator agent splits work across worktrees and ephemeral workers that report back and disappear. Agents learn it from the `/axelstration` skill (installed for Claude Code and Codex); see below.
 - **Search and usage:** `Ctrl+Shift+F` searches past Claude and Codex conversations and resumes one; tokens spent by the active Claude conversation are shown next to the tabs, and a `Σ` chip lists the tokens (input, output, cache) each worktree has spent across its Claude and Codex conversations, read from their logs. Tokens only: no cost is estimated.
-- **Status bar:** keep-awake switch, memory used by Axelstra and its terminals, number of terminals, listening dev-server ports and the total agent tokens (hover for the per-worktree breakdown).
+- **Status bar:** keep-awake switch, memory used by Axelstra and its terminals, number of terminals, listening dev-server ports and the total agent tokens (hover for the per-worktree breakdown). The running-agents chip opens a list of agents that are running, stopped and waiting for an answer; the worktrees chip opens an overview (uncommitted, ahead and behind the remote, already merged, without an agent) with a button to clean the merged ones.
 - **Links:** URLs and file paths in terminal output are clickable (a path opens in the editor).
 - **Notifications:** when an agent finishes, stops or needs an answer. On Windows, clicking the toast opens that session. On macOS and Linux the notification is shown but clicking it does not select the session (the notification plugin has no click callback there); the worktree gets its attention dot instead.
 - **Layout:** `Ctrl+B` hides the project list, `Ctrl+Shift+B` the right panel (or use the panel buttons in the tab bar).
@@ -84,6 +88,8 @@ axelstra limit 4                                      # at most 4 workers at onc
 The command palette entry *Orquestração* shows coordinators and their workers, with state and unread messages.
 
 ### Agent status hooks
+
+Settings has a button that installs these hooks for you in one click. To do it by hand:
 
 The red "waiting" dot comes from what the terminal shows (permission prompts, questions). Claude Code can also say it directly, which works in auto mode too: add this to `~/.claude/settings.json`. The hooks only run inside Axelstra sessions (they need `AXELSTRA_SESSION`), print nothing and exit 0 at once when the daemon is not running.
 
