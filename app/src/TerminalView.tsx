@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -57,6 +58,10 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // the agents measure text with current Unicode widths (symbols, emoji): xterm's default Unicode 6 table wraps
+    // those lines differently and the cursor lands on the wrong row
+    term.loadAddon(new Unicode11Addon());
+    term.unicode.activeVersion = "11";
     const search = new SearchAddon();
     term.loadAddon(search);
     term.loadAddon(new WebLinksAddon((_e, url) => void openUrl(url)));
@@ -81,6 +86,12 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
         g.onContextLoss(() => {
           g.dispose();
           if (gl === g) gl = null;
+          // the fallback renderer measures cells a little differently: fit the grid again and repaint
+          requestAnimationFrame(() => {
+            if (gone) return;
+            refit();
+            term.refresh(0, term.rows - 1);
+          });
         });
         term.loadAddon(g);
         gl = g;
