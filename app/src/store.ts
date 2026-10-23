@@ -1,4 +1,5 @@
 import { ask } from "./Confirm";
+import { pushNotification } from "./notifications";
 import { LEFT, RIGHT, fitPanel } from "./layout";
 import { createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
@@ -27,6 +28,8 @@ const save = (k: string, v: string | null) => {
 export const AGENTS: Record<string, string> = { claude: "claude", chatgpt: "codex" };
 /** names of the agents the pickers list: the built-in two plus any other agent CLI found on the PATH */
 export const [agentKeys, setAgentKeys] = createSignal<string[]>(Object.keys(AGENTS));
+/** project whose settings dialog (worktree env files, setup command) is open */
+export const [showProjectSettings, setShowProjectSettings] = createSignal<string | null>(null);
 export const addAgents = (names: string[]) => {
   for (const n of names) AGENTS[n] = n;
   setAgentKeys(Object.keys(AGENTS));
@@ -318,6 +321,7 @@ const trackAgents = (list: SessionInfo[]) => {
           ? [`${who} precisa de ti · ${name}`, `${who} fez uma pergunta na worktree "${name}" e precisa da tua resposta para continuar.`]
           : [`${who} parou · ${name}`, `${who} ficou parado na worktree "${name}" sem terminar. Abre para ver o que aconteceu.`];
     void notify(head, body, wtPath, s.id, state === "waiting");
+    pushNotification({ kind: state === "done" ? "done" : state === "waiting" ? "waiting" : "error", worktree: wtPath, session: s.id, text: body });
   }
 };
 

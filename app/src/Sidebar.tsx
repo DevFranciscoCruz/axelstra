@@ -17,6 +17,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import logo from "./assets/logo.png";
 import {
   AGENTS,
+  setShowProjectSettings,
   agentKeys,
   isPinned,
   togglePin,
