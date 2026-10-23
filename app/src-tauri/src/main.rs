@@ -133,11 +133,11 @@ fn read_only(method: &str) -> bool {
 /// calls (a unit test reads `app/src` and fails when this list and the sources drift apart). Anything else is refused,
 /// so a compromised page cannot reach what the UI never uses (`session.pending_clear`, `msg.send`, `flow.set`...).
 const ALLOWED_METHODS: &[&str] = &[
-    "agent.search", "agent.status", "agent.usage", "app.dir", "automation.delete", "automation.list", "automation.run", "automation.save",
+    "agent.search", "agent.status", "agent.usage", "agent.worktree_usage", "app.dir", "automation.delete", "automation.list", "automation.run", "automation.save",
     "codex.limits", "computer.enable", "computer.status", "daemon.shutdown", "dispatch.meta", "flow.list",
     "fs.create", "fs.delete", "fs.grep", "fs.list", "fs.read", "fs.rename", "fs.search", "fs.stat", "fs.write",
     "gh.list", "git.changes", "git.commit", "git.diff", "git.log", "git.pr", "git.push", "git.show", "git.suggest",
-    "kanban.delete", "kanban.list", "kanban.move", "kanban.save", "open.editor", "orch.limits", "orch.start", "orch.status",
+    "kanban.delete", "kanban.list", "kanban.move", "kanban.save", "open.editor", "orch.limits", "orch.retry", "orch.start", "orch.status",
     "ping", "pm.detect", "ports.list", "project.add", "project.list", "project.logo", "project.remove", "project.setup",
     "session.kill", "session.list", "session.pending", "session.pending_remove", "session.remove", "session.rename", "session.resize",
     "session.resources", "session.spawn", "settings.get", "settings.set",

@@ -288,14 +288,14 @@ export function Kanban(props: { project: string }) {
                       </div>
                       <Show when={col.id === "needs-review"}>
                         <div class="kcard-body">Motivo: {reason(c.meta.id)}</div>
-                        <div class="kchips" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                        <div class="kchips" role="group" aria-label="Ações do cartão" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                           <button onClick={() => openWt(c.meta.id)}>Abrir worktree</button>
                           <button onClick={() => void retry(c)}>Tentar integrar de novo</button>
                           <button onClick={() => void openPr(c)}>Abrir pull request</button>
                         </div>
                       </Show>
                       <div
-                        style={{ position: "relative" }}
+                        role="group" style={{ position: "relative" }}
                         onClick={(e) => e.stopPropagation()}
                         onFocusOut={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && menu() === c.meta.id && setMenu(null)}
                         onKeyDown={(e) => {
@@ -342,7 +342,7 @@ export function Kanban(props: { project: string }) {
               />
               <textarea
                 class="m-body"
-                placeholder="Escreva livremente: o contexto, o que quer, critérios… O agente lê isto."
+                placeholder="Escreve livremente: o contexto, o que queres, critérios… O agente lê isto."
                 value={d().body}
                 onInput={(e) => setDraft({ ...d(), body: e.currentTarget.value })}
               />

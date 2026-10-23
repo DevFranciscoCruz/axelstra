@@ -47,10 +47,7 @@ pub fn load(store: &Path) -> Vec<Automation> {
 }
 
 pub fn save_all(store: &Path, v: &[Automation]) -> Result<()> {
-    std::fs::create_dir_all(store.parent().unwrap())?;
-    let tmp = store.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(v)?)?;
-    std::fs::rename(&tmp, store)?;
+    crate::store::write_atomic(store, &serde_json::to_vec_pretty(v)?)?;
     Ok(())
 }
 

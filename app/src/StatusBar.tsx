@@ -80,7 +80,7 @@ export function StatusBar() {
         <svg {...svg}>
           <path d="M3 7h8v3a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7zM11 8h1a1.5 1.5 0 0 1 0 3h-1M5 2.5v2M8 2.5v2" />
         </svg>
-        <span>{awake() ? (awakeOk() ? "On" : "n/d") : "Off"}</span>
+        <span>{awake() ? (awakeOk() ? "Ligado" : "n/d") : "Desligado"}</span>
       </button>
       <span class="sb-item" title={memTip()}>
         <svg {...svg}>
