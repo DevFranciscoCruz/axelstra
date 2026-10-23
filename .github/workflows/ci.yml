@@ -29,6 +29,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # catches host (Tauri) compile errors on every push instead of at release time
       - run: cargo check -p axelstra-app
+      # host unit tests, including the daemon_call allow-list against the frontend sources
+      - run: cargo test --release -p axelstra-app
+      # the debug test exe links the release CRT too (see app/src-tauri/build.rs)
+      - run: cargo test -p axelstra-app
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 15

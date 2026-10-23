@@ -31,6 +31,8 @@ struct State {
     pending: Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>,
 }
 
+#[cfg(all(windows, target_env = "msvc", debug_assertions))]
+mod debugcrt;
 mod gpu;
 mod stats;
 mod voice;
@@ -94,7 +96,7 @@ static LAST_INSTANCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU6
 /// its sessions are gone and the UI restores them from the saved list.
 fn reconnect() -> Result<Client> {
     use tauri::Emitter;
-    // the slot mutex is held meanwhile (a restart can take seconds): the UI shows a state instead of looking frozen
+    // a restart can take seconds: the UI shows a state instead of looking frozen
     if let Some(app) = APP.get() {
         let _ = app.emit("daemon-reconnecting", ());
     }
@@ -127,12 +129,72 @@ fn read_only(method: &str) -> bool {
     matches!(tail, "list" | "status" | "get" | "read" | "screen" | "usage" | "ports" | "pending" | "info" | "stats" | "log" | "inbox" | "thread" | "search" | "logo" | "dir" | "limits" | "diff" | "changes")
 }
 
+/// Daemon methods the webview may forward through `daemon_call` / `daemon_call_bg`: exactly the ones the frontend
+/// calls (a unit test reads `app/src` and fails when this list and the sources drift apart). Anything else is refused,
+/// so a compromised page cannot reach what the UI never uses (`session.pending_clear`, `msg.send`, `flow.set`...).
+const ALLOWED_METHODS: &[&str] = &[
+    "agent.search", "agent.status", "agent.usage", "app.dir", "automation.delete", "automation.list", "automation.run", "automation.save",
+    "codex.limits", "computer.enable", "computer.status", "daemon.shutdown", "dispatch.meta", "flow.list",
+    "fs.create", "fs.delete", "fs.grep", "fs.list", "fs.read", "fs.rename", "fs.search", "fs.stat", "fs.write",
+    "gh.list", "git.changes", "git.commit", "git.diff", "git.log", "git.pr", "git.push", "git.show",
+    "kanban.delete", "kanban.list", "kanban.move", "kanban.save", "open.editor", "orch.limits", "orch.start", "orch.status",
+    "ping", "pm.detect", "ports.list", "project.add", "project.list", "project.logo", "project.remove", "project.setup",
+    "session.kill", "session.list", "session.pending", "session.pending_remove", "session.remove", "session.rename", "session.resize",
+    "session.resources", "session.spawn", "settings.get", "settings.set",
+    "worktree.create", "worktree.from_pr", "worktree.remove", "worktree.status",
+];
+
+fn check_allowed(method: &str) -> Result<(), String> {
+    if ALLOWED_METHODS.contains(&method) {
+        Ok(())
+    } else {
+        Err(format!("método do daemon não permitido: {method}"))
+    }
+}
+
+/// Only one caller restarts the daemon connection at a time; the others wait for it outside any slot lock.
+static RECONNECT: Mutex<()> = Mutex::new(());
+/// How long a caller waits for another one's reconnect before giving up.
+const RECONNECT_WAIT: Duration = Duration::from_secs(12);
+
+/// Fills an empty `slot` with a live connection. The slot lock is never held while connecting or sleeping, so calls on
+/// other slots (and `slot` itself) are not stuck behind a restart that can take seconds.
+fn reconnect_into(slot: &Mutex<Option<Client>>) -> Result<()> {
+    let deadline = std::time::Instant::now() + RECONNECT_WAIT;
+    loop {
+        if slot.lock().unwrap().is_some() {
+            return Ok(());
+        }
+        let gate = match RECONNECT.try_lock() {
+            Ok(g) => Some(g),
+            Err(std::sync::TryLockError::Poisoned(p)) => Some(p.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        };
+        if let Some(_gate) = gate {
+            // another caller may have finished while this one took the gate
+            if slot.lock().unwrap().is_some() {
+                return Ok(());
+            }
+            let c = reconnect()?;
+            *slot.lock().unwrap() = Some(c);
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!("o daemon está a reiniciar; tenta outra vez dentro de instantes");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn with_client<T>(slot: &Mutex<Option<Client>>, retry: bool, f: impl Fn(&mut Client) -> Result<T>) -> Result<T> {
     let mut g = slot.lock().unwrap();
     if g.is_none() {
-        *g = Some(reconnect()?);
+        drop(g);
+        reconnect_into(slot)?;
+        g = slot.lock().unwrap();
     }
-    match f(g.as_mut().unwrap()) {
+    let Some(c) = g.as_mut() else { anyhow::bail!("sem ligação ao daemon") };
+    match f(c) {
         Ok(v) => Ok(v),
         // the daemon answered with an error: the connection is fine and the call must not run twice
         Err(e) if e.downcast_ref::<axelstra_daemon::client::Remote>().is_some() => Err(e),
@@ -141,9 +203,13 @@ fn with_client<T>(slot: &Mutex<Option<Client>>, retry: bool, f: impl Fn(&mut Cli
             // cannot repeat a side effect (it never left, or it only reads)
             let never_sent = e.downcast_ref::<axelstra_daemon::client::NotSent>().is_some();
             *g = None;
-            *g = Some(reconnect()?);
+            drop(g);
+            reconnect_into(slot)?;
             if retry || never_sent {
-                f(g.as_mut().unwrap())
+                match slot.lock().unwrap().as_mut() {
+                    Some(c) => f(c),
+                    None => Err(e),
+                }
             } else {
                 Err(e.context("a ligação ao daemon caiu durante o pedido; confirma o estado antes de repetir"))
             }
@@ -153,6 +219,7 @@ fn with_client<T>(slot: &Mutex<Option<Client>>, retry: bool, f: impl Fn(&mut Cli
 
 #[tauri::command]
 async fn daemon_call(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, String> {
+    check_allowed(&method)?;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_client(&st.control, read_only(&method), |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
@@ -163,6 +230,7 @@ async fn daemon_call(state: tauri::State<'_, Arc<State>>, method: String, params
 
 #[tauri::command]
 async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, String> {
+    check_allowed(&method)?;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_client(&st.bg, read_only(&method), |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
@@ -610,7 +678,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::windows_shell;
+    use super::{check_allowed, windows_shell, ALLOWED_METHODS};
+    use std::collections::BTreeSet;
+    use std::path::Path;
 
     #[test]
     fn auto_prefers_pwsh() {
@@ -625,5 +695,92 @@ mod tests {
         assert_eq!(windows_shell("cmd", true), ("cmd".into(), vec![]));
         assert_eq!(windows_shell("wsl", false).0, "wsl");
         assert_eq!(windows_shell("bash", false).1, vec!["-l".to_string()]);
+    }
+
+    fn sources(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                sources(&p, out);
+            } else if p.extension().is_some_and(|x| x == "ts" || x == "tsx") && !p.file_name().unwrap().to_string_lossy().contains(".test.") {
+                out.push(p);
+            }
+        }
+    }
+
+    /// Every `call("x.y"` / `callBg("x.y"` in the frontend (an optional `<Type>` after the name is skipped).
+    /// A call whose method is not a string literal is returned as `?file`, since the list cannot cover it.
+    fn called_methods() -> BTreeSet<String> {
+        let mut files = vec![];
+        sources(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../src"), &mut files);
+        assert!(!files.is_empty(), "frontend sources not found");
+        let mut found = BTreeSet::new();
+        for f in files {
+            let t = std::fs::read_to_string(&f).unwrap();
+            let b = t.as_bytes();
+            for name in ["call", "callBg"] {
+                for (at, _) in t.match_indices(name) {
+                    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || c == b'.';
+                    if (at > 0 && ident(b[at - 1])) || !matches!(b.get(at + name.len()), Some(b'(' | b'<')) {
+                        continue;
+                    }
+                    let mut i = at + name.len();
+                    if b[i] == b'<' {
+                        let mut depth = 0;
+                        while i < b.len() {
+                            match b[i] {
+                                b'<' => depth += 1,
+                                b'>' if b[i - 1] != b'=' => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                            i += 1;
+                        }
+                        i += 1;
+                    }
+                    if b.get(i) != Some(&b'(') {
+                        continue;
+                    }
+                    let rest = t[i + 1..].trim_start();
+                    let arg = rest.chars().next();
+                    // the declarations themselves: `call = <T>(method: string` has no literal and no `(` right after the name
+                    match arg {
+                        Some(q @ ('"' | '\'' | '`')) => {
+                            let end = rest[1..].find(q).expect("unterminated string");
+                            found.insert(rest[1..1 + end].to_string());
+                        }
+                        _ => {
+                            found.insert(format!("?{}", f.file_name().unwrap().to_string_lossy()));
+                        }
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn allow_list_matches_frontend_calls() {
+        let called = called_methods();
+        let dynamic: Vec<_> = called.iter().filter(|m| m.starts_with('?')).collect();
+        assert!(dynamic.is_empty(), "daemon call with a non-literal method (cannot be allow-listed): {dynamic:?}");
+        let listed: BTreeSet<String> = ALLOWED_METHODS.iter().map(|m| m.to_string()).collect();
+        assert_eq!(listed.len(), ALLOWED_METHODS.len(), "duplicate in ALLOWED_METHODS");
+        let missing: Vec<_> = called.difference(&listed).collect();
+        assert!(missing.is_empty(), "frontend calls methods missing from ALLOWED_METHODS (main.rs): {missing:?}");
+        let unused: Vec<_> = listed.difference(&called).collect();
+        assert!(unused.is_empty(), "ALLOWED_METHODS lists methods the frontend never calls: {unused:?}");
+    }
+
+    #[test]
+    fn unknown_methods_are_refused() {
+        assert!(check_allowed("session.spawn").is_ok());
+        assert!(check_allowed("session.pending_clear").is_err());
+        assert!(check_allowed("").is_err());
+        assert!(check_allowed("flow.set").unwrap_err().contains("não permitido"));
     }
 }

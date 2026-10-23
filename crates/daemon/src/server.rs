@@ -751,6 +751,19 @@ fn dispatch(
             let code = session()?.try_wait();
             Ok(json!({"running": code.is_none(), "code": code}))
         }
+        // the tab name the user chose: kept with the session (and in sessions.json, so a restore reopens it under that name)
+        "session.rename" => {
+            let id = sid()?;
+            session()?;
+            let label = p["label"].as_str().map(str::trim).filter(|l| !l.is_empty()).ok_or_else(|| anyhow::anyhow!("missing label"))?;
+            let label: String = label.chars().take(120).collect();
+            reg.labels.lock().unwrap().insert(id, label.clone());
+            if let Some(spec) = reg.specs.lock().unwrap().get_mut(&id) {
+                spec["label"] = json!(label);
+            }
+            reg.persist();
+            Ok(json!({"label": label}))
+        }
         "session.remove" => {
             let id = sid()?;
             if let Some(stop) = subs.remove(&id) {
