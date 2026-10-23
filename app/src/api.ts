@@ -320,7 +320,7 @@ export const gitPr = (worktree: string, title: string, body: string, base?: stri
   call<{ url: string }>("git.pr", { worktree, title, body, base }).then((r) => r.url);
 
 export type KCard = {
-  meta: { id: string; title: string; status: string; agent: string; depends_on: string[]; priority: number };
+  meta: { id: string; title: string; status: string; agent: string; depends_on: string[]; priority: number; acceptance?: string | null };
   body: string;
 };
 export type Board = { cards: KCard[]; broken: { file: string; error: string }[] };
@@ -341,7 +341,11 @@ export type OrchRun = {
   blocked?: string[];
   error?: string;
 };
-export const orchStart = (project: string, max = 3) => call<OrchRun>("orch.start", { project, max });
+export const orchStart = (project: string, max = 3, trustAcceptance = false) =>
+  call<OrchRun>("orch.start", { project, max, trust_acceptance: trustAcceptance });
+/** merges a needs-review card again after the user fixed its worktree */
+export const orchRetry = (project: string, id: string, trustAcceptance = false) =>
+  call("orch.retry", { project, id, trust_acceptance: trustAcceptance });
 export const orchStatus = (project: string) => call<OrchRun>("orch.status", { project });
 
 export type Commit = {
