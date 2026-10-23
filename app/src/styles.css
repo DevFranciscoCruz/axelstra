@@ -857,6 +857,21 @@ kbd { font: inherit; font-size: 11px; border: 1px solid var(--line-3); border-bo
 button.sb-item { cursor: pointer; }
 button.sb-item:hover { background: rgba(255, 255, 255, .06); color: var(--text); }
 .sb-item.on { color: var(--ok); }
+.sb-pop-wrap { position: relative; display: inline-flex; }
+.sb-pop { position: absolute; left: 0; bottom: 22px; z-index: 41; min-width: 260px; max-width: 380px; max-height: 60vh; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); color: var(--text); font-size: 12px; user-select: text; }
+.sb-head { font-weight: 600; padding: 4px 6px 2px; }
+.sb-empty { padding: 2px 6px 4px; color: var(--muted); }
+.sb-entry { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 6px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.sb-entry:hover, .sb-entry:focus-visible { background: rgba(255, 255, 255, .08); }
+.sb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-wt { margin-left: auto; padding-left: 8px; white-space: nowrap; }
+.sb-table { width: 100%; border-collapse: collapse; }
+.sb-table th, .sb-table td { padding: 2px 6px; text-align: right; font-weight: 400; }
+.sb-table th:first-child { text-align: left; }
+.sb-table thead th { color: var(--muted); }
+.sb-merged { list-style: none; margin: 0; padding: 0 6px 4px; }
+.sb-merged li { display: flex; gap: 8px; justify-content: space-between; padding: 1px 0; }
+.sb-clean { margin: 4px 6px 2px; padding: 3px 10px; font-size: 12px; }
 
 .orch-row { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-bottom: 1px solid var(--line-2); }
 .orch-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }

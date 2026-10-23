@@ -12,6 +12,7 @@ pub mod lag;
 pub mod msgbus;
 pub mod overlaps;
 pub mod notes;
+pub mod overview;
 #[cfg(windows)]
 pub mod pipesec;
 pub mod ports;
