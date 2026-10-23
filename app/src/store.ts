@@ -289,15 +289,24 @@ const notify = async (title: string, body: string, worktree: string, session: nu
   }
 };
 
+const appStart = Date.now();
+/** when each session last started working; a restored session replays its screen for a moment and looks busy */
+const workingSince = new Map<number, number>();
+/** no notification for the first seconds after start (restored sessions settle) nor for a burst of work shorter than this */
+const NOTIFY_GRACE_MS = 30000;
+const NOTIFY_MIN_WORK_MS = 15000;
+
 /** an agent that was working and went quiet needs a look: flag it and notify if the user is elsewhere */
 const trackAgents = (list: SessionInfo[]) => {
   // sessions that were removed leave nothing behind
   const alive = new Set(list.map((s) => s.id));
   for (const id of lastState.keys()) if (!alive.has(id)) lastState.delete(id);
+  for (const id of workingSince.keys()) if (!alive.has(id)) workingSince.delete(id);
   for (const s of list) {
     const state = sessionState(s);
     const prev = lastState.get(s.id);
     lastState.set(s.id, state);
+    if (state === "working" && prev !== "working") workingSince.set(s.id, Date.now());
     const wtPath = s.meta?.worktree;
     if (s.meta?.kind !== "agent" || !wtPath) continue;
     // back to work: the earlier "needs a look" flag is stale
@@ -312,6 +321,8 @@ const trackAgents = (list: SessionInfo[]) => {
     const watching = viewing && document.hasFocus();
     if (!viewing) setAttention((cur) => new Set(cur).add(norm(wtPath)));
     if (watching) continue;
+    const since = workingSince.get(s.id);
+    if (Date.now() - appStart < NOTIFY_GRACE_MS || !since || Date.now() - since < NOTIFY_MIN_WORK_MS) continue;
     const name = wtPath.split(/[\\/]/).pop() ?? wtPath;
     const who = s.label ?? "O agente";
     const [head, body] =

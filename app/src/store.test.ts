@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo } from "./api";
 
 const invoke = vi.hoisted(() => vi.fn(async (cmd: string, _args?: unknown) => (cmd === "notify_session" ? true : undefined)));
@@ -72,6 +72,14 @@ describe("sessionState", () => {
 });
 
 describe("attention flag and notifications", () => {
+  // the store ignores the first seconds after start and short bursts of work: a clock that jumps 40 s per read gets past both
+  let clock = 0;
+  beforeEach(() => {
+    clock = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => (clock += 40000));
+  });
+  afterEach(() => vi.restoreAllMocks());
+
   it("flags a worktree that finished while another one is open, and notifies", async () => {
     const store = await load();
     store.selectWorktree(OTHER);
@@ -96,6 +104,16 @@ describe("attention flag and notifications", () => {
     await tick(store, agent({ idle_ms: 100 }));
     await tick(store, agent({ idle_ms: 9000 }));
     expect(await notified()).toBe(0);
+  });
+
+  it("does not notify for a restored session that only looked busy for a moment", async () => {
+    vi.spyOn(Date, "now").mockImplementation(() => (clock += 500));
+    const store = await load();
+    store.selectWorktree(OTHER);
+    await tick(store, agent({ idle_ms: 100 }));
+    await tick(store, agent({ idle_ms: 9000 }));
+    await settle();
+    expect(invoke.mock.calls.find((c) => c[0] === "notify_session")).toBeUndefined();
   });
 
   it("clears the flag when the agent starts working again", async () => {
