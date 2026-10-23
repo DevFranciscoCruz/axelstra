@@ -18,9 +18,12 @@ const props: Record<string, Record<string, unknown>> = {
   RadioGroup: { label: "l", value: "a", onChange: noop, options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] },
   Select: { value: "a", onChange: noop, options: [{ value: "a", label: "A" }] },
   Dialog: { label: "d", onClose: noop, children: "x" },
+  Tabs: { value: "a", onChange: noop, children: "x" },
   DropdownMenu: { open: false, onOpenChange: noop, x: 0, y: 0, items: [{ label: "a", run: noop }] },
 };
 const helpers = ["buttonVariants", "badgeVariants", "cn"];
+/** pieces that only render inside their parent (Tabs) */
+const parts = ["TabsList", "TabsTrigger"];
 
 describe("ui/index", () => {
   it("renders every exported component without throwing", () => {
@@ -29,6 +32,7 @@ describe("ui/index", () => {
         expect(typeof value, name).toBe("function");
         continue;
       }
+      if (parts.includes(name)) continue;
       expect(props, `${name} needs sample props`).toHaveProperty(name);
       const host = document.createElement("div");
       document.body.append(host);

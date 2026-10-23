@@ -1,5 +1,5 @@
 import { ask } from "./Confirm";
-import { Button, Input } from "./ui";
+import { Button, Input, Tabs, TabsList, TabsTrigger } from "./ui";
 import { Icon } from "./Icon";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -377,14 +377,16 @@ export function FilesPanel() {
             } else if (e.key === "Enter" && mode() === "names" && names()?.[0]) openPath(names()![0]);
           }}
         />
-        <div class="seg" role="tablist">
-          <button role="tab" aria-selected={mode() === "names"} classList={{ on: mode() === "names" }} onClick={() => (setMode("names"), setDq(q().trim()))}>
-            Nomes
-          </button>
-          <button role="tab" aria-selected={mode() === "contents"} classList={{ on: mode() === "contents" }} onClick={() => (setMode("contents"), setDq(q().trim()))}>
-            Conteúdo
-          </button>
-        </div>
+        <Tabs value={mode()} onChange={(v) => (setMode(v as "names" | "contents"), setDq(q().trim()))}>
+          <TabsList variant="segmented" aria-label="Pesquisar em">
+            <TabsTrigger variant="segmented" value="names">
+              Nomes
+            </TabsTrigger>
+            <TabsTrigger variant="segmented" value="contents">
+              Conteúdo
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
       <div
         class="rlist"
