@@ -4,6 +4,15 @@ import { JSX } from "solid-js";
  *  next to text in a different font, an SVG centres exactly. Sized in em so it scales with the button. */
 const PATHS: Record<string, JSX.Element> = {
   x: <path d="M4 4l8 8M12 4l-8 8" />,
+  // agent marks, drawn as simple strokes
+  claude: <path d="M8 2v12M2 8h12M3.8 3.8l8.4 8.4M12.2 3.8l-8.4 8.4" />,
+  codex: (
+    <>
+      <path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9z" />
+      <path d="M8 1.8v6.2l5.4 3.1M8 8L2.6 11.1M2.6 4.9L8 8l5.4-3.1" />
+    </>
+  ),
+  gemini: <path d="M8 1.5C8.6 5.2 10.8 7.4 14.5 8 10.8 8.6 8.6 10.8 8 14.5 7.4 10.8 5.2 8.6 1.5 8 5.2 7.4 7.4 5.2 8 1.5z" />,
   plus: <path d="M8 3v10M3 8h10" />,
   check: <path d="M3.5 8.5l3 3 6-7" />,
   chevDown: <path d="M4 6l4 4 4-4" />,

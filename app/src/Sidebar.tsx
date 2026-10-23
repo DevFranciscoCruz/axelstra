@@ -1,4 +1,5 @@
-import { Icon } from "./Icon";
+import { Icon, hasIcon } from "./Icon";
+import { Select } from "./Select";
 import { ask, askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import { getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession, dispatchOverlaps, worktreeRename, worktreeOverview, worktreeSweep, worktreeSetParent } from "./api";
@@ -18,6 +19,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import logo from "./assets/logo.png";
 import {
   AGENTS,
+  canonAgent,
   setShowProjectSettings,
   agentKeys,
   isPinned,
@@ -36,6 +38,7 @@ import {
   watchDispatch,
   dispatchTopics,
   confirmDiscard,
+  closeSessionTab,
   creatingWorktree,
   setCreatingWorktree,
   removeRequest,
@@ -87,7 +90,7 @@ export function Sidebar() {
     (() => {
       try {
         const v = localStorage.getItem(NEWWT_KEY);
-        return v === "none" || (v && AGENTS[v]) ? v! : "claude";
+        return v === "none" ? v : v && AGENTS[v] ? canonAgent(v) : "claude";
       } catch {
         return "claude";
       }
@@ -420,7 +423,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
       icon: "sparkle",
       children: [
         { label: "Seguir o global", icon: projectPrefsOf(p.id).agent ? undefined : "check", run: () => setProjectPref(p.id, { agent: undefined }) },
-        ...agentKeys().map((a) => ({ label: a, icon: projectPrefsOf(p.id).agent === a ? "check" : undefined, run: () => setProjectPref(p.id, { agent: a }) })),
+        ...agentKeys().map((a) => ({ label: a, icon: projectPrefsOf(p.id).agent && canonAgent(projectPrefsOf(p.id).agent!) === a ? "check" : undefined, run: () => setProjectPref(p.id, { agent: a }) })),
       ],
     },
     { separator: true },
@@ -737,6 +740,12 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                                     aria-current={active() ? "true" : undefined}
                                     title={`${info().name} (F2 muda o nome)`}
                                     onClick={() => openSession(a.meta?.worktree ?? w.path, a.id)}
+                                    onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+                                    onAuxClick={(e) => {
+                                      if (e.button !== 1) return;
+                                      e.preventDefault();
+                                      void closeSessionTab(a);
+                                    }}
                                     onKeyDown={(e) => {
                                       if (e.key === "F2") {
                                         e.preventDefault();
@@ -846,10 +855,12 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
               </label>
               <label class="m-full">
                 Agente
-                <select value={newAgent()} onChange={(e) => setNewAgentSig(e.currentTarget.value)}>
-                  <option value="none">Nenhum (só o worktree)</option>
-                  <For each={agentKeys()}>{(a) => <option value={a}>{a}</option>}</For>
-                </select>
+                <Select
+                  value={newAgent()}
+                  label="Agente"
+                  options={[{ value: "none", label: "Nenhum (só o worktree)" }, ...agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))]}
+                  onChange={setNewAgentSig}
+                />
               </label>
               <div class="m-actions" style={{ "justify-content": "flex-end" }}>
                 <button onClick={() => void closeNewWorktree()}>Cancelar</button>

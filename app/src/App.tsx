@@ -45,7 +45,7 @@ import {
   activeSession,
   AGENTS,
   agentKeys,
-  addAgents,
+  setInstalledAgents,
   agentPrompt,
   defaultAgent,
   fileLine,
@@ -57,6 +57,7 @@ import {
   setShowAutomations,
   showDispatcher,
   setShowDispatcher,
+  setSessionCloser,
   showSettings,
   showAgentSearch,
   setShowAgentSearch,
@@ -157,13 +158,13 @@ export function App() {
   onMount(() =>
     void tauriInvoke<string[]>("missing_tools")
       .then((m) => {
-        void agentsList().then((l) => addAgents(l.filter((a) => a.installed && a.id !== "claude" && a.id !== "codex").map((a) => a.id))).catch(() => 0);
+        void agentsList().then((l) => setInstalledAgents(l.filter((a) => a.installed).map((a) => a.id))).catch(() => setInstalledAgents(null));
         const bits: string[] = [];
         if (m.includes("git")) bits.push("o git não está instalado ou não está no PATH (sem ele não há worktrees)");
         if (m.includes("claude") && m.includes("codex")) bits.push("nem o claude nem o codex foram encontrados (instala um deles para usar agentes)");
         if (bits.length) showNotice(`Falta configurar: ${bits.join("; ")}.`);
       })
-      .catch(() => 0),
+      .catch(() => setInstalledAgents(null)),
   );
 
   onMount(() => {
@@ -433,8 +434,9 @@ export function App() {
 
   const close = async (s: SessionInfo) => {
     try {
-      if (s.running && s.meta?.kind === "agent") {
-        const ok = await ask(`Fechar "${tabLabel(s)}"? O agente em execução é terminado.`, { title: "Fechar agente", kind: "warning", okLabel: "Fechar", cancelLabel: "Cancelar" });
+      if (s.running) {
+        const agent = s.meta?.kind === "agent";
+        const ok = await ask(`Fechar "${tabLabel(s)}"? ${agent ? "O agente em execução é terminado." : "O terminal e o que corre nele são terminados."}`, { title: agent ? "Fechar agente" : "Fechar terminal", kind: "warning", okLabel: "Fechar", cancelLabel: "Cancelar" });
         if (!ok) return;
       }
       rememberClosed(s);
@@ -445,6 +447,8 @@ export function App() {
     }
     await refreshSessions();
   };
+
+  setSessionCloser(close);
 
   // Ctrl+Shift+T: bring back the tab closed last (a shell opens anew; an agent resumes its conversation)
   const reopenClosed = async () => {

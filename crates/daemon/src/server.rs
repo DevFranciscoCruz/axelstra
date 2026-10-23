@@ -799,7 +799,16 @@ fn dispatch(
             let history_key = p["meta"]["key"].as_str().map(String::from);
             // an agent gets a name ("Tarefa N") and its task file; the prompt it starts with is the goal
             let data_dir = reg.saved.parent().unwrap_or(std::path::Path::new("")).to_path_buf();
-            let label = crate::notes::on_spawn(&crate::notes::root(&data_dir), p["label"].as_str(), &mut meta, p["goal"].as_str());
+            // no other agent of the project running: its numbering starts again
+            let alone = {
+                let project = meta.as_ref().and_then(|m| m["project"].as_str()).unwrap_or_default().to_string();
+                let sessions = reg.sessions.lock_recover();
+                let metas = reg.metas.lock_recover();
+                !metas.iter().any(|(id, m)| {
+                    m["kind"] == "agent" && m["main"] != true && m["project"].as_str() == Some(project.as_str()) && sessions.get(id).is_some_and(|s| s.try_wait().is_none())
+                })
+            };
+            let label = crate::notes::on_spawn(&crate::notes::root(&data_dir), p["label"].as_str(), &mut meta, p["goal"].as_str(), alone);
             let note = meta.as_ref().and_then(|m| m.get("note").cloned());
             let id = reg.spawn(&s, label.as_deref(), meta)?;
             // a restored agent shows what its terminal said before the restart, dimmed, above its own output

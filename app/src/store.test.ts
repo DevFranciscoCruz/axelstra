@@ -296,8 +296,8 @@ describe("project preferences", () => {
   it("a project can pick its own agent and fall back to the global one", async () => {
     const store = await load();
     expect(store.projectAgent("p1")).toBe("claude");
-    store.setProjectPref("p1", { agent: "chatgpt" });
-    expect(store.projectAgent("p1")).toBe("chatgpt");
+    store.setProjectPref("p1", { agent: "codex" });
+    expect(store.projectAgent("p1")).toBe("codex");
     expect(store.projectAgent("p2")).toBe("claude");
     store.setProjectPref("p1", { agent: undefined });
     expect(store.projectAgent("p1")).toBe("claude");

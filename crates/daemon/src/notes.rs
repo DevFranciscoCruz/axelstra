@@ -65,6 +65,26 @@ fn next_number(dir: &Path, project: &str) -> u32 {
     n
 }
 
+/// Numbering of a project starts again: the counter drops to 0 and the task files of earlier agents move to
+/// `arquivo/` (kept, never deleted) so their names are free.
+fn restart(dir: &Path, project: &str) {
+    COUNTERS.lock_recover().get_or_insert_with(HashMap::new).remove(project);
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let old: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "md")).collect();
+    if old.is_empty() {
+        return;
+    }
+    let arch = dir.join("arquivo");
+    if std::fs::create_dir_all(&arch).is_err() {
+        return;
+    }
+    let tag = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    for p in old {
+        let Some(stem) = p.file_stem().map(|s| s.to_string_lossy().into_owned()) else { continue };
+        let _ = std::fs::rename(&p, arch.join(format!("{stem} {tag}.md")));
+    }
+}
+
 fn stamp() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
 }
@@ -104,9 +124,11 @@ pub fn inside_root(root: &Path, p: &Path) -> bool {
 /// Called when a session is spawned. For an agent it settles the name and the task file and records the file in
 /// `meta["note"]`; returns the label to use. A label other than the agent's own name (renamed, or restored) is kept.
 /// `goal` is the prompt the agent starts with, if any.
-pub fn on_spawn(root: &Path, label: Option<&str>, meta: &mut Option<Value>, goal: Option<&str>) -> Option<String> {
+/// `alone` is true when the project has no other running agent: a new name then starts again at "Tarefa 1" and the
+/// finished tasks' files move to `arquivo/`. The main worktree is no task: its agent gets no name and no file.
+pub fn on_spawn(root: &Path, label: Option<&str>, meta: &mut Option<Value>, goal: Option<&str>, alone: bool) -> Option<String> {
     let kept = label.map(str::to_string);
-    let Some(m) = meta.as_mut().filter(|m| m["kind"] == "agent") else { return kept };
+    let Some(m) = meta.as_mut().filter(|m| m["kind"] == "agent" && m["main"] != true) else { return kept };
     let project = safe_name(m["project"].as_str().unwrap_or("geral"));
     let agent = m["agent"].as_str().unwrap_or("agent").to_string();
     let dir = root.join(&project);
@@ -117,7 +139,12 @@ pub fn on_spawn(root: &Path, label: Option<&str>, meta: &mut Option<Value>, goal
             }
             l.to_string()
         }
-        None => format!("Tarefa {}", next_number(&dir, &project)),
+        None => {
+            if alone {
+                restart(&dir, &project);
+            }
+            format!("Tarefa {}", next_number(&dir, &project))
+        }
     };
     // a restored agent comes back with its file; the path is only believed when it is really one of ours
     let known = m["note"].as_str().map(PathBuf::from).filter(|p| inside_root(root, p));
@@ -278,14 +305,14 @@ mod tests {
     fn default_names_count_per_project_and_are_not_reused() {
         let root = dir("count");
         let mut m = agent_meta("p-count");
-        assert_eq!(on_spawn(&root, Some("claude"), &mut m, None).as_deref(), Some("Tarefa 1"));
+        assert_eq!(on_spawn(&root, Some("claude"), &mut m, None, false).as_deref(), Some("Tarefa 1"));
         let mut m2 = agent_meta("p-count");
-        assert_eq!(on_spawn(&root, None, &mut m2, None).as_deref(), Some("Tarefa 2"));
+        assert_eq!(on_spawn(&root, None, &mut m2, None, false).as_deref(), Some("Tarefa 2"));
         let mut other = agent_meta("p-count-other");
-        assert_eq!(on_spawn(&root, Some("claude"), &mut other, None).as_deref(), Some("Tarefa 1"));
+        assert_eq!(on_spawn(&root, Some("claude"), &mut other, None, false).as_deref(), Some("Tarefa 1"));
         // the first agent is renamed and its file stays: the number still is not reused
         let mut m3 = agent_meta("p-count");
-        assert_eq!(on_spawn(&root, Some("claude"), &mut m3, None).as_deref(), Some("Tarefa 3"));
+        assert_eq!(on_spawn(&root, Some("claude"), &mut m3, None, false).as_deref(), Some("Tarefa 3"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -293,11 +320,11 @@ mod tests {
     fn restored_agent_keeps_label_and_file() {
         let root = dir("restore");
         let mut m = agent_meta("p-restore");
-        let name = on_spawn(&root, Some("claude"), &mut m, Some("faz X")).unwrap();
+        let name = on_spawn(&root, Some("claude"), &mut m, Some("faz X"), false).unwrap();
         let note = m.as_ref().unwrap()["note"].as_str().unwrap().to_string();
         let mut back = agent_meta("p-restore");
         back.as_mut().unwrap()["note"] = json!(note);
-        assert_eq!(on_spawn(&root, Some(&name), &mut back, None), Some(name));
+        assert_eq!(on_spawn(&root, Some(&name), &mut back, None, false), Some(name));
         assert_eq!(back.unwrap()["note"], json!(note));
         assert_eq!(std::fs::read_dir(root.join("p-restore")).unwrap().count(), 1);
         let _ = std::fs::remove_dir_all(&root);
@@ -310,7 +337,7 @@ mod tests {
         std::fs::write(&outside, "x").unwrap();
         let mut m = agent_meta("p-evil");
         m.as_mut().unwrap()["note"] = json!(outside.to_string_lossy());
-        on_spawn(&root, Some("claude"), &mut m, None);
+        on_spawn(&root, Some("claude"), &mut m, None, false);
         let note = PathBuf::from(m.unwrap()["note"].as_str().unwrap());
         assert!(inside_root(&root, &note));
         assert_ne!(note, outside);
@@ -323,7 +350,7 @@ mod tests {
     fn terminals_get_no_file_and_keep_their_label() {
         let root = dir("term");
         let mut m = Some(json!({"project": "p", "kind": "terminal"}));
-        assert_eq!(on_spawn(&root, Some("terminal"), &mut m, None).as_deref(), Some("terminal"));
+        assert_eq!(on_spawn(&root, Some("terminal"), &mut m, None, false).as_deref(), Some("terminal"));
         assert!(m.unwrap().get("note").is_none());
         assert!(!root.exists() || std::fs::read_dir(&root).unwrap().count() == 0);
         let _ = std::fs::remove_dir_all(&root);
@@ -333,7 +360,7 @@ mod tests {
     fn file_has_goal_and_report_section_and_appends() {
         let root = dir("body");
         let mut m = agent_meta("p-body");
-        on_spawn(&root, Some("claude"), &mut m, Some("corrigir o <login> & testar \"tudo\""));
+        on_spawn(&root, Some("claude"), &mut m, Some("corrigir o <login> & testar \"tudo\""), false);
         let p = PathBuf::from(m.unwrap()["note"].as_str().unwrap());
         let t = read(&p).unwrap();
         assert!(t.starts_with("# Tarefa "), "{t}");
@@ -360,7 +387,7 @@ mod tests {
         let root = dir("export");
         let wt = dir("export-wt");
         let mut m = agent_meta("p-export");
-        on_spawn(&root, Some("claude"), &mut m, None);
+        on_spawn(&root, Some("claude"), &mut m, None, false);
         let note = PathBuf::from(m.unwrap()["note"].as_str().unwrap());
         let out = export(&note, &wt, false).unwrap();
         assert_eq!(out.parent().unwrap(), wt.join(".axelstra"));
@@ -378,8 +405,8 @@ mod tests {
         let root = dir("bywt");
         let mut a = Some(json!({"project": "p-bywt", "worktree": "C:/x/Wt-A", "kind": "agent", "agent": "claude"}));
         let mut b = Some(json!({"project": "p-bywt", "worktree": "C:/x/wt-b", "kind": "agent", "agent": "claude"}));
-        on_spawn(&root, Some("claude"), &mut a, Some("faz A"));
-        on_spawn(&root, Some("claude"), &mut b, None);
+        on_spawn(&root, Some("claude"), &mut a, Some("faz A"), false);
+        on_spawn(&root, Some("claude"), &mut b, None, false);
         let pa = PathBuf::from(a.unwrap()["note"].as_str().unwrap());
         assert_eq!(for_worktree(&root, "p-bywt", "c:\\x\\wt-a/")[0].status, "aberto");
         append(&pa, "ok", "feito\ncom detalhe").unwrap();

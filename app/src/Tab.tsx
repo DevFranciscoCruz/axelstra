@@ -33,6 +33,13 @@ export function Tab(props: {
             tabindex={props.selected || props.tabbable ? 0 : -1}
             title={props.title}
             onClick={props.onSelect}
+            // middle click closes, like a browser tab (mousedown is stopped so Windows does not start autoscroll)
+            onMouseDown={(e) => e.button === 1 && props.onClose && e.preventDefault()}
+            onAuxClick={(e) => {
+              if (e.button !== 1 || !props.onClose) return;
+              e.preventDefault();
+              props.onClose();
+            }}
             onKeyDown={(e) => {
               if (e.key === "F2" && props.onRename) {
                 e.preventDefault();

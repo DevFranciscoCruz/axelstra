@@ -1,9 +1,9 @@
 import type { WtUsage } from "./usageFormat";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { projectTerse } from "./store";
+import { projects, projectTerse } from "./store";
 
-export type SessionMeta = { project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; note?: string; parent?: number; worker?: boolean };
+export type SessionMeta = { project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; note?: string; parent?: number; worker?: boolean; main?: boolean };
 export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean; /** worktree of the same project this one is grouped under */ parent?: string | null };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
@@ -113,13 +113,16 @@ export const launchDefaultAgent = async (
     pre ? pre.rules : getSettings(terse).then((x) => x.rules, () => null),
   ]);
   const ps = /powershell|pwsh/i.test(program);
+  // the main worktree is not a task: its agent gets no "Tarefa N" name and no task file
+  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const main = projects().find((p) => p.id === project)?.worktrees.some((w) => w.is_main && norm(w.path) === norm(worktree)) || undefined;
   // key is stable for the life of the tab; resume is the conversation id, which /clear replaces
   const key = restore ? restore.key : cli === "claude" ? crypto.randomUUID() : undefined;
   const resume = restore ? restore.resume ?? key : key;
   const line = agentLine(cli, resume, !!restore, ps, `${dir}/hooks.json`, rules);
   const run = ps ? [...args, "-NoExit", "-Command", line] : [...args, "-c", `${line}; exec ${shQuote(program, false)} -l`];
   const env = key ? { AXELSTRA_KEY: key, AXELSTRA_DIR: dir } : undefined;
-  const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent", agent: cli, resume, key, note: restore?.note }, env);
+  const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent", agent: cli, resume, key, note: restore?.note, main }, env);
   // only claude takes the rules as a system prompt: type them into the others once they have booted
   if (rules && cli !== "claude" && !restore) void nudge(id, rules);
   return id;
