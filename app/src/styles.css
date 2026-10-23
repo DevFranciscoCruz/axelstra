@@ -1037,3 +1037,6 @@ button.rtab { background: none; border: 0; font: inherit; cursor: pointer; }
 .wt-report-status, .wt-report-time { color: var(--muted); font-size: 10.5px; flex: none; }
 .wt-report-status.ok { color: var(--accent); }
 .wt-report-excerpt { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+.project.collapsed > :not(.project-head) { display: none; }
+.project-head .proj-fold { flex: none; width: 20px; height: 20px; opacity: .8; }
