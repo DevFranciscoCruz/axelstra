@@ -287,6 +287,11 @@ pub fn claude_usage(cwd: &str, session_id: Option<&str>) -> Option<Usage> {
             v.into_iter().max_by_key(|p| mtime(p))?
         }
     };
+    file_usage(path)
+}
+
+/// Totals of one Claude transcript, kept between calls so a growing file is only read from where it stopped.
+fn file_usage(path: PathBuf) -> Option<Usage> {
     let meta = std::fs::metadata(&path).ok()?;
     let (len, mt) = (meta.len(), mtime(&path));
     let mut cache = CACHE.lock().unwrap();
@@ -321,6 +326,128 @@ pub fn claude_usage(cwd: &str, session_id: Option<&str>) -> Option<Usage> {
     let u = acc.u.clone();
     map.insert(path, (len, mt, off, acc));
     Some(u)
+}
+
+/// What one worktree has spent, summed over every Claude and Codex conversation that ran in it.
+#[derive(Serialize, Clone, Default, Debug, PartialEq)]
+pub struct WorktreeUsage {
+    pub worktree: String,
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub claude_sessions: u64,
+    pub codex_sessions: u64,
+}
+
+impl WorktreeUsage {
+    fn add(&mut self, u: &Usage, claude: bool) {
+        self.input += u.input;
+        self.output += u.output;
+        self.cache_read += u.cache_read;
+        self.cache_write += u.cache_write;
+        if claude {
+            self.claude_sessions += 1;
+        } else {
+            self.codex_sessions += 1;
+        }
+    }
+}
+
+/// Paths from the UI and from the logs differ in case, slashes and a `\\?\` prefix on Windows.
+fn norm_path(p: &str) -> String {
+    p.trim_start_matches(r"\\?\").replace('\\', "/").trim_end_matches('/').to_lowercase()
+}
+
+/// A Codex session file: the folder it ran in (`session_meta`, first line) and its token totals. The
+/// `token_count` events carry running totals, so the last one is the whole session.
+pub fn codex_totals(lines: impl Iterator<Item = String>) -> (Option<String>, Usage) {
+    let (mut cwd, mut u) = (None, Usage::default());
+    for line in lines {
+        if cwd.is_none() && line.contains("\"cwd\"") {
+            if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                cwd = v["payload"]["cwd"].as_str().map(String::from);
+            }
+        }
+        if !line.contains("total_token_usage") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+        let t = &v["payload"]["info"]["total_token_usage"];
+        if !t.is_object() {
+            continue;
+        }
+        let n = |k: &str| t[k].as_u64().unwrap_or(0);
+        // Codex counts the cached part inside input_tokens
+        let cached = n("cached_input_tokens");
+        u = Usage { input: n("input_tokens").saturating_sub(cached), output: n("output_tokens"), cache_read: cached, cache_write: 0, messages: 1, context: 0 };
+    }
+    (cwd, u)
+}
+
+/// per Codex file: (length, mtime, folder it ran in, totals)
+static CODEX_CACHE: Mutex<Option<HashMap<PathBuf, (u64, u64, Option<String>, Usage)>>> = Mutex::new(None);
+
+fn codex_file(path: &Path) -> Option<(Option<String>, Usage)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let meta = std::fs::metadata(path).ok()?;
+    let (len, mt) = (meta.len(), mtime(path));
+    let mut cache = CODEX_CACHE.lock().unwrap();
+    let map = cache.get_or_insert_with(HashMap::new);
+    if let Some((l, m, cwd, u)) = map.get(path) {
+        if *l == len && *m == mt {
+            return Some((cwd.clone(), u.clone()));
+        }
+    }
+    let mut f = std::fs::File::open(path).ok()?;
+    // the folder is on the first line, the running totals at the end: read those two ends
+    let mut head = String::new();
+    BufReader::new(&f).read_line(&mut head).ok()?;
+    f.seek(SeekFrom::Start(len.saturating_sub(256 * 1024))).ok()?;
+    let mut tail = String::new();
+    let _ = f.read_to_string(&mut tail);
+    let (cwd, u) = codex_totals(std::iter::once(head).chain(tail.lines().map(String::from)));
+    map.insert(path.to_path_buf(), (len, mt, cwd.clone(), u.clone()));
+    Some((cwd, u))
+}
+
+/// Token totals per worktree, in the order given. Claude's folder per worktree is read directly; Codex
+/// files are matched to a worktree by the folder they started in.
+pub fn worktree_usage(worktrees: &[String]) -> Vec<WorktreeUsage> {
+    let mut out: Vec<WorktreeUsage> = worktrees.iter().map(|w| WorktreeUsage { worktree: w.clone(), ..Default::default() }).collect();
+    if let Some(root) = claude_root() {
+        for w in &mut out {
+            let mut files = vec![];
+            jsonl_files(&root.join(claude_dir_name(&w.worktree)), 0, &mut files);
+            for f in files {
+                if let Some(u) = file_usage(f).filter(|u| u.messages > 0) {
+                    w.add(&u, true);
+                }
+            }
+        }
+    }
+    if let Some(root) = codex_root() {
+        let mut files = vec![];
+        jsonl_files(&root, 4, &mut files);
+        let sessions: Vec<(String, Usage)> = files.iter().filter_map(|f| codex_file(f)).filter_map(|(cwd, u)| Some((cwd?, u))).collect();
+        add_codex(&mut out, &sessions);
+    }
+    out
+}
+
+/// Adds each Codex session (folder, totals) to the worktree it ran in, or in one of its subfolders.
+fn add_codex(out: &mut [WorktreeUsage], sessions: &[(String, Usage)]) {
+    for (cwd, u) in sessions {
+        let c = norm_path(cwd);
+        // the longest match wins, so a worktree nested in another one is not counted twice
+        let best = out.iter().enumerate().filter(|(_, w)| {
+            let n = norm_path(&w.worktree);
+            c == n || c.starts_with(&format!("{n}/"))
+        });
+        if let Some((i, _)) = best.max_by_key(|(_, w)| w.worktree.len()) {
+            out[i].add(u, false);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -382,5 +509,53 @@ mod tests {
         search_file(&f, "claude", "needle-id", 5, &mut none);
         assert!(none.is_empty(), "ids are not searchable text");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn codex_session_totals_use_the_last_count_and_the_first_folder() {
+        let meta = r#"{"type":"session_meta","payload":{"id":"x","cwd":"C:\\wt\\a"}}"#;
+        let early = r#"{"type":"event_msg","payload":{"type":"token_count","info":null}}"#;
+        let one = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":10,"total_tokens":110}}}}"#;
+        let two = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":300,"cached_input_tokens":200,"output_tokens":40,"total_tokens":340}}}}"#;
+        let (cwd, u) = codex_totals([meta, early, one, "junk", two].into_iter().map(String::from));
+        assert_eq!(cwd.as_deref(), Some(r"C:\wt\a"));
+        assert_eq!(u, Usage { input: 100, output: 40, cache_read: 200, cache_write: 0, messages: 1, context: 0 });
+    }
+
+    #[test]
+    fn worktree_totals_add_up_both_agents_and_match_paths_loosely() {
+        let mut out = vec![
+            WorktreeUsage { worktree: r"C:\wt\a".into(), ..Default::default() },
+            WorktreeUsage { worktree: r"C:\wt\a\nested".into(), ..Default::default() },
+            WorktreeUsage { worktree: r"C:\wt\b".into(), ..Default::default() },
+        ];
+        let claude = Usage { input: 5, output: 6, cache_read: 7, cache_write: 8, messages: 2, context: 0 };
+        out[0].add(&claude, true);
+        let codex = Usage { input: 1, output: 2, cache_read: 3, cache_write: 0, messages: 1, context: 0 };
+        add_codex(
+            &mut out,
+            &[
+                (r"\\?\c:\WT\a/".into(), codex.clone()),
+                (r"C:\wt\a\nested\sub".into(), codex.clone()),
+                (r"C:\wt\ab".into(), codex.clone()),
+                (r"D:\elsewhere".into(), codex),
+            ],
+        );
+        assert_eq!(out[0], WorktreeUsage { worktree: r"C:\wt\a".into(), input: 6, output: 8, cache_read: 10, cache_write: 8, claude_sessions: 1, codex_sessions: 1 });
+        assert_eq!((out[1].input, out[1].codex_sessions), (1, 1));
+        assert_eq!(out[2].codex_sessions, 0, "a sibling folder with the same prefix is not this worktree");
+    }
+
+    #[test]
+    fn file_usage_reads_a_transcript_and_picks_up_growth() {
+        let f = std::env::temp_dir().join(format!("axl-usage-{}.jsonl", std::process::id()));
+        let a = r#"{"message":{"id":"m1","usage":{"input_tokens":10,"output_tokens":5}}}"#;
+        std::fs::write(&f, format!("{a}\n")).unwrap();
+        assert_eq!(file_usage(f.clone()).unwrap().output, 5);
+        let b = r#"{"message":{"id":"m2","usage":{"input_tokens":1,"output_tokens":2}}}"#;
+        std::fs::write(&f, format!("{a}\n{b}\n")).unwrap();
+        let u = file_usage(f.clone()).unwrap();
+        assert_eq!((u.input, u.output, u.messages), (11, 7, 2));
+        let _ = std::fs::remove_file(&f);
     }
 }
