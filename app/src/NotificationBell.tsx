@@ -4,6 +4,7 @@ import { isTopModal, popModal, pushModal } from "./modalStack";
 import { NotifEntry, NotifKind, clearAll, markAllRead, notifications, unreadCount } from "./notifications";
 import { ago } from "./time";
 import "./notifications.css";
+import { PlainButton } from "./ui";
 
 /** word and glyph per kind: the meaning never rests on colour alone */
 const KIND: Record<NotifKind, [string, string]> = {
@@ -90,26 +91,26 @@ export function NotificationBell(props: { onJump: (e: NotifEntry) => void }) {
 
   return (
     <div class="notif">
-      <button ref={bell} class="icon notif-bell" title="Notificações" aria-label={label()} aria-haspopup="dialog" aria-expanded={open()} onClick={() => (open() ? close() : show())}>
+      <PlainButton ref={bell} class="icon notif-bell" title="Notificações" aria-label={label()} aria-haspopup="dialog" aria-expanded={open()} onClick={() => (open() ? close() : show())}>
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M8 2.2a3.8 3.8 0 0 0-3.8 3.8c0 3-1.4 4-1.4 4h10.4s-1.4-1-1.4-4A3.8 3.8 0 0 0 8 2.2zM6.6 12.6a1.5 1.5 0 0 0 2.8 0" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
         <Show when={unreadCount() > 0}>
           <span class="notif-badge" aria-hidden="true">{unreadCount() > 99 ? "99+" : unreadCount()}</span>
         </Show>
-      </button>
+      </PlainButton>
       <Show when={open()}>
         <div ref={pop} class="notif-pop" role="dialog" aria-label="Notificações">
           <div class="notif-head">
             <span class="notif-title">Notificações</span>
-            <button class="link" disabled={notifications().length === 0} onClick={() => clearAll()}>Limpar tudo</button>
+            <PlainButton class="link" disabled={notifications().length === 0} onClick={() => clearAll()}>Limpar tudo</PlainButton>
           </div>
           <Show when={notifications().length} fallback={<div class="notif-empty">Sem notificações</div>}>
             <ul class="notif-list">
               <For each={notifications()}>
                 {(n) => (
                   <li>
-                    <button class="notif-item" classList={{ fresh: fresh().has(n.id) }} onClick={() => jump(n)}>
+                    <PlainButton class="notif-item" classList={{ fresh: fresh().has(n.id) }} onClick={() => jump(n)}>
                       <span class={`notif-kind ${n.kind}`}>
                         <span aria-hidden="true">{KIND[n.kind][0]}</span> {KIND[n.kind][1]}
                         <Show when={fresh().has(n.id)}> · novo</Show>
@@ -119,7 +120,7 @@ export function NotificationBell(props: { onJump: (e: NotifEntry) => void }) {
                         <Show when={wtName(n.worktree)}>{wtName(n.worktree)} · </Show>
                         {ago((Date.now() - n.at) / 1000)}
                       </span>
-                    </button>
+                    </PlainButton>
                   </li>
                 )}
               </For>

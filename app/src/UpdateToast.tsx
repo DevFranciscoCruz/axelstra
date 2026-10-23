@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
+import { Button } from "./ui";
 
 type Info = { version: string; notes: string | null };
 
@@ -85,12 +86,12 @@ export function UpdateToast() {
             </div>
           </div>
           <div class="ut-actions">
-            <button disabled={busy()} onClick={() => setDismissed(i().version)}>
+            <Button disabled={busy()} onClick={() => setDismissed(i().version)}>
               Mais tarde
-            </button>
-            <button class="primary" disabled={busy()} onClick={() => void install()}>
+            </Button>
+            <Button variant="default" disabled={busy()} onClick={() => void install()}>
               {busy() ? "A reiniciar…" : "Reiniciar agora"}
-            </button>
+            </Button>
           </div>
           <Show when={err()}>
             <div class="error">{err()}</div>
