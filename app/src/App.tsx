@@ -15,6 +15,7 @@ import { Automations } from "./Automations";
 import { Dispatcher } from "./Dispatcher";
 import { Settings } from "./Settings";
 import { Shortcuts } from "./Shortcuts";
+import { LEFT, RIGHT, resizeTo, splitTo } from "./layout";
 import { isTextTarget, overlayOpen } from "./keyboard";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
@@ -478,6 +479,14 @@ export function App() {
     if (!showSidebar()) toggleSidebar();
   };
 
+  // the same resize from the keyboard (arrows, Shift for bigger steps, Home/End)
+  const resizeKey = (e: KeyboardEvent, dir: 1 | -1, w: number, range: { min: number; max: number }, set: (w: number) => void) => {
+    const to = resizeTo(w, e.key, e.shiftKey, dir, range);
+    if (to === null) return;
+    e.preventDefault();
+    set(to);
+  };
+
   const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
   return (
@@ -487,10 +496,34 @@ export function App() {
       style={{ "--left-w": `${leftW()}px`, "--right-w": `${rightW()}px` }}
     >
       <Show when={showSidebar()}>
-        <div class="resizer" style={{ left: "var(--left-w)" }} onMouseDown={(e) => drag(e, 1, leftW(), setLeftW)} />
+        <div
+          class="resizer"
+          style={{ left: "var(--left-w)" }}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Largura da lista de projetos"
+          aria-valuenow={leftW()}
+          aria-valuemin={LEFT.min}
+          aria-valuemax={LEFT.max}
+          tabindex="0"
+          onKeyDown={(e) => resizeKey(e, 1, leftW(), LEFT, setLeftW)}
+          onMouseDown={(e) => drag(e, 1, leftW(), setLeftW)}
+        />
       </Show>
       <Show when={current() && showRightPanel()}>
-        <div class="resizer right-edge" style={{ right: "var(--right-w)" }} onMouseDown={(e) => drag(e, -1, rightW(), setRightW)} />
+        <div
+          class="resizer right-edge"
+          style={{ right: "var(--right-w)" }}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Largura do painel direito"
+          aria-valuenow={rightW()}
+          aria-valuemin={RIGHT.min}
+          aria-valuemax={RIGHT.max}
+          tabindex="0"
+          onKeyDown={(e) => resizeKey(e, -1, rightW(), RIGHT, setRightW)}
+          onMouseDown={(e) => drag(e, -1, rightW(), setRightW)}
+        />
       </Show>
       <Show when={agentPrompt()}>
         {(done) => (
@@ -778,6 +811,19 @@ export function App() {
                 <Show when={splitSession() !== null && splitSession() !== activeSession() && tabs().some((s) => s.id === splitSession())}>
                   <div
                     class="split-sep"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Largura do terminal dividido"
+                    aria-valuenow={Math.round(splitFrac() * 100)}
+                    aria-valuemin={20}
+                    aria-valuemax={80}
+                    tabindex="0"
+                    onKeyDown={(e) => {
+                      const to = splitTo(splitFrac(), e.key);
+                      if (to === null) return;
+                      e.preventDefault();
+                      setSplitFrac(to);
+                    }}
                     onMouseDown={(e) => {
                       e.preventDefault();
                       const area = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
