@@ -44,29 +44,3 @@ export const radioKeys = (e: KeyboardEvent & { currentTarget: HTMLElement }) => 
   radios[to].focus();
   radios[to].click();
 };
-
-/** Icon-only buttons carry their name in `title`; mirror it to aria-label so screen readers get it.
- * Added nodes are collected and handled once per frame, so a big re-render costs one pass. */
-export const labelIcons = () => {
-  const sel = "button[title]:not([aria-label])";
-  const label = (b: HTMLElement) => b.setAttribute("aria-label", b.title);
-  document.querySelectorAll<HTMLElement>(sel).forEach(label);
-  const queue = new Set<HTMLElement>();
-  let scheduled = false;
-  const run = () => {
-    scheduled = false;
-    for (const n of queue) {
-      if (!n.isConnected) continue;
-      if (n.matches(sel)) label(n);
-      n.querySelectorAll<HTMLElement>(sel).forEach(label);
-    }
-    queue.clear();
-  };
-  new MutationObserver((ms) => {
-    for (const m of ms) m.addedNodes.forEach((n) => n instanceof HTMLElement && queue.add(n));
-    if (queue.size && !scheduled) {
-      scheduled = true;
-      requestAnimationFrame(run);
-    }
-  }).observe(document.body, { childList: true, subtree: true });
-};
