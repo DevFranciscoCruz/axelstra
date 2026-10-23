@@ -61,3 +61,16 @@ export const moveIndex = (current: number, count: number, key: string): number |
       return null;
   }
 };
+
+/** Roving focus for a `role=tablist`: arrows, Home and End move focus between the tabs (wrapping), Enter or Space then picks one.
+ * Spread on the list (`onKeyDown`); give each tab `tabindex={selected ? 0 : -1}`. Pass `select` for tabs that switch as you arrow. */
+export const tabKeys = (e: KeyboardEvent & { currentTarget: HTMLElement }, select = false) => {
+  const tabs = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]'));
+  const at = tabs.indexOf(document.activeElement as HTMLElement);
+  if (at < 0) return;
+  const to = nextRadio(at, tabs.length, e.key === "ArrowUp" || e.key === "ArrowDown" ? "" : e.key);
+  if (to === null) return;
+  e.preventDefault();
+  tabs[to].focus();
+  if (select) tabs[to].click();
+};

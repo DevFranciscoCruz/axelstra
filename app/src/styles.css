@@ -956,3 +956,11 @@ button.icon, button.x, button.split-x, button.cbtn { display: inline-flex; align
 .dot.glyph:not(.on):not(.queued) { background: var(--muted); }
 .dot.glyph.work svg { animation: spin 1.1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* a tab is a wrapper holding the tab button and, beside it, the close button */
+.tab-main { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
+.tab-main > span:not(.dot):not(.dtag) { overflow: hidden; text-overflow: ellipsis; }
+.tab-rename { width: 120px; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line-3); border-radius: 4px; padding: 0 4px; }
+.item.wt .wt-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 0; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.rtablist { display: flex; gap: 2px; }
+button.rtab { background: none; border: 0; font: inherit; cursor: pointer; }

@@ -30,9 +30,10 @@ import { StatusBar } from "./StatusBar";
 import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
 import { ErrorToast } from "./ErrorToast";
 import { Modal } from "./Modal";
+import { Tab } from "./Tab";
 import { StateDot } from "./StateDot";
 import { dotOfSession } from "./agentState";
-import { press } from "./a11y";
+import { tabKeys } from "./a11y";
 import { ask } from "./Confirm";
 import { PullsPanel } from "./PullsPanel";
 import { TerminalView } from "./TerminalView";
@@ -489,6 +490,14 @@ export function App() {
     set(to);
   };
 
+  const anyTabSelected = () => showKanban() || openDiff() !== null || openFile() !== null || openCommit() !== null || activeSession() !== null;
+  // renaming ends with the new name (null = cancelled); focus goes back to the tab, not to the page
+  const finishRename = (id: number, name: string | null, refocus = true) => {
+    if (name !== null) renameTab(id, name);
+    setRenaming(null);
+    if (refocus) queueMicrotask(() => document.querySelector<HTMLElement>(`[data-tab="tab-${id}"]`)?.focus());
+  };
+
   const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
   return (
@@ -622,115 +631,98 @@ export function App() {
             <button class="icon add" title="Projetos (Ctrl+B)" aria-label="Projetos (Ctrl+B)" classList={{ on: showSidebar() }} onClick={toggleSidebar}>
               <PanelIcon side="left" on={showSidebar()} />
             </button>
-            <div class="tabs">
-            <div class="tab" classList={{ active: showKanban() }} {...press(() => guarded(() => setShowKanban(true)), "tab")}>
+            <div class="tabs" role="tablist" aria-label="Separadores" onKeyDown={(e) => tabKeys(e)}>
+            <Tab selected={showKanban()} tabbable={!anyTabSelected()} onSelect={() => guarded(() => setShowKanban(true))}>
               <span class="dtag"><Icon name="grid" size={11} /></span>
               <span>Kanban</span>
-            </div>
+            </Tab>
             <For each={tabs()}>
               {(s) => (
-                <div
-                  class="tab"
-                  classList={{ active: !showKanban() && openDiff() === null && openFile() === null && openCommit() === null && activeSession() === s.id }}
-                  style={dropOn() === s.id && dragTab() !== s.id ? { "box-shadow": "inset 2px 0 0 var(--accent, #7aa2f7)" } : undefined}
-                  draggable={renaming() !== s.id}
-                  onDragStart={(e) => {
-                    setDragTab(s.id);
-                    e.dataTransfer?.setData("text/plain", String(s.id));
+                <Tab
+                  id={`tab-${s.id}`}
+                  selected={!showKanban() && openDiff() === null && openFile() === null && openCommit() === null && activeSession() === s.id}
+                  onSelect={() => showTab(s)}
+                  onClose={() => void close(s)}
+                  onRename={() => setRenaming(s.id)}
+                  wrap={{
+                    style: dropOn() === s.id && dragTab() !== s.id ? { "box-shadow": "inset 2px 0 0 var(--accent, #7aa2f7)" } : undefined,
+                    draggable: renaming() !== s.id,
+                    onDragStart: (e) => {
+                      setDragTab(s.id);
+                      e.dataTransfer?.setData("text/plain", String(s.id));
+                    },
+                    onDragOver: (e) => {
+                      if (dragTab() === null) return;
+                      e.preventDefault();
+                      setDropOn(s.id);
+                    },
+                    onDrop: (e) => {
+                      e.preventDefault();
+                      const from = dragTab();
+                      if (from !== null) moveTab(tabs().map((t) => t.id), from, s.id);
+                      setDragTab(null);
+                      setDropOn(null);
+                    },
+                    onDragEnd: () => {
+                      setDragTab(null);
+                      setDropOn(null);
+                    },
+                    onDblClick: () => setRenaming(s.id),
+                    onMouseDown: (e) => e.button === 1 && e.preventDefault(),
+                    onAuxClick: (e) => {
+                      if (e.button !== 1) return;
+                      e.preventDefault();
+                      void close(s);
+                    },
                   }}
-                  onDragOver={(e) => {
-                    if (dragTab() === null) return;
-                    e.preventDefault();
-                    setDropOn(s.id);
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const from = dragTab();
-                    if (from !== null) moveTab(tabs().map((t) => t.id), from, s.id);
-                    setDragTab(null);
-                    setDropOn(null);
-                  }}
-                  onDragEnd={() => {
-                    setDragTab(null);
-                    setDropOn(null);
-                  }}
-                  onDblClick={() => setRenaming(s.id)}
-                  onMouseDown={(e) => e.button === 1 && e.preventDefault()}
-                  onAuxClick={(e) => {
-                    if (e.button !== 1) return;
-                    e.preventDefault();
-                    void close(s);
-                  }}
-                  {...press(() => showTab(s), "tab")}
+                  editing={
+                    renaming() === s.id ? (
+                      <>
+                        <StateDot state={dotOfSession(s)} />
+                        <input
+                          class="tab-rename"
+                          aria-label="Nome do separador"
+                          value={tabLabel(s)}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === "Enter") finishRename(s.id, e.currentTarget.value);
+                            else if (e.key === "Escape") finishRename(s.id, null);
+                          }}
+                          onBlur={(e) => renaming() === s.id && finishRename(s.id, e.currentTarget.value, false)}
+                          ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
+                        />
+                      </>
+                    ) : undefined
+                  }
                 >
                   <StateDot state={dotOfSession(s)} />
-                  <Show
-                    when={renaming() === s.id}
-                    fallback={<span>{s.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{tabLabel(s)}</span>}
-                  >
-                    <input
-                      style={{ width: "120px", font: "inherit", color: "inherit", background: "transparent", border: "1px solid var(--line-3)", "border-radius": "4px", padding: "0 4px" }}
-                      value={tabLabel(s)}
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === "Enter") {
-                          renameTab(s.id, e.currentTarget.value);
-                          setRenaming(null);
-                        } else if (e.key === "Escape") setRenaming(null);
-                      }}
-                      onBlur={(e) => {
-                        if (renaming() !== s.id) return;
-                        renameTab(s.id, e.currentTarget.value);
-                        setRenaming(null);
-                      }}
-                      ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
-                    />
-                  </Show>
-                  <button
-                    class="x"
-                    title="Fechar" aria-label="Fechar"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void close(s);
-                    }}
-                  >
-                    <Icon name="x" />
-                  </button>
-                </div>
+                  <span>{s.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{tabLabel(s)}</span>
+                </Tab>
               )}
             </For>
             <Show when={openCommit()}>
               {(c) => (
-                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={c().subject} {...press(() => setShowKanban(false), "tab")}>
+                <Tab class="diff-tab" selected={!showKanban()} title={c().subject} onSelect={() => setShowKanban(false)} onClose={() => setOpenCommit(null)} closeLabel="Fechar commit">
                   <span class="dtag"><Icon name="branch" size={11} /></span>
                   <span>{c().short}</span>
-                  <button class="x" title="Fechar commit" aria-label="Fechar commit" onClick={() => setOpenCommit(null)}>
-                    <Icon name="x" />
-                  </button>
-                </div>
+                </Tab>
               )}
             </Show>
             <Show when={openFile()}>
               {(p) => (
-                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} {...press(() => setShowKanban(false), "tab")}>
+                <Tab class="diff-tab" selected={!showKanban()} title={p()} onSelect={() => setShowKanban(false)} onClose={() => guarded(() => setOpenFile(null))} closeLabel="Fechar ficheiro">
                   <span class="dtag"><Icon name="pencil" size={11} /></span>
                   <span>{baseName(p())}</span>
-                  <button class="x" title="Fechar ficheiro" aria-label="Fechar ficheiro" onClick={(e) => { e.stopPropagation(); guarded(() => setOpenFile(null)); }}>
-                    <Icon name="x" />
-                  </button>
-                </div>
+                </Tab>
               )}
             </Show>
             <Show when={openDiff()}>
               {(p) => (
-                <div class="tab diff-tab" classList={{ active: !showKanban() }} title={p()} {...press(() => setShowKanban(false), "tab")}>
+                <Tab class="diff-tab" selected={!showKanban()} title={p()} onSelect={() => setShowKanban(false)} onClose={() => setOpenDiff(null)} closeLabel="Fechar diff">
                   <span class="dtag">Δ</span>
                   <span>{baseName(p())}</span>
-                  <button class="x" title="Fechar diff" aria-label="Fechar diff" onClick={() => setOpenDiff(null)}>
-                    <Icon name="x" />
-                  </button>
-                </div>
+                </Tab>
               )}
             </Show>
             </div>
