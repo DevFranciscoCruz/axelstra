@@ -4,16 +4,18 @@
 
 Lightweight desktop workbench for parallel coding agents on git worktrees (Windows and macOS, Tauri + Rust).
 
-<p align="center"><img src="assets/demo/demo.gif" width="820" alt="Axelstra: a new worktree gets an agent, the status dots follow it, and a notification arrives when another agent finishes"></p>
+<p align="center"><img src="assets/demo/demo.gif" width="820" alt="Axelstra tour: new worktree with an agent, notification, Ctrl+K, AI commit message, files and editor, Kanban, automations and dispatcher"></p>
 
-<sub>Scripted mock with fake data: source in [`assets/demo/index.html`](assets/demo/index.html), open it in a browser to watch it live.</sub>
+<sub>Scripted mock with fake data: source in [`assets/demo/index.html`](assets/demo/index.html), open it in a browser to watch it live. The tour: create a worktree and start an agent, get notified when another one finishes, jump with `Ctrl+K`, write the commit message with AI, browse and edit files, run the Kanban, scheduled automations and the dispatcher.</sub>
 
 - **Projects and worktrees:** one sidebar entry per repo, one worktree per task, each with its own terminals.
 - **Agents:** open Claude Code or Codex in a worktree with one click; a dot shows working / idle / done and you get a notification when an agent stops.
 - **Terminals:** split view, command palette (`Ctrl+K`), dev-server ports shown as chips that open in the browser.
 - **Session restore:** terminals live in a background daemon. After a reboot or an update they reopen where they were, and Claude Code resumes its conversation (a `/clear` is followed, so you get the new one).
-- **Code:** file tree and editor, changes panel with diff and line comments sent to a running agent, commit box, pull requests and issues (needs `gh`).
+- **Code:** file tree and editor, changes panel with diff and line comments sent to a running agent, commit box with an AI-suggested message, pull requests and issues (needs `gh`).
 - **Kanban and orchestrator:** a markdown board of ideas; the orchestrator dispatches one agent per card and merges the results into an integration branch.
+- **AI commit messages:** the sparkle button in the commit box asks your `claude` CLI for a message from the pending diff. It follows the repo's recent style (e.g. Conventional Commits), writes an imperative subject of at most 72 characters and a body only when the reason is not obvious. You read and edit it before committing; nothing is staged until you commit.
+- **Worktree cleanup:** a background sweep removes `ax/*` worktrees once their work is merged (in `origin/main`, or its pull request merged on GitHub). It never touches a worktree with a live session, uncommitted changes or unmerged work. On by default; `axelstra worktree sweep --auto off` turns it off, `--dry-run` lists what it would remove.
 - **Automations:** scheduled agent runs in fresh worktrees (interval, daily, weekly).
 - **Voice:** dictate a prompt with `Ctrl+Shift+M`. Speech is recognized locally (Whisper, downloaded once, about 160 MB), stops by itself when you pause and goes straight to the active terminal.
 - **Orchestration:** a coordinator agent splits work across worktrees and ephemeral workers that report back and disappear. Agents learn it from the `/axelstration` skill (installed for Claude Code and Codex); see below.
