@@ -1,4 +1,4 @@
-import { Button, Input, Textarea } from "./ui";
+import { Button, Field, Input, Textarea } from "./ui";
 import { Select } from "./Select";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
@@ -202,14 +202,15 @@ export function Kanban(props: { project: string }) {
       <div class="kbar">
         <span class="ktitle">Kanban</span>
         <span class="grow" />
-        <button
+        <Button
+          variant="default"
           class="primary"
           title="Cria um worktree de integração e despacha um agente por cartão em 'Para fazer'"
           disabled={inCol("todo").length === 0 || run().state === "running"}
           onClick={() => void start()}
         >
           {run().state === "running" ? "A executar…" : `Executar “Para fazer” (${inCol("todo").length})`}
-        </button>
+        </Button>
       </div>
       <Show when={err()}>
         <div class="kerr">{err()}</div>
@@ -251,9 +252,9 @@ export function Kanban(props: { project: string }) {
               <div class="kcol-head">
                 <span>{col.label}</span>
                 <span class="kcount">{colCards(col.id).length}</span>
-                <button class="icon" title="Novo cartão" aria-label="Novo cartão" onClick={() => edit(undefined, col.id)}>
+                <Button variant="ghost" size="icon" class="icon" title="Novo cartão" aria-label="Novo cartão" onClick={() => edit(undefined, col.id)}>
                   <Icon name="plus" />
-                </button>
+                </Button>
               </div>
               <div class="kcards">
                 <For each={colCards(col.id)}>
@@ -290,9 +291,9 @@ export function Kanban(props: { project: string }) {
                       <Show when={col.id === "needs-review"}>
                         <div class="kcard-body">Motivo: {reason(c.meta.id)}</div>
                         <div class="kchips" role="group" aria-label="Ações do cartão" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                          <button onClick={() => openWt(c.meta.id)}>Abrir worktree</button>
-                          <button onClick={() => void retry(c)}>Tentar integrar de novo</button>
-                          <button onClick={() => void openPr(c)}>Abrir pull request</button>
+                          <Button size="sm" onClick={() => openWt(c.meta.id)}>Abrir worktree</Button>
+                          <Button size="sm" onClick={() => void retry(c)}>Tentar integrar de novo</Button>
+                          <Button size="sm" onClick={() => void openPr(c)}>Abrir pull request</Button>
                         </div>
                       </Show>
                       <div
@@ -307,16 +308,16 @@ export function Kanban(props: { project: string }) {
                           }
                         }}
                       >
-                        <button aria-haspopup="menu" aria-expanded={menu() === c.meta.id} onClick={() => setMenu(menu() === c.meta.id ? null : c.meta.id)}>
+                        <Button size="sm" aria-haspopup="menu" aria-expanded={menu() === c.meta.id} onClick={() => setMenu(menu() === c.meta.id ? null : c.meta.id)}>
                           Mover para…
-                        </button>
+                        </Button>
                         <Show when={menu() === c.meta.id}>
                           <div role="menu" style={{ display: "flex", "flex-direction": "column", gap: "2px", "margin-top": "4px" }}>
                             <For each={COLS.filter((x) => x.id !== col.id)}>
                               {(x, i) => (
-                                <button role="menuitem" ref={(el) => queueMicrotask(() => i() === 0 && el.focus())} onClick={() => void moveTo(c.meta.id, x.id)}>
+                                <Button size="sm" class="justify-start" role="menuitem" ref={(el) => queueMicrotask(() => i() === 0 && el.focus())} onClick={() => void moveTo(c.meta.id, x.id)}>
                                   {x.label}
-                                </button>
+                                </Button>
                               )}
                             </For>
                           </div>
@@ -349,36 +350,31 @@ export function Kanban(props: { project: string }) {
                 onInput={(e) => setDraft({ ...d(), body: e.currentTarget.value })}
               />
               <div class="m-row">
-                <label>
-                  Estado
+                <Field label="Estado">
                   <Select
                     value={d().status}
                     options={COLS.map((c) => ({ value: c.id, label: c.label }))}
                     onChange={(v) => setDraft({ ...d(), status: v })}
                   />
-                </label>
-                <label>
-                  Agente
+                </Field>
+                <Field label="Agente" hint={agentWarning(agents(), d().agent) || undefined}>
                   <Select
                     value={d().agent}
                     options={agentOptions(agents(), d().agent)}
                     onChange={(v) => setDraft({ ...d(), agent: v })}
                   />
-                  <Show when={agentWarning(agents(), d().agent)}>{(w) => <span class="auto-note">{w()}</span>}</Show>
-                </label>
-                <label>
-                  Prioridade
-                  <input
+                </Field>
+                <Field label="Prioridade">
+                  <Input
                     type="number"
                     value={d().priority}
                     onInput={(e) => setDraft({ ...d(), priority: parseInt(e.currentTarget.value) || 0 })}
                   />
-                </label>
+                </Field>
               </div>
-              <label class="m-full">
-                Depende de (ids separados por vírgula)
+              <Field label="Depende de (ids separados por vírgula)" full>
                 <Input value={d().depends} onInput={(e) => setDraft({ ...d(), depends: e.currentTarget.value })} />
-              </label>
+              </Field>
               <div class="m-actions">
                 <Show when={d().id}>
                   <Button variant="destructive" onClick={() => void remove()}>

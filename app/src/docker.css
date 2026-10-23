@@ -2,28 +2,13 @@
 .dk { display: flex; flex: 1; min-width: 0; min-height: 0; height: 100%; background: var(--bg); color: var(--text); font-size: var(--fs-base); }
 .dk .grow { flex: 1; }
 .dk-nav { width: 148px; flex: none; display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; border-right: 1px solid var(--line); background: var(--panel); }
-.dk-nav-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 10px; border: 0; border-radius: var(--r-md); background: none; color: var(--muted); font: inherit; text-align: left; cursor: pointer; }
-.dk-nav-item:hover { background: var(--s1); color: var(--text); }
-.dk-nav-item.on { background: var(--s2); color: var(--text); }
+.dk-nav-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .dk-count { font-size: var(--fs-sm); color: var(--muted); }
 .dk-ver { padding: 6px 10px 0; }
 
 .dk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 .dk-tools { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
-.dk-search { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line-2); border-radius: var(--r-md); padding: 5px 9px; color: var(--text); font: inherit; }
-.dk-search:focus { outline: none; border-color: var(--accent); }
 .dk-seg { display: flex; }
-.dk-seg button { padding: 3px 10px; }
-.dk-seg button.on { background: var(--panel); color: var(--text); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.dk-tools button:not(.icon):not(.primary), .dk-compose button, .dk-empty button:not(.link) { background: transparent; border: 1px solid var(--line-3); color: var(--text); border-radius: var(--r-md); padding: 4px 10px; font: inherit; font-size: var(--fs-md); cursor: pointer; }
-.dk-tools button:not(.icon):not(.primary):hover, .dk-compose button:hover, .dk-empty button:not(.link):hover { border-color: var(--accent); color: var(--accent); }
-.dk-empty .primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-.dk-compose button:disabled, .dk-empty button:disabled, .dk-gbtn:disabled, .dk .icon:disabled { opacity: .4; cursor: default; }
-.dk .icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-md); background: none; color: var(--muted); cursor: pointer; }
-.dk .icon:hover:not(:disabled) { background: var(--s2); color: var(--text); }
-.dk .icon.danger:hover:not(:disabled) { color: var(--danger); }
-.dk .link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-size: var(--fs-md); text-decoration: underline; cursor: pointer; }
-.dk button:focus-visible, .dk input:focus-visible, .dk-row:focus-visible, .dk-list:focus-visible, .dk-pre:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .dk-body { flex: 1; min-height: 0; overflow-y: auto; }
 .dk-err { margin: 8px 12px; padding: 6px 10px; border: 1px solid rgba(248, 113, 113, .45); border-radius: var(--r-md); color: var(--danger); font-size: var(--fs-md); white-space: pre-wrap; }
@@ -37,12 +22,8 @@
 .dk-list { outline: none; }
 .dk-group + .dk-group { border-top: 1px solid var(--line); }
 .dk-ghead { display: flex; align-items: center; gap: 6px; padding: 5px 12px; background: var(--panel); position: sticky; top: 0; z-index: 1; }
-.dk-gtoggle { display: flex; align-items: center; gap: 8px; background: none; border: 0; color: var(--text); font: inherit; cursor: pointer; padding: 2px 0; }
 .dk-chev { display: inline-flex; transition: transform .1s; }
 .dk-chev.shut { transform: rotate(-90deg); }
-.dk-gbtn { background: none; border: 0; border-radius: var(--r-md); padding: 2px 8px; color: var(--muted); font: inherit; font-size: var(--fs-md); cursor: pointer; }
-.dk-gbtn:hover:not(:disabled) { background: var(--s2); color: var(--text); }
-.dk-gbtn.danger:hover:not(:disabled) { color: var(--danger); }
 
 .dk-row { display: grid; grid-template-columns: 104px minmax(120px, 1fr) minmax(0, 1.1fr) 56px 76px 84px auto; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--line-2); cursor: default; min-height: 42px; }
 .dk-row.plain { grid-template-columns: minmax(140px, 1.2fr) minmax(0, 1.4fr) auto auto; }
@@ -64,9 +45,6 @@
 .dk-dhead { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .dk-dtitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dk-dtabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line); }
-.dk-dtabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 7px 10px; color: var(--muted); font: inherit; cursor: pointer; }
-.dk-dtabs button:hover { color: var(--text); }
-.dk-dtabs button.on { color: var(--text); border-bottom-color: var(--accent); }
 .dk-dbody { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 .dk-info { padding: 10px 14px; }
 .dk-info h4 { margin: 14px 0 6px; font-size: var(--fs-md); color: var(--muted); font-weight: 600; }
@@ -82,12 +60,11 @@
 .dk-pre { flex: 1; min-height: 120px; margin: 0; padding: 8px 12px; overflow: auto; background: var(--bg); font-family: "Cascadia Code", Consolas, monospace; font-size: var(--fs-md); line-height: 1.45; white-space: pre-wrap; word-break: break-all; }
 .dk-termhost { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 .dk-flist { list-style: none; margin: 0; padding: 4px 6px; max-height: 40%; overflow-y: auto; border-bottom: 1px solid var(--line); }
-.dk-flist button { display: flex; align-items: center; gap: 6px; width: 100%; background: none; border: 0; border-radius: var(--r-sm); padding: 3px 8px; color: var(--text); font: inherit; font-size: var(--fs-md); text-align: left; cursor: pointer; }
-.dk-flist button:hover { background: var(--s1); }
-.dk-flist button.on { background: var(--s2); }
 
 @media (max-width: 1100px) {
   .dk-row { grid-template-columns: 104px minmax(100px, 1fr) minmax(0, 1fr) auto; }
   .dk-row .dk-num { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .dk-chev { transition: none; } }
+
+.dk-row:focus-visible, .dk-list:focus-visible, .dk-pre:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

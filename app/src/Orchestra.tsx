@@ -3,6 +3,7 @@ import { Icon } from "./Icon";
 import { SessionInfo, SessionRes, killSession, removeSession, sessionResources, workerLimits } from "./api";
 import { ask } from "./Confirm";
 import { Modal } from "./Modal";
+import { Button, Input } from "./ui";
 import { openSession, refreshSessions, sessionState, sessions, setShowOrchestra } from "./store";
 
 const baseName = (p?: string) => (p ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
@@ -96,13 +97,13 @@ export function Orchestra() {
             <span class="wt-badge" title="Mensagens por ler"><Icon name="mail" size={11} inline /> {props.s.unread}</span>
           </Show>
           <span class="grow" />
-          <button onClick={() => open(props.s)} disabled={!props.s.meta?.worktree}>
+          <Button size="sm" onClick={() => open(props.s)} disabled={!props.s.meta?.worktree}>
             Abrir
-          </button>
+          </Button>
           <Show when={props.depth > 0}>
-            <button class="danger" onClick={() => void stop(props.s)}>
+            <Button size="sm" variant="destructive" class="danger" onClick={() => void stop(props.s)}>
               Parar
-            </button>
+            </Button>
           </Show>
         </div>
         <For each={kids(props.s.id)}>{(k) => <Row s={k} depth={props.depth + 1} />}</For>
@@ -115,8 +116,8 @@ export function Orchestra() {
       <div class="m-title" style={{ "font-weight": "600" }}>Orquestração</div>
       <div class="orch-head auto-note">
         {workerCount()} {workerCount() === 1 ? "worker a correr" : "workers a correr"} · limite
-        <input
-          class="orch-limit"
+        <Input
+          class="orch-limit w-16"
           type="number"
           min="1"
           max="64"
