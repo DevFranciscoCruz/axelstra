@@ -14,9 +14,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       # the app crate needs the desktop toolkit; the engine crates (daemon, orchestrator, CLI) do not
       - name: Engine tests
         run: cargo test --no-fail-fast -p axelstra-core -p axelstra-daemon -p axelstra
@@ -24,9 +24,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       # catches host (Tauri) compile errors on every push instead of at release time
       - run: cargo check -p axelstra-app
       # host unit tests, including the daemon_call allow-list against the frontend sources
@@ -37,8 +37,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with: { node-version: 22 }
       - run: npm ci
         working-directory: app
@@ -46,3 +46,54 @@ jobs:
         working-directory: app
       - run: npm test
         working-directory: app
+  lint:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with: { components: "rustfmt, clippy" }
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      # not blocking yet: the tree has never been through rustfmt (see rustfmt.toml). Run `cargo fmt --all` once
+      # when no branch is in flight, then drop continue-on-error.
+      - run: cargo fmt --all --check
+        continue-on-error: true
+      # warnings fail the build. The -A list is what the tree still has outside the files this check was set up
+      # with (core/git.rs, daemon/server.rs, cli, app voice.rs): fix those, then delete the matching -A.
+      - run: >
+          cargo clippy --workspace --all-targets -- -D warnings
+          -A clippy::type_complexity
+          -A clippy::manual_is_multiple_of
+          -A clippy::needless_borrow
+          -A clippy::redundant_closure
+          -A clippy::chunks_exact_with_const_size
+          -A clippy::unnecessary_map_or
+  # Linux is experimental: this only proves the desktop host still compiles there.
+  linux-host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Desktop toolkit
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+      - run: cargo check -p axelstra-app
+  # Reports only for now: a finding in a dependency we cannot bump yet should not block unrelated work.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with: { node-version: 22 }
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit
+        continue-on-error: true
+      - run: npm audit --omit=dev
+        working-directory: app
+        continue-on-error: true
