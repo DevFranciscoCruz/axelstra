@@ -99,7 +99,8 @@ mod imp {
     }
 
     impl Job {
-        /// Private memory right now of every process in the job (what a task manager would add up).
+        /// RAM in use right now by every process in the job (working set). Not the commit charge (PrivateUsage): that one
+        /// counts memory a process only reserved and can be twice the real RAM for node and claude.
         pub fn memory_now(&self) -> u64 {
             use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX};
             use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
@@ -128,7 +129,7 @@ mod imp {
                     let mut c: PROCESS_MEMORY_COUNTERS_EX = std::mem::zeroed();
                     c.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
                     if GetProcessMemoryInfo(h, &mut c as *mut _ as *mut PROCESS_MEMORY_COUNTERS, c.cb) != 0 {
-                        total += c.PrivateUsage as u64;
+                        total += c.WorkingSetSize as u64;
                     }
                     CloseHandle(h);
                 }
