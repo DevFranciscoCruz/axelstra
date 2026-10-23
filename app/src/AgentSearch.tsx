@@ -1,5 +1,6 @@
-import { For, Show, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 import { AgentHit, agentSearch, launchDefaultAgent } from "./api";
+import { moveIndex } from "./a11y";
 import { Modal } from "./Modal";
 import { findWorktree, projectTerse, refreshSessions, setError, setShowAgentSearch, setActiveSession, selectWorktree } from "./store";
 
@@ -15,6 +16,7 @@ export function AgentSearch() {
   const [hits, setHits] = createSignal<AgentHit[]>([]);
   const [busy, setBusy] = createSignal(false);
   const [done, setDone] = createSignal(false);
+  const [sel, setSel] = createSignal(0);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let seq = 0;
   onCleanup(() => clearTimeout(timer));
@@ -55,22 +57,59 @@ export function AgentSearch() {
     }
   };
 
+  createEffect(() => {
+    hits();
+    setSel(0);
+  });
+  // keep the highlighted hit visible while arrowing through a long list
+  createEffect(() => {
+    sel();
+    queueMicrotask(() => document.querySelector(".search-hit.on")?.scrollIntoView({ block: "nearest" }));
+  });
+  const onKey = (e: KeyboardEvent) => {
+    // Home and End stay with the text field (cursor)
+    const to = e.key.startsWith("Arrow") ? moveIndex(sel(), hits().length, e.key) : null;
+    if (to !== null) {
+      e.preventDefault();
+      setSel(to);
+    } else if (e.key === "Enter" && hits()[sel()]) {
+      e.preventDefault();
+      void open(hits()[sel()]);
+    }
+  };
+
   return (
     <Modal label="Pesquisar conversas" onClose={() => setShowAgentSearch(false)} class="modal auto">
       <input
         class="m-title"
         placeholder="Pesquisar nas conversas do Claude e do Codex…"
+        role="combobox"
+        aria-expanded={hits().length > 0}
+        aria-controls="search-list"
+        aria-activedescendant={hits().length ? `search-hit-${sel()}` : undefined}
+        aria-label="Pesquisar nas conversas"
         value={q()}
+        onKeyDown={onKey}
         onInput={(e) => {
           setQ(e.currentTarget.value);
           run(e.currentTarget.value);
         }}
         ref={(el) => queueMicrotask(() => el.focus())}
       />
-      <div class="auto-list">
+      <div class="auto-list" id="search-list" role="listbox" aria-label="Conversas encontradas">
         <For each={hits()}>
-          {(h) => (
-            <div class="auto-item search-hit" classList={{ off: !target(h) }} onClick={() => void open(h)} title={target(h) ? "Retomar esta conversa" : h.cwd}>
+          {(h, i) => (
+            <div
+              class="auto-item search-hit"
+              id={`search-hit-${i()}`}
+              role="option"
+              aria-selected={i() === sel()}
+              aria-disabled={!target(h)}
+              classList={{ off: !target(h), on: i() === sel() }}
+              onMouseEnter={() => setSel(i())}
+              onClick={() => void open(h)}
+              title={target(h) ? "Retomar esta conversa" : h.cwd}
+            >
               <div class="auto-main">
                 <div class="auto-name">
                   {h.agent} · {baseName(h.cwd || "?")} <span class="auto-note">há {ago(h.ts)}</span>
@@ -80,12 +119,10 @@ export function AgentSearch() {
             </div>
           )}
         </For>
-        <Show when={done() && hits().length === 0}>
-          <div class="auto-note">Nada encontrado.</div>
-        </Show>
-        <Show when={busy()}>
-          <div class="auto-note">A pesquisar…</div>
-        </Show>
+      </div>
+      <div class="auto-note" role="status">
+        <Show when={busy()}>A pesquisar…</Show>
+        <Show when={!busy() && done() && hits().length === 0}>Nada encontrado.</Show>
       </div>
       <div class="auto-note">Só as conversas do Claude em worktrees conhecidos podem ser retomadas aqui; as restantes aparecem a cinzento.</div>
     </Modal>

@@ -72,6 +72,9 @@ import {
   splitSession,
   setSplitSession,
   setFsTick,
+  projects,
+  setCreatingWorktree,
+  setRemoveRequest,
   norm,
   findWorktree,
   openDiff,
@@ -470,6 +473,11 @@ export function App() {
     window.addEventListener("mouseup", up);
   };
 
+  // the dialogs for a new or removed worktree belong to the sidebar: show it first
+  const showSidebarNow = () => {
+    if (!showSidebar()) toggleSidebar();
+  };
+
   const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
   return (
@@ -515,7 +523,14 @@ export function App() {
                 { label: "Novo terminal", run: () => void newTerminal() },
                 { label: "Dividir terminal", run: () => void toggleSplit() },
                 { label: "Reabrir último separador fechado", hint: "Ctrl+Shift+T", run: () => void reopenClosed() },
+                ...(activeSession() !== null ? [{ label: "Mudar o nome do separador", hint: "F2", run: () => setRenaming(activeSession()) }] : []),
+                ...(current()!.wt.is_main
+                  ? []
+                  : [{ label: "Remover worktree atual", hint: "worktree", run: () => { showSidebarNow(); setRemoveRequest({ project: current()!.project.id, path: current()!.wt.path, name: current()!.wt.branch ?? current()!.wt.path }); } }]),
               ]
+            : []),
+          ...(projects().length > 0
+            ? [{ label: "Novo worktree", hint: "worktree", run: () => { showSidebarNow(); setCreatingWorktree(current()?.project.id ?? projects()[0].id); } }]
             : []),
           { label: "Pesquisar conversas", hint: "Ctrl+Shift+F", run: () => setShowAgentSearch(true) },
           { label: "Orquestração: agentes e workers", run: () => setShowOrchestra(true) },
@@ -524,6 +539,7 @@ export function App() {
           { label: "Automatizações", hint: "agendamento", run: () => setShowAutomations(true) },
           { label: "Atalhos de teclado", hint: "?", run: () => setShowShortcuts(true) },
           { label: showSidebar() ? "Ocultar projetos" : "Mostrar projetos", hint: "Ctrl+B", run: toggleSidebar },
+          { label: showRightPanel() ? "Ocultar painel direito" : "Mostrar painel direito", hint: "Ctrl+Shift+B", run: toggleRightPanel },
           { label: computerOn() ? "Controlo do ecrã pelos agentes: desligar" : "Controlo do ecrã pelos agentes: ligar", run: () => void toggleComputer() },
         ]}
       />

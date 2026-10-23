@@ -214,6 +214,11 @@ export const [splitSession, setSplitSession] = createSignal<number | null>(null)
 /** dev-server ports opened by the selected worktree's terminals */
 export const [ports, setPorts] = createSignal<number[]>([]);
 
+/** project whose "new worktree" dialog is open: the sidebar shows it, the command palette can ask for it */
+export const [creatingWorktree, setCreatingWorktree] = createSignal<string | null>(null);
+/** a worktree the command palette asked to remove; the sidebar confirms and does it */
+export const [removeRequest, setRemoveRequest] = createSignal<{ project: string; path: string; name: string } | null>(null);
+
 /** the automations dialog */
 export const [showAutomations, setShowAutomations] = createSignal(false);
 export const [showSettings, setShowSettings] = createSignal(false);
