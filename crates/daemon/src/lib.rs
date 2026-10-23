@@ -2,6 +2,7 @@ pub mod agentlog;
 pub mod automations;
 pub mod changes;
 pub mod client;
+pub mod docker;
 pub mod fsops;
 pub mod gh;
 pub mod janitor;
