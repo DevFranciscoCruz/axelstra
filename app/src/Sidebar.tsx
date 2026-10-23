@@ -744,7 +744,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                                     <StateDot state={dotOfSession(a)} />
                                     <span class="wt-agent-name">{a.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{info().name}</span>
                                     <Show when={info().kind}>
-                                      <span class="wt-agent-kind">{info().kind}</span>
+                                      <span class="wt-agent-kind inline-flex items-center text-muted-foreground" title={info().kind} role="img" aria-label={`Agente ${info().kind}`}>{hasIcon(info().kind) ? <Icon name={info().kind} size={13} /> : info().kind}</span>
                                     </Show>
                                     <Show when={info().worktree}>
                                       <span class="wt-agent-wt inline-flex items-center text-muted-foreground" title={info().worktree} role="img" aria-label={`Worktree ${info().worktree}`}><Icon name="branch" size={12} /></span>
