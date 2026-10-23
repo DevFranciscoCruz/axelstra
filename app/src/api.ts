@@ -78,13 +78,20 @@ const RESUME_LINE: Record<string, string> = {
   gemini: "gemini --resume latest",
 };
 
+/** A search hit resumes a specific Gemini conversation as "gemini:SESSION_ID" (any other resume value is Axelstra's own tab key). */
+export const geminiResumeId = (resume: string | undefined) => {
+  const id = resume?.startsWith("gemini:") ? resume.slice(7) : "";
+  return /^[A-Za-z0-9_-]{1,80}$/.test(id) ? id : null;
+};
+
 /** Command line for an agent. On restore it resumes the earlier conversation, falling back to a fresh start. */
 export const agentLine = (cli: string, resume: string | undefined, restoring: boolean, ps: boolean, hooks: string, rules?: string | null) => {
   const style = rules ? ` --append-system-prompt ${shQuote(rules, ps)}` : "";
   const claude = (flags: string) => `claude --settings ${shQuote(hooks, ps)}${style} ${flags}`;
   const fresh = cli === "claude" && resume ? claude(`--session-id ${resume}`) : cli;
   if (!restoring) return fresh;
-  const back = cli === "claude" && resume ? claude(`--resume ${resume}`) : RESUME_LINE[cli] ?? cli;
+  const gem = cli === "gemini" ? geminiResumeId(resume) : null;
+  const back = cli === "claude" && resume ? claude(`--resume ${resume}`) : gem ? `gemini --resume ${gem}` : RESUME_LINE[cli] ?? cli;
   return ps ? `${back}; if (!$?) { ${fresh} }` : `${back} || ${fresh}`;
 };
 
@@ -410,7 +417,16 @@ export const worktreeOverview = () => callBg<{ projects: import("./statusGroups"
 /** removes the worktrees whose work is merged (the janitor's sweep) */
 export const worktreeSweep = () => call<{ swept: { path: string; branch: string; removed: boolean }[] }>("worktree.sweep", {}).then((r) => r.swept);
 
-export type AgentHit = { agent: "claude" | "codex"; session: string; cwd: string; ts: number; snippet: string };
+/** `project` is Gemini's project hash (its logs keep no folder); `geminiPathVariants` + sha-256 map it back to a worktree. */
+export type AgentHit = { agent: "claude" | "codex" | "gemini"; session: string; cwd: string; ts: number; snippet: string; project?: string };
+/** Ways Gemini may have spelled a worktree path before hashing it (mirrors gemini_hashes in crates/daemon/src/agentlog.rs). */
+export const geminiPathVariants = (path: string) => {
+  const t = path.replace(/^\\\\\?\\/, "").replace(/[\\/]+$/, "");
+  return [...new Set([path, t, t.replace(/\//g, "\\"), t.replace(/\\/g, "/")])];
+};
+/** What launchDefaultAgent gets as `resume` to reopen a hit's conversation; null when the agent cannot resume it. */
+export const hitResume = (h: Pick<AgentHit, "agent" | "session">) =>
+  h.agent === "claude" ? h.session : h.agent === "gemini" ? `gemini:${h.session}` : null;
 export const agentSearch = (query: string, max = 30) => callBg<{ hits: AgentHit[] }>("agent.search", { query, max }).then((r) => r.hits);
 
 export type TokenUsage = { input: number; output: number; cache_read: number; cache_write: number; messages: number; context: number };

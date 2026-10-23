@@ -1,4 +1,4 @@
-//! Reads the transcripts the agent CLIs already keep on disk: full-text search across past
+//! Reads the transcripts the agent CLIs (Claude, Codex, Gemini) already keep on disk: full-text search across past
 //! conversations and token usage of one session. Nothing is indexed or cached on disk; files are
 //! scanned on demand, newest first, so an idle daemon costs nothing.
 use crate::store::LockRecover;
@@ -20,6 +20,10 @@ fn claude_root() -> Option<PathBuf> {
 
 fn codex_root() -> Option<PathBuf> {
     Some(home()?.join(".codex").join("sessions"))
+}
+
+fn gemini_root() -> Option<PathBuf> {
+    Some(home()?.join(".gemini").join("tmp"))
 }
 
 /// Claude names a project folder after its path with every non-alphanumeric character as `-`.
@@ -52,6 +56,9 @@ pub struct Hit {
     pub cwd: String,
     pub ts: u64,
     pub snippet: String,
+    /// Gemini keeps no folder in its logs, only the project hash: the app matches it to a worktree
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
 }
 
 /// Plain text of one transcript line: message content of either CLI, whatever its shape.
@@ -132,7 +139,7 @@ fn search_file(p: &Path, agent: &'static str, needle_lc: &str, per_file: usize, 
         }
         let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
         if let Some(sn) = snippet(&line_text(&v), needle_lc) {
-            out.push(Hit { agent, session: session.clone(), cwd: cwd.clone(), ts, snippet: sn });
+            out.push(Hit { agent, session: session.clone(), cwd: cwd.clone(), ts, snippet: sn, project: None });
             found += 1;
             if found >= per_file {
                 return;
@@ -157,17 +164,244 @@ pub fn search(query: &str, max: usize) -> Vec<Hit> {
         jsonl_files(&r, 4, &mut v);
         files.extend(v.drain(..).map(|p| (p, "codex")));
     }
+    if let Some(r) = gemini_root() {
+        files.extend(gemini_files(&r).into_iter().map(|p| (p, "gemini")));
+    }
     files.sort_by_key(|(p, _)| std::cmp::Reverse(mtime(p)));
     let mut hits = vec![];
     // the newest 400 conversations are plenty; older ones are a click away in the CLI's own picker
     for (p, agent) in files.into_iter().take(400) {
-        search_file(&p, agent, &needle, 2, &mut hits);
+        if agent == "gemini" {
+            search_gemini(&p, &needle, 2, &mut hits);
+        } else {
+            search_file(&p, agent, &needle, 2, &mut hits);
+        }
         if hits.len() >= max {
             hits.truncate(max);
             break;
         }
     }
     hits
+}
+
+// ---- Gemini CLI ----
+// Layout (from the Gemini CLI docs and source; NOT verified against an install, none on this machine):
+//   ~/.gemini/tmp/PROJECT_HASH/chats/session-TIMESTAMP-ID8.json   one session per file
+//   PROJECT_HASH = lowercase hex SHA-256 of the project root path
+//   { "sessionId", "projectHash", "startTime", "lastUpdated",
+//     "messages": [ { "id", "timestamp", "type": "user" | "gemini" | "info" | "error",
+//                     "content": string or [ { "text" } ], "model"?, "tokens"?: { input, output, cached, thoughts, tool, total } } ] }
+// Newer builds may write the same records as JSON lines (.jsonl): both are read. `logs.json` next to `chats` only
+// holds the user prompts, so it is not read. `gemini --resume` takes `latest`, an index or a session id.
+
+/// Gemini files larger than this are skipped, so one runaway log cannot stall a search.
+const GEMINI_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+fn gemini_files_of(project: &Path) -> Vec<PathBuf> {
+    let Ok(chats) = std::fs::read_dir(project.join("chats")) else { return vec![] };
+    chats.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json" || x == "jsonl")).collect()
+}
+
+fn gemini_files(root: &Path) -> Vec<PathBuf> {
+    let Ok(rd) = std::fs::read_dir(root) else { return vec![] };
+    rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).flat_map(|p| gemini_files_of(&p)).collect()
+}
+
+/// SHA-256 as lowercase hex (Gemini names a project folder after the hash of its path).
+pub fn sha256_hex(data: &[u8]) -> String {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be,
+        0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa,
+        0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85,
+        0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+        0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f,
+        0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    let mut h: [u32; 8] = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    let mut msg = data.to_vec();
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&((data.len() as u64) * 8).to_be_bytes());
+    for chunk in msg.chunks(64) {
+        let mut w = [0u32; 64];
+        for (i, b) in chunk.chunks(4).enumerate() {
+            w[i] = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+        }
+        let mut a = h;
+        for i in 0..64 {
+            let s1 = a[4].rotate_right(6) ^ a[4].rotate_right(11) ^ a[4].rotate_right(25);
+            let ch = (a[4] & a[5]) ^ (!a[4] & a[6]);
+            let t1 = a[7].wrapping_add(s1).wrapping_add(ch).wrapping_add(K[i]).wrapping_add(w[i]);
+            let s0 = a[0].rotate_right(2) ^ a[0].rotate_right(13) ^ a[0].rotate_right(22);
+            let maj = (a[0] & a[1]) ^ (a[0] & a[2]) ^ (a[1] & a[2]);
+            a = [t1.wrapping_add(s0.wrapping_add(maj)), a[0], a[1], a[2], a[3].wrapping_add(t1), a[4], a[5], a[6]];
+        }
+        for i in 0..8 {
+            h[i] = h[i].wrapping_add(a[i]);
+        }
+    }
+    h.iter().map(|x| format!("{x:08x}")).collect()
+}
+
+/// Project hashes a worktree path may have under Gemini: the path as written and the slash and trailing-slash variants
+/// (Gemini hashes whatever string its process saw as the root, and on Windows that varies).
+pub fn gemini_hashes(path: &str) -> Vec<String> {
+    let t = path.trim_start_matches(r"\\?\").trim_end_matches(['/', '\\']);
+    let mut v: Vec<String> = vec![];
+    for cand in [path.to_string(), t.to_string(), t.replace('/', "\\"), t.replace('\\', "/")] {
+        let h = sha256_hex(cand.as_bytes());
+        if !v.contains(&h) {
+            v.push(h);
+        }
+    }
+    v
+}
+
+/// One Gemini conversation, reduced to what search and totals need.
+#[derive(Debug, Default, PartialEq)]
+pub struct GeminiSession {
+    pub session: String,
+    pub project_hash: String,
+    /// first user prompt, one line
+    pub title: String,
+    pub started: u64,
+    pub updated: u64,
+    /// (role, text) of the user and model messages
+    pub messages: Vec<(&'static str, String)>,
+    pub usage: Usage,
+}
+
+fn iso_secs(v: &Value) -> Option<u64> {
+    let t = chrono::DateTime::parse_from_rfc3339(v.as_str()?).ok()?.timestamp();
+    u64::try_from(t).ok()
+}
+
+/// Text of a message `content`: a plain string or a list of parts with a `text`.
+fn gemini_text(c: &Value) -> String {
+    match c {
+        Value::String(s) => s.clone(),
+        Value::Array(a) => a.iter().filter_map(|p| p["text"].as_str().or_else(|| p.as_str())).collect::<Vec<_>>().join("\n"),
+        Value::Object(_) => c["text"].as_str().unwrap_or_default().to_string(),
+        _ => String::new(),
+    }
+}
+
+fn absorb_header(v: &Value, s: &mut GeminiSession) {
+    if let Some(id) = v["sessionId"].as_str() {
+        s.session = id.to_string();
+    }
+    if let Some(h) = v["projectHash"].as_str() {
+        s.project_hash = h.to_string();
+    }
+    if let Some(t) = iso_secs(&v["startTime"]) {
+        s.started = t;
+    }
+    if let Some(t) = iso_secs(&v["lastUpdated"]) {
+        s.updated = t;
+    }
+}
+
+/// Parses one session file (`.json`, or `.jsonl` with one record per line). Never panics: anything unreadable
+/// or unexpected is skipped, and `None` means the file holds no usable conversation.
+pub fn parse_gemini(text: &str, jsonl: bool) -> Option<GeminiSession> {
+    let mut sess = GeminiSession::default();
+    let mut msgs: Vec<Value> = vec![];
+    if jsonl {
+        for line in text.lines() {
+            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+            if v["type"].is_string() && v.get("content").is_some() {
+                msgs.push(v);
+            } else {
+                absorb_header(&v, &mut sess);
+            }
+        }
+    } else {
+        let v: Value = serde_json::from_str(text).ok()?;
+        absorb_header(&v, &mut sess);
+        msgs = v["messages"].as_array().cloned().unwrap_or_default();
+    }
+    let mut totals = Usage::default();
+    for m in &msgs {
+        let role = match m["type"].as_str() {
+            Some("user") => "user",
+            Some("gemini") | Some("model") => "gemini",
+            _ => continue,
+        };
+        let body = gemini_text(&m["content"]);
+        if let Some(ts) = iso_secs(&m["timestamp"]) {
+            sess.started = if sess.started == 0 { ts } else { sess.started.min(ts) };
+            sess.updated = sess.updated.max(ts);
+        }
+        // Gemini counts the cached part inside `input`
+        let t = &m["tokens"];
+        if role == "gemini" && t.is_object() {
+            let n = |k: &str| t[k].as_u64().unwrap_or(0);
+            let cached = n("cached");
+            totals.input += n("input").saturating_sub(cached);
+            totals.output += n("output") + n("thoughts");
+            totals.cache_read += cached;
+            totals.messages += 1;
+        }
+        if sess.title.is_empty() && role == "user" && !body.trim().is_empty() {
+            sess.title = body.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
+        }
+        if !body.trim().is_empty() {
+            sess.messages.push((role, body));
+        }
+    }
+    sess.usage = totals;
+    if sess.messages.is_empty() {
+        return None;
+    }
+    Some(sess)
+}
+
+/// Reads and parses a session file, capped in size; the project hash falls back to the folder above `chats`.
+fn read_gemini(p: &Path) -> Option<GeminiSession> {
+    if std::fs::metadata(p).ok()?.len() > GEMINI_MAX_BYTES {
+        return None;
+    }
+    let text = std::fs::read_to_string(p).ok()?;
+    let mut s = parse_gemini(&text, p.extension().is_some_and(|x| x == "jsonl"))?;
+    if s.session.is_empty() {
+        s.session = p.file_stem().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default();
+    }
+    if s.project_hash.is_empty() {
+        s.project_hash =
+            p.parent().and_then(|c| c.parent()).and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    }
+    if s.updated == 0 {
+        s.updated = mtime(p);
+    }
+    Some(s)
+}
+
+fn search_gemini(p: &Path, needle_lc: &str, per_file: usize, out: &mut Vec<Hit>) {
+    let Some(s) = read_gemini(p) else { return };
+    let mut found = 0;
+    for (_, body) in &s.messages {
+        if let Some(sn) = snippet(body, needle_lc) {
+            out.push(Hit {
+                agent: "gemini",
+                session: s.session.clone(),
+                cwd: String::new(),
+                ts: s.updated,
+                snippet: sn,
+                project: Some(s.project_hash.clone()),
+            });
+            found += 1;
+            if found >= per_file {
+                return;
+            }
+        }
+    }
 }
 
 #[derive(Serialize, Clone, Default, Debug, PartialEq)]
@@ -343,7 +577,7 @@ fn file_usage(path: PathBuf) -> Option<Usage> {
     Some(u)
 }
 
-/// What one worktree has spent, summed over every Claude and Codex conversation that ran in it.
+/// What one worktree has spent, summed over every Claude, Codex and Gemini conversation that ran in it.
 #[derive(Serialize, Clone, Default, Debug, PartialEq)]
 pub struct WorktreeUsage {
     pub worktree: String,
@@ -353,18 +587,19 @@ pub struct WorktreeUsage {
     pub cache_write: u64,
     pub claude_sessions: u64,
     pub codex_sessions: u64,
+    pub gemini_sessions: u64,
 }
 
 impl WorktreeUsage {
-    fn add(&mut self, u: &Usage, claude: bool) {
+    fn add(&mut self, u: &Usage, agent: &str) {
         self.input += u.input;
         self.output += u.output;
         self.cache_read += u.cache_read;
         self.cache_write += u.cache_write;
-        if claude {
-            self.claude_sessions += 1;
-        } else {
-            self.codex_sessions += 1;
+        match agent {
+            "claude" => self.claude_sessions += 1,
+            "gemini" => self.gemini_sessions += 1,
+            _ => self.codex_sessions += 1,
         }
     }
 }
@@ -444,7 +679,7 @@ pub fn worktree_usage(worktrees: &[String]) -> Vec<WorktreeUsage> {
             jsonl_files(&root.join(claude_dir_name(&w.worktree)), 0, &mut files);
             for f in files {
                 if let Some(u) = file_usage(f).filter(|u| u.messages > 0) {
-                    w.add(&u, true);
+                    w.add(&u, "claude");
                 }
             }
         }
@@ -454,6 +689,17 @@ pub fn worktree_usage(worktrees: &[String]) -> Vec<WorktreeUsage> {
         jsonl_files(&root, 4, &mut files);
         let sessions: Vec<(String, Usage)> = files.iter().filter_map(|f| codex_file(f)).filter_map(|(cwd, u)| Some((cwd?, u))).collect();
         add_codex(&mut out, &sessions);
+    }
+    if let Some(root) = gemini_root() {
+        for w in &mut out {
+            for h in gemini_hashes(&w.worktree) {
+                for f in gemini_files_of(&root.join(&h)) {
+                    if let Some(u) = read_gemini(&f).map(|s| s.usage).filter(|u| u.messages > 0) {
+                        w.add(&u, "gemini");
+                    }
+                }
+            }
+        }
     }
     out
 }
@@ -468,7 +714,7 @@ fn add_codex(out: &mut [WorktreeUsage], sessions: &[(String, Usage)]) {
             c == n || c.starts_with(&format!("{n}/"))
         });
         if let Some((i, _)) = best.max_by_key(|(_, w)| w.worktree.len()) {
-            out[i].add(u, false);
+            out[i].add(u, "codex");
         }
     }
 }
@@ -554,7 +800,7 @@ mod tests {
             WorktreeUsage { worktree: r"C:\wt\b".into(), ..Default::default() },
         ];
         let claude = Usage { input: 5, output: 6, cache_read: 7, cache_write: 8, messages: 2, context: 0 };
-        out[0].add(&claude, true);
+        out[0].add(&claude, "claude");
         let codex = Usage { input: 1, output: 2, cache_read: 3, cache_write: 0, messages: 1, context: 0 };
         add_codex(
             &mut out,
@@ -574,11 +820,93 @@ mod tests {
                 cache_read: 10,
                 cache_write: 8,
                 claude_sessions: 1,
-                codex_sessions: 1
+                codex_sessions: 1,
+                gemini_sessions: 0
             }
         );
         assert_eq!((out[1].input, out[1].codex_sessions), (1, 1));
         assert_eq!(out[2].codex_sessions, 0, "a sibling folder with the same prefix is not this worktree");
+    }
+
+    #[test]
+    fn sha256_matches_known_vectors() {
+        assert_eq!(sha256_hex(b""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            sha256_hex(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+        );
+    }
+
+    #[test]
+    fn gemini_hashes_cover_slash_and_trailing_variants() {
+        let v = gemini_hashes(r"C:\wt\a\");
+        assert!(v.contains(&sha256_hex(br"C:\wt\a")));
+        assert!(v.contains(&sha256_hex(b"C:/wt/a")));
+        assert_eq!(gemini_hashes("/home/x").len(), 2, "plain and backslash form");
+    }
+
+    const GEMINI_JSON: &str = r#"{
+      "sessionId": "7d9c1c0e-2b0a-4d7e-9a53-0f6f5d0f1a11",
+      "projectHash": "abc123",
+      "startTime": "2026-10-20T10:00:00.000Z",
+      "lastUpdated": "2026-10-20T10:05:00.000Z",
+      "messages": [
+        {"id":"1","timestamp":"2026-10-20T10:00:01.000Z","type":"user","content":"Corrige o   bug do Flux Capacitor\nagora"},
+        {"id":"2","timestamp":"2026-10-20T10:00:09.000Z","type":"gemini","content":"Feito: o flux capacitor funciona.","model":"gemini-2.5-pro",
+         "tokens":{"input":1000,"output":50,"cached":400,"thoughts":20,"tool":0,"total":1070}},
+        {"id":"3","timestamp":"2026-10-20T10:01:00.000Z","type":"info","content":"Update available"},
+        {"id":"4","timestamp":"2026-10-20T10:02:00.000Z","type":"user","content":[{"text":"outra pergunta"},{"text":"em partes"}]},
+        {"id":"5","timestamp":"2026-10-20T10:05:00.000Z","type":"gemini","content":"resposta","tokens":{"input":2000,"output":10,"cached":1500,"thoughts":0,"tool":0,"total":2010}}
+      ]
+    }"#;
+
+    #[test]
+    fn gemini_session_is_parsed_with_title_times_and_tokens() {
+        let s = parse_gemini(GEMINI_JSON, false).unwrap();
+        assert_eq!(s.session, "7d9c1c0e-2b0a-4d7e-9a53-0f6f5d0f1a11");
+        assert_eq!(s.project_hash, "abc123");
+        assert_eq!(s.title, "Corrige o bug do Flux Capacitor agora");
+        assert_eq!(s.updated - s.started, 300);
+        // user and model messages only: the info line is dropped, array content is joined
+        assert_eq!(s.messages.len(), 4);
+        assert_eq!(s.messages[2].1, "outra pergunta\nem partes");
+        assert_eq!(s.usage, Usage { input: 600 + 500, output: 70 + 10, cache_read: 1900, cache_write: 0, messages: 2, context: 0 });
+    }
+
+    #[test]
+    fn gemini_jsonl_and_broken_input_do_not_panic() {
+        let lines = "{\"sessionId\":\"s1\",\"projectHash\":\"h\",\"startTime\":\"2026-10-20T10:00:00Z\"}\nnot json\n{\"id\":\"a\",\"timestamp\":\"2026-10-20T10:00:05Z\",\"type\":\"user\",\"content\":\"olá\"}\n";
+        let s = parse_gemini(lines, true).unwrap();
+        assert_eq!((s.session.as_str(), s.title.as_str(), s.messages.len()), ("s1", "olá", 1));
+        assert!(parse_gemini("{ truncated", false).is_none());
+        assert!(parse_gemini("[]", false).is_none());
+        assert!(parse_gemini("", true).is_none());
+        assert!(parse_gemini(r#"{"messages":[{"type":"user","content":null},{"type":"gemini"},7]}"#, false).is_none());
+    }
+
+    #[test]
+    fn gemini_search_and_worktree_usage_read_the_chats_folder() {
+        let root = std::env::temp_dir().join(format!("axl-gem-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let wt = r"C:\wt\gem";
+        let chats = root.join(sha256_hex(wt.as_bytes())).join("chats");
+        std::fs::create_dir_all(&chats).unwrap();
+        std::fs::write(chats.join("session-2026-10-20T10-00-7d9c1c0e.json"), GEMINI_JSON).unwrap();
+        std::fs::write(chats.join("session-broken.json"), "{ nope").unwrap();
+        let files = gemini_files(&root);
+        assert_eq!(files.len(), 2);
+        let mut hits = vec![];
+        for f in &files {
+            search_gemini(f, "flux capacitor", 5, &mut hits);
+        }
+        assert_eq!(hits.len(), 2, "user prompt and model reply");
+        assert_eq!(hits[0].agent, "gemini");
+        assert_eq!(hits[0].session, "7d9c1c0e-2b0a-4d7e-9a53-0f6f5d0f1a11");
+        assert_eq!(hits[0].project.as_deref(), Some("abc123"));
+        let mine = gemini_files_of(&root.join(&gemini_hashes(wt)[0]));
+        assert_eq!(mine.iter().filter_map(|f| read_gemini(f)).map(|s| s.usage.messages).sum::<u64>(), 2);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
