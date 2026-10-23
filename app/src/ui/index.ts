@@ -8,3 +8,5 @@ export { CheckboxInput } from "./checkbox-input";
 export { cn } from "./cn";
 export { PlainButton, PlainInput } from "./plain";
 export { Select } from "./select";
+export { Dialog } from "./dialog";
+export { CheckboxField } from "./checkbox-field";
