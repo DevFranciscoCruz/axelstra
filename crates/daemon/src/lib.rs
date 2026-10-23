@@ -11,6 +11,7 @@ pub mod kanban;
 pub mod lag;
 pub mod msgbus;
 pub mod overlaps;
+pub mod notes;
 #[cfg(windows)]
 pub mod pipesec;
 pub mod ports;

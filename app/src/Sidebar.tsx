@@ -1,12 +1,14 @@
 import { Icon } from "./Icon";
 import { ask, askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
-import { getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession } from "./api";
+import { getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession, dispatchOverlaps, worktreeRename } from "./api";
 import { Modal } from "./Modal";
 import { pickProject } from "./projectActions";
 import { StateDot } from "./StateDot";
 import { ago } from "./time";
-import { dotOfSession, dotOfWorktree } from "./agentState";
+import { DOT_LABEL, dotOfSession, dotOfWorktree } from "./agentState";
+import { agentRowInfo, agentRowLabel, overlapsOf, overlapTitle } from "./agentRow";
+import { NoteView, openNote } from "./NoteView";
 import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
 import { invoke } from "@tauri-apps/api/core";
 import { press } from "./a11y";
@@ -53,6 +55,8 @@ import {
   setError,
   activeSession,
   openSession,
+  tabLabel,
+  renameTab,
 } from "./store";
 
 function ProjectIcon(props: { id: string; name: string; url?: string | null }) {
@@ -140,6 +144,37 @@ export function Sidebar() {
     }
     return out;
   });
+  // worktrees that edit some of the same files (the daemon answers; until it can, the badge simply stays hidden)
+  const [overlaps, setOverlaps] = createSignal<Record<string, string[]> | null>(null);
+  const pollOverlaps = () => dispatchOverlaps().then(setOverlaps, () => setOverlaps(null));
+  void pollOverlaps();
+  const overlapTimer = setInterval(() => !document.hidden && void pollOverlaps(), 20000);
+  onCleanup(() => clearInterval(overlapTimer));
+  // agent being renamed in the list (F2 on its row), and the worktree being renamed
+  const [renamingAgent, setRenamingAgent] = createSignal<number | null>(null);
+  const [renamingWt, setRenamingWt] = createSignal<{ path: string; name: string } | null>(null);
+  const [wtNewName, setWtNewName] = createSignal("");
+  const [wtRenameErr, setWtRenameErr] = createSignal("");
+  const finishAgentRename = (id: number, name: string | null) => {
+    if (name !== null) renameTab(id, name);
+    setRenamingAgent(null);
+    queueMicrotask(() => document.querySelector<HTMLElement>(`[data-agent-row="${id}"]`)?.focus());
+  };
+  const submitWtRename = async () => {
+    const r = renamingWt();
+    const name = wtNewName().trim();
+    if (!r || !name) return;
+    try {
+      await worktreeRename(r.path, name);
+    } catch (e) {
+      setWtRenameErr(String(e));
+      return;
+    }
+    setRenamingWt(null);
+    await refreshProjects();
+    await refreshSessions();
+    void pollOverlaps();
+  };
   const idleLabel = (ms?: number) => (ms === undefined ? "" : ago(ms / 1000));
   const [editSetup, setEditSetup] = createSignal<string | null>(null);
   const [setupText, setSetupText] = createSignal("");
@@ -270,6 +305,7 @@ export function Sidebar() {
       ],
     },
     { label: "Copiar caminho", icon: "copy", run: () => copy(w.path) },
+    { label: "Mudar o nome do worktree…", icon: "pencil", disabled: w.is_main, run: () => { setWtNewName(w.branch ?? label); setWtRenameErr(""); setRenamingWt({ path: w.path, name: label }); } },
     { label: "Copiar nome do worktree", icon: "copy", run: () => copy(w.branch ?? label) },
     { separator: true },
     { label: isPinned(w.path) ? "Desafixar" : "Fixar", icon: "pin", run: () => togglePin(w.path) },
@@ -476,6 +512,11 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                     <Show when={st()?.dirty}>
                       <span class="wt-badge" title={`${st()!.dirty} ficheiro(s) com alterações por guardar`}><i class="bdot" />{st()!.dirty}</span>
                     </Show>
+                    <Show when={overlapTitle(overlapsOf(overlaps(), w.path))}>
+                      {(t) => (
+                        <span class="wt-badge overlap" role="img" title={t()} aria-label={t()}><Icon name="warning" size={11} /></span>
+                      )}
+                    </Show>
                     <Show when={st()?.ahead || st()?.behind}>
                       <span class="wt-badge" title={`${st()!.ahead} commit(s) à frente e ${st()!.behind} atrás do remoto`}>
                         {st()!.ahead ? <span class="bd"><Icon name="arrowUp" size={10} />{st()!.ahead}</span> : null}
@@ -531,18 +572,62 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                       </button>
                       <Show when={!agentsHidden().has(norm(w.path))}>
                         <For each={agents()}>
-                          {(a) => (
-                            <div
-                              class="wt-agent"
-                              classList={{ active: activeSession() === a.id && norm(selectedWorktree()) === norm(w.path) }}
-                              {...press(() => openSession(a.meta?.worktree ?? w.path, a.id))}
-                              title={a.label ?? `Sessão ${a.id}`}
-                            >
-                              <StateDot state={dotOfSession(a)} />
-                              <span class="wt-agent-name">{a.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{a.label ?? `Sessão ${a.id}`}</span>
-                              <span class="wt-agent-time">{a.running ? idleLabel(a.idle_ms) : "fim"}</span>
-                            </div>
-                          )}
+                          {(a) => {
+                            const info = () => agentRowInfo(a, w.path, tabLabel(a));
+                            const state = () => DOT_LABEL[dotOfSession(a)];
+                            const active = () => activeSession() === a.id && norm(selectedWorktree()) === norm(w.path);
+                            return (
+                              <div class="wt-agent" classList={{ active: active() }}>
+                                <Show
+                                  when={renamingAgent() !== a.id}
+                                  fallback={
+                                    <input
+                                      class="wt-agent-edit"
+                                      aria-label="Nome do agente"
+                                      value={info().name}
+                                      ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") finishAgentRename(a.id, e.currentTarget.value);
+                                        else if (e.key === "Escape") finishAgentRename(a.id, null);
+                                      }}
+                                      onBlur={(e) => renamingAgent() === a.id && finishAgentRename(a.id, e.currentTarget.value)}
+                                    />
+                                  }
+                                >
+                                  <button
+                                    type="button"
+                                    class="wt-agent-open"
+                                    data-agent-row={a.id}
+                                    aria-label={agentRowLabel(info(), state())}
+                                    aria-current={active() ? "true" : undefined}
+                                    title={`${info().name} (F2 muda o nome)`}
+                                    onClick={() => openSession(a.meta?.worktree ?? w.path, a.id)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "F2") {
+                                        e.preventDefault();
+                                        setRenamingAgent(a.id);
+                                      }
+                                    }}
+                                  >
+                                    <StateDot state={dotOfSession(a)} />
+                                    <span class="wt-agent-name">{a.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{info().name}</span>
+                                    <Show when={info().kind}>
+                                      <span class="wt-agent-kind">{info().kind}</span>
+                                    </Show>
+                                    <Show when={info().worktree}>
+                                      <span class="wt-agent-wt" title={a.meta?.worktree}>{info().worktree}</span>
+                                    </Show>
+                                    <span class="wt-agent-time">{a.running ? idleLabel(a.idle_ms) : "fim"}</span>
+                                  </button>
+                                </Show>
+                                <Show when={info().hasReport && renamingAgent() !== a.id}>
+                                  <button type="button" class="wt-agent-report" aria-label={`Relatório de ${info().name}`} title="Abrir o relatório deste agente" onClick={() => openNote(a.id, info().name)}>
+                                    <Icon name="file" size={11} /> Relatório
+                                  </button>
+                                </Show>
+                              </div>
+                            );
+                          }}
                         </For>
                       </Show>
                     </div>
@@ -601,6 +686,32 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
             </Modal>
           );
         }}
+      </Show>
+      <NoteView />
+      <Show when={renamingWt()}>
+        {(r) => (
+          <Modal label="Mudar o nome do worktree" dirty={wtNewName().trim() !== r().name} onClose={() => setRenamingWt(null)}>
+            <div class="m-title" style={{ "font-weight": "600" }}>Mudar o nome do worktree</div>
+            <label class="m-full">
+              Nome
+              <input
+                value={wtNewName()}
+                onInput={(e) => { setWtNewName(e.currentTarget.value); setWtRenameErr(""); }}
+                onKeyDown={(e) => e.key === "Enter" && void submitWtRename()}
+                ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
+              />
+            </label>
+            <Show when={wtRenameErr()}>
+              <div class="note-status bad" role="alert">{wtRenameErr()}</div>
+            </Show>
+            <div class="m-actions" style={{ "justify-content": "flex-end" }}>
+              <button onClick={() => setRenamingWt(null)}>Cancelar</button>
+              <button class="primary" disabled={!wtNewName().trim() || wtNewName().trim() === r().name} onClick={() => void submitWtRename()}>
+                Mudar o nome
+              </button>
+            </div>
+          </Modal>
+        )}
       </Show>
     </aside>
   );

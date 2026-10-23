@@ -93,7 +93,8 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
                 println!("nothing to remove");
             }
         }
-        Cmd::Agent { worktree, agent, prompt, report_to, when, idle_secs, lines } => {
+        Cmd::Agent { worktree, agent, prompt, prompt_file, report_to, when, idle_secs, lines } => {
+            let prompt = resolve_prompt(prompt, prompt_file.as_deref(), &mut std::io::stdin())?;
             let reap = reap_for(report_to, when.as_deref(), "idle", idle_secs, lines, std::env::var("AXELSTRA_SESSION").ok().as_deref())?;
             println!("{}", spawn_agent(&mut c, &worktree, &agent, prompt.as_deref(), reap, false)?);
         }
@@ -234,6 +235,8 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
         | Cmd::Reply { .. }
         | Cmd::Done { .. }
         | Cmd::Escalate { .. }
+        | Cmd::Note { .. }
+        | Cmd::TaskFile
         | Cmd::Limit { .. }
         | Cmd::Thread { .. }
         | Cmd::Flow { .. }) => return super::orchcmd::run(c2, c),
@@ -241,6 +244,40 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
         _ => unreachable!(),
     }
     Ok(())
+}
+
+/// The first message for an agent: `--prompt TEXT`, `--prompt -` (stdin) or `--prompt-file PATH`.
+fn resolve_prompt(prompt: Option<String>, file: Option<&Path>, stdin: &mut dyn std::io::Read) -> Result<Option<String>> {
+    let text = match (prompt, file) {
+        (Some(_), Some(_)) => bail!("use --prompt or --prompt-file, not both"),
+        (Some(p), None) if p == "-" => {
+            let mut t = String::new();
+            stdin.read_to_string(&mut t).context("cannot read the prompt from stdin")?;
+            t
+        }
+        (Some(p), None) => p,
+        (None, Some(f)) => std::fs::read_to_string(f).with_context(|| format!("cannot read {}", f.display()))?,
+        (None, None) => return Ok(None),
+    };
+    let text = text.trim_start_matches('\u{feff}').trim_end().to_string();
+    if text.is_empty() {
+        bail!("the prompt is empty");
+    }
+    Ok(Some(text))
+}
+
+/// `line` with the content of `file` as its last argument, read by the shell itself; the file is deleted once read.
+/// Windows PowerShell 5 does not escape double quotes when it starts a program, so they are escaped here.
+fn with_prompt_file(line: &str, file: &str, ps: bool) -> String {
+    if ps {
+        let f = ps_quote(file);
+        format!(
+            "$axp = [IO.File]::ReadAllText({f}, [Text.Encoding]::UTF8); Remove-Item -LiteralPath {f}; $axp = $axp -replace '(\\\\*)\"','$1$1\\\"' -replace '(\\\\+)$','$1$1'; {line} $axp"
+        )
+    } else {
+        let f = sh_quote(file);
+        format!("axp=$(cat {f}); rm -f {f}; {line} \"$axp\"")
+    }
 }
 
 /// Starts a claude/codex session in `worktree` (visible in the app); returns its session id.
@@ -252,6 +289,8 @@ pub(crate) fn spawn_agent(
     reap: Option<Value>,
     worker: bool,
 ) -> Result<u32> {
+    // what the agent was asked, kept as the goal at the top of its task file
+    let goal = prompt.unwrap_or_default().to_string();
     // any agent CLI on the PATH works (opencode, gemini...); only claude and codex get conversation resume
     if agent.is_empty() || !agent.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')) {
         bail!("--agent must be the name of a command on the PATH (claude, codex, opencode...)");
@@ -292,8 +331,11 @@ pub(crate) fn spawn_agent(
         } else {
             pr.to_string()
         };
-        line.push(' ');
-        line.push_str(&if ps { ps_quote(&full) } else { sh_quote(&full) });
+        // the text never goes through a command line: a file the shell reads, so <, >, &, quotes and newlines arrive as typed
+        let file = format!("{dir}/prompts/{}.txt", new_uuid());
+        std::fs::create_dir_all(Path::new(&file).parent().context("bad data dir")?)?;
+        std::fs::write(&file, &full).with_context(|| format!("cannot write {file}"))?;
+        line = with_prompt_file(&line, &file, ps);
     }
     shell_run(&program, &mut args, ps, &line, reap.is_none());
     let mut meta = json!({"project": p["id"], "worktree": wt, "kind": "agent", "agent": agent});
@@ -306,7 +348,7 @@ pub(crate) fn spawn_agent(
     let r = c.call(
         "session.spawn",
         with_reap(
-            json!({"program": program, "args": args, "cwd": wt, "label": agent, "meta": meta, "env": env, "cols": 120, "rows": 30}),
+            json!({"program": program, "args": args, "cwd": wt, "label": agent, "meta": meta, "env": env, "goal": goal, "cols": 120, "rows": 30}),
             reap,
             worker,
         ),
@@ -582,6 +624,77 @@ mod tests {
         let u = new_uuid();
         assert_eq!(u.len(), 36);
         assert_ne!(u, new_uuid());
+    }
+
+    const NASTY: &str =
+        "corrige <login> & testa > saída | \"citado\" 'simples' \\\"barra\\ $HOME `tick` %PATH% ^ !\nsegunda linha\n\n  recuo\\";
+
+    #[test]
+    fn prompt_comes_from_text_stdin_or_file() {
+        let mut empty = std::io::empty();
+        assert_eq!(resolve_prompt(Some("a<b".into()), None, &mut empty).unwrap().as_deref(), Some("a<b"));
+        assert_eq!(resolve_prompt(None, None, &mut empty).unwrap(), None);
+        let mut input = std::io::Cursor::new(NASTY.as_bytes().to_vec());
+        assert_eq!(resolve_prompt(Some("-".into()), None, &mut input).unwrap().unwrap(), NASTY.trim_end());
+        let f = std::env::temp_dir().join(format!("axl-prompt-{}.txt", std::process::id()));
+        std::fs::write(&f, format!("\u{feff}{NASTY}\n")).unwrap();
+        assert_eq!(resolve_prompt(None, Some(&f), &mut empty).unwrap().unwrap(), NASTY.trim_end());
+        assert!(resolve_prompt(Some("x".into()), Some(&f), &mut empty).is_err());
+        std::fs::write(&f, " \n").unwrap();
+        assert!(resolve_prompt(None, Some(&f), &mut empty).is_err());
+        let _ = std::fs::remove_file(&f);
+    }
+
+    #[test]
+    fn posix_line_reads_the_prompt_from_the_file() {
+        let l = with_prompt_file("claude --x", "/tmp/it's.txt", false);
+        assert_eq!(l, r#"axp=$(cat '/tmp/it'\''s.txt'); rm -f '/tmp/it'\''s.txt'; claude --x "$axp""#);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn posix_shell_passes_the_prompt_unchanged() {
+        let d = std::env::temp_dir().join(format!("axl-posix-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let (input, output) = (d.join("in.txt"), d.join("out.txt"));
+        std::fs::write(&input, NASTY).unwrap();
+        let line = with_prompt_file("printf %s", &input.to_string_lossy(), false);
+        let st =
+            std::process::Command::new("sh").args(["-c", &format!("{line} > {}", sh_quote(&output.to_string_lossy()))]).status().unwrap();
+        assert!(st.success());
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), NASTY);
+        assert!(!input.exists(), "prompt file is removed once read");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The real path on Windows: powershell -Command LINE, the program receiving the text as one argument.
+    /// A second powershell stands in for the agent: it writes the argument it received to a file.
+    #[cfg(windows)]
+    #[test]
+    fn windows_line_delivers_the_prompt_unchanged() {
+        let d = std::env::temp_dir().join(format!("axl-ps-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let (script, input, output) = (d.join("echo.ps1"), d.join("in.txt"), d.join("out.txt"));
+        std::fs::write(
+            &script,
+            format!(
+                "if ($args.Count -ne 1) {{ [IO.File]::WriteAllText('{}', 'ARGS=' + $args.Count); exit 1 }}\r\n[IO.File]::WriteAllText('{}', $args[0], (New-Object Text.UTF8Encoding $false))",
+                output.display(),
+                output.display()
+            ),
+        )
+        .unwrap();
+        for prompt in [NASTY, "simples", "termina em barra\\", "só \"aspas\""] {
+            let _ = std::fs::remove_file(&output);
+            std::fs::write(&input, prompt).unwrap();
+            let agent = format!("powershell -NoProfile -NonInteractive -File {}", ps_quote(&script.to_string_lossy()));
+            let line = with_prompt_file(&agent, &input.to_string_lossy(), true);
+            let st = std::process::Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &line]).status().unwrap();
+            assert!(st.success(), "{prompt:?}: {:?}", std::fs::read_to_string(&output));
+            assert_eq!(std::fs::read_to_string(&output).unwrap(), prompt, "{prompt:?}");
+            assert!(!input.exists(), "prompt file is removed once read");
+        }
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
