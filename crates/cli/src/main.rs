@@ -238,6 +238,9 @@ enum Cmd {
         /// Run agents as interactive terminals in the daemon (start it with `axelstra daemon`)
         #[arg(long)]
         daemon: bool,
+        /// Allow the cards' `acceptance` commands to run (they come from the repository: only for a repo you trust)
+        #[arg(long)]
+        trust_acceptance: bool,
         /// Agent command, `{prompt_file}` is substituted. Everything after `--`.
         #[arg(last = true)]
         agent: Vec<String>,
@@ -433,10 +436,10 @@ fn main() -> Result<()> {
                 println!("{id}  agent={} deps={:?}", c.meta.agent, c.meta.depends_on);
             }
         }
-        Cmd::Start { repo, name, max, wt_root, daemon, agent } => {
+        Cmd::Start { repo, name, max, wt_root, daemon, trust_acceptance, agent } => {
             let repo = axelstra_core::git::canon(&repo)?;
             let wt_root = wt_root.unwrap_or_else(|| repo.parent().unwrap().join(".axelstra-wt"));
-            let r = orch::run(&orch::Options {
+            let opts = orch::Options {
                 repo,
                 name,
                 max_concurrency: max,
@@ -448,7 +451,8 @@ fn main() -> Result<()> {
                 } else {
                     None
                 },
-            })?;
+            };
+            let r = if trust_acceptance { orch::run_trusted(&opts)? } else { orch::run(&opts)? };
             println!("integration: {} ({})", r.integ_branch, r.integ_wt.display());
             println!("merged: {:?}", r.merged);
             for (id, why) in &r.failed {

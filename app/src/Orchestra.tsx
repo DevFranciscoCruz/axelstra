@@ -135,7 +135,7 @@ export function Orchestra() {
         </Show>
         <Show when={roots().length === 0 && orphans().length === 0 && loners().length === 0}>
           <div class="auto-note">
-            Ainda não há workers. Peça a um agente (Claude, Codex…) para usar <b>/axelstration</b> e eles aparecem aqui, por baixo de quem os lançou.
+            Ainda não há workers. Pede a um agente (Claude, Codex…) para usar <b>/axelstration</b> e eles aparecem aqui, por baixo de quem os lançou.
           </div>
         </Show>
       </div>

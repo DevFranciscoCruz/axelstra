@@ -90,9 +90,7 @@ fn exclude_kanban(repo: &Path) -> Result<()> {
 }
 
 fn atomic_write(path: &Path, text: &str) -> Result<()> {
-    let tmp = path.with_extension("md.tmp");
-    std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path)?;
+    crate::store::write_atomic(path, text.as_bytes())?;
     Ok(())
 }
 

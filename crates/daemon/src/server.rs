@@ -1121,6 +1121,11 @@ fn dispatch(
             let u = tokio::task::block_in_place(|| crate::agentlog::claude_usage(&cwd, p["session"].as_str()));
             Ok(json!({"usage": u}))
         }
+        "agent.worktree_usage" => {
+            let paths: Vec<String> = p["worktrees"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            let usage = tokio::task::block_in_place(|| crate::agentlog::worktree_usage(&paths));
+            Ok(json!({"usage": usage}))
+        }
         "project.list" => {
             if let Some((at, v)) = reg.plist.lock_recover().as_ref() {
                 if at.elapsed() < Duration::from_secs(3) {
