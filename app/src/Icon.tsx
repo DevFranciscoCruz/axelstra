@@ -43,6 +43,7 @@ const PATHS: Record<string, JSX.Element> = {
   ),
   folder: <path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" />,
   file: <path d="M4 2.5h5l3 3v8H4zM9 2.5v3h3" />,
+  box: <path d="M2.5 5.5 8 2.5l5.5 3v5L8 13.5l-5.5-3zM2.5 5.5 8 8.5l5.5-3M8 8.5v5" />,
   grid: (
     <>
       <rect x="2.5" y="2.5" width="4.5" height="4.5" rx=".8" />

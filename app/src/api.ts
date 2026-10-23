@@ -397,3 +397,40 @@ export const agentStatus = (key: string) => callBg<{ status: ClaudeStatus | null
 export type CodexWindow = { used_percent?: number; window_minutes?: number; resets_at?: number; resets_in_seconds?: number };
 export type CodexLimits = { primary?: CodexWindow; secondary?: CodexWindow; as_of?: number };
 export const codexLimits = () => callBg<{ limits: CodexLimits | null }>("codex.limits").then((r) => r.limits);
+
+// ---- docker ----
+export type DockerStatus = { installed: boolean; running: boolean; version: string; error: string };
+export type DockerPort = { host: number | null; container: number; proto: string };
+export type DockerContainer = {
+  id: string; name: string; image: string; state: string; status: string; ports: DockerPort[]; created: string;
+  project: string; working_dir: string; service: string; volumes: string[]; networks: string[];
+};
+export type DockerProject = { name: string; working_dir: string; running: number; total: number };
+export type DockerCompose = { file: string | null; project: string; services: DockerContainer[] };
+export type DockerStat = { id: string; name: string; cpu: number; mem: string; mem_pct: number };
+export type DockerImage = { id: string; tags: string[]; size: string; created: string; containers: number; dangling: boolean };
+export type DockerVolume = { name: string; driver: string; mountpoint: string; used_by: string[] };
+export type DockerNetwork = { id: string; name: string; driver: string; scope: string; containers: string[] };
+export type DockerInspect = { command: string; workdir: string; restart: string; env: [string, string][]; mounts: [string, string, string, boolean][]; networks: [string, string][] };
+export type DockerFsEntry = { name: string; dir: boolean };
+export type DockerAction =
+  | "container.start" | "container.stop" | "container.restart" | "container.pause" | "container.unpause" | "container.kill" | "container.remove"
+  | "image.remove" | "volume.remove" | "prune.containers" | "prune.images" | "prune.volumes" | "compose.up" | "compose.down";
+
+// queries go over the second connection: the 3 s poll must not hold up interactive calls
+export const dockerStatus = () => callBg<DockerStatus>("docker.status");
+export const dockerContainers = (worktree?: string | null) =>
+  callBg<{ projects: DockerProject[]; containers: DockerContainer[]; compose: DockerCompose | null }>("docker.containers", worktree ? { worktree } : {});
+export const dockerStats = () => callBg<{ stats: DockerStat[] }>("docker.stats").then((r) => r.stats);
+export const dockerImages = () => callBg<{ images: DockerImage[] }>("docker.images").then((r) => r.images);
+export const dockerVolumes = () => callBg<{ volumes: DockerVolume[] }>("docker.volumes").then((r) => r.volumes);
+export const dockerNetworks = () => callBg<{ networks: DockerNetwork[] }>("docker.networks").then((r) => r.networks);
+export const dockerInspect = (id: string) => callBg<DockerInspect>("docker.inspect", { id });
+export const dockerLogs = (id: string, tail = 500) => callBg<{ text: string }>("docker.logs", { id, tail }).then((r) => r.text);
+export const dockerFsList = (id: string, path: string) => callBg<{ entries: DockerFsEntry[] }>("docker.fs_list", { id, path }).then((r) => r.entries);
+export const dockerFsRead = (id: string, path: string) => callBg<{ text: string }>("docker.fs_read", { id, path }).then((r) => r.text);
+export const dockerAction = (action: DockerAction, o: { id?: string; force?: boolean; volumes?: boolean; worktree?: string } = {}) =>
+  call<{ output: string }>("docker.action", { action, ...o }).then((r) => r.output);
+/** Logs and shell are sessions the daemon starts with a fixed command in the worktree; the answer is the session id. */
+export const dockerOpenLogs = (worktree: string, id: string, project?: string) => call<{ id: number }>("docker.open_logs", { worktree, id, project }).then((r) => r.id);
+export const dockerOpenShell = (worktree: string, id: string, project?: string) => call<{ id: number }>("docker.open_shell", { worktree, id, project }).then((r) => r.id);
