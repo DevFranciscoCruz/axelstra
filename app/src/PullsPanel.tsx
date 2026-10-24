@@ -22,7 +22,8 @@ import { P } from "./strings.panels";
 import {
   findWorktree,
   refreshProjects,
-  selectWorktree,
+  selectIfStill,
+  navStamp,
   selectedWorktree,
   setError,
   rightTab,
@@ -248,9 +249,10 @@ export function PullsPanel() {
     if (!p) return;
     setBusy(n);
     try {
+      const stamp = navStamp();
       const w = await worktreeFromPr(p, n);
       await refreshProjects();
-      selectWorktree(w.path);
+      selectIfStill(stamp, w.path);
       showNotice(P.pulls.wtCreated(n));
     } catch (e) {
       setError(String(e));

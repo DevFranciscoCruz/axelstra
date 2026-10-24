@@ -35,6 +35,17 @@ export const openSession = (path: string, id: number) =>
     setActiveSession(id);
   });
 
+/** Counts every change of the selected worktree. A flow that selects something after an `await` takes `navStamp()`
+ *  first and uses `selectIfStill`/`openIfStill`: if the user went elsewhere meanwhile, the view stays where they put it. */
+let navEpoch = 0;
+export const navStamp = () => navEpoch;
+export const selectIfStill = (stamp: number, path: string | null) => {
+  if (stamp === navEpoch) selectWorktree(path);
+};
+export const openIfStill = (stamp: number, path: string, id: number) => {
+  if (stamp === navEpoch) openSession(path, id);
+};
+
 const notify = async (title: string, body: string, worktree: string, session: number, waiting: boolean) => {
   try {
     if (await invoke<boolean>("notify_session", { title, body, worktree, session, waiting })) return;
@@ -202,6 +213,7 @@ const [wt, setWt] = createSignal<string | null>(readString("axelstra.worktree") 
 export const selectedWorktree = wt;
 export const selectWorktree = (path: string | null) => guarded(() => doSelect(path));
 const doSelect = (path: string | null) => {
+  navEpoch++;
   setWt(path);
   if (path)
     setAttention((cur) => {
