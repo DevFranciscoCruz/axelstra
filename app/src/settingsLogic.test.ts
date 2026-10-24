@@ -30,7 +30,7 @@ describe("waitUntil", () => {
 });
 
 describe("diagnosticRows", () => {
-  const info = { app_version: "0.3.1", app_proto: 7, daemon_connected: true, daemon_proto: 7, daemon_instance: 42, data_dir: "C:/d", lag_log: "C:/d/lag.log", lag_log_bytes: 0, missing_tools: [] };
+  const info = { app_version: "0.3.1", app_proto: 7, daemon_connected: true, daemon_proto: 7, daemon_instance: 42, daemon_build: "0.3.1+x", daemon_security: 2, app_security_min: 2, data_dir: "C:/d", lag_log: "C:/d/lag.log", lag_log_bytes: 0, missing_tools: [] };
   it("lists what was reported", () => {
     expect(diagnosticRows(null)).toEqual([]);
     expect(diagnosticRows(info)).toEqual([
