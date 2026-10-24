@@ -941,8 +941,3 @@ button.icon, button.x, button.cbtn { display: inline-flex; align-items: center; 
 .wup-total { border-top: 1px solid var(--line-ctl); margin-top: 4px; padding-top: 4px; }
 .claude-ico { color: var(--claude); }
 
-/* first-run card in the empty project list */
-.first-run { display: flex; flex-direction: column; gap: 8px; align-items: stretch; text-align: left; padding: 12px; }
-.fr-title { font-weight: 600; color: var(--text); }
-.fr-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; color: var(--text); }
-.first-run code { font-family: "Cascadia Code", Consolas, monospace; }
