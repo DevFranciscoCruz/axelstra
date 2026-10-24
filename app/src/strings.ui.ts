@@ -1,5 +1,6 @@
 import { count, dict, plural } from "./i18n";
 import { enU } from "./strings.ui.en";
+import { ptBRU } from "./strings.ui.ptbr";
 
 /** pt-PT texts that sit directly in small components: close-window dialog, dispatcher, shortcuts, right tabs, loading, error boundary, worktree dialogs, reports. */
 export const ptU = {
@@ -66,4 +67,4 @@ export const ptU = {
   },
 } as const;
 
-export const U = dict(ptU, enU);
+export const U = dict<typeof ptU>(ptU, enU, ptBRU);
