@@ -422,16 +422,12 @@ id: ../evil
 
     #[test]
     fn timeout_min_must_be_finite_positive_and_capped() {
-        let mk = |v: &str| {
-            format!(
-                "---
+        let mk = |v: &str| format!("---
 id: a
 timeout_min: {v}
 ---
 body
-"
-            )
-        };
+");
         for bad in ["-1", "0", ".nan", ".inf", "-.inf", "1e30", "10081"] {
             assert!(parse(&mk(bad), Path::new("x")).is_err(), "{bad} accepted");
         }
@@ -448,20 +444,12 @@ body
 
     #[test]
     fn fingerprint_changes_when_a_card_changes() {
-        let c = |mode: &str, body: &str| {
-            parse(
-                &format!(
-                    "---
+        let c = |mode: &str, body: &str| parse(&format!("---
 id: a
 permission_mode: {mode}
 ---
 {body}
-"
-                ),
-                Path::new("x"),
-            )
-            .unwrap()
-        };
+"), Path::new("x")).unwrap();
         let base = fingerprint(&[c("auto", "do")]);
         assert_eq!(base, fingerprint(&[c("auto", "do")]));
         assert_ne!(base, fingerprint(&[c("bypassPermissions", "do")]));
