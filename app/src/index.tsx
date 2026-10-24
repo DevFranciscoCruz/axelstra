@@ -3,7 +3,7 @@ import "@fontsource-variable/inter";
 import "@xterm/xterm/css/xterm.css";
 import "./tailwind.css";
 import { App } from "./App";
-import { Gallery } from "./ui/Gallery";
+import { lazy } from "solid-js";
 import { Section } from "./Boundary";
 import { initTheme } from "./theme";
 import { installErrorHooks } from "./errorHooks";
@@ -18,6 +18,9 @@ installErrorHooks(
   window,
   (reason) => setError(errorText(reason)),
 );
+
+// the component reference is its own chunk, fetched only for `#ui`
+const Gallery = lazy(() => import("./ui/Gallery").then((m) => ({ default: m.Gallery })));
 
 // `#ui` opens the component reference page instead of the app
 render(

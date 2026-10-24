@@ -127,7 +127,17 @@ const [leftRaw, setLeftRaw] = createSignal(num("axelstra.leftW", 260));
 const [rightRaw, setRightRaw] = createSignal(num("axelstra.rightW", 320));
 // the window size, so the saved widths shrink when the window does (and come back when it grows)
 const [winW, setWinW] = createSignal(typeof window === "undefined" ? 1400 : window.innerWidth);
-if (typeof window !== "undefined") window.addEventListener("resize", () => setWinW(window.innerWidth));
+// one update per frame while the window is being dragged: each width change refits every terminal
+if (typeof window !== "undefined") {
+  let frame = 0;
+  window.addEventListener("resize", () => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      setWinW(window.innerWidth);
+    });
+  });
+}
 /** widths in use: what was saved, limited so the centre keeps a usable width */
 export const leftW = () => fitPanel(leftRaw(), LEFT, rightOn() ? rightRaw() : 0, winW());
 export const rightW = () => fitPanel(rightRaw(), RIGHT, leftOn() ? leftW() : 0, winW());
@@ -306,7 +316,7 @@ export const togglePin = (path: string) => {
 export const [activeSession, setActiveSession] = createSignal<number | null>(null);
 
 /** "working": produced output in the last few seconds; "idle": quiet; "done": the process ended */
-export const WORKING_MS = 3000;
+const WORKING_MS = 3000;
 export const sessionState = (s: SessionInfo): "working" | "waiting" | "idle" | "done" =>
   !s.running ? "done" : s.waiting ? "waiting" : (s.idle_ms ?? Infinity) < WORKING_MS ? "working" : "idle";
 

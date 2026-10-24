@@ -26,6 +26,8 @@ import { Handler, paletteCommands } from "./commands";
 import { requestNotificationsOpen } from "./notifications";
 import { restartDaemonFlow } from "./daemonActions";
 import { S, count } from "./strings";
+import { onTauriEvent } from "./tauriEvents";
+import { startDrag } from "./dragResize";
 import { basename } from "./paths";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
 import { LEFT, RIGHT, resizeTo, splitTo } from "./layout";
@@ -155,9 +157,11 @@ export function App() {
   onMount(() => {
     // typing lag diagnosis: stalls of the webview's main thread go to lag.log (see lag_log in the host)
     try {
-      new PerformanceObserver((list) => {
+      const obs = new PerformanceObserver((list) => {
         for (const e of list.getEntries()) if (e.duration >= 80) void tauriInvoke("lag_log", { what: "main thread stalled", ms: Math.round(e.duration) }).catch((err) => console.debug("lag_log", err));
-      }).observe({ entryTypes: ["longtask"] });
+      });
+      obs.observe({ entryTypes: ["longtask"] });
+      onCleanup(() => obs.disconnect());
     } catch (e) {
       console.debug("longtask observer not supported", e);
     }
@@ -206,28 +210,28 @@ export function App() {
         });
     void restore(S.app.onReopen);
     // the daemon crashed or was replaced while the app was open: its sessions are gone, bring them back
-    let unlistenRestart: (() => void) | undefined;
-    void import("@tauri-apps/api/event").then(({ listen }) =>
-      listen("daemon-restarted", () => {
+    const unlisten = [
+      onTauriEvent("daemon-restarted", () => {
         showNotice(S.app.daemonRestarted);
         void restore(S.app.afterRestart);
-      }).then((u) => (unlistenRestart = u)),
-    );
-    // the host reconnects to the daemon on its own: show it meanwhile, and say so when it did not work
-    const unlistenLink: (() => void)[] = [];
-    void import("@tauri-apps/api/event").then(({ listen }) => {
-      void listen("daemon-reconnecting", () => setDaemonReconnecting(true)).then((u) => unlistenLink.push(u));
-      void listen<{ ok: boolean }>("daemon-reconnected", (e) => {
+      }),
+      // the host reconnects to the daemon on its own: show it meanwhile, and say so when it did not work
+      onTauriEvent("daemon-reconnecting", () => setDaemonReconnecting(true)),
+      onTauriEvent<{ ok: boolean } | undefined>("daemon-reconnected", (p) => {
         setDaemonReconnecting(false);
-        if (!e.payload?.ok)
+        if (!p?.ok)
           toast({
             text: S.app.reconnectFailed,
             kind: "error",
             key: "daemon-reconnect",
             action: { label: S.toast.retryNow, run: () => void retryDaemon() },
           });
-      }).then((u) => unlistenLink.push(u));
-    });
+      }),
+      // clicking a desktop notification lands on the session that raised it
+      onTauriEvent<{ worktree: string; session: number }>("notification-click", (p) => {
+        void refreshSessions().then(() => openSession(p.worktree, p.session));
+      }),
+    ];
     // the daemon pushes `session.changed` (see watchWorktree below); this poll is only the safety net
     const fast = createPoller(refreshSessions, 10000);
     // git is the costly part: the change list only matters for the selected worktree, and the project
@@ -241,13 +245,6 @@ export function App() {
       void refreshProjects();
     };
     window.addEventListener("focus", onFocus);
-    // clicking a desktop notification lands on the session that raised it
-    let unlistenClick: (() => void) | undefined;
-    void import("@tauri-apps/api/event").then(({ listen }) =>
-      listen<{ worktree: string; session: number }>("notification-click", (e) => {
-        void refreshSessions().then(() => openSession(e.payload.worktree, e.payload.session));
-      }).then((u) => (unlistenClick = u)),
-    );
     // Ctrl+B hides the project list, Ctrl+Shift+B the right panel; captured so the terminal never sees them.
     // The ones that move around the page leave dialogs, the editor and text fields alone.
     const onKey = (e: KeyboardEvent) => {
@@ -321,9 +318,7 @@ export function App() {
       slow.stop();
       stopWatch();
       window.removeEventListener("focus", onFocus);
-      unlistenClick?.();
-      unlistenRestart?.();
-      unlistenLink.forEach((u) => u());
+      unlisten.forEach((u) => u());
     });
   });
 
@@ -509,18 +504,13 @@ export function App() {
   const [dropOn, setDropOn] = createSignal<number | null>(null);
 
   // drag a panel edge; `dir` flips the delta for the right-hand panel
+  let stopDrag: (() => void) | undefined;
+  onCleanup(() => stopDrag?.());
   const drag = (e: MouseEvent, dir: 1 | -1, start: number, set: (w: number) => void) => {
     e.preventDefault();
     const x0 = e.clientX;
-    const move = (m: MouseEvent) => set(start + dir * (m.clientX - x0));
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-      document.body.classList.remove("resizing");
-    };
-    document.body.classList.add("resizing");
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    stopDrag?.();
+    stopDrag = startDrag((m) => set(start + dir * (m.clientX - x0)));
   };
 
   // the dialogs for a new or removed worktree belong to the sidebar: show it first
@@ -898,15 +888,8 @@ export function App() {
                     onMouseDown={(e) => {
                       e.preventDefault();
                       const area = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
-                      const move = (m: MouseEvent) => setSplitFrac(Math.min(0.8, Math.max(0.2, (area.right - m.clientX) / area.width)));
-                      const up = () => {
-                        window.removeEventListener("mousemove", move);
-                        window.removeEventListener("mouseup", up);
-                        document.body.classList.remove("resizing");
-                      };
-                      document.body.classList.add("resizing");
-                      window.addEventListener("mousemove", move);
-                      window.addEventListener("mouseup", up);
+                      stopDrag?.();
+                      stopDrag = startDrag((m) => setSplitFrac(Math.min(0.8, Math.max(0.2, (area.right - m.clientX) / area.width))));
                     }}
                   />
                   <div class="split-pane group/split" style={{ flex: `0 0 ${splitFrac() * 100}%` }}>
