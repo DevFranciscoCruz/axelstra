@@ -232,7 +232,7 @@ fn summarize(text: &str) -> (String, String) {
 
 /// The task files of a project whose header names `worktree` (newest first). Files that cannot be read are skipped.
 pub fn for_worktree(root: &Path, project: &str, worktree: &str) -> Vec<NoteInfo> {
-    let want = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
+    let want = axelstra_core::paths::norm;
     let want_wt = want(worktree);
     let Ok(rd) = std::fs::read_dir(root.join(safe_name(project))) else { return vec![] };
     let mut out: Vec<NoteInfo> = rd
