@@ -258,7 +258,17 @@ mod tests {
     fn untrusted_text_can_be_left_without_enter() {
         assert!(paste_with("x", true).ends_with(b"\r"));
         assert!(paste_with("x", false).ends_with(b"\x1b[201~"));
-        let m = Msg { id: 1, from: Some(2), to: 1, kind: "message".into(), text: "do it".into(), reply_to: None, thread: None, ts: 0, read: false };
+        let m = Msg {
+            id: 1,
+            from: Some(2),
+            to: 1,
+            kind: "message".into(),
+            text: "do it".into(),
+            reply_to: None,
+            thread: None,
+            ts: 0,
+            read: false,
+        };
         assert!(notice(&m, "s").contains("não confiável"));
     }
 

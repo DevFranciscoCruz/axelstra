@@ -85,8 +85,13 @@ impl Audit {
     /// The newest `limit` entries (oldest first), optionally only those of one session.
     pub fn list(&self, limit: usize, session: Option<u32>) -> Vec<Value> {
         let ring = self.ring.lock_recover();
-        let mut v: Vec<Value> =
-            ring.iter().rev().filter(|e| session.is_none_or(|s| e["session"].as_u64() == Some(u64::from(s)))).take(limit).cloned().collect();
+        let mut v: Vec<Value> = ring
+            .iter()
+            .rev()
+            .filter(|e| session.is_none_or(|s| e["session"].as_u64() == Some(u64::from(s))))
+            .take(limit)
+            .cloned()
+            .collect();
         v.reverse();
         v
     }

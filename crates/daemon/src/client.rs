@@ -183,7 +183,11 @@ mod watchdog {
                 }
             });
             st = match st.entries.iter().map(|e| e.at).min() {
-                Some(next) => WAKE.wait_timeout(st, next.saturating_duration_since(Instant::now())).unwrap_or_else(std::sync::PoisonError::into_inner).0,
+                Some(next) => {
+                    WAKE.wait_timeout(st, next.saturating_duration_since(Instant::now()))
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .0
+                }
                 None => WAKE.wait(st).unwrap_or_else(std::sync::PoisonError::into_inner),
             };
         }
@@ -314,7 +318,17 @@ impl Client {
 
     fn connect_with(pipe: &str, token: &str, client: Option<&str>, agent_token: Option<String>) -> Result<Client> {
         let f = open(pipe)?;
-        let mut c = Client { rd: f.try_clone()?, wr: f, next: 0, proto: 0, instance: 0, timeout: None, broken: false, build: String::new(), security: 0 };
+        let mut c = Client {
+            rd: f.try_clone()?,
+            wr: f,
+            next: 0,
+            proto: 0,
+            instance: 0,
+            timeout: None,
+            broken: false,
+            build: String::new(),
+            security: 0,
+        };
         let hello = c.call("hello", json!({"token": token, "client": client, "agent_token": agent_token}))?;
         c.proto = hello["proto"].as_u64().unwrap_or(1);
         c.instance = hello["instance"].as_u64().unwrap_or(0);

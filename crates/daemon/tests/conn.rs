@@ -68,7 +68,8 @@ fn keys_still_flow_while_a_slow_call_runs() {
     let (pipe, token) = start();
     let mut c = Client::connect(&pipe, &token).unwrap();
     let (prog, args): (&str, Vec<&str>) = if cfg!(windows) { ("cmd", vec!["/q"]) } else { ("sh", vec![]) };
-    let id = c.call("session.spawn", json!({"program": prog, "args": args, "cols": 80, "rows": 24})).unwrap()["id"].as_u64().unwrap() as u32;
+    let id =
+        c.call("session.spawn", json!({"program": prog, "args": args, "cols": 80, "rows": 24})).unwrap()["id"].as_u64().unwrap() as u32;
     c.call("session.subscribe", json!({"id": id})).unwrap();
     // a call that takes a while (a scan of the whole disk would): queued, not run inline on the reader
     c.send("session.list", json!({})).unwrap();
