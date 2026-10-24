@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   DockerContainer,
@@ -342,7 +342,7 @@ export function LogsTab(props: { c: DockerContainer; onOpenTab: () => void }) {
 }
 
 export function ShellTab(props: { c: DockerContainer; run: boolean; onOpenTab: () => void }) {
-  const [sid, setSid] = createSignal<number | null>(shells.get(props.c.id) ?? null);
+  const [sid, setSid] = createSignal<number | null>(untrack(() => shells.get(props.c.id) ?? null));
   const [err, setErr] = createSignal("");
   const live = () => {
     const id = sid();

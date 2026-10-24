@@ -1,4 +1,4 @@
-import { Show, createSignal } from "solid-js";
+import { Show, createSignal, untrack } from "solid-js";
 import { Modal } from "./Modal";
 import { P } from "./strings.panels";
 import { Button, Input, cn } from "./ui";
@@ -14,7 +14,7 @@ const [typed, setTyped] = createSignal("");
 /** in-app replacement for the native confirm dialog; same call shape as the dialog plugin's `ask` */
 export const ask = (message: string, opts: Opts = {}) =>
   new Promise<boolean>((resolve) => {
-    pending()?.resolve(false);
+    untrack(pending)?.resolve(false);
     setTyped("");
     setPending({ message, opts, resolve });
   });
@@ -25,7 +25,7 @@ export const typedMatches = (expected: string, typed: string) => typed.trim().to
 /** three ways out for unsaved text: save it, drop it, or keep editing */
 export const askSave = (message: string, title: string) =>
   new Promise<"save" | "discard" | "cancel">((resolve) => {
-    pending()?.resolve(false);
+    untrack(pending)?.resolve(false);
     setPending({ message, opts: { title, kind: "warning", okLabel: P.confirm.save, cancelLabel: P.confirm.cancel }, resolve: (ok) => resolve(ok ? "save" : "cancel"), third: { label: P.confirm.dontSave, resolve: () => resolve("discard") } });
   });
 

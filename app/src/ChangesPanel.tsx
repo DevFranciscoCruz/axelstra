@@ -112,6 +112,7 @@ export function ChangesPanel() {
   };
   const doCommitPush = async () => {
     if (!(await confirmPush())) return;
+    // eslint-disable-next-line solid/reactivity -- only called from click/keydown handlers and menu actions
     await act(async () => {
       const c = await commitOnly();
       await gitPush(selectedWorktree()!);
@@ -120,6 +121,7 @@ export function ChangesPanel() {
   };
   const doPr = async () => {
     if (!(await ask(P.changes.prAsk(branch()), { title: P.changes.prTitle, kind: "warning" }))) return;
+    // eslint-disable-next-line solid/reactivity -- only called from click/keydown handlers and menu actions
     await act(async () => {
       const url = await gitPr(selectedWorktree()!, prTitle(), "", changesMode() === "main" ? baseRef() : undefined);
       setPrOpen(false);

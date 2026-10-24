@@ -115,6 +115,7 @@ function Dir(props: { wt: string; path: string; depth: number }) {
       })
       .catch((e) => r === req && setErr(String(e)));
   };
+  // eslint-disable-next-line solid/reactivity -- runs from events (load) and from a key handler
   load();
   // the daemon reports file changes: keep the visible folders current. A burst of events asks once, and a hidden window not at all
   // (it asks again when the window is shown).
@@ -303,6 +304,7 @@ function Node(props: { wt: string; dir: string; e: FsEntry; depth: number }) {
             () => (props.e.dir ? toggle(path()) : openPath(path())),
             "button",
             (e) => {
+              // eslint-disable-next-line solid/reactivity -- runs from events (load) and from a key handler
               if (menuKey(() => fileMenu(props.wt, path(), props.e.dir))(e)) return;
               if (e.key === "F2") setEditing({ mode: "rename", parent: props.dir, target: path() });
               else if (e.key === "Delete") showMenu(new MouseEvent("contextmenu", { clientX: 40, clientY: 40 }), fileMenu(props.wt, path(), props.e.dir).slice(-1));

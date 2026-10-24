@@ -117,6 +117,15 @@ export function DockerView() {
   const doAction = (a: DockerAction, c: DockerContainer, done: string, o: { force?: boolean; volumes?: boolean } = {}) =>
     act(`${done}: ${c.name}`, () => dockerAction(a, { id: c.name, ...o }));
 
+  const removeVolume = async (v: DockerVolume) => {
+    if (await ask(P.docker.removeVolumeAsk(v.name), { title: P.docker.removeVolumeTitle, kind: "danger", okLabel: P.docker.remove, cancelLabel: P.docker.cancel }))
+      await act(P.docker.volumeRemoved(v.name), () => dockerAction("volume.remove", { id: v.name }));
+  };
+  const removeImage = async (i: DockerImage) => {
+    if (await ask(P.docker.removeImageAsk(i.tags[0] ?? i.id), { title: P.docker.removeImageTitle, kind: "danger", okLabel: P.docker.remove, cancelLabel: P.docker.cancel }))
+      await act(P.docker.imageRemoved(i.tags[0] ?? i.id), () => dockerAction("image.remove", { id: i.id }));
+  };
+
   const confirmRemove = async (c: DockerContainer, mode: "plain" | "force" | "volumes") => {
     const what = {
       plain: P.docker.removeAsk.plain(c.name),
@@ -380,16 +389,10 @@ export function DockerView() {
             </Show>
 
             <Show when={nav() === "volumes"}>
-              <VolumesList list={volumes()} q={q()} busy={busy()} onRemove={async (v) => {
-                if (await ask(P.docker.removeVolumeAsk(v.name), { title: P.docker.removeVolumeTitle, kind: "danger", okLabel: P.docker.remove, cancelLabel: P.docker.cancel }))
-                  await act(P.docker.volumeRemoved(v.name), () => dockerAction("volume.remove", { id: v.name }));
-              }} />
+              <VolumesList list={volumes()} q={q()} busy={busy()} onRemove={removeVolume} />
             </Show>
             <Show when={nav() === "images"}>
-              <ImagesList list={images()} containers={containers()} q={q()} busy={busy()} onRemove={async (i) => {
-                if (await ask(P.docker.removeImageAsk(i.tags[0] ?? i.id), { title: P.docker.removeImageTitle, kind: "danger", okLabel: P.docker.remove, cancelLabel: P.docker.cancel }))
-                  await act(P.docker.imageRemoved(i.tags[0] ?? i.id), () => dockerAction("image.remove", { id: i.id }));
-              }} />
+              <ImagesList list={images()} containers={containers()} q={q()} busy={busy()} onRemove={removeImage} />
             </Show>
             <Show when={nav() === "networks"}>
               <NetworksList list={networks()} q={q()} />

@@ -121,8 +121,8 @@ export function Row(props: {
       aria-selected={props.sel}
       tabindex="-1"
       data-cid={props.c.id}
-      onClick={props.onPick}
-      onContextMenu={props.onMenu}
+      onClick={() => props.onPick()}
+      onContextMenu={(e) => props.onMenu(e)}
     >
       <span class="dk-state" title={props.c.status}>
         <span class="dot" classList={{ on: st().cls === "on", warn: st().cls === "warn" }} />

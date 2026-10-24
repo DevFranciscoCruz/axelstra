@@ -186,6 +186,7 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
         /* transient; the next change or tick retries */
       }
     };
+    // eslint-disable-next-line solid/reactivity -- poll trigger, called from a timer and from an effect
     checkNow = () => void check();
     poller = createPoller(check, 30000);
   });
@@ -194,6 +195,7 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
   createEffect(on(fsTick, () => checkNow?.(), { defer: true }));
   createEffect(() => setEditorDirty(dirty()));
   createEffect(on(isLight, (l) => view?.dispatch({ effects: look.reconfigure(l ? [] : oneDark) }), { defer: true }));
+  // eslint-disable-next-line solid/reactivity -- poll trigger, called from a timer and from an effect
   setEditorSaver(() => save());
   onCleanup(() => {
     setEditorSaver(null);
@@ -232,7 +234,7 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
           <Button size="sm" onClick={() => guarded(() => setOpenFile(null))}>{P.editor.close}</Button>
         </div>
       </Show>
-      <div class="editor-host" ref={host} style={refused() || bigSize() > 0 ? { display: "none" } : undefined} />
+      <div class="editor-host" classList={{ off: refused() || bigSize() > 0 }} ref={host} />
     </div>
   );
 }

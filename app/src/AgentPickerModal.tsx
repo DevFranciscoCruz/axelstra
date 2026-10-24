@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createSignal, untrack } from "solid-js";
 import { hasIcon } from "./Icon";
 import { agentLabel } from "./agentLabel";
 import { Modal } from "./Modal";
@@ -8,7 +8,9 @@ import { Button, Field, Select } from "./ui";
 
 /** "Novo agente": which agent to open. `done` gets the agent key, or null when dismissed; a choice becomes the default. */
 export function AgentPickerModal(props: { project: string | undefined; done: (agent: string | null) => void }) {
-  const [choice, setChoice] = createSignal(projectAgent(props.project));
+  const [choice, setChoice] = createSignal(
+    untrack(() => projectAgent(props.project)),
+  ); /* the picker opens once per project */
   const go = () => {
     setDefaultAgent(choice());
     props.done(choice());

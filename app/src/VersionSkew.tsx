@@ -9,8 +9,6 @@ import { daemonOlderThanApp } from "./skewLogic";
 
 const CHECK_MS = 60_000;
 // the banner lives inside the shared toast stack (ErrorToast), so it flows there instead of floating on its own
-const FLOW = { position: "static", transform: "none" } as const;
-
 /**
  * "Daemon older than the app": shown while the running daemon is of an older release than this app. Restarting is safe,
  * terminals and agents come back through session restore, so the button restarts it without asking twice. "Mais tarde"
@@ -35,7 +33,7 @@ export function VersionSkew() {
   });
   return (
     <Show when={old() && !dismissed()}>
-      <div class="error-toast notice" role="status" data-testid="version-skew" style={FLOW}>
+      <div class="error-toast notice flow" role="status" data-testid="version-skew">
         <span class="et-msg">{S.versionSkew.text}</span>
         <Button
           size="sm"

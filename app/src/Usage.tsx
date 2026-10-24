@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
 import { createPoller } from "./poller";
 import { TokenUsage, agentUsage, worktreeUsage } from "./api";
 import { activeSession, projects, sessions } from "./store";
@@ -120,8 +120,8 @@ export function UsageChip() {
     if (!s || s.meta?.kind !== "agent" || s.meta.agent !== "claude" || !cwd) return "";
     return JSON.stringify([cwd, s.meta?.resume ?? s.meta?.key ?? ""]);
   });
-  createEffect(() => {
-    const [cwd, conv] = target() ? (JSON.parse(target()) as [string, string]) : ["", ""];
+  createEffect(on(target, (tgt) => {
+    const [cwd, conv] = tgt ? (JSON.parse(tgt) as [string, string]) : ["", ""];
     setUsage(null);
     if (!cwd) return;
     let alive = true;
@@ -135,7 +135,7 @@ export function UsageChip() {
       alive = false;
       t.stop();
     });
-  });
+  }));
   const spent = () => (usage() ? usage()!.input + usage()!.output + usage()!.cache_write : 0);
   const ctx = () => usage()?.context ?? 0;
   return (
