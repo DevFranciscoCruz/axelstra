@@ -2,7 +2,7 @@ import { For, Show, createResource, createSignal } from "solid-js";
 import { projectEnvPreview, setProjectSetup } from "./api";
 import { Modal } from "./Modal";
 import { projects, refreshProjects, setError } from "./store";
-import { Button, Field, Input } from "./ui";
+import { Button, Field, Textarea } from "./ui";
 import { P } from "./strings.panels";
 
 const LIST = { margin: "0", "padding-left": "18px", "font-family": "monospace", "font-size": "12px", "line-height": "1.5" };
@@ -37,13 +37,17 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
       </div>
 
       <Field label={P.projectSettings.setup}>
-        <Input
+        <Textarea
           id="ps-setup"
+          rows={4}
+          class="font-mono text-xs"
+          spellcheck={false}
           placeholder={P.projectSettings.setupPlaceholder}
           value={setup()}
           onInput={(e) => setSetup(e.currentTarget.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !saving()) void save();
+            // Enter adds a line (one command per line); Ctrl/Cmd+Enter saves
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !saving()) void save();
           }}
         />
       </Field>

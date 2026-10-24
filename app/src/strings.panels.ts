@@ -81,6 +81,7 @@ export const P = {
     removeNamed: (n: string) => `Remover ${n}`,
     // dialogs
     discardWtName: "O nome do worktree ainda não foi criado.",
+    noSetup: "Este projeto não tem comando de setup.",
     discardSetup: "O comando de setup tem alterações por guardar.",
     envCopied: (n: number) => ` · ${count(n, "ficheiro de ambiente copiado", "ficheiros de ambiente copiados")}`,
     envSkipped: (n: number) => ` · ${n} ficou de fora`,
@@ -120,6 +121,7 @@ export const P = {
       markUnread: "Marcar como não lido",
       sleep: "Dormir",
       setupCmd: "Comando de setup…",
+      runSetup: "Executar setup do projeto",
       defaultAgent: "Agente por omissão",
     },
   },
@@ -671,9 +673,9 @@ export const P = {
     project: "projeto",
     close: "Fechar",
     setup: "Comando de setup",
-    setupPlaceholder: "ex.: bun install (vazio = nenhum)",
+    setupPlaceholder: "um comando por linha, ex.: npm ci (vazio = nenhum)",
     setupNote:
-      "Corre num terminal visível de cada worktree novo. Fica guardado só nesta app, nunca no repositório: um repositório clonado não consegue mandar o Axelstra correr comandos.",
+      "Um comando por linha (linhas a começar por # são ignoradas), escritos em sequência num terminal visível de cada worktree novo; Ctrl+Enter guarda. Também dá para os repetir a qualquer momento no menu do worktree, em «Executar setup do projeto». Fica guardado só nesta app, nunca no repositório: um repositório clonado não consegue mandar o Axelstra correr comandos.",
     copied: "Ficheiros copiados para worktrees novos",
     includePre: "Lista no ficheiro ",
     includeMid:
