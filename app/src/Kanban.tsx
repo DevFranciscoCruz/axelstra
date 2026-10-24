@@ -4,9 +4,10 @@ import { Select } from "./Select";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
-import { AgentInfo, Board, KCard, agentOptions, agentWarning, agentsList, OrchRun, gitPr, gitPush, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchRetry, orchStart, orchStatus } from "./api";
+import { AgentInfo, Board, KCard, agentOptions, agentWarning, agentsList, OrchRun, gitPr, gitPush, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchRetry, orchStart, orchStatus, orchTrustInfo } from "./api";
 import { Modal } from "./Modal";
-import { refreshProjects, selectWorktree, setError, setShowKanban, showNotice } from "./store";
+import { refreshProjects, selectWorktree, setError, setShowKanban, showNotice, toast } from "./store";
+import { planStart, restorePayload } from "./kanbanLogic";
 import { S } from "./strings";
 import { press } from "./a11y";
 
@@ -49,16 +50,11 @@ export function Kanban(props: { project: string }) {
     const n = inCol("todo").length;
     // acceptance commands run in a shell: a card from a cloned repo could carry anything
     const cmds = inCol("todo").filter((c) => c.meta.acceptance).map((c) => `${c.meta.id}: ${c.meta.acceptance}`);
-    if (
-      !(await ask(
-        `Despachar ${n} agente(s) para os cartões em "Para fazer"? Cada um corre num worktree isolado e o resultado é integrado num branch novo (orch/…). Nada é enviado para o remote.` +
-          (cmds.length ? `\n\nEstes comandos de aceitação vão correr na sua máquina:\n${cmds.join("\n")}\n\nSó confirme se confia nestes cartões.` : ""),
-        { title: "Executar orquestração", kind: cmds.length ? "warning" : "info" },
-      ))
-    )
-      return;
+    const trust = await orchTrustInfo(props.project).catch(() => null);
+    const plan = planStart(n, trust, cmds);
+    if (!(await ask(plan.message, { title: "Executar orquestração", kind: plan.warn ? "warning" : "info", ...(plan.bypass.length ? { typeToConfirm: "bypass", okLabel: "Executar sem permissões" } : {}) }))) return;
     try {
-      setRun(await orchStart(props.project, 3, cmds.length > 0));
+      setRun(await orchStart(props.project, 3, plan.trustAcceptance, plan.pin));
       void refreshProjects();
     } catch (e) {
       setErr(String(e));
@@ -132,11 +128,17 @@ export function Kanban(props: { project: string }) {
   const remove = async () => {
     const d = draft();
     if (!d?.id) return;
-    if (!(await ask(`Apagar o cartão "${d.title}"? O ficheiro é removido.`, { title: "Apagar", kind: "danger" }))) return;
+    const card = board().cards.find((c) => c.meta.id === d.id);
+    // undo re-creates the card from what was on the board, so only ask up front when that copy is missing
+    if (!card && !(await ask(`Apagar o cartão "${d.title}"? O ficheiro é removido.`, { title: "Apagar", kind: "danger" }))) return;
     try {
       await kanbanDelete(props.project, d.id);
       setDraft(null);
-      showNotice(S.cardDeleted(d.title));
+      toast({
+        text: S.cardDeleted(d.title),
+        kind: "info",
+        ...(card ? { action: { label: "Desfazer", run: () => void kanbanSave(props.project, restorePayload(card)).then(reload, (e) => setError(String(e))) } } : {}),
+      });
       await reload();
     } catch (e) {
       setError(S.deleteFailed(d.title, e));

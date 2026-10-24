@@ -1,18 +1,25 @@
 import { Show, createSignal } from "solid-js";
 import { Modal } from "./Modal";
-import { Button } from "./ui";
+import { Button, Input } from "./ui";
 
-type Opts = { title?: string; kind?: "danger" | "warning" | "info" | "error"; okLabel?: string; cancelLabel?: string };
+type Opts = { title?: string; kind?: "danger" | "warning" | "info" | "error"; okLabel?: string; cancelLabel?: string;
+  /** the OK button stays off until this exact text is typed (removing work that is not saved anywhere else) */
+  typeToConfirm?: string };
 type Pending = { message: string; opts: Opts; resolve: (ok: boolean) => void; /** a third button: its label, and what answering it resolves */ third?: { label: string; resolve: () => void } };
 
 const [pending, setPending] = createSignal<Pending | null>(null);
+const [typed, setTyped] = createSignal("");
 
 /** in-app replacement for the native confirm dialog; same call shape as the dialog plugin's `ask` */
 export const ask = (message: string, opts: Opts = {}) =>
   new Promise<boolean>((resolve) => {
     pending()?.resolve(false);
+    setTyped("");
     setPending({ message, opts, resolve });
   });
+
+/** the typed text matches, ignoring case and surrounding spaces */
+export const typedMatches = (expected: string, typed: string) => typed.trim().toLowerCase() === expected.trim().toLowerCase() && expected.trim() !== "";
 
 /** three ways out for unsaved text: save it, drop it, or keep editing */
 export const askSave = (message: string, title: string) =>
@@ -54,10 +61,21 @@ export function ConfirmHost() {
           <div class="auto-note" style={{ "white-space": "pre-wrap" }}>
             {p.message}
           </div>
+          <Show when={p.opts.typeToConfirm}>
+            {(want) => (
+              <Input
+                aria-label={`Escreva "${want()}" para confirmar`}
+                placeholder={want()}
+                value={typed()}
+                onInput={(e) => setTyped(e.currentTarget.value)}
+                onKeyDown={(e) => e.key === "Enter" && typedMatches(want(), typed()) && answer(true)}
+              />
+            )}
+          </Show>
           <div class="m-actions" style={{ "justify-content": "flex-end" }}>
             <Button ref={(el: HTMLButtonElement) => focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(false)}>{p.opts.cancelLabel ?? "Cancelar"}</Button>
             <Show when={p.third}>{(t) => <Button variant="destructive" onClick={answerThird}>{t().label}</Button>}</Show>
-            <Button variant={isDanger(p.opts.kind) && !p.third ? "destructive" : "default"} class={isDanger(p.opts.kind) && !p.third ? "primary kind-warn" : "primary"} ref={(el: HTMLButtonElement) => !focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(true)}>
+            <Button variant={isDanger(p.opts.kind) && !p.third ? "destructive" : "default"} class={isDanger(p.opts.kind) && !p.third ? "primary kind-warn" : "primary"} ref={(el: HTMLButtonElement) => !focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} disabled={!!p.opts.typeToConfirm && !typedMatches(p.opts.typeToConfirm, typed())} onClick={() => answer(true)}>
               {p.opts.okLabel ?? "Sim"}
             </Button>
           </div>

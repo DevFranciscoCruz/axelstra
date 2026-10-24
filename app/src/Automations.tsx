@@ -4,7 +4,7 @@ import { Automation, agentOptions, agentWarning, agentsList, deleteAutomation, l
 import { Select } from "./Select";
 import { Modal } from "./Modal";
 import { ask, askDiscard } from "./Confirm";
-import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations, showNotice } from "./store";
+import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations, showNotice, toast } from "./store";
 import { S } from "./strings";
 import { Button, Field, Input, Textarea } from "./ui";
 
@@ -86,11 +86,14 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
     });
 
   const remove = async (a: Automation) => {
-    const ok = await ask(`Apagar a automatização "${a.name}"?`, { title: "Apagar", kind: "danger", okLabel: "Apagar", cancelLabel: "Cancelar" });
-    if (!ok) return;
     try {
       await deleteAutomation(a.id);
-      showNotice(S.automationDeleted(a.name));
+      // the deleted object is kept: undo saves it again under the same id
+      toast({
+        text: S.automationDeleted(a.name),
+        kind: "info",
+        action: { label: "Desfazer", run: () => void saveAutomation(a).then(() => refetch(), (e) => setError(S.deleteFailed(a.name, e))) },
+      });
       await refetch();
     } catch (e) {
       setError(S.deleteFailed(a.name, e));
