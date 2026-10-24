@@ -170,7 +170,7 @@ pub fn parse(text: &str, path: &Path) -> Result<Card> {
     let rest = text.strip_prefix("---\n").with_context(|| format!("{}: missing frontmatter", path.display()))?;
     let (front, body) = rest.split_once("\n---").with_context(|| format!("{}: unterminated frontmatter", path.display()))?;
     let body = body.trim_start_matches('\n').to_string();
-    let meta: Meta = serde_yaml::from_str(front).with_context(|| format!("{}: bad frontmatter", path.display()))?;
+    let meta: Meta = serde_norway::from_str(front).with_context(|| format!("{}: bad frontmatter", path.display()))?;
     validate(&meta).with_context(|| path.display().to_string())?;
     Ok(Card { meta, body, path: path.to_path_buf() })
 }
