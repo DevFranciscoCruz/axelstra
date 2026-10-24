@@ -3,11 +3,12 @@ import { SessionInfo, call } from "../api";
 import { errorText } from "../appError";
 import { setError } from "./notify";
 import { refreshSessions } from "./sessions";
+import { L } from "../strings.logic";
 
 // ---- tabs of the selected worktree: names, order and the ones just closed ----
 /** names the user gave tabs: shown at once, and also sent to the daemon so they survive a restart (the local copy covers a failed call) */
 const [tabNames, setTabNames] = createSignal<Record<number, string>>({});
-export const tabLabel = (s: SessionInfo) => tabNames()[s.id] ?? s.label ?? `Sessão ${s.id}`;
+export const tabLabel = (s: SessionInfo) => tabNames()[s.id] ?? s.label ?? L.session(s.id);
 export const renameTab = (id: number, name: string) => {
   const n = name.trim();
   setTabNames((cur) => {
@@ -19,7 +20,7 @@ export const renameTab = (id: number, name: string) => {
   // the local name already shows; if the daemon could not keep it, say so (it would be lost on restart)
   void call("session.rename", { id, label: n })
     .then(() => refreshSessions())
-    .catch((e) => setError(`Não foi possível guardar o nome do separador: ${errorText(e)}`));
+    .catch((e) => setError(`${L.tabRenameFailed}${errorText(e)}`));
 };
 /** the order the user dragged tabs into; ids not in it follow in their natural order */
 const [tabOrder, setTabOrder] = createSignal<number[]>([]);

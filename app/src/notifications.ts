@@ -1,6 +1,7 @@
 import { createSignal } from "solid-js";
 import type { ShipStatus } from "./api";
 import { readString, writeJson } from "./persist";
+import { L } from "./strings.logic";
 
 export type NotifKind = "done" | "waiting" | "ci-fail" | "ci-pass" | "merged" | "error" | "budget";
 
@@ -89,10 +90,10 @@ export const shipEvents = (prev: ShipStatus | null, next: ShipStatus, worktree: 
   if (!prev || prev.problem || next.problem || prev.number !== next.number) return [];
   const out: NewEntry[] = [];
   const pr = `#${next.number} ${next.title}`.trim();
-  if (prev.pr_state === "open" && next.pr_state === "merged") out.push({ kind: "merged", worktree, text: `Merge feito: ${pr} (${name})` });
+  if (prev.pr_state === "open" && next.pr_state === "merged") out.push({ kind: "merged", worktree, text: L.notify.ship.merged(pr, name) });
   if (prev.ci !== next.ci && next.pr_state === "open") {
-    if (next.ci === "fail") out.push({ kind: "ci-fail", worktree, text: `CI a falhar: ${pr} (${name})` });
-    else if (next.ci === "pass" && prev.ci !== "none") out.push({ kind: "ci-pass", worktree, text: `CI a passar: ${pr} (${name})` });
+    if (next.ci === "fail") out.push({ kind: "ci-fail", worktree, text: L.notify.ship.ciFail(pr, name) });
+    else if (next.ci === "pass" && prev.ci !== "none") out.push({ kind: "ci-pass", worktree, text: L.notify.ship.ciPass(pr, name) });
   }
   return out;
 };

@@ -62,6 +62,7 @@ export const callOr = <T>(method: string, params: Record<string, unknown>, fallb
   call<T>(method, params).catch((e) => (isUnknownMethod(e) ? fallback : Promise.reject(e)));
 
 import { Channel, invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { L } from "./strings.logic";
 export type Terse = "off" | "short" | "tiny";
 export type NotifyMode = "all" | "waiting" | "off";
 export type ShellChoice = "auto" | "pwsh" | "powershell" | "bash" | "wsl" | "cmd";
@@ -634,16 +635,16 @@ export const agentOptions = (list: AgentInfo[], current?: string) => {
   const out: { value: string; label: string; icon?: string }[] = list.filter((a) => a.installed).map((a) => ({ value: a.id, label: a.name, icon: mark(a.id) }));
   const cur = current && list.find((a) => a.id === current || (current === "chatgpt" && a.id === "codex"));
   if (current && !out.some((o) => o.value === current || (current === "chatgpt" && o.value === "codex"))) {
-    out.push({ value: current, label: cur ? `${cur.name} (não instalado)` : `${current} (desconhecido)` });
+    out.push({ value: current, label: cur ? L.agent.notInstalled(cur.name) : L.agent.unknownInList(current) });
   }
   return out;
 };
 
-/** pt-PT warning for a chosen agent that cannot run, with the official install command; empty when it is fine. */
+/** warning (in the UI language) for a chosen agent that cannot run, with the official install command; empty when it is fine. */
 export const agentWarning = (list: AgentInfo[], id: string) => {
   const a = list.find((x) => x.id === id || (id === "chatgpt" && x.id === "codex"));
-  if (!a) return list.length ? `Agente desconhecido: ${id}` : "";
-  return a.installed ? "" : `${a.name} não encontrado: instala com ${a.install}`;
+  if (!a) return list.length ? L.agent.unknown(id) : "";
+  return a.installed ? "" : L.agent.notFound(a.name, a.install);
 };
 
 export type CodexWindow = { used_percent?: number; window_minutes?: number; resets_at?: number; resets_in_seconds?: number };

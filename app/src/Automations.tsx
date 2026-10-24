@@ -8,13 +8,13 @@ import { S } from "./strings";
 import { P } from "./strings.panels";
 import { Button, Field, Input, Select, Textarea } from "./ui";
 
-const DAYS = P.automations.days;
+const days = () => P.automations.days;
 
 const describe = (a: Automation) => {
   const s = a.schedule;
   if (s.kind === "interval") return P.automations.everyMin(s.minutes);
   if (s.kind === "daily") return P.automations.daily(s.time);
-  return P.automations.weekly(DAYS[s.day], s.time);
+  return P.automations.weekly(days()[s.day], s.time);
 };
 
 const blank = (project: string): Automation => ({
@@ -227,7 +227,7 @@ export function Automations() {
                           <Field label={P.automations.day}>
                             <Select
                               value={String(x().day)}
-                              options={DAYS.map((n, idx) => ({ value: String(idx), label: n }))}
+                              options={days().map((n, idx) => ({ value: String(idx), label: n }))}
                               onChange={(v) => setDraft({ ...d(), schedule: { ...x(), day: parseInt(v) } })}
                             />
                           </Field>

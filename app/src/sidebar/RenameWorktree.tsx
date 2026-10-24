@@ -1,6 +1,8 @@
 import { Show } from "solid-js";
 import { Modal } from "../Modal";
 import { Button, Field, Input } from "../ui";
+import { S } from "../strings";
+import { U } from "../strings.ui";
 
 /** The "Mudar o nome do worktree" dialog. */
 export function RenameWorktree(props: {
@@ -12,9 +14,9 @@ export function RenameWorktree(props: {
   onSubmit: () => void;
 }) {
   return (
-    <Modal label="Mudar o nome do worktree" dirty={props.value.trim() !== props.current} onClose={props.onClose}>
-      <div class="m-title font-semibold">Mudar o nome do worktree</div>
-      <Field label="Nome" full>
+    <Modal label={U.renameWorktree.title} dirty={props.value.trim() !== props.current} onClose={props.onClose}>
+      <div class="m-title font-semibold">{U.renameWorktree.title}</div>
+      <Field label={U.renameWorktree.name} full>
         <Input
           value={props.value}
           onInput={(e) => props.onInput(e.currentTarget.value)}
@@ -33,13 +35,13 @@ export function RenameWorktree(props: {
         </div>
       </Show>
       <div class="m-actions">
-        <Button onClick={props.onClose}>Cancelar</Button>
+        <Button onClick={props.onClose}>{S.cancel}</Button>
         <Button
           variant="default"
           disabled={!props.value.trim() || props.value.trim() === props.current}
           onClick={props.onSubmit}
         >
-          Mudar o nome
+          {U.renameWorktree.submit}
         </Button>
       </div>
     </Modal>

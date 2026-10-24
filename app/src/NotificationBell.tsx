@@ -1,7 +1,16 @@
+import { lazyPair } from "./i18n";
 import { For, Show, createEffect, createSignal, on, onCleanup } from "solid-js";
 import { moveIndex } from "./a11y";
 import { isTopModal, popModal, pushModal } from "./modalStack";
-import { NotifEntry, NotifKind, clearAll, markAllRead, notifications, notificationsOpenRequest, unreadCount } from "./notifications";
+import {
+  NotifEntry,
+  NotifKind,
+  clearAll,
+  markAllRead,
+  notifications,
+  notificationsOpenRequest,
+  unreadCount,
+} from "./notifications";
 import { ago } from "./time";
 import { basename } from "./paths";
 import { S } from "./strings";
@@ -10,17 +19,16 @@ import { Button, cn } from "./ui";
 
 /** word and glyph per kind: the meaning never rests on colour alone */
 const KIND: Record<NotifKind, [string, string]> = {
-  done: ["✓", S.notif.done],
-  waiting: ["?", S.notif.waiting],
-  "ci-fail": ["✕", S.notif.ciFail],
-  "ci-pass": ["✓", S.notif.ciPass],
-  merged: ["⇄", S.notif.merged],
-  error: ["!", S.notif.error],
-  budget: ["Σ", S.notif.budget],
+  done: lazyPair("✓", () => S.notif.done),
+  waiting: lazyPair("?", () => S.notif.waiting),
+  "ci-fail": lazyPair("✕", () => S.notif.ciFail),
+  "ci-pass": lazyPair("✓", () => S.notif.ciPass),
+  merged: lazyPair("⇄", () => S.notif.merged),
+  error: lazyPair("!", () => S.notif.error),
+  budget: lazyPair("Σ", () => S.notif.budget),
 };
 
 const FOCUSABLE = "button:not(:disabled)";
-
 
 /** Bell with an unread badge and the list of recent events. `onJump` opens what an entry is about (its worktree, and
  *  its agent session when it has one). Mount once, e.g. in the sidebar header. */
@@ -71,13 +79,21 @@ export function NotificationBell(props: { onJump: (e: NotifEntry) => void }) {
   };
 
   const show = () => {
-    setFresh(new Set(notifications().filter((n) => !n.read).map((n) => n.id)));
+    setFresh(
+      new Set(
+        notifications()
+          .filter((n) => !n.read)
+          .map((n) => n.id),
+      ),
+    );
     markAllRead();
     setOpen(true);
     layer = pushModal();
     window.addEventListener("keydown", onKey, true);
     document.addEventListener("mousedown", onDown, true);
-    queueMicrotask(() => (pop?.querySelector<HTMLElement>(".notif-item") ?? pop?.querySelector<HTMLElement>(FOCUSABLE))?.focus());
+    queueMicrotask(() =>
+      (pop?.querySelector<HTMLElement>(".notif-item") ?? pop?.querySelector<HTMLElement>(FOCUSABLE))?.focus(),
+    );
   };
   onCleanup(() => close(false));
   // the palette asks for the list
@@ -95,26 +111,61 @@ export function NotificationBell(props: { onJump: (e: NotifEntry) => void }) {
 
   return (
     <div class="notif">
-      <Button ref={bell} variant="icon" size="glyph" class="relative" title={S.notif.title} aria-label={label()} aria-haspopup="dialog" aria-expanded={open()} onClick={() => (open() ? close() : show())}>
+      <Button
+        ref={bell}
+        variant="icon"
+        size="glyph"
+        class="relative"
+        title={S.notif.title}
+        aria-label={label()}
+        aria-haspopup="dialog"
+        aria-expanded={open()}
+        onClick={() => (open() ? close() : show())}
+      >
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M8 2.2a3.8 3.8 0 0 0-3.8 3.8c0 3-1.4 4-1.4 4h10.4s-1.4-1-1.4-4A3.8 3.8 0 0 0 8 2.2zM6.6 12.6a1.5 1.5 0 0 0 2.8 0" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+          <path
+            d="M8 2.2a3.8 3.8 0 0 0-3.8 3.8c0 3-1.4 4-1.4 4h10.4s-1.4-1-1.4-4A3.8 3.8 0 0 0 8 2.2zM6.6 12.6a1.5 1.5 0 0 0 2.8 0"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.3"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
         </svg>
         <Show when={unreadCount() > 0}>
-          <span class="notif-badge" aria-hidden="true">{unreadCount() > 99 ? "99+" : unreadCount()}</span>
+          <span class="notif-badge" aria-hidden="true">
+            {unreadCount() > 99 ? "99+" : unreadCount()}
+          </span>
         </Show>
       </Button>
       <Show when={open()}>
         <div ref={pop} class="notif-pop" role="dialog" aria-label={S.notif.title}>
           <div class="notif-head">
             <span class="notif-title">{S.notif.title}</span>
-            <Button variant="outline" size="sm" class="h-auto py-0.5" disabled={notifications().length === 0} onClick={() => clearAll()}>{S.notif.clearAll}</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-auto py-0.5"
+              disabled={notifications().length === 0}
+              onClick={() => clearAll()}
+            >
+              {S.notif.clearAll}
+            </Button>
           </div>
           <Show when={notifications().length} fallback={<div class="notif-empty">{S.notif.empty}</div>}>
             <ul class="notif-list">
               <For each={notifications()}>
                 {(n) => (
                   <li>
-                    <Button variant="row" size="bare" class={cn("notif-item h-auto w-full flex-col items-stretch gap-0.5 rounded-none border-0 border-b border-border px-2.5 py-2 hover:bg-muted focus-visible:bg-muted", fresh().has(n.id) && "border-l-[3px] border-l-primary pl-[7px]")} onClick={() => jump(n)}>
+                    <Button
+                      variant="row"
+                      size="bare"
+                      class={cn(
+                        "notif-item h-auto w-full flex-col items-stretch gap-0.5 rounded-none border-0 border-b border-border px-2.5 py-2 hover:bg-muted focus-visible:bg-muted",
+                        fresh().has(n.id) && "border-l-[3px] border-l-primary pl-[7px]",
+                      )}
+                      onClick={() => jump(n)}
+                    >
                       <span class={`notif-kind ${n.kind}`}>
                         <span aria-hidden="true">{KIND[n.kind][0]}</span> {KIND[n.kind][1]}
                         <Show when={fresh().has(n.id)}> · {S.notif.fresh}</Show>

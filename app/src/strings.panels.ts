@@ -1,7 +1,9 @@
-import { count } from "./strings";
+import { dict } from "./i18n";
+import { enP } from "./strings.panels.en";
+import { count } from "./i18n";
 
 /** pt-PT texts of the panels (sidebar, docker, kanban...) that strings.ts does not hold; same glossary as strings.ts. */
-export const P = {
+export const ptP = {
   confirm: {
     title: "Confirmar",
     yes: "Sim",
@@ -861,3 +863,5 @@ O branch tem de estar enviado para o remoto.`,
     failed: (agent: string, why: string) => `Não foi possível instalar os hooks do ${agent}: ${why}`,
   },
 } as const;
+
+export const P = dict(ptP, enP);

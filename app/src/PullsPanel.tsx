@@ -1,23 +1,48 @@
+import { lazyPair } from "./i18n";
 import { Loading } from "./Loading";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Badge, Button } from "./ui";
 import { Icon } from "./Icon";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { GhItem, ReviewComment, ghComments, ghList, ghSendComment, worktreeFromPr } from "./api";
-import { SendStep, commentHints, confirmKey, displayBody, isNoLeadError, locationLabel, reviewLine, threads, worktreeForPr } from "./prComments";
+import {
+  SendStep,
+  commentHints,
+  confirmKey,
+  displayBody,
+  isNoLeadError,
+  locationLabel,
+  reviewLine,
+  threads,
+  worktreeForPr,
+} from "./prComments";
 import "./pulls.css";
 import { RightTabs } from "./RightTabs";
 import { P } from "./strings.panels";
-import { findWorktree, refreshProjects, selectWorktree, selectedWorktree, setError, rightTab , showNotice } from "./store";
+import {
+  findWorktree,
+  refreshProjects,
+  selectWorktree,
+  selectedWorktree,
+  setError,
+  rightTab,
+  showNotice,
+} from "./store";
 
-const CHECK: Record<string, [string, string]> = { pass: ["check", P.pulls.checks.pass], fail: ["x", P.pulls.checks.fail], pending: ["ellipsis", P.pulls.checks.pending] };
+const CHECK: Record<string, [string, string]> = {
+  pass: lazyPair("check", () => P.pulls.checks.pass),
+  fail: lazyPair("x", () => P.pulls.checks.fail),
+  pending: lazyPair("ellipsis", () => P.pulls.checks.pending),
+};
 const REVIEW = P.pulls.review;
 const C = P.pulls.comments;
 
 /** The review comments of one PR, read when the list is opened. Sending one to the agent shows the exact text first. */
 function ReviewComments(props: { item: GhItem; project: string; worktree: string | null }) {
   const [open, setOpen] = createSignal(false);
-  const [data, { refetch }] = createResource(open, async (o) => (o ? ghComments(props.project, props.item.number) : null));
+  const [data, { refetch }] = createResource(open, async (o) =>
+    o ? ghComments(props.project, props.item.number) : null,
+  );
   const [send, setSend] = createSignal<SendStep>({ step: "idle" });
   const n = () => props.item.number;
   const listId = () => `prc-${n()}`;
@@ -75,7 +100,9 @@ function ReviewComments(props: { item: GhItem; project: string; worktree: string
     <li class="prc" classList={{ reply: p.reply }}>
       <div class="prc-head">
         <span class="prc-author">{p.c.author}</span>
-        <span class="prc-loc mono" title={locationLabel(p.c)}>{locationLabel(p.c)}</span>
+        <span class="prc-loc mono" title={locationLabel(p.c)}>
+          {locationLabel(p.c)}
+        </span>
         <For each={commentHints(p.c)}>{(h) => <Badge>{h}</Badge>}</For>
         <span class="grow" />
         <Button
@@ -91,12 +118,30 @@ function ReviewComments(props: { item: GhItem; project: string; worktree: string
       </div>
       <div class="prc-body">{displayBody(p.c.body)}</div>
       <Show when={(send().step === "confirm" || send().step === "sending") && active() === p.c.id}>
-        <div class="prc-confirm" role="group" aria-label={C.confirmTitle} tabindex="-1" onKeyDown={key} ref={(el) => queueMicrotask(() => el.focus())}>
+        <div
+          class="prc-confirm"
+          role="group"
+          aria-label={C.confirmTitle}
+          tabindex="-1"
+          onKeyDown={key}
+          ref={(el) => queueMicrotask(() => el.focus())}
+        >
           <div class="muted">{C.confirmIntro}</div>
-          <pre class="prc-text" tabindex="0" aria-label={C.confirmTitle}>{confirmText()}</pre>
+          <pre class="prc-text" tabindex="0" aria-label={C.confirmTitle}>
+            {confirmText()}
+          </pre>
           <div class="prc-actions">
-            <Button size="sm" variant="default" disabled={send().step === "sending"} onClick={() => void confirm()}>{C.confirmOk}</Button>
-            <Button size="sm" variant="outline" disabled={send().step === "sending"} onClick={() => setSend({ step: "idle" })}>{C.confirmCancel}</Button>
+            <Button size="sm" variant="default" disabled={send().step === "sending"} onClick={() => void confirm()}>
+              {C.confirmOk}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={send().step === "sending"}
+              onClick={() => setSend({ step: "idle" })}
+            >
+              {C.confirmCancel}
+            </Button>
             <span class="muted">{C.confirmHint}</span>
           </div>
         </div>
@@ -106,13 +151,30 @@ function ReviewComments(props: { item: GhItem; project: string; worktree: string
 
   return (
     <div class="prc-wrap">
-      <Button variant="link" size="bare" aria-expanded={open()} aria-controls={listId()} title={C.toggleTip} onClick={() => setOpen(!open())}>
+      <Button
+        variant="link"
+        size="bare"
+        aria-expanded={open()}
+        aria-controls={listId()}
+        title={C.toggleTip}
+        onClick={() => setOpen(!open())}
+      >
         <Icon name={open() ? "chevDown" : "chevRight"} size={11} /> {C.toggle}
       </Button>
       <Show when={open()}>
         <div id={listId()} role="region" aria-label={C.list(n())}>
           <Show when={!data.loading} fallback={<div class="muted prc-note">{C.loading}</div>}>
-            <Show when={!data.error} fallback={<div class="placeholder">{String(data.error?.message ?? data.error)}<Button size="sm" onClick={() => void refetch()}>{P.pulls.refresh}</Button></div>}>
+            <Show
+              when={!data.error}
+              fallback={
+                <div class="placeholder">
+                  {String(data.error?.message ?? data.error)}
+                  <Button size="sm" onClick={() => void refetch()}>
+                    {P.pulls.refresh}
+                  </Button>
+                </div>
+              }
+            >
               <Show when={data()}>
                 {(d) => (
                   <>
@@ -124,7 +186,9 @@ function ReviewComments(props: { item: GhItem; project: string; worktree: string
                         <For each={d().reviews}>
                           {(r) => (
                             <li class="prc">
-                              <div class="prc-head"><span class="prc-author">{reviewLine(r)}</span></div>
+                              <div class="prc-head">
+                                <span class="prc-author">{reviewLine(r)}</span>
+                              </div>
                               <div class="prc-body">{displayBody(r.body)}</div>
                             </li>
                           )}
@@ -132,7 +196,14 @@ function ReviewComments(props: { item: GhItem; project: string; worktree: string
                       </ul>
                     </Show>
                     <ul class="prc-list" aria-label={C.list(n())}>
-                      <For each={threads(d().comments)} fallback={<Show when={!d().reviews.length}><li class="muted prc-note">{C.none}</li></Show>}>
+                      <For
+                        each={threads(d().comments)}
+                        fallback={
+                          <Show when={!d().reviews.length}>
+                            <li class="muted prc-note">{C.none}</li>
+                          </Show>
+                        }
+                      >
                         {(t) => (
                           <>
                             <Row c={t.root} />
@@ -192,20 +263,41 @@ export function PullsPanel() {
     <aside class="rightbar" id="rpanel" role="tabpanel" aria-labelledby={`rtab-${rightTab()}`}>
       <RightTabs />
       <div class="rtools">
-        <Button variant="icon" size="icon" class={kind() === "pr" ? "text-primary" : undefined} aria-pressed={kind() === "pr"} onClick={() => setKind("pr")}>
+        <Button
+          variant="icon"
+          size="icon"
+          class={kind() === "pr" ? "text-primary" : undefined}
+          aria-pressed={kind() === "pr"}
+          onClick={() => setKind("pr")}
+        >
           {P.pulls.prs}
         </Button>
-        <Button variant="icon" size="icon" class={kind() === "issue" ? "text-primary" : undefined} aria-pressed={kind() === "issue"} onClick={() => setKind("issue")}>
+        <Button
+          variant="icon"
+          size="icon"
+          class={kind() === "issue" ? "text-primary" : undefined}
+          aria-pressed={kind() === "issue"}
+          onClick={() => setKind("issue")}
+        >
           {P.pulls.issues}
         </Button>
         <span class="grow" />
-        <Button variant="icon" size="icon" title={P.pulls.refresh} aria-label={P.pulls.refresh} onClick={() => void refetch()}>
+        <Button
+          variant="icon"
+          size="icon"
+          title={P.pulls.refresh}
+          aria-label={P.pulls.refresh}
+          onClick={() => void refetch()}
+        >
           <Icon name="refresh" />
         </Button>
       </div>
       <div class="rlist">
         <Show when={!items.loading} fallback={<Loading onRetry={() => void refetch()} />}>
-          <Show when={!items.error} fallback={<div class="placeholder">{String(items.error?.message ?? items.error)}</div>}>
+          <Show
+            when={!items.error}
+            fallback={<div class="placeholder">{String(items.error?.message ?? items.error)}</div>}
+          >
             <For each={items()} fallback={<div class="placeholder">{P.pulls.nothing}</div>}>
               {(i) => (
                 <div class="pr">
@@ -233,11 +325,23 @@ export function PullsPanel() {
                     </Show>
                     <span class="grow" />
                     <Show when={kind() === "pr"}>
-                      <Button variant="icon" size="icon" disabled={busy() === i.number} title={P.pulls.openWtTip} onClick={() => void work(i.number)}>
+                      <Button
+                        variant="icon"
+                        size="icon"
+                        disabled={busy() === i.number}
+                        title={P.pulls.openWtTip}
+                        onClick={() => void work(i.number)}
+                      >
                         {busy() === i.number ? "…" : P.pulls.worktree}
                       </Button>
                     </Show>
-                    <Button variant="icon" size="icon" title={P.pulls.openBrowser} aria-label={P.pulls.openBrowser} onClick={() => void open(i.url)}>
+                    <Button
+                      variant="icon"
+                      size="icon"
+                      title={P.pulls.openBrowser}
+                      aria-label={P.pulls.openBrowser}
+                      onClick={() => void open(i.url)}
+                    >
                       <Icon name="external" />
                     </Button>
                   </div>

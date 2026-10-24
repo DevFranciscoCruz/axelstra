@@ -1,19 +1,11 @@
 import type { SessionInfo } from "./api";
 import { sessionState } from "./store";
+import { L } from "./strings.logic";
 
 /** What a status dot shows besides its colour: a shape, and the words for the tooltip and screen readers. */
 export type DotState = "working" | "idle" | "waiting" | "done" | "attention" | "queued" | "running" | "none";
 
-export const DOT_LABEL: Record<DotState, string> = {
-  working: "A trabalhar",
-  idle: "Parado",
-  waiting: "À espera de resposta",
-  done: "Terminado",
-  attention: "Parou: precisa de atenção",
-  queued: "Na fila: o plano ainda não chegou a esta tarefa",
-  running: "Terminal ativo",
-  none: "",
-};
+export const DOT_LABEL: Record<DotState, string> = L.dot;
 
 /** Glyph paths (8x8 box, stroked): a different silhouette per state, so colour is never the only cue. */
 export const DOT_GLYPH: Record<DotState, string> = {

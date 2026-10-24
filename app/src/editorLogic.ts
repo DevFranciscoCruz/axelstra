@@ -1,12 +1,13 @@
+import { L } from "./strings.logic";
 /** Above this many characters the editor asks before opening (CodeMirror slows down on big files). */
 export const LARGE_FILE_CHARS = 2 * 1024 * 1024;
 
 /** Text for a failed fs.read: binary and non-UTF-8 files cannot be edited, say so clearly. */
 export function describeReadError(err: unknown): string {
   const s = String(err);
-  if (/binary file/i.test(s)) return "Ficheiro binário: não pode ser aberto no editor.";
-  if (/not valid UTF-8/i.test(s)) return "O ficheiro não é texto UTF-8: não pode ser aberto no editor.";
-  if (/larger than/i.test(s)) return "Ficheiro demasiado grande para o editor.";
+  if (/binary file/i.test(s)) return L.editor.binary;
+  if (/not valid UTF-8/i.test(s)) return L.editor.notUtf8;
+  if (/larger than/i.test(s)) return L.editor.tooLarge;
   return s;
 }
 

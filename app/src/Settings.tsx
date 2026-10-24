@@ -13,6 +13,8 @@ import { classifySettingsError, diagnosticRows, errorText } from "./settingsLogi
 import { setError, setShowSettings, showNotice } from "./store";
 import { DEFAULT_FONT, MAX_FONT, MIN_FONT, TermTheme, setTermPrefs, termPrefs } from "./termprefs";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
+import { LOCALES, LOCALE_NAMES, locale, setLocale } from "./i18n";
+import { L } from "./strings.logic";
 import "./termui.css";
 import { Button, CheckboxField, Field, Input, RadioGroup } from "./ui";
 
@@ -214,6 +216,10 @@ export function Settings() {
                   options={SHELLS.map((v) => ({ value: v, label: S.shells[v] }))}
                   onPick={(v) => void save({ shell: v })}
                 />
+              </Section>
+
+              <Section title={L.lang.title} note={L.lang.note}>
+                <Choices label={L.lang.title} value={locale()} options={LOCALES.map((v) => ({ value: v, label: LOCALE_NAMES[v] }))} onPick={setLocale} />
               </Section>
 
               <Section title={S.appearance} note={S.appearanceNote}>

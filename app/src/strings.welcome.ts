@@ -1,5 +1,7 @@
+import { dict } from "./i18n";
+import { enW } from "./strings.welcome.en";
 /** pt-PT texts of the empty main-area screen (no project, or no worktree chosen). */
-export const W = {
+export const ptW = {
   title: "Bem-vindo ao Axelstra",
   flow: "Adiciona um projeto, cria um worktree e abre um agente.",
   add: "Adicionar projeto",
@@ -20,3 +22,5 @@ export const W = {
   toolMissing: "não encontrado",
   needGh: { name: "gh", why: "só é preciso para PRs" },
 } as const;
+
+export const W = dict(ptW, enW);

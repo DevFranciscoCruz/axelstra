@@ -1,9 +1,11 @@
+import { dict } from "./i18n";
+import { enB } from "./strings.budget.en";
 /** pt-PT texts of the token budgets (Settings section, status bar, popover, alerts). */
-import { count } from "./strings";
+import { count } from "./i18n";
 
 const period = { daily: "diário", weekly: "semanal" } as const;
 
-export const B = {
+export const ptB = {
   title: "Orçamentos de tokens",
   note: "Avisa quando um worktree gasta demasiados tokens num dia ou numa semana: 80% é um aviso, 100% é excedido. Conta entrada, saída e escrita de cache dos agentes.",
   defaultRow: "Todos os worktrees",
@@ -39,3 +41,5 @@ export const B = {
     `Orçamento ${period[p]} de ${name} excedido: ${used} de ${limit} tokens`,
   paused: (n: number) => ` · ${count(n, "agente interrompido", "agentes interrompidos")}`,
 };
+
+export const B = dict(ptB, enB);

@@ -3,6 +3,8 @@ import { copyDiagnostics, logFrontendError } from "./api";
 import { errorText } from "./appError";
 import { formatError } from "./errorHooks";
 import { Button } from "./ui";
+import { S } from "./strings";
+import { U } from "./strings.ui";
 
 /** What a section shows instead of itself when it threw while rendering: the rest of the app (terminals included) keeps running. */
 export function Fallback(props: { name: string; error: unknown; reset: () => void; whole?: boolean }) {
@@ -15,19 +17,18 @@ export function Fallback(props: { name: string; error: unknown; reset: () => voi
   return (
     <div class="placeholder" classList={{ whole: props.whole }} role="alert">
       <div>
-        {props.whole ? "O Axelstra encontrou um erro." : `Esta parte (${props.name}) encontrou um erro.`} Os terminais
-        continuam a correr.
+        {props.whole ? U.boundary.whole : U.boundary.part(props.name)} {U.boundary.terminalsKeep}
       </div>
       <div class="hints boundary-msg">{errorText(props.error)}</div>
       <div class="empty-actions">
         <Button variant="default" onClick={props.reset}>
-          Tentar de novo
+          {S.retry}
         </Button>
         <Button onClick={() => void copyDiagnostics().catch((e) => console.debug("copyDiagnostics", e))}>
-          Copiar diagnóstico
+          {U.boundary.copyDiag}
         </Button>
         <Show when={props.whole}>
-          <Button onClick={() => location.reload()}>Recarregar</Button>
+          <Button onClick={() => location.reload()}>{U.boundary.reload}</Button>
         </Show>
       </div>
     </div>
