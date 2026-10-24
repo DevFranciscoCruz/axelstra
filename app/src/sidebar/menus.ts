@@ -5,6 +5,7 @@ import { openInEditor, worktreeSetParent } from "../api";
 import { wtKey } from "../wtGroups";
 import { P } from "../strings.panels";
 import { S } from "../strings";
+import { agentLabel } from "../agentLabel";
 import {
   canonAgent,
   agentKeys,
@@ -113,7 +114,7 @@ export const projectMenu = (
         run: () => setProjectPref(p.id, { agent: undefined }),
       },
       ...agentKeys().map((a) => ({
-        label: projectPrefsOf(p.id).agent && canonAgent(projectPrefsOf(p.id).agent!) === a ? `${a} ✓` : a,
+        label: projectPrefsOf(p.id).agent && canonAgent(projectPrefsOf(p.id).agent!) === a ? `${agentLabel(a)} ✓` : agentLabel(a),
         icon: hasIcon(a) ? a : undefined,
         run: () => setProjectPref(p.id, { agent: a }),
       })),

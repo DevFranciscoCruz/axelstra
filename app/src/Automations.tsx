@@ -178,8 +178,7 @@ export function Automations() {
                 <Field label={P.automations.agent}>
                   <Select
                     value={d().agent}
-                    iconOnly
-                  options={agentOptions(agents() ?? [], d().agent)}
+                    options={agentOptions(agents() ?? [], d().agent)}
                     onChange={(v) => setDraft({ ...d(), agent: v })}
                   />
                   <Show when={agentWarning(agents() ?? [], d().agent)}>{(w) => <span class="auto-note">{w()}</span>}</Show>
