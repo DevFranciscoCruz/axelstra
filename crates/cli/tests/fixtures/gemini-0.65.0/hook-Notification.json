@@ -1,0 +1,15 @@
+{
+ "session_id": "400f78d6-4be1-447f-841d-e883bd32e50f",
+ "transcript_path": "C:\\home\\.gemini\\tmp\\gem\\chats\\session-2026-10-24T15-18-400f78d6.jsonl",
+ "cwd": "C:\\wt\\gem",
+ "hook_event_name": "Notification",
+ "timestamp": "2026-10-24T15:18:21.011Z",
+ "notification_type": "ToolPermission",
+ "message": "Tool Confirm Shell Command requires execution",
+ "details": {
+  "type": "exec",
+  "title": "Confirm Shell Command",
+  "command": "mkdir newdir_stub",
+  "rootCommand": "mkdir"
+ }
+}
