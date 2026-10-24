@@ -136,7 +136,7 @@ impl Write for Conn {
 /// An error the daemon itself returned (the call arrived and was refused), as opposed to a broken connection:
 /// retrying such a call would only repeat the refusal, or worse, repeat a side effect.
 #[derive(Debug)]
-pub struct Remote(pub String);
+pub struct Remote(pub String, pub Option<axelstra_core::msg::Coded>);
 
 impl std::fmt::Display for Remote {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -144,7 +144,12 @@ impl std::fmt::Display for Remote {
     }
 }
 
-impl std::error::Error for Remote {}
+impl std::error::Error for Remote {
+    /// the message code the daemon sent, so `msg::find` sees it through this wrapper
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.1.as_ref().map(|c| c as &(dyn std::error::Error + 'static))
+    }
+}
 
 /// The request could not be written to the daemon, so it never ran: retrying it is always safe.
 #[derive(Debug)]
@@ -662,7 +667,9 @@ impl Client {
             match self.read()? {
                 Frame::Response(v) if v["id"].as_u64() == Some(id) => {
                     if let Some(e) = v.get("error") {
-                        return Err(anyhow::Error::new(Remote(format!("{method}: {}", e.as_str().unwrap_or("error")))));
+                        let text = format!("{method}: {}", e.as_str().unwrap_or("error"));
+                        let coded = axelstra_core::msg::Coded::from_wire(v["code"].as_str().unwrap_or(""), &v["params"], &text);
+                        return Err(anyhow::Error::new(Remote(text, coded)));
                     }
                     return Ok(v["result"].clone());
                 }

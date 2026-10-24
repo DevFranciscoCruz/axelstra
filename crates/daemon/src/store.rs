@@ -29,16 +29,27 @@ const BACKUPS: usize = 3;
 /// persisted struct changes shape incompatibly.
 pub const CURRENT_VERSION: u32 = 1;
 
-static NOTICES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static NOTICES: Mutex<Vec<(String, Option<axelstra_core::msg::Coded>)>> = Mutex::new(Vec::new());
 
 /// Records a message about lost or recovered state for the server/UI to show later (and logs it).
 pub fn notice(msg: String) {
     eprintln!("{msg}");
-    NOTICES.lock_recover().push(msg);
+    NOTICES.lock_recover().push((msg, None));
+}
+
+/// Same, with a message code the UI translates (`c.text` is the English line the log and old frontends show).
+pub fn notice_coded(c: axelstra_core::msg::Coded) {
+    eprintln!("{}", c.text);
+    NOTICES.lock_recover().push((c.text.clone(), Some(c)));
 }
 
 /// Takes (and clears) the notices recorded since the last call.
 pub fn take_notices() -> Vec<String> {
+    take_notice_items().into_iter().map(|(t, _)| t).collect()
+}
+
+/// Same, with the message code of each notice that has one.
+pub fn take_notice_items() -> Vec<(String, Option<axelstra_core::msg::Coded>)> {
     std::mem::take(&mut *NOTICES.lock_recover())
 }
 

@@ -814,7 +814,15 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
     }
     let body = match res {
         Ok(v) => json!({"id": req.id, "result": v}),
-        Err(e) => json!({"id": req.id, "error": format!("{e:#}")}),
+        Err(e) => {
+            let mut b = json!({"id": req.id, "error": format!("{e:#}")});
+            // additive: an old frontend keeps showing `error`, a new one translates `code` with `params`
+            if let Some(c) = axelstra_core::msg::find(&e) {
+                b["code"] = json!(c.code);
+                b["params"] = c.params_json();
+            }
+            b
+        }
     };
     let _ = tx.send(encode(JSON, body.to_string().as_bytes())).await;
     // deferred work (stream start) runs only after the reply is queued

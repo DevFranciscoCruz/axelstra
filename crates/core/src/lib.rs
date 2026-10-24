@@ -3,6 +3,7 @@ pub mod card;
 pub mod exec;
 pub mod git;
 pub mod job;
+pub mod msg;
 pub mod orch;
 pub mod paths;
 pub mod procs;
