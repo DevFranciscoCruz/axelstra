@@ -34,6 +34,7 @@ struct State {
 #[cfg(all(windows, target_env = "msvc", debug_assertions))]
 mod debugcrt;
 mod gpu;
+mod hosts;
 mod logging;
 mod stats;
 mod voice;
@@ -237,6 +238,8 @@ const ALLOWED_METHODS: &[&str] = &[
     "worktree.set_parent",
     "hooks.install",
     "hooks.status",
+    "host.browse",
+    "host.info",
     "kanban.delete",
     "kanban.list",
     "kanban.move",
@@ -307,6 +310,8 @@ fn check_params(method: &str, params: &Value) -> Result<(), String> {
             }
             Ok(())
         }
+        // the host registry changes only through `host_add` / `host_remove`, which confirm in a native dialog
+        "settings.set" if params.get("hosts").is_some() => Err("anfitriões só se alteram pelos comandos próprios".into()),
         // the UI never overrides the agent command: a page that did could run any program unsupervised
         "orch.start" if !params["agent"].is_null() => Err("override de agente não permitido".into()),
         "fs.write" => {
@@ -400,22 +405,21 @@ fn with_client<T>(slot: &Mutex<Option<Client>>, retry: bool, f: impl Fn(&mut Cli
 async fn daemon_call(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, String> {
     check_call(&method, &params)?;
     let st = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        with_client(&st.control, read_only(&method), |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || routed(&st, &method, params, false)).await.map_err(|e| e.to_string())?
+}
+
+/// One call, to this machine's daemon or (when its paths or session id say so) to a remote host's.
+fn routed(st: &State, method: &str, params: Value, bg: bool) -> Result<Value, String> {
+    let slot = if bg { &st.bg } else { &st.control };
+    let local = |m: &str, p: Value| with_client(slot, read_only(m), |c| c.call(m, p.clone()));
+    hosts::route(method, params, bg, read_only(method), &local).map_err(|e| format!("{e:#}"))
 }
 
 #[tauri::command]
 async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, String> {
     check_call(&method, &params)?;
     let st = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        with_client(&st.bg, read_only(&method), |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || routed(&st, &method, params, true)).await.map_err(|e| e.to_string())?
 }
 
 /// Asks for a folder in the native dialog. The path never passes through the webview: a compromised page could
@@ -586,6 +590,96 @@ fn workspace_import_cancel() {
     *WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner()) = (None, Vec::new());
 }
 
+/// A native yes/no the page cannot answer for the user (the registry and remote projects are the user's to decide).
+fn confirm_native(app: &tauri::AppHandle, title: &str, text: String) -> bool {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    app.dialog().message(text).title(title).kind(MessageDialogKind::Warning).buttons(MessageDialogButtons::OkCancel).blocking_show()
+}
+
+/// The registered remote hosts and how each connection stands.
+#[tauri::command]
+fn hosts_list() -> Vec<Value> {
+    hosts::list()
+}
+
+/// Registers a host after the user confirmed it in a native dialog (a page cannot make the app run `ssh` somewhere).
+#[tauri::command]
+async fn host_add(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<State>>,
+    name: String,
+    spec: String,
+    bin: Option<String>,
+) -> Result<Value, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        axelstra_daemon::remote::RemoteSpec::parse(&spec).map_err(|e| format!("{e:#}"))?;
+        let text = format!(
+            "Adicionar o anfitrião remoto \"{}\"?
+
+O Axelstra vai executar `ssh`/`wsl.exe` para {spec} e ligar-se ao daemon que lá corre.",
+            name.trim()
+        );
+        if !confirm_native(&app, "Adicionar anfitrião remoto", text) {
+            return Err("cancelado".to_string());
+        }
+        let h = with_client(&st.control, false, |c| hosts::add(c, &name, &spec, bin.as_deref())).map_err(|e| format!("{e:#}"))?;
+        Ok(h)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Forgets a host and drops its connections (what runs there keeps running).
+#[tauri::command]
+async fn host_remove(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, id: String) -> Result<(), String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if !confirm_native(&app, "Remover anfitrião remoto", format!("Remover o anfitrião \"{id}\"? O que corre lá continua a correr."))
+        {
+            return Err("cancelado".to_string());
+        }
+        with_client(&st.control, false, |c| hosts::remove(c, &id)).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Tries the host again now (the keeper thread also does it by itself, after a wait).
+#[tauri::command]
+async fn host_reconnect(id: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let h = hosts::get(&id).ok_or_else(|| format!("anfitrião desconhecido: {id}"))?;
+        let _ = h.connect_now();
+        Ok(h.describe())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Adds a folder of a remote host as a project, after the user confirmed it in a native dialog.
+#[tauri::command]
+async fn project_add_remote(app: tauri::AppHandle, host: String, path: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let h = hosts::get(&host).ok_or_else(|| format!("anfitrião desconhecido: {host}"))?;
+        let t = path.trim();
+        let absolute = t.starts_with('/') || t.as_bytes().get(1) == Some(&b':');
+        if t.is_empty() || t.len() > 1024 || t.chars().any(char::is_control) || !absolute {
+            return Err("caminho remoto inválido: tem de ser absoluto".to_string());
+        }
+        let text = format!("Adicionar {t} em {} como projeto?", h.def.name);
+        if !confirm_native(&app, "Adicionar projeto remoto", text) {
+            return Err("cancelado".to_string());
+        }
+        let mut v = hosts::with_remote(&h, hosts::Which::Control, false, |c| c.call("project.add", json!({"path": t})))
+            .map_err(|e| format!("{e:#}"))?;
+        hosts::tag_project(&h.def.id, h.def.slot, &mut v);
+        Ok(v)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Typing lag diagnosis: slow steps go to `<data dir>/lag.log` (shared with the daemon's own slow calls).
 fn lag_note(what: &str, took: std::time::Duration) {
     axelstra_daemon::lag::note(what, took, 40);
@@ -597,36 +691,45 @@ fn lag_log(what: String, ms: u64) {
     lag_note(&format!("webview {what}"), std::time::Duration::from_millis(ms));
 }
 
-/// Keystrokes go to the daemon through one writer thread: in order (a lock race between per-key tasks could swap
-/// them), and a stalled daemon never blocks the UI. Bytes queued for the same session are sent as one frame.
-static INPUT_TX: std::sync::OnceLock<std::sync::mpsc::Sender<(u32, Vec<u8>)>> = std::sync::OnceLock::new();
+/// Keystrokes go to the daemon through one writer thread per host (slot 0 is this machine): in order (a lock race
+/// between per-key tasks could swap them), a stalled daemon never blocks the UI, and a slow remote link never holds up
+/// typing in a local terminal. Bytes queued for the same session are sent as one frame.
+type InputTx = std::sync::mpsc::Sender<(u32, Vec<u8>)>;
+static INPUT_TX: Mutex<Vec<(u32, InputTx)>> = Mutex::new(Vec::new());
 
-fn input_sender(st: &Arc<State>) -> &'static std::sync::mpsc::Sender<(u32, Vec<u8>)> {
-    INPUT_TX.get_or_init(|| {
-        let (tx, rx) = std::sync::mpsc::channel::<(u32, Vec<u8>)>();
-        let st = st.clone();
-        std::thread::spawn(move || {
-            while let Ok((mut id, mut data)) = rx.recv() {
-                let mut pending: Vec<(u32, Vec<u8>)> = vec![];
-                while let Ok((i, d)) = rx.try_recv() {
-                    if i == id {
-                        data.extend(d);
-                    } else {
-                        pending.push((id, std::mem::take(&mut data)));
-                        id = i;
-                        data = d;
-                    }
-                }
-                pending.push((id, data));
-                for (id, data) in pending {
-                    let t = std::time::Instant::now();
-                    let _ = with_client(&st.input, true, |c| c.send_input(id, &data));
-                    lag_note("keystroke to daemon", t.elapsed());
+fn input_sender(st: &Arc<State>, slot: u32) -> InputTx {
+    let mut all = INPUT_TX.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, tx)) = all.iter().find(|(s, _)| *s == slot) {
+        return tx.clone();
+    }
+    let (tx, rx) = std::sync::mpsc::channel::<(u32, Vec<u8>)>();
+    let st = st.clone();
+    std::thread::spawn(move || {
+        while let Ok((mut id, mut data)) = rx.recv() {
+            let mut pending: Vec<(u32, Vec<u8>)> = vec![];
+            while let Ok((i, d)) = rx.try_recv() {
+                if i == id {
+                    data.extend(d);
+                } else {
+                    pending.push((id, std::mem::take(&mut data)));
+                    id = i;
+                    data = d;
                 }
             }
-        });
-        tx
-    })
+            pending.push((id, data));
+            for (id, data) in pending {
+                let t = std::time::Instant::now();
+                let (_, raw) = hosts::split_gid(id);
+                let _ = match hosts::by_slot(slot) {
+                    Some(h) if slot != 0 => hosts::with_remote(&h, hosts::Which::Input, true, |c| c.send_input(raw, &data)),
+                    _ => with_client(&st.input, true, |c| c.send_input(id, &data)),
+                };
+                lag_note("keystroke to daemon", t.elapsed());
+            }
+        }
+    });
+    all.push((slot, tx.clone()));
+    tx
 }
 
 #[tauri::command]
@@ -635,7 +738,7 @@ fn session_write(state: tauri::State<'_, Arc<State>>, id: u32, data: String) -> 
     if !state.attachments.lock().unwrap().get(&id).is_some_and(|m| !m.is_empty()) {
         return Err(format!("sessão {id} não está anexada"));
     }
-    input_sender(state.inner()).send((id, data.into_bytes())).map_err(|e| e.to_string())
+    input_sender(state.inner(), hosts::split_gid(id).0).send((id, data.into_bytes())).map_err(|e| e.to_string())
 }
 
 /// Streams a session to the webview: raw bytes for output, a JSON string for events.
@@ -652,11 +755,21 @@ async fn session_attach(state: tauri::State<'_, Arc<State>>, id: u32, on_data: C
                 m.remove(&token);
             }
         };
-        let mut c = connect().map_err(|e| {
+        let (slot, raw) = hosts::split_gid(id);
+        let remote = if slot == 0 { None } else { hosts::by_slot(slot) };
+        if slot != 0 && remote.is_none() {
+            forget();
+            return Err(format!("sessão {id} de um anfitrião que já não existe"));
+        }
+        let mut c = match &remote {
+            Some(h) => h.connect_stream(),
+            None => connect(),
+        }
+        .map_err(|e| {
             forget();
             format!("{e:#}")
         })?;
-        c.call("session.subscribe", json!({"id": id})).map_err(|e| {
+        c.call("session.subscribe", json!({"id": raw})).map_err(|e| {
             forget();
             format!("{e:#}")
         })?;
@@ -669,7 +782,13 @@ async fn session_attach(state: tauri::State<'_, Arc<State>>, id: u32, on_data: C
                     // the daemon's keep-alive (see the forwarder): only there so a detached tab can hang up
                     Frame::Output { data, .. } if data.is_empty() => Ok(()),
                     Frame::Output { data, .. } => on_data.send(InvokeResponseBody::Raw(data)),
-                    Frame::Event(e) => on_data.send(InvokeResponseBody::Json(e.to_string())),
+                    Frame::Event(mut e) => {
+                        if let Some(h) = &remote {
+                            let name = e["event"].as_str().unwrap_or_default().to_string();
+                            hosts::tag_result(&name, &h.def.id, h.def.slot, &mut e);
+                        }
+                        on_data.send(InvokeResponseBody::Json(e.to_string()))
+                    }
                     Frame::Response(_) => Ok(()),
                 };
                 if sent.is_err() {
@@ -696,6 +815,8 @@ async fn watch_start(
         let c = connect().map_err(|e| format!("{e:#}"))?;
         let mut rd = c.try_clone().map_err(|e| format!("{e:#}"))?;
         *st.watch.lock().unwrap() = Some(c);
+        // remote hosts push their events into the same channel
+        hosts::set_events(on_event.clone());
         std::thread::spawn(move || {
             while let Ok(f) = rd.read() {
                 if let Frame::Event(e) = f {
@@ -721,7 +842,8 @@ async fn watch_set(state: tauri::State<'_, Arc<State>>, worktree: Option<String>
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let mut g = st.watch.lock().unwrap();
         let c = g.as_mut().ok_or("watch not started")?;
-        match worktree {
+        // a remote worktree is watched by that host's daemon; this machine's one then watches nothing
+        match hosts::watch_target(worktree.as_deref()).map_err(|e| format!("{e:#}"))? {
             Some(w) => c.send("watch.subscribe", json!({"worktree": w})),
             None => c.send("watch.unsubscribe", json!({})),
         }
@@ -910,8 +1032,22 @@ fn clean_pastes() {
     }
 }
 
+/// The terminal to start: this machine's, or (with `host`) the login shell of that remote host.
 #[tauri::command]
-fn default_shell() -> (String, Vec<String>) {
+async fn default_shell(host: Option<String>) -> Result<(String, Vec<String>), String> {
+    let Some(host) = host.filter(|h| h != hosts::LOCAL) else { return Ok(local_shell()) };
+    tauri::async_runtime::spawn_blocking(move || {
+        let h = hosts::get(&host).ok_or_else(|| format!("anfitrião desconhecido: {host}"))?;
+        let info = hosts::with_remote(&h, hosts::Which::Bg, true, |c| c.call("host.info", json!({}))).map_err(|e| format!("{e:#}"))?;
+        // only a shell the daemon would start for a terminal; anything else falls back to sh
+        let shell = info["shell"].as_str().filter(|s| is_shell(s)).unwrap_or("/bin/sh").to_string();
+        Ok((shell, vec!["-l".to_string()]))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn local_shell() -> (String, Vec<String>) {
     if cfg!(windows) {
         windows_shell(setting("shell").as_str().unwrap_or("auto"), on_path("pwsh"))
     } else {
@@ -1013,6 +1149,7 @@ fn main() {
         .manage(voice::Voice::default())
         .setup(|app| {
             let _ = APP.set(app.handle().clone());
+            hosts::load();
             std::thread::spawn(clean_pastes);
             Ok(())
         })
@@ -1045,6 +1182,11 @@ fn main() {
             watch_start,
             watch_set,
             default_shell,
+            hosts_list,
+            host_add,
+            host_remove,
+            host_reconnect,
+            project_add_remote,
             update_check,
             update_download,
             update_apply,

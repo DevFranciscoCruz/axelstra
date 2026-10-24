@@ -563,6 +563,14 @@ impl Client {
         }
     }
 
+    /// Ends the `ssh`/`wsl.exe` child of a remote connection now, so a thread blocked in `read` on a clone of it sees the
+    /// end of the stream (the child otherwise lives until the last clone is dropped). No effect on a local connection.
+    pub fn kill_child(&self) {
+        if let Conn::Child(c) = &self.rd {
+            let _ = recover(&c.shared.child).kill();
+        }
+    }
+
     /// The `hello` result the daemon gave (for the bridge, which answers its own client's `hello` with it).
     pub fn hello_result(&self) -> &Value {
         &self.hello
