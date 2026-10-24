@@ -66,6 +66,16 @@ export type Diagnostics = {
   missing_tools: string[];
 };
 export const diagnostics = () => tauriInvoke<Diagnostics>("diagnostics");
+/** Sends a webview error to the Rust log file. */
+export const logFrontendError = (r: { kind: string; message: string; stack: string }) => tauriInvoke<void>("log_frontend_error", r);
+/** Text bundle for bug reports (version, OS, data dir, log tails). */
+export const diagnosticsBundle = () => tauriInvoke<string>("diagnostics_bundle");
+/** Copies the diagnostics bundle to the clipboard and returns it. */
+export async function copyDiagnostics(): Promise<string> {
+  const text = await diagnosticsBundle();
+  await tauriInvoke("clipboard_write", { text });
+  return text;
+}
 
 /** Single-quotes `s` for the shell that will read the line: PowerShell doubles a quote (the typographic ones count too),
  * sh closes the string, escapes the quote and opens it again. */
