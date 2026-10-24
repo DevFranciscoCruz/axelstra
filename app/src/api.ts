@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AppError, toAppError } from "./appError";
 import { apiContext } from "./apiContext";
-import { norm } from "./paths";
+import { hostOf, norm } from "./paths";
 
 /** Mirrors the Rust `meta` of a session (crates/daemon). `blank`, `interrupted` and `lost_workers` are set on entries of `session.pending`. */
 export type SessionMeta = {
@@ -28,6 +28,8 @@ export type Project = { id: string; name: string; path: string; worktrees: Workt
   default_branch?: string;
   icon_url?: string | null;
   remote?: string | null;
+  /** id of the remote host the project lives on; absent = this machine */
+  host?: string;
 };
 
 /** A call that gets no answer in this long fails (a stuck daemon must not leave the UI waiting for ever). */
@@ -87,11 +89,21 @@ const once = <T>(fn: () => Promise<T>) => {
   };
   return get;
 };
-const shellOnce = once(() => tauriInvoke<[string, string[]]>("default_shell"));
+/** the login shell, one answer per host ("" = this machine) */
+const shells = new Map<string, ReturnType<typeof once<[string, string[]]>>>();
 const dirOnce = once(() => call<{ dir: string }>("app.dir").then((r) => r.dir));
-export const defaultShell = shellOnce;
+/** The shell for a terminal in `path`: a remote path (`@host:/dir`) gets that host's login shell, anything else the local one. */
+export const defaultShell = (path?: string | null): Promise<[string, string[]]> => {
+  const host = hostOf(path) ?? "";
+  let get = shells.get(host);
+  if (!get) {
+    get = once(() => tauriInvoke<[string, string[]]>("default_shell", host ? { host } : {}));
+    shells.set(host, get);
+  }
+  return get();
+};
 /** the shell choice in Settings changed: the next terminal asks again */
-export const resetShellCache = () => shellOnce.reset();
+export const resetShellCache = () => shells.clear();
 export const daemonShutdown = () => call("daemon.shutdown");
 
 /** What the Rust `diagnostics` command reports. */
@@ -162,7 +174,7 @@ export const launchDefaultAgent = async (
   terse?: Terse,
 ) => {
   const [[program, args], dir, rules] = await Promise.all([
-    defaultShell(),
+    defaultShell(worktree),
     dirOnce(),
     pre ? pre.rules : getSettings(terse).then((x) => x.rules, () => null),
   ]);
@@ -777,3 +789,18 @@ export const triggersSet = (project: string, patch: { ci_fix?: boolean; confirm?
   call<TriggerState>("triggers.set", { project, ...patch });
 /** What the trigger did since the last call (take semantics); an older daemon has none. */
 export const triggersEvents = () => callOr<{ events: TriggerEvent[] }>("triggers.events", {}, { events: [] }).then((r) => r.events ?? []);
+
+// ---- remote hosts (M7b): the registry lives in the Tauri host, not in the daemon ----
+export type HostState = "idle" | "connecting" | "ok" | "lost" | "auth";
+export type HostInfo = { id: string; name: string; spec: string; slot: number; state: HostState; error?: string; proto?: number; build?: string };
+export type HostInfoReport = { os: string; home: string; user: string; hostname: string; shell: string; sep: string; proto: number; build: string };
+export type BrowseEntry = { name: string; git: boolean };
+export type BrowseResult = { path: string; parent: string | null; home: string; entries: BrowseEntry[]; truncated?: boolean };
+export const hostsList = () => hostCmd<HostInfo[]>("hosts_list", "hosts_list");
+export const hostAdd = (name: string, spec: string, bin?: string) => hostCmd<HostInfo>("host_add", "host_add", { name, spec, ...(bin ? { bin } : {}) });
+export const hostRemove = (id: string) => hostCmd<void>("host_remove", "host_remove", { id });
+export const hostReconnect = (id: string) => hostCmd<HostInfo>("host_reconnect", "host_reconnect", { id });
+/** the host shows its own confirmation and checks the path exists on the remote */
+export const projectAddRemote = (host: string, path: string) => hostCmd<Project>("project_add_remote", "project_add_remote", { host, path });
+export const hostInfo = (host: string) => call<HostInfoReport>("host.info", { host });
+export const hostBrowse = (host: string, path?: string) => call<BrowseResult>("host.browse", path ? { host, path } : { host });

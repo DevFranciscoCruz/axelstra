@@ -20,7 +20,7 @@ export const setupInput = (cmds: string[]): string => cmds.map((c) => `${c}\r`).
 export async function runSetup(projectId: string, worktree: string, text: string | null | undefined): Promise<boolean> {
   const cmds = setupCommands(text);
   if (!cmds.length) return false;
-  const [program, args] = await defaultShell();
+  const [program, args] = await defaultShell(worktree);
   const { id } = await spawnSession(program, args, "setup", worktree, { project: projectId, worktree, kind: "shell" });
   // type only once the shell has printed its prompt (a slow profile can take seconds); if it never does, type anyway
   void waitShellReady(() => call<{ lines: string[] }>("session.screen", { id, lines: 5 }).then((r) => r.lines))

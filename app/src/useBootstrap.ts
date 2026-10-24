@@ -38,6 +38,7 @@ import {
   setPorts,
   showNotice,
   toast,
+  watchHosts,
 } from "./store";
 
 /** Everything the shell starts when it opens: startup checks, session restore, pollers, daemon events, the worktree watch and the dev-server port lookup. */
@@ -58,6 +59,8 @@ export function useBootstrap() {
       console.debug("longtask observer not supported", e);
     }
   });
+
+  onMount(() => onCleanup(watchHosts()));
 
   onMount(
     () =>
