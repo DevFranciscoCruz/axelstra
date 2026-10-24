@@ -246,7 +246,7 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         "computer.enable" => p["on"].as_bool() == Some(true),
         // an agent must not raise its own limit or switch the auto-pause off; the events are the user's to take
         "budget.check" | "budget.events" => true,
-        "settings.set" => p.get("budgets").is_some(),
+        "settings.set" => p.get("budgets").is_some() || p.get("hosts").is_some(),
         "project.add"
         | "project.setup"
         | "hooks.install"
