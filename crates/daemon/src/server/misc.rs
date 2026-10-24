@@ -120,6 +120,28 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let session = p["session"].as_u64().and_then(|x| u32::try_from(x).ok());
             Ok(json!({"entries": reg.audit.list(limit, session)}))
         }
+        "env.tools" => Ok(json!({"tools": tokio::task::block_in_place(crate::envtools::detect)})),
+        "backup.export" => {
+            // sessions.json is the registry's own view, not whatever was last flushed
+            reg.persist();
+            let dir = reg.saved.parent().unwrap_or(std::path::Path::new("")).to_path_buf();
+            let out = tokio::task::block_in_place(|| crate::backup::export(&dir))?;
+            Ok(json!({"path": out.to_string_lossy().replace('\\', "/")}))
+        }
+        "backup.restore" => {
+            let src = p["path"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| anyhow::anyhow!("path is required"))?;
+            let dir = reg.saved.parent().unwrap_or(std::path::Path::new("")).to_path_buf();
+            let restored = tokio::task::block_in_place(|| crate::backup::restore(&dir, std::path::Path::new(src)))?;
+            if restored.iter().any(|f| f == "sessions.json") {
+                // the restored sessions wait for the UI like those of a daemon restart; live ones are kept
+                let v = read_json::<Vec<Value>>(&reg.saved).ok().flatten().unwrap_or_default();
+                *reg.pending.lock_recover() = v;
+                reg.persist();
+            }
+            *reg.plist.lock_recover() = None;
+            reg.wt_gen.fetch_add(1, Ordering::SeqCst);
+            Ok(json!({"restored": restored}))
+        }
         "notices.take" => Ok(json!({"notices": crate::store::take_notices()})),
         // used by the app updater: the installer cannot replace a running axelstra.exe.
         // Sessions die with the daemon (Job Objects), so the UI warns before calling this.

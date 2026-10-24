@@ -11,6 +11,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
             Ok(json!({"max_workers": reg.bus.limit(), "workers": reg.bus.live_workers(alive)}))
         }
+        "orch.trust_info" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let repo = std::path::PathBuf::from(&pr.path);
+            Ok(serde_json::to_value(tokio::task::block_in_place(|| axelstra_core::orch::trust_info(&repo))?)?)
+        }
         "orch.start" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let name = format!("ui-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs());

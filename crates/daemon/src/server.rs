@@ -235,7 +235,8 @@ fn new_agent_token() -> Option<String> {
 fn agent_forbidden(method: &str, p: &Value) -> bool {
     match method {
         "computer.enable" => p["on"].as_bool() == Some(true),
-        "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" | "notices.take" | "audit.list" => true,
+        "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" | "notices.take" | "audit.list" | "backup.export"
+        | "backup.restore" => true,
         _ => false,
     }
 }
@@ -991,7 +992,7 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
         "orch" | "kanban" | "automation" => orchestration::call(c),
         "msg" | "notes" => messaging::call(c),
         "agent" | "agents" | "codex" | "computer" | "settings" | "flow" | "app" | "hooks" | "ping" | "audit" | "notices" | "daemon"
-        | "hello" => misc::call(c),
+        | "hello" | "backup" | "env" => misc::call(c),
         _ => anyhow::bail!("unknown method {}", req.method),
     }
 }
