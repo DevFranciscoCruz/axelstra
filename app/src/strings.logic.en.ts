@@ -24,6 +24,13 @@ export const enL: Widen<typeof ptL> = {
     noBackup: "This daemon does not support backups yet. Update and restart Axelstra.",
     restorePath: "Choose the folder of the backup to restore",
     copyDiag: "Copy diagnostics",
+    cleanTitle: "Automatic clean-up",
+    cleanNote:
+      "Removes by itself what is already integrated: worktrees, ax/* branches, orphan folders, old backups and records. Anything with changes or unintegrated work is never deleted.",
+    cleanNow: "Clean now",
+    cleanNothing: "Nothing to clean.",
+    cleanRemoved: "Removed",
+    cleanWarning: "Warning",
     diagCopied: "Diagnostics copied to the clipboard.",
   },
   actionHint: "action",
@@ -137,6 +144,12 @@ export const enL: Widen<typeof ptL> = {
       body: (who: string, wt: string) =>
         `${who} asked a question in worktree "${wt}" and needs your answer to continue.`,
     },
+    wait: {
+      permission: (who: string, wt: string, text: string) => `${who} asks permission in ${wt}: ${text}`,
+      question: (who: string, wt: string, text: string) => `${who} has a question in ${wt}: ${text}`,
+      permissionGeneric: (who: string, wt: string) => `${who} asks permission in ${wt} and waits for your answer.`,
+      questionGeneric: (who: string, wt: string) => `${who} has a question in ${wt} and waits for your answer.`,
+    },
     stalledHead: (who: string, wt: string) => `${who} stalled, not reporting · ${wt}`,
     stopped: {
       head: (who: string, wt: string) => `${who} stopped · ${wt}`,
@@ -149,6 +162,8 @@ export const enL: Widen<typeof ptL> = {
       ciPass: (pr: string, wt: string) => `CI passing: ${pr} (${wt})`,
     },
     janitor: (branch: string, into: string) => `worktree ${branch} removed (merged into ${into})`,
+    integrated: (branch: string, into: string) => `worktree ${branch} integrated into ${into} and removed`,
+    emptyRemoved: (branch: string) => `empty worktree ${branch} removed`,
   },
   restore: {
     restored: (n: number) => count(n, "session restored", "sessions restored"),

@@ -51,7 +51,14 @@ impl Env for Fake {
         self.now.get()
     }
     fn projects(&self) -> Vec<Project> {
-        vec![Project { id: "p".into(), name: "p".into(), path: "C:/r/main".into(), setup: None, parents: Default::default() }]
+        vec![Project {
+            id: "p".into(),
+            name: "p".into(),
+            path: "C:/r/main".into(),
+            setup: None,
+            parents: Default::default(),
+            ..Default::default()
+        }]
     }
     fn worktrees(&self, _: &Project) -> Vec<Worktree> {
         self.wts.clone()

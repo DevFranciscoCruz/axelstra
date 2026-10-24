@@ -301,6 +301,11 @@ pub fn push_event(row: &Row, paused: &[u32], at: u64) {
     }
 }
 
+/// Whether there are crossings the app has not taken yet.
+pub fn has_events() -> bool {
+    !EVENTS.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+}
+
 /// Takes (and clears) the crossings since the last call.
 pub fn take_events() -> Vec<Value> {
     std::mem::take(&mut *EVENTS.lock().unwrap_or_else(|e| e.into_inner()))

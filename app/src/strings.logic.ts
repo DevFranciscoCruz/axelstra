@@ -26,6 +26,13 @@ export const ptL = {
     noBackup: "Este daemon ainda não suporta cópias de segurança. Atualiza e reinicia o Axelstra.",
     restorePath: "Escolhe a pasta da cópia a restaurar",
     copyDiag: "Copiar diagnóstico",
+    cleanTitle: "Limpeza automática",
+    cleanNote:
+      "Remove sozinha o que já está integrado: worktrees, branches ax/*, pastas órfãs, cópias e registos antigos. O que tem alterações ou trabalho por integrar nunca se apaga.",
+    cleanNow: "Limpar agora",
+    cleanNothing: "Nada para limpar.",
+    cleanRemoved: "Removido",
+    cleanWarning: "Aviso",
     diagCopied: "Diagnóstico copiado para a área de transferência.",
   },
   actionHint: "ação",
@@ -145,6 +152,12 @@ export const ptL = {
       body: (who: string, wt: string) =>
         `${who} fez uma pergunta na worktree "${wt}" e precisa da tua resposta para continuar.`,
     },
+    wait: {
+      permission: (who: string, wt: string, text: string) => `${who} pede permissão em ${wt}: ${text}`,
+      question: (who: string, wt: string, text: string) => `${who} tem uma pergunta em ${wt}: ${text}`,
+      permissionGeneric: (who: string, wt: string) => `${who} pede permissão em ${wt} e espera a tua resposta.`,
+      questionGeneric: (who: string, wt: string) => `${who} tem uma pergunta em ${wt} e espera a tua resposta.`,
+    },
     stalledHead: (who: string, wt: string) => `${who} sem atividade e sem reportar · ${wt}`,
     stopped: {
       head: (who: string, wt: string) => `${who} parou · ${wt}`,
@@ -157,6 +170,8 @@ export const ptL = {
       ciPass: (pr: string, wt: string) => `CI a passar: ${pr} (${wt})`,
     },
     janitor: (branch: string, into: string) => `worktree ${branch} removido (integrado em ${into})`,
+    integrated: (branch: string, into: string) => `worktree ${branch} integrado em ${into} e removido`,
+    emptyRemoved: (branch: string) => `worktree vazio ${branch} removido`,
   },
   restore: {
     restored: (n: number) => count(n, "sessão restaurada", "sessões restauradas"),

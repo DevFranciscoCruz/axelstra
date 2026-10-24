@@ -1,146 +1,10 @@
-//! Detects an agent that stopped to ask the user something (a permission prompt, a y/n question).
-//! Works on the tail of the terminal output; no parsing of the agent's own protocol.
-
-/// Drops ANSI escape sequences (CSI, OSC) and carriage returns, keeping printable text.
-pub fn strip_ansi(bytes: &[u8]) -> String {
-    let s = String::from_utf8_lossy(bytes);
-    let mut out = String::with_capacity(s.len());
-    let mut it = s.chars().peekable();
-    while let Some(c) = it.next() {
-        match c {
-            '\x1b' => match it.peek() {
-                Some('[') => {
-                    it.next();
-                    for n in it.by_ref() {
-                        if ('@'..='~').contains(&n) {
-                            break;
-                        }
-                    }
-                }
-                Some(']') => {
-                    it.next();
-                    while let Some(n) = it.next() {
-                        if n == '\x07' || (n == '\x1b' && it.peek() == Some(&'\\')) {
-                            if n == '\x1b' {
-                                it.next();
-                            }
-                            break;
-                        }
-                    }
-                }
-                _ => {
-                    it.next();
-                }
-            },
-            '\r' => {}
-            c if c.is_control() && c != '\n' && c != '\t' => {}
-            c => out.push(c),
-        }
-    }
-    out
-}
+//! "Waiting for an answer" is never read off the terminal text: it is something the agent says. An agent says it with
+//! `axelstra ask` / `axelstra escalate` (the message bus keeps those) or through its own hook (`axelstra hook ...`
+//! sends `session.hint` with a kind and the text). Without such an event a session is only working or idle.
 
 /// Rule typed into every lead/worker prompt (English on purpose: agents are prompted in English). Writing "waiting for
 /// your decision" in the terminal tells nobody; the stall watchdog only flags the silence after the fact.
 pub const NEVER_WAIT_RULE: &str = "Never wait silently for the human: if you need a decision, a confirmation or a permission, or you are blocked, run `axelstra ask $AXELSTRA_PARENT \"<question>\"` (it blocks until answered) or `axelstra escalate \"<problem>\"`; if the choice is reversible, decide, say so in your report and carry on. Text such as \"waiting for your decision\" in the terminal reaches nobody, and after a few quiet minutes you are flagged as stalled.";
-
-const MARKERS: &[&str] = &[
-    "do you want to proceed",
-    "do you want to make this edit",
-    "do you want to create",
-    "do you want to allow",
-    "allow this",
-    "(y/n)",
-    "[y/n]",
-    "[y/n/",
-    "(yes/no)",
-    "press enter to continue",
-    "esc to cancel",
-    "approve this",
-    "waiting for your",
-];
-
-/// True when the last lines of the screen look like a question waiting for an answer.
-pub fn needs_input(tail: &[u8]) -> bool {
-    let text = strip_ansi(tail).to_lowercase();
-    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-    let last: String = lines[lines.len().saturating_sub(12)..].join("\n");
-    MARKERS.iter().any(|m| last.contains(m)) || (last.contains("❯ 1.") && last.contains("2."))
-}
-
-/// Phrases (lowercase) with which an agent hands a decision, a confirmation or a permission to the user without a
-/// question mark: "continuo parado à espera da tua decisão", "let me know how to proceed". PT-PT, PT-BR and English.
-const ASK_PHRASES: &[&str] = &[
-    "à espera d",
-    "a aguardar",
-    "aguardo ",
-    "aguardando",
-    "espero pela",
-    "espero a tua",
-    "sua decisão",
-    "tua decisão",
-    "a tua confirmação",
-    "a sua confirmação",
-    "me confirma",
-    "confirma-me",
-    "confirme se",
-    "confirma se",
-    "diz-me se",
-    "diga-me se",
-    "avisa-me",
-    "me avise",
-    "queres que eu",
-    "quer que eu",
-    "posso prosseguir",
-    "posso avançar",
-    "posso continuar",
-    "posso seguir",
-    "devo prosseguir",
-    "devo continuar",
-    "preciso da tua",
-    "preciso da sua",
-    "preciso de permissão",
-    "waiting for your",
-    "waiting on your",
-    "waiting for you",
-    "waiting for a decision",
-    "waiting for confirmation",
-    "awaiting your",
-    "awaiting confirmation",
-    "awaiting approval",
-    "should i proceed",
-    "should i continue",
-    "shall i proceed",
-    "shall i continue",
-    "let me know if",
-    "let me know how",
-    "let me know when",
-    "let me know whether",
-    "please confirm",
-    "need your decision",
-    "need your confirmation",
-    "need your approval",
-    "need your permission",
-    "your decision",
-    "want me to",
-];
-
-/// True when the screen's last lines (as rendered, see `Session::screen_lines`) contain a free-form question
-/// the agent put to the user ("Uso X ou Y?"), which has no fixed marker, or a statement that hands a decision,
-/// confirmation or permission to the user without a question mark. The TUI's own hints don't count.
-pub fn asks_question(lines: &[String]) -> bool {
-    let from = lines.len().saturating_sub(8);
-    lines[from..].iter().any(|l| {
-        let t = l.trim().trim_matches(|c: char| "│┃|>* ".contains(c)).trim();
-        if t.chars().count() < 8 || t.contains("for shortcuts") || t.starts_with("? ") {
-            return false;
-        }
-        t.ends_with('?') || {
-            let low = t.to_lowercase();
-            ASK_PHRASES.iter().any(|p| low.contains(p))
-        }
-    })
-}
 
 /// What an agent's own hook (Claude Code's Notification, Stop, UserPromptSubmit) said it is doing.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -172,14 +36,76 @@ pub fn hint_waiting(state: HintState, age_ms: u64, since_input_ms: u64, idle_ms:
     state == HintState::Waiting && age_ms < HINT_TTL_MS && since_input_ms > age_ms && idle_ms + HINT_SLACK_MS >= age_ms
 }
 
+/// Why an agent needs the user: a permission prompt, a question (an elicitation, `axelstra ask`) or, for a session
+/// that only sits at its input box, `IdleInput`, which is not a wait.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WaitKind {
+    Permission,
+    Question,
+    IdleInput,
+}
+
+impl WaitKind {
+    pub fn parse(s: &str) -> Option<WaitKind> {
+        match s {
+            "permission" => Some(WaitKind::Permission),
+            "question" => Some(WaitKind::Question),
+            "idle_input" => Some(WaitKind::IdleInput),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WaitKind::Permission => "permission",
+            WaitKind::Question => "question",
+            WaitKind::IdleInput => "idle_input",
+        }
+    }
+}
+
+/// What the agent said it waits for: the kind and its own words.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Wait {
+    pub kind: WaitKind,
+    pub text: String,
+}
+
+/// Longest event text kept (characters).
+pub const WAIT_TEXT_MAX: usize = 500;
+
+/// The text an agent sent, safe to store and show: no control characters, trimmed, at most `WAIT_TEXT_MAX` characters.
+pub fn clean_text(text: &str) -> String {
+    let t: String = text.chars().filter(|c| *c == '\n' || !c.is_control()).collect();
+    let t = t.trim();
+    match t.char_indices().nth(WAIT_TEXT_MAX) {
+        Some((i, _)) => format!("{}…", t[..i].trim_end()),
+        None => t.to_string(),
+    }
+}
+
+struct Hint {
+    at: std::time::Instant,
+    state: HintState,
+    wait: Option<Wait>,
+    /// the parent was told about this wait
+    told: bool,
+}
+
 /// Latest hint per session, with the moment it arrived.
 #[derive(Default)]
-pub struct Hints(std::sync::Mutex<std::collections::HashMap<u32, (std::time::Instant, HintState)>>);
+pub struct Hints(std::sync::Mutex<std::collections::HashMap<u32, Hint>>);
 
 impl Hints {
-    pub fn set(&self, id: u32, state: HintState) {
+    /// Records the agent's latest event. Only `Waiting` with a kind that needs the user counts as a wait: an
+    /// `idle_input` (Claude's `idle_prompt`: it finished and sits at the prompt) is just idle.
+    pub fn set(&self, id: u32, state: HintState, wait: Option<Wait>) {
+        let wait = wait.filter(|w| state == HintState::Waiting && w.kind != WaitKind::IdleInput);
+        let state = if state == HintState::Waiting && wait.is_none() { HintState::Idle } else { state };
         if let Ok(mut m) = self.0.lock() {
-            m.insert(id, (std::time::Instant::now(), state));
+            // the agent repeating the wait it is already in (a Notification fires again) is the same wait
+            let told = state == HintState::Waiting && m.get(&id).is_some_and(|h| h.state == HintState::Waiting && h.told && h.wait == wait);
+            m.insert(id, Hint { at: std::time::Instant::now(), state, wait, told });
         }
     }
 
@@ -189,16 +115,32 @@ impl Hints {
         }
     }
 
-    /// Whether the session's hint still says it waits, given how long it has been quiet (see `hint_waiting`).
-    pub fn waiting(&self, id: u32, since_input_ms: u64, idle_ms: u64) -> bool {
-        let Ok(m) = self.0.lock() else { return false };
-        m.get(&id).map(|(at, st)| hint_waiting(*st, at.elapsed().as_millis() as u64, since_input_ms, idle_ms)).unwrap_or(false)
+    /// What the session's hint says it waits for, if it still does, given how long it has been quiet (see `hint_waiting`).
+    pub fn waiting(&self, id: u32, since_input_ms: u64, idle_ms: u64) -> Option<Wait> {
+        let m = self.0.lock().ok()?;
+        let h = m.get(&id)?;
+        hint_waiting(h.state, h.at.elapsed().as_millis() as u64, since_input_ms, idle_ms).then(|| h.wait.clone()).flatten()
+    }
+
+    /// The wait to tell the parent about, once per wait: a second call for the same event gives nothing.
+    pub fn take_untold(&self, id: u32) -> Option<Wait> {
+        let mut m = self.0.lock().ok()?;
+        let h = m.get_mut(&id)?;
+        if h.told || h.state != HintState::Waiting {
+            return None;
+        }
+        h.told = true;
+        h.wait.clone()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn w(kind: WaitKind, text: &str) -> Option<Wait> {
+        Some(Wait { kind, text: text.into() })
+    }
 
     #[test]
     fn hint_waits_until_input_output_or_expiry() {
@@ -222,74 +164,63 @@ mod tests {
     #[test]
     fn hints_replace_and_clear() {
         let h = Hints::default();
-        h.set(1, HintState::Waiting);
+        h.set(1, HintState::Waiting, w(WaitKind::Permission, "Allow Bash?"));
         std::thread::sleep(std::time::Duration::from_millis(5));
-        assert!(h.waiting(1, u64::MAX, 60_000));
-        assert!(!h.waiting(2, u64::MAX, 60_000));
-        h.set(1, HintState::Working);
-        assert!(!h.waiting(1, u64::MAX, 60_000));
-        h.set(1, HintState::Waiting);
+        assert_eq!(h.waiting(1, u64::MAX, 60_000), w(WaitKind::Permission, "Allow Bash?"));
+        assert!(h.waiting(2, u64::MAX, 60_000).is_none());
+        h.set(1, HintState::Working, None);
+        assert!(h.waiting(1, u64::MAX, 60_000).is_none());
+        h.set(1, HintState::Waiting, w(WaitKind::Question, "q"));
         h.clear(1);
-        assert!(!h.waiting(1, u64::MAX, 60_000));
+        assert!(h.waiting(1, u64::MAX, 60_000).is_none());
         assert_eq!(HintState::parse("idle"), Some(HintState::Idle));
         assert_eq!(HintState::parse("x"), None);
     }
 
     #[test]
-    fn free_form_question_is_detected() {
-        let l = |s: &str| s.to_string();
-        assert!(asks_question(&[l("Analisei o código."), l("● Uso a opção A ou a B?"), l("╭──╮"), l("│ > │")]));
-        assert!(!asks_question(&[l("Tudo feito."), l("  ? for shortcuts")]));
-        assert!(!asks_question(&[l("Terminei.")]));
+    fn a_wait_needs_a_kind_and_idle_input_is_not_one() {
+        let h = Hints::default();
+        // the old hook said only "waiting": no event kind, no wait
+        h.set(1, HintState::Waiting, None);
+        h.set(2, HintState::Waiting, w(WaitKind::IdleInput, "Claude is waiting for your input"));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert!(h.waiting(1, u64::MAX, 60_000).is_none());
+        assert!(h.waiting(2, u64::MAX, 60_000).is_none());
+        assert!(h.take_untold(2).is_none());
     }
 
     #[test]
-    fn decision_phrases_without_question_mark_count() {
-        let l = |s: &str| vec!["Testes verdes.".to_string(), s.to_string(), "╭──╮".to_string()];
-        for t in [
-            "Continuo parado à espera da tua decisão sobre retomar os testes.",
-            "Fico a aguardar a sua confirmação para avançar.",
-            "Aguardando a sua decisão.",
-            "I am waiting for your decision on the migration.",
-            "Let me know how to proceed.",
-            "Please confirm before I delete the branch.",
-            "Posso prosseguir com o merge.",
-            "I need your permission to run this.",
-        ] {
-            assert!(asks_question(&l(t)), "{t}");
+    fn the_parent_is_told_once_per_wait() {
+        let h = Hints::default();
+        h.set(1, HintState::Waiting, w(WaitKind::Permission, "p"));
+        assert_eq!(h.take_untold(1), w(WaitKind::Permission, "p"));
+        assert!(h.take_untold(1).is_none());
+        // the same wait repeated is the same wait
+        h.set(1, HintState::Waiting, w(WaitKind::Permission, "p"));
+        assert!(h.take_untold(1).is_none());
+        // a different one is a new wait
+        h.set(1, HintState::Waiting, w(WaitKind::Question, "q"));
+        assert_eq!(h.take_untold(1), w(WaitKind::Question, "q"));
+        h.set(1, HintState::Idle, None);
+        assert!(h.take_untold(1).is_none());
+    }
+
+    #[test]
+    fn kinds_round_trip_and_text_is_cleaned() {
+        for k in [WaitKind::Permission, WaitKind::Question, WaitKind::IdleInput] {
+            assert_eq!(WaitKind::parse(k.as_str()), Some(k));
         }
-        for t in ["Editei 3 ficheiros e corri os testes.", "Build finished, all tests pass.", "Reading src/main.rs"] {
-            assert!(!asks_question(&l(t)), "{t}");
-        }
-        // an old phrase scrolled out of the last 8 lines is ignored
-        let mut old = vec!["Waiting for your decision.".to_string()];
-        old.extend((0..10).map(|i| format!("saída {i} do comando")));
-        assert!(!asks_question(&old));
+        assert_eq!(WaitKind::parse("screen"), None);
+        assert_eq!(clean_text("  a\x1b[31m b\r\n"), "a[31m b");
+        assert_eq!(clean_text(&"x".repeat(900)).chars().count(), WAIT_TEXT_MAX + 1);
     }
 
+    /// Text on the screen never makes a wait: there is no screen input to `Hints` at all, and a finished session or
+    /// the user's own question mark leaves it idle.
     #[test]
-    fn claude_permission_prompt() {
-        let screen =
-            "\x1b[1mBash command\x1b[0m\n  npm install\n\n Do you want to proceed?\n \x1b[36m❯ 1. Yes\x1b[0m\n   2. No\n\n Esc to cancel";
-        assert!(needs_input(screen.as_bytes()));
-    }
-
-    #[test]
-    fn plain_question() {
-        assert!(needs_input(b"Overwrite file? (y/n) "));
-    }
-
-    #[test]
-    fn working_output_is_not_a_prompt() {
-        assert!(!needs_input(b"\x1b[2KReading src/main.rs\nEditing 3 files\n"));
-    }
-
-    #[test]
-    fn old_prompt_scrolled_away_is_ignored() {
-        let mut s = String::from("Do you want to proceed?\n");
-        for i in 0..30 {
-            s.push_str(&format!("line {i}\n"));
-        }
-        assert!(!needs_input(s.as_bytes()));
+    fn a_session_without_events_never_waits() {
+        let h = Hints::default();
+        assert!(h.waiting(7, u64::MAX, 60_000).is_none());
+        assert!(h.take_untold(7).is_none());
     }
 }

@@ -3,7 +3,7 @@ import type { ShipStatus } from "./api";
 import { readString, writeJson } from "./persist";
 import { L } from "./strings.logic";
 
-export type NotifKind = "done" | "waiting" | "ci-fail" | "ci-pass" | "merged" | "error" | "budget";
+export type NotifKind = "done" | "waiting" | "ci-fail" | "ci-pass" | "merged" | "error" | "budget" | "attention";
 
 export type NotifEntry = {
   id: string;
@@ -24,7 +24,7 @@ export const MAX_ENTRIES = 100;
 /** the same event again inside this window is the same event (a poll that fires twice, a retry) */
 export const DEDUPE_MS = 2 * 60_000;
 const KEY = "axelstra.notifications";
-const KINDS: NotifKind[] = ["done", "waiting", "ci-fail", "ci-pass", "merged", "error", "budget"];
+const KINDS: NotifKind[] = ["done", "waiting", "ci-fail", "ci-pass", "merged", "error", "budget", "attention"];
 
 /** newest first, at most `max` */
 export const trim = (list: NotifEntry[], max = MAX_ENTRIES): NotifEntry[] => list.slice(0, max);

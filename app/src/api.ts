@@ -21,7 +21,9 @@ export type SessionMeta = {
 };
 /** Set by the daemon on an agent that went quiet without reporting: the notice in message-code form (see msg/agents.ts). */
 export type StallInfo = { minutes: number; code: string; params: Record<string, unknown>; text: string };
-export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; stalled?: boolean; stall?: StallInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
+/** Set by the daemon while an agent waits for the user, from the agent's own hook event or `axelstra ask`/`escalate`. */
+export type WaitInfo = { kind: "permission" | "question" | "idle_input"; text: string };
+export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; wait?: WaitInfo | null; stalled?: boolean; stall?: StallInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean; /** worktree of the same project this one is grouped under */ parent?: string | null };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   /** false for a plain folder that is not a git repository (yet) */
@@ -33,13 +35,17 @@ export type Project = { id: string; name: string; path: string; worktrees: Workt
   remote?: string | null;
   /** id of the remote host the project lives on; absent = this machine */
   host?: string;
+  /** absent = on: finished ax/* work is integrated into the default branch by itself */
+  auto_integrate?: boolean;
+  /** absent = off: never pushes unless set */
+  push_after_integrate?: boolean;
 };
 
 /** A call that gets no answer in this long fails (a stuck daemon must not leave the UI waiting for ever). */
 export const CALL_TIMEOUT_MS = 30_000;
 /** Methods that legitimately run git, gh, docker or a whole agent run: they get longer. */
 export const SLOW_TIMEOUT_MS = 5 * 60_000;
-const SLOW = /^(git\.|gh\.|docker\.|pm\.|orch\.|worktree\.(create|from_pr|remove|sweep|rename)|project\.(add|remove)|agent\.|fs\.grep|automation\.run|diagnostics)/;
+const SLOW = /^(git\.|gh\.|docker\.|pm\.|orch\.|worktree\.(create|from_pr|remove|sweep|rename|integrate)|project\.(add|remove)|agent\.|fs\.grep|automation\.run|diagnostics)/;
 export const timeoutFor = (method: string) => (SLOW.test(method) ? SLOW_TIMEOUT_MS : CALL_TIMEOUT_MS);
 
 /** `p`, but failing with a readable AppError when it rejects or takes longer than the method's timeout. */
@@ -325,6 +331,19 @@ let watchReady: Promise<void> | null = null;
 let channel: Channel<{ event?: string; worktree?: string }> | null = null;
 let unlisteners: Promise<() => void>[] = [];
 
+/** Events the daemon pushes on the watch stream besides the file, session and project ones: the app takes what changed
+ *  when one arrives instead of asking on a timer. */
+export type DaemonEvent = "janitor.events" | "triggers.events" | "budget.events" | "dispatch.changed";
+const eventSubs = new Map<string, Set<() => void>>();
+/** Runs `fn` each time the daemon announces `name` (and after the stream reconnects, in case one was missed); returns the unsubscribe. */
+export const onDaemonEvent = (name: DaemonEvent, fn: () => void): (() => void) => {
+  let set = eventSubs.get(name);
+  if (!set) eventSubs.set(name, (set = new Set()));
+  set.add(fn);
+  return () => void set.delete(fn);
+};
+const fire = (name: string) => eventSubs.get(name)?.forEach((f) => f());
+
 /** Drops the current Channel: its late messages go nowhere. (Tauri has no close for a Channel; the host replaces its end on the next watch_start.) */
 const dropChannel = () => {
   if (channel) channel.onmessage = () => {};
@@ -341,6 +360,7 @@ const startWatch = () => {
     if (m?.event === "fs.changed" && m.worktree) handlers.onChanged(m.worktree);
     else if (m?.event === "session.changed") handlers.onSessions?.();
     else if (m?.event === "projects.changed") handlers.onProjects?.();
+    else if (m?.event) fire(m.event);
   };
   return tauriInvoke<void>("watch_start", { onEvent: ch });
 };
@@ -351,7 +371,13 @@ const rewatch = () => {
   if (!wanted || !handlers || reconnecting) return;
   reconnecting = true;
   dropChannel();
-  void watchWorktree(lastWorktree, handlers.onChanged, handlers.onSessions, handlers.onProjects).finally(() => (reconnecting = false));
+  void watchWorktree(lastWorktree, handlers.onChanged, handlers.onSessions, handlers.onProjects).finally(() => {
+    reconnecting = false;
+    // whatever happened while the stream was down is not coming as an event: look once
+    handlers?.onSessions?.();
+    handlers?.onProjects?.();
+    for (const name of eventSubs.keys()) fire(name);
+  });
 };
 export const watchWorktree = async (worktree: string | null, onChanged: (worktree: string) => void, onSessions?: () => void, onProjects?: () => void) => {
   handlers = { onChanged, onSessions, onProjects };
@@ -434,6 +460,11 @@ const nativePick = <T>(method: string, cmd: string, title: string) => invoke<T>(
  *  The webview never supplies the path (`project.add` is not in the host's allow-list). */
 export const pickAndAddProject = (title: string) => nativePick<Project | null>("project.add", "project_add_pick", title);
 export const projectLogo = (id: string) => call<{ data_url: string | null }>("project.logo", { id }).then((r) => r.data_url);
+/** per-project integration settings; send only what changed */
+export const setProjectIntegrate = (id: string, s: { auto?: boolean; push?: boolean }) => call("project.integrate", { id, ...s });
+export type IntegrateResult = { integrated: boolean; into: string; how: "ff" | "merge" | "none"; removed: boolean; pushed: boolean | null };
+/** integrates a worktree's branch into the default branch; fails with a coded error when it cannot */
+export const integrateWorktree = (project: string, path: string) => call<IntegrateResult>("worktree.integrate", { project, path });
 export const setProjectSetup = (id: string, setup: string) => call("project.setup", { id, setup });
 export const detectPackageManagers = (id: string) => call<{ installed: string[]; suggested: string | null; package_json?: boolean }>("pm.detect", { id });
 export type DispatchMeta = Record<string, { title?: string; archived?: boolean; requests?: string[]; updated?: number }>;
@@ -596,7 +627,8 @@ export const worktreeStatus = (paths: string[]) => callBg<{ status: WtStatus[] }
 /** counts per project for the status bar (cached by the daemon for about 10 s) */
 export const worktreeOverview = () => callBg<{ projects: import("./statusGroups").OverviewProject[] }>("worktree.overview").then((r) => r.projects);
 /** removes the worktrees whose work is merged (the janitor's sweep) */
-export const worktreeSweep = () => call<{ swept: { path: string; branch: string; removed: boolean }[] }>("worktree.sweep", {}).then((r) => r.swept);
+export type SweepItem = { path: string; branch: string; removed: boolean; kind?: string; why?: string; warning?: string };
+export const worktreeSweep = () => call<{ swept: SweepItem[] }>("worktree.sweep", {}).then((r) => r.swept);
 
 /** `project` is Gemini's project hash (its logs keep no folder); `geminiPathVariants` + sha-256 map it back to a worktree. */
 export type AgentHit = { agent: "claude" | "codex" | "gemini"; session: string; cwd: string; ts: number; snippet: string; project?: string };
@@ -773,7 +805,16 @@ export const applyWorkspaceImport = (mode: WorkspaceMode, conflicts: WorkspaceCo
 /** The dialog was closed: the host forgets the picked file. */
 export const cancelWorkspaceImport = () => hostCmd<void>("workspace.import", "workspace_import_cancel").catch((e) => console.debug("workspace_import_cancel", e));
 
-export type JanitorEvent = { project: string; path: string; branch: string; into: string; why: string; at: number };
+export type JanitorEvent = {
+  project: string; path: string; branch: string; into: string; why: string; at: number;
+  /** absent = "removed" (an older daemon) */
+  kind?: "removed" | "integrated" | "empty" | "attention";
+  how?: "ff" | "merge";
+  pushed?: boolean | null;
+  code?: string;
+  params?: Record<string, unknown>;
+  text?: string;
+};
 /** Worktrees the automatic sweep removed since the last call (take semantics); an older daemon has none. */
 export const janitorEvents = () => callOr<{ events: JanitorEvent[] }>("janitor.events", {}, { events: [] }).then((r) => r.events ?? []);
 

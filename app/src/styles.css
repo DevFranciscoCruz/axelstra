@@ -524,6 +524,8 @@ button.icon:hover {
 .m-row { display: flex; gap: 8px; }
 .m-row label, .m-full { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-sm); color: var(--muted); flex: 1; min-width: 0; }
 .m-actions { display: flex; gap: 8px; align-items: center; }
+.clean-list { margin: 8px 0 0; padding-left: 18px; font-size: var(--fs-sm); max-height: 160px; overflow: auto; }
+.clean-list .warn { color: var(--warn); }
 
 
 /* dialog buttons: same size and shape, the secondary one outlined instead of the browser grey */
@@ -968,3 +970,10 @@ button.icon, button.x, button.cbtn { display: inline-flex; align-items: center; 
 .error-toast.flow, .error-toast.notice.flow { position: static; transform: none; }
 .update-toast.flow { position: static; width: auto; animation: none; }
 .mono-list { margin: 0; padding-left: 18px; font-family: monospace; font-size: var(--fs-md); line-height: 1.5; }
+
+.wt-pending { margin: 2px 4px 4px 14px; padding: 6px 8px; border: 1px dashed var(--line-3); border-radius: var(--r-xl); background: color-mix(in srgb, var(--accent, var(--line)) 8%, transparent); font-size: var(--fs-md); }
+.wt-pending.attention { border-style: solid; border-color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.wt-pending-head { display: flex; align-items: center; gap: 5px; }
+.wt-pending-meta { color: var(--muted); font-size: var(--fs-sm); }
+.wt-pending-reason { margin-top: 3px; color: var(--muted); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.wt-pending-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }

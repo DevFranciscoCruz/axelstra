@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionInfo } from "./api";
-import { countsFor, groupAgents, mergedList, sumCounts, type OverviewProject } from "./statusGroups";
+import { countsFor, groupAgents, mergedList, pendingOf, pendingState, sumCounts, type OverviewProject } from "./statusGroups";
 
 const sess = (id: number, over: Partial<SessionInfo> = {}, wt = "C:/w/feat-a"): SessionInfo => ({ id, running: true, label: null, meta: { kind: "agent", worktree: wt }, ...over }) as SessionInfo;
 const WIN = ["C:", "w", "fix-b", ""].join(String.fromCharCode(92));
@@ -43,5 +43,20 @@ describe("worktree overview", () => {
   it("lists merged worktrees of every project with the project name", () => {
     const l = mergedList([proj("a", 3, 1), proj("b", 2, 2)]);
     expect(l.map((m) => `${m.project}:${m.branch}`)).toEqual(["A:ax/a0", "B:ax/b0", "B:ax/b1"]);
+  });
+});
+
+describe("pendingOf / pendingState", () => {
+  const p = { ...proj("a", 1, 0), pending: [{ path: "C:\\wt\\x", branch: "ax/x", ahead: 2, dirty: false }] };
+  it("finds a worktree by normalised path, per project", () => {
+    expect(pendingOf([p], "a", "c:/wt/x/")?.ahead).toBe(2);
+    expect(pendingOf([p], "b", "c:/wt/x")).toBeUndefined();
+  });
+  it("tolerates an older daemon without pending", () => {
+    expect(pendingOf([proj("a", 1, 0)], "a", "/wt/x")).toBeUndefined();
+  });
+  it("attention beats pending", () => {
+    expect(pendingState(p.pending[0])).toBe("pending");
+    expect(pendingState({ ...p.pending[0], attention: { code: "integrate.busy", text: "t" } })).toBe("attention");
   });
 });

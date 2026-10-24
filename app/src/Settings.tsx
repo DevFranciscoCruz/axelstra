@@ -1,6 +1,21 @@
 import { For, JSX, Show, createResource, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { NotifyMode, SettingsPatch, budgetCheck, ShellChoice, Terse, backupExport, pickAndRestoreBackup, copyDiagnostics, diagnostics, getSettings, resetShellCache, setSettings } from "./api";
+import {
+  NotifyMode,
+  SettingsPatch,
+  budgetCheck,
+  ShellChoice,
+  Terse,
+  backupExport,
+  worktreeSweep,
+  SweepItem,
+  pickAndRestoreBackup,
+  copyDiagnostics,
+  diagnostics,
+  getSettings,
+  resetShellCache,
+  setSettings,
+} from "./api";
 import { restartDaemonFlow } from "./daemonActions";
 import { BudgetsSection } from "./BudgetsSection";
 import { setBudgetRows } from "./budgetStore";
@@ -10,7 +25,7 @@ import { HostsSection } from "./HostsSection";
 import { Modal } from "./Modal";
 import { S } from "./strings";
 import { classifySettingsError, diagnosticRows, errorText } from "./settingsLogic";
-import { setError, setShowSettings, showNotice } from "./store";
+import { refreshProjects, setError, setShowSettings, showNotice } from "./store";
 import { DEFAULT_FONT, MAX_FONT, MIN_FONT, TermTheme, setTermPrefs, termPrefs } from "./termprefs";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
 import { LOCALES, LOCALE_NAMES, locale, setLocale } from "./i18n";
@@ -29,7 +44,12 @@ const T = L.settingsRows;
 
 /** A row of exclusive choices (a null value, "auto", is keyed by a sentinel: radio values are strings). */
 const NONE = "__none__";
-function Choices<T extends string | null>(props: { label: string; value: T; options: { value: T; label: string; hint?: string }[]; onPick: (v: T) => void }) {
+function Choices<T extends string | null>(props: {
+  label: string;
+  value: T;
+  options: { value: T; label: string; hint?: string }[];
+  onPick: (v: T) => void;
+}) {
   const key = (v: T) => v ?? NONE;
   return (
     <RadioGroup
@@ -55,7 +75,9 @@ const Section = (props: { title: string; note?: string; children: JSX.Element })
 function Diagnostics() {
   const [d, { refetch }] = createResource(async () => {
     const info = await diagnostics().catch((e) => (console.debug("diagnostics", e), null));
-    const missing = info?.missing_tools ?? (await invoke<string[]>("missing_tools").catch((e) => (console.debug("missing_tools", e), null)));
+    const missing =
+      info?.missing_tools ??
+      (await invoke<string[]>("missing_tools").catch((e) => (console.debug("missing_tools", e), null)));
     return { info, missing };
   });
   return (
@@ -131,6 +153,19 @@ export function Settings() {
       setError(errorText(e));
     }
   };
+  const [swept, setSwept] = createSignal<SweepItem[] | null>(null);
+  const cleanLine = (i: SweepItem) =>
+    [i.warning ? T.cleanWarning : i.removed ? T.cleanRemoved : "", i.branch || i.path, i.warning ?? i.why ?? ""]
+      .filter(Boolean)
+      .join(" · ");
+  const cleanNow = async () => {
+    try {
+      setSwept(await worktreeSweep());
+      await refreshProjects();
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
   const restartDaemon = () => void restartDaemonFlow(setRestarting, () => void refetch());
   return (
     <Modal label={S.settings} class="modal settings" onClose={() => setShowSettings(false)}>
@@ -143,7 +178,9 @@ export function Settings() {
         when={s.state !== "errored"}
         fallback={
           <div class="set-error">
-            <div class="auto-note">{classifySettingsError(s.error) === "old-daemon" ? S.oldDaemon : S.loadFailed + errorText(s.error)}</div>
+            <div class="auto-note">
+              {classifySettingsError(s.error) === "old-daemon" ? S.oldDaemon : S.loadFailed + errorText(s.error)}
+            </div>
             <div class="m-actions">
               <Show when={classifySettingsError(s.error) === "old-daemon"}>
                 <Button variant="default" disabled={restarting()} onClick={restartDaemon}>
@@ -175,7 +212,10 @@ export function Settings() {
                   <Choices<string | null>
                     label={S.pm}
                     value={cfg().pm}
-                    options={[{ value: null, label: S.auto }, ...cfg().installed.map((m) => ({ value: m as string | null, label: m }))]}
+                    options={[
+                      { value: null, label: S.auto },
+                      ...cfg().installed.map((m) => ({ value: m as string | null, label: m })),
+                    ]}
                     onPick={(v) => void save({ pm: v })}
                   />
                 </Show>
@@ -217,11 +257,21 @@ export function Settings() {
               </Section>
 
               <Section title={L.lang.title} note={L.lang.note}>
-                <Choices label={L.lang.title} value={locale()} options={LOCALES.map((v) => ({ value: v, label: LOCALE_NAMES[v] }))} onPick={setLocale} />
+                <Choices
+                  label={L.lang.title}
+                  value={locale()}
+                  options={LOCALES.map((v) => ({ value: v, label: LOCALE_NAMES[v] }))}
+                  onPick={setLocale}
+                />
               </Section>
 
               <Section title={S.appearance} note={S.appearanceNote}>
-                <Choices label={S.appTheme} value={appTheme()} options={APP_THEMES.map((v) => ({ value: v, label: S.appThemes[v] }))} onPick={setAppTheme} />
+                <Choices
+                  label={S.appTheme}
+                  value={appTheme()}
+                  options={APP_THEMES.map((v) => ({ value: v, label: S.appThemes[v] }))}
+                  onPick={setAppTheme}
+                />
               </Section>
 
               <Section title={S.terminal} note={S.terminalNote}>
@@ -257,6 +307,22 @@ export function Settings() {
                 <CheckboxField checked={termPrefs().screenReader} onChange={(v) => setTermPrefs({ screenReader: v })}>
                   {T.screenReader}
                 </CheckboxField>
+              </Section>
+
+              <Section title={T.cleanTitle} note={T.cleanNote}>
+                <div class="m-actions start">
+                  <Button onClick={() => void cleanNow()}>{T.cleanNow}</Button>
+                </div>
+                <Show when={swept()}>
+                  {(list) => (
+                    <ul class="clean-list">
+                      <Show when={!list().length}>
+                        <li>{T.cleanNothing}</li>
+                      </Show>
+                      <For each={list()}>{(i) => <li classList={{ warn: !!i.warning }}>{cleanLine(i)}</li>}</For>
+                    </ul>
+                  )}
+                </Show>
               </Section>
 
               <Section title={T.backup} note={T.backupNote}>

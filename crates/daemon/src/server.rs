@@ -7,8 +7,8 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 mod containers;
@@ -31,9 +31,11 @@ static INSTANCE: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
 /// down (they block) instead of growing the daemon's memory.
 type Tx = mpsc::Sender<Vec<u8>>;
 const OUT_QUEUE: usize = 1024;
+/// How long a terminal stream waits for output before it sends an empty frame (see `session.subscribe`).
+const STREAM_HEARTBEAT: Duration = Duration::from_secs(5);
 
 /// Lock order. Hold at most these in this order, never a later one while taking an earlier one:
-///   auto_lock, sessions, labels, metas, specs, pending, then the leaf locks (runs, flows, plist).
+///   auto_lock, sessions, labels, metas, specs, pending, then the leaf locks (runs, flows, plist, watchers, the pulses).
 /// Leaf locks are never held while taking another lock. A path that needs two takes them in this order
 /// (`session.list`, `daemon.shutdown` and `persist` do); the `lock_order` test runs those paths against each other.
 struct Registry {
@@ -77,25 +79,128 @@ struct Registry {
     audit: crate::audit::Audit,
     /// `hello`s refused with a bad token since the last good one: each failure makes the next answer slower
     bad_hellos: AtomicU32,
+    /// bumped by anything that may change what `session.list` shows or whether the daemon is idle (a request, a
+    /// connection coming or going, a session starting, exiting or printing after a quiet spell); see `spawn_session_monitor`
+    pulse: Pulse,
+    /// connections that get `session.changed` and `projects.changed` (their `watch.subscribe`), with their stop flag
+    watchers: Mutex<Vec<(Arc<AtomicBool>, Tx)>>,
+    /// the automation list changed: the scheduler works out its next due time again
+    auto_wake: tokio::sync::Notify,
+    /// the budgets in the settings changed: the budget loop reads them again
+    budget_wake: tokio::sync::Notify,
+    /// something may have made a worktree removable (a session ended, a merge, a finished flow): see `spawn_janitor`
+    janitor: Pulse,
+    /// `daemon.shutdown` is under way: the janitor must not start removing a worktree it could not finish
+    closing: AtomicBool,
+}
+
+/// Wakes a background waiter when something happened, so it never has to poll.
+#[derive(Default)]
+struct Pulse {
+    count: Mutex<u64>,
+    cv: Condvar,
+}
+
+impl Pulse {
+    fn bump(&self) {
+        *self.count.lock_recover() += 1;
+        self.cv.notify_all();
+    }
+
+    fn now(&self) -> u64 {
+        *self.count.lock_recover()
+    }
+
+    /// Waits for a bump after `seen` (the count it returned last time), or at most `timeout`. Returns the count now.
+    fn wait(&self, seen: u64, timeout: Option<Duration>) -> u64 {
+        let g = self.count.lock_recover();
+        let g = match timeout {
+            None => self.cv.wait_while(g, |n| *n == seen).unwrap_or_else(PoisonError::into_inner),
+            Some(t) => self.cv.wait_timeout_while(g, t, |n| *n == seen).unwrap_or_else(PoisonError::into_inner).0,
+        };
+        *g
+    }
 }
 
 impl Registry {
-    /// Rewrites sessions.json: still-pending sessions first, then the live ones.
+    /// Sends `{"event": name}` to every watching connection. One that stopped reading misses it rather than block us.
+    fn broadcast(&self, name: &str) {
+        let frame = encode(EVENT, json!({"event": name}).to_string().as_bytes());
+        self.watchers.lock_recover().retain(|(stop, tx)| {
+            !stop.load(Ordering::SeqCst) && !matches!(tx.try_send(frame.clone()), Err(mpsc::error::TrySendError::Closed(_)))
+        });
+    }
+
+    /// Tells the app there is something to take for its toasts and notification center (`janitor.events`,
+    /// `triggers.events`, `budget.events`); it takes them with those calls, so it never asks on a timer.
+    fn announce_events(&self) {
+        if crate::janitor::has_events() {
+            self.broadcast("janitor.events");
+        }
+        if crate::triggers::has_events() {
+            self.broadcast("triggers.events");
+        }
+        if crate::budget::has_events() {
+            self.broadcast("budget.events");
+        }
+    }
+
+    /// The worktrees changed outside a request that already says so: drop the cached lists and tell the app.
+    fn projects_changed(&self) {
+        forget_project_list(self);
+        self.broadcast("projects.changed");
+    }
+
+    /// Rewrites sessions.json: still-pending sessions first, then the live ones. A record of a deleted worktree or of a
+    /// session that reported with `axelstra done` is not kept: it is dropped here, with its `sid/` file, so the
+    /// clean-up is continuous (every persist) and not only the one at start.
     fn persist(&self) {
         // both locks stay held through the write, so two persists cannot land out of order
         let specs = self.specs.lock_recover();
-        let pending = self.pending.lock_recover();
+        let mut pending = self.pending.lock_recover();
+        let dead: Vec<Value> = pending.iter().filter(|r| !rec_alive(r)).cloned().collect();
+        pending.retain(rec_alive);
+        for r in &dead {
+            self.drop_sid_of(r);
+        }
         let mut v = pending.clone();
         let mut ids: Vec<_> = specs.keys().copied().collect();
         ids.sort();
-        v.extend(ids.iter().map(|i| specs[i].clone()));
+        // a session that reported with `axelstra done` is finished: restoring it would only start an agent with nothing to do
+        v.extend(ids.iter().filter(|i| self.bus.finished(**i).is_none() && rec_alive(&specs[*i])).map(|i| specs[i].clone()));
         let _ = write_json(&self.saved, &v);
+    }
+
+    /// `sid/` and `scrollback/` files no saved or live session refers to (old enough not to be one being written).
+    fn clean_leftovers(&self, dry: bool) -> Vec<Value> {
+        let mut keys: Vec<String> = vec![];
+        let key_of = |r: &Value| r["meta"]["key"].as_str().map(String::from);
+        keys.extend(self.pending.lock_recover().iter().filter_map(key_of));
+        keys.extend(self.specs.lock_recover().values().filter_map(key_of));
+        keys.extend(self.metas.lock_recover().values().filter_map(|m| m["key"].as_str().map(String::from)));
+        let mut out = vec![];
+        if let Some(dir) = self.saved.parent() {
+            crate::cleanup::leftovers(dir, &keys, dry, &mut out);
+        }
+        out
+    }
+
+    /// Deletes the files a saved session left behind: the `sid/<key>.json` the hook wrote (the conversation id used to
+    /// resume it) and its saved terminal history.
+    fn drop_sid_of(&self, rec: &Value) {
+        let Some(key) = rec["meta"]["key"].as_str().filter(|k| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        else {
+            return;
+        };
+        let _ = std::fs::remove_file(self.saved.with_file_name("sid").join(format!("{key}.json")));
+        let _ = std::fs::remove_file(self.saved.with_file_name("scrollback").join(format!("{key}.txt")));
     }
 
     fn new(store: std::path::PathBuf, pipe: String, token: String) -> Registry {
         let saved = store.with_file_name("sessions.json");
         // a corrupt sessions.json is moved to sessions.json.bad, so the first persist cannot wipe it
-        let pending = read_json::<Vec<Value>>(&saved).ok().flatten().unwrap_or_default();
+        let mut pending = read_json::<Vec<Value>>(&saved).ok().flatten().unwrap_or_default();
+        prune_dead_pending(&saved, &mut pending);
         let audit = crate::audit::Audit::new(Some(saved.with_file_name("audit.log")));
         Registry {
             next: AtomicU32::new(0),
@@ -121,6 +226,12 @@ impl Registry {
             wt_gen: AtomicU64::new(0),
             audit,
             bad_hellos: AtomicU32::new(0),
+            pulse: Default::default(),
+            watchers: Default::default(),
+            auto_wake: Default::default(),
+            budget_wake: Default::default(),
+            janitor: Default::default(),
+            closing: AtomicBool::new(false),
         }
     }
 
@@ -142,7 +253,43 @@ impl Registry {
         crate::msgbus::deliver(target, crate::msgbus::paste_with(text, !self.runs_in_bypass(id)));
     }
 
+    /// True while a session waiting to be restored (from the previous daemon run) belongs to this worktree.
+    fn worktree_pending(&self, path: &str) -> bool {
+        let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
+        let want = norm(path);
+        self.pending.lock_recover().iter().any(|r| {
+            r["meta"]["worktree"].as_str().is_some_and(|w| norm(w) == want) || r["cwd"].as_str().is_some_and(|c| within(&norm(c), &want))
+        })
+    }
+
     /// True while a live session works in this worktree (any terminal or agent with it as worktree or cwd).
+    /// What the session said it waits for: an unanswered `ask`/`escalate`, or (unless it reported with `done`) its
+    /// agent's own hook event. Never the screen text.
+    fn wait_of(&self, id: u32, since_input_ms: u64, idle_ms: u64) -> Option<axelstra_core::waiting::Wait> {
+        if let Some(text) = self.bus.pending_of(id) {
+            return Some(axelstra_core::waiting::Wait { kind: axelstra_core::waiting::WaitKind::Question, text });
+        }
+        if self.bus.finished(id).is_some() {
+            return None;
+        }
+        self.hints.waiting(id, since_input_ms, idle_ms)
+    }
+
+    /// Tells the session's parent (once per wait) that it waits for an answer, with the agent's own text.
+    fn tell_parent_waiting(&self, id: u32) {
+        let Some(wait) = self.hints.take_untold(id) else { return };
+        let Some(pid) = self.metas.lock_recover().get(&id).and_then(|m| m["parent"].as_u64()).map(|p| p as u32) else { return };
+        let Some(ps) = self.get(pid) else { return };
+        let label = self.labels.lock_recover().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
+        let what = if wait.kind == axelstra_core::waiting::WaitKind::Permission { "pede uma permissão" } else { "tem uma pergunta" };
+        let text = format!("{what} ao utilizador e está parado à espera: {}", wait.text);
+        let m = self.bus.send(Some(id), pid, "message", &text, None, None);
+        let agent = self.metas.lock_recover().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
+        if agent {
+            self.deliver_untrusted(pid, ps, &crate::msgbus::notice(&m, &format!("{label} (sessão {id})")));
+        }
+    }
+
     fn worktree_busy(&self, path: &str) -> bool {
         let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
         let want = norm(path);
@@ -193,7 +340,7 @@ impl Registry {
     }
 
     /// Starts a session and records its label and UI metadata.
-    fn spawn(&self, s: &Spawn, label: Option<&str>, meta: Option<Value>) -> Result<u32> {
+    fn spawn(self: &Arc<Self>, s: &Spawn, label: Option<&str>, meta: Option<Value>) -> Result<u32> {
         // the session learns its own id, so a CLI run inside it can name it as the parent of a worker
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
         let mut s = s.clone();
@@ -216,15 +363,44 @@ impl Registry {
             }
         }
         let sess = Arc::new(Session::spawn(&s)?);
-        self.sessions.lock_recover().insert(id, sess);
+        // working again after a quiet spell: the session monitor hears it without polling (weak: no cycle through the hook)
+        let weak = Arc::downgrade(self);
+        sess.on_wake(Arc::new(move || {
+            if let Some(r) = weak.upgrade() {
+                r.pulse.bump();
+            }
+        }));
+        self.sessions.lock_recover().insert(id, sess.clone());
         if let Some(l) = label {
             self.labels.lock_recover().insert(id, l.to_string());
         }
         if let Some(m) = meta {
             self.metas.lock_recover().insert(id, m);
         }
+        watch_exit(self, id, sess);
+        self.pulse.bump();
         Ok(id)
     }
+}
+
+/// Waits (no polling, see `Session::wait_exit`) for the program of session `id` to end, then: whatever it left running
+/// in its process tree goes too (a dev server or an agent's helpers would otherwise keep using memory with nothing to
+/// show them), watchers hear it, and the janitor looks for a worktree this freed.
+/// The tab itself stays (it shows the exit code) until the app removes it.
+fn watch_exit(reg: &Arc<Registry>, id: u32, s: Arc<Session>) {
+    let reg = Arc::downgrade(reg);
+    std::thread::spawn(move || {
+        s.wait_exit();
+        s.kill();
+        // the last output may still be on its way through the pipe: then the stream ends, which is what tells a
+        // terminal's subscribers that the program is gone
+        std::thread::sleep(Duration::from_millis(150));
+        s.end_stream();
+        let Some(reg) = reg.upgrade() else { return };
+        reg.hints.clear(id);
+        reg.pulse.bump();
+        reg.janitor.bump();
+    });
 }
 
 /// A terminal size from a request: `as u16` would wrap 65537 to 1, and 0 is no size at all.
@@ -265,6 +441,8 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         | "triggers.set"
         | "triggers.events"
         | "worktree.rebase"
+        | "worktree.integrate"
+        | "project.integrate"
         | "workspace.export"
         | "workspace.import_preview"
         | "workspace.import" => true,
@@ -274,6 +452,33 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
 
 /// True when `path` is `root` or lies below it, comparing whole path components (`/a/wt-2` is not inside `/a/wt`).
 /// Both are already normalized (forward slashes, lowercase).
+/// False when a saved session points at folders that are all gone (a deleted worktree): it cannot be restored.
+/// A record with no folder at all (a plain shell) counts as alive.
+fn rec_alive(rec: &Value) -> bool {
+    let dirs: Vec<&str> = [rec["meta"]["worktree"].as_str(), rec["cwd"].as_str()].into_iter().flatten().filter(|d| !d.is_empty()).collect();
+    dirs.is_empty() || dirs.iter().any(|d| std::path::Path::new(d).exists())
+}
+
+/// One-off clean-up at start: sessions saved for worktrees that no longer exist are dropped, so a restart does not
+/// try to bring back dozens of dead agents. The file as it was is copied to `backups/` first.
+fn prune_dead_pending(saved: &std::path::Path, pending: &mut Vec<Value>) {
+    if pending.iter().all(rec_alive) {
+        return;
+    }
+    if let (Some(dir), Ok(ts)) = (saved.parent(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)) {
+        let backups = dir.join("backups");
+        if std::fs::create_dir_all(&backups).is_ok() {
+            let _ = std::fs::copy(saved, backups.join(format!("sessions-before-prune-{}.json", ts.as_secs())));
+        }
+    }
+    pending.retain(rec_alive);
+    let _ = write_json(saved, &*pending);
+}
+
+/// The most agents a single `session.pending` hands out; the rest wait for the next restore, so a restart never
+/// starts dozens of agents at once.
+const RESTORE_BATCH: usize = 8;
+
 fn within(path: &str, root: &str) -> bool {
     std::path::Path::new(path).starts_with(root)
 }
@@ -376,22 +581,42 @@ const REPORTED_IDLE_MS: u64 = 10_000;
 
 static SWEEP_QUEUED: AtomicBool = AtomicBool::new(false);
 
-/// Runs the worktree sweep a few seconds from now (once for a burst of events): after a `done` or a merge, so the
-/// finished worktree goes away without waiting for the 10-minute loop. The delay lets the reaper close the session.
+/// Kicks the janitor a few seconds from now (once for a burst of events): after a `done` or a merge, so the finished
+/// worktree goes away without waiting for anything else. The delay lets the reaper close the session; it is one
+/// delay per event, not a loop.
 fn sweep_soon(reg: &Arc<Registry>) {
-    if reg.saved.with_file_name("janitor.off").exists() || SWEEP_QUEUED.swap(true, Ordering::SeqCst) {
+    if SWEEP_QUEUED.swap(true, Ordering::SeqCst) {
         return;
     }
     let r = reg.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(4));
         SWEEP_QUEUED.store(false, Ordering::SeqCst);
-        for s in crate::janitor::sweep(&r.store, &|path| r.worktree_busy(path), false) {
-            eprintln!("janitor: {s}");
-        }
-        crate::overview::invalidate();
-        r.wt_gen.fetch_add(1, Ordering::SeqCst);
+        r.janitor.bump();
     });
+}
+
+/// Tells the main agent of the project that `item` (a sweep result with an `integrate.*` code) was left for a human or
+/// for it. Typed into an agent, so it stays English.
+fn tell_main_not_integrated(reg: &Arc<Registry>, item: &Value) {
+    let Some(p) = crate::projects::load(&reg.store).into_iter().find(|p| item["project"].as_str() == Some(p.id.as_str())) else { return };
+    let main = crate::projects::norm_path(&p.path);
+    let target = {
+        let metas = reg.metas.lock_recover();
+        metas
+            .iter()
+            .find(|(_, m)| m["kind"] == "agent" && m["worktree"].as_str().is_some_and(|w| crate::projects::norm_path(w) == main))
+            .map(|(id, _)| *id)
+    };
+    let Some((id, s)) = target.and_then(|id| reg.get(id).map(|s| (id, s))) else { return };
+    let text = format!(
+        "worktree {} (branch {}) finished but was NOT integrated into the default branch: {} Open it, fix the cause and integrate (the user can also press Integrar in the sidebar).",
+        item["path"].as_str().unwrap_or_default(),
+        item["branch"].as_str().unwrap_or_default(),
+        item["why"].as_str().unwrap_or_default()
+    );
+    let m = reg.bus.send(None, id, "message", &text, None, None);
+    reg.deliver_untrusted(id, s, &crate::msgbus::notice(&m, "axelstra"));
 }
 
 fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: bool, idle_secs: u64, lines: usize) {
@@ -399,8 +624,8 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
         let mut worked = false;
         let mut done_by_idle = false;
         let mut nudged = false;
+        let mut seen = reg.pulse.now();
         loop {
-            std::thread::sleep(Duration::from_millis(500));
             let Some(s) = reg.get(id) else { return };
             let exited = s.try_wait();
             let idle = s.idle_ms();
@@ -411,19 +636,9 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
                 break;
             }
             if idle_mode && worked && idle >= idle_secs * 1000 {
-                let screen = s.screen_lines(12);
-                if axelstra_core::waiting::needs_input(&s.tail(4096)) || axelstra_core::waiting::asks_question(&screen) {
-                    // it is waiting for an answer, not finished: keep it and tell the parent once (until it works again)
-                    if let Some((pid, ps)) = parent.and_then(|p| reg.get(p).map(|s| (p, s))) {
-                        let label = reg.labels.lock_recover().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
-                        let shown = axelstra_core::screen::last_reply(&s.screen_lines(200)).unwrap_or_else(|| screen.join("\n"));
-                        let text = format!("parou à espera de uma resposta. Última mensagem:\n{shown}");
-                        let m = reg.bus.send(Some(id), pid, "escalate", &text, None, None);
-                        let agent = reg.metas.lock_recover().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
-                        if agent {
-                            reg.deliver_untrusted(pid, ps, &crate::msgbus::notice(&m, &format!("{label} (sessão {id})")));
-                        }
-                    }
+                // it said it waits for an answer (hook event, ask, escalate): not finished, keep it. The parent was told
+                // when the event came in.
+                if reg.wait_of(id, s.since_input_ms(), idle).is_some() {
                     worked = false;
                 } else if !nudged && reg.metas.lock_recover().get(&id).map(|m| m["kind"] == "agent").unwrap_or(false) {
                     // first quiet spell: ask the worker to report through the bus instead of scraping its screen
@@ -436,6 +651,11 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
                     break;
                 }
             }
+            // no polling: the program exiting, `axelstra done`, output after a quiet spell and every request bump the
+            // pulse; the one timer is the moment the session would count as idle for `idle_secs`
+            let limit = idle_secs * 1000;
+            let timeout = (idle_mode && worked && idle < limit).then(|| Duration::from_millis(limit - idle + 20));
+            seen = reg.pulse.wait(seen, timeout);
         }
         let Some(s) = reg.get(id) else { return };
         // give the output pipe a moment to drain after the process ended
@@ -473,58 +693,62 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
         reg.sessions.lock_recover().remove(&id);
         reg.labels.lock_recover().remove(&id);
         reg.metas.lock_recover().remove(&id);
-        reg.specs.lock_recover().remove(&id);
+        let gone = reg.specs.lock_recover().remove(&id);
+        if let Some(spec) = gone {
+            reg.drop_sid_of(&spec);
+        }
         reg.bus.forget(id);
         reg.persist();
+        reg.pulse.bump();
+        reg.janitor.bump();
     });
 }
 
-/// Wakes every 30 s and starts the automations that are due. Missed runs are not replayed.
+/// Kills the live sessions whose worktree folder no longer exists on disk (they would only keep using memory).
+/// Sessions without a worktree are left alone. No timer: called when something may have removed a worktree (the
+/// project list is asked for, the watched worktree vanished, a janitor sweep or an orchestration ended).
+fn reap_orphans(reg: &Registry) {
+    kill_sessions_where(reg, |w| !std::path::Path::new(w).exists());
+}
+
+/// Kills the live sessions whose worktree (from their meta) satisfies `pred`.
+fn kill_sessions_where(reg: &Registry, pred: impl Fn(&str) -> bool) {
+    let doomed: Vec<_> = {
+        let sessions = reg.sessions.lock_recover();
+        let metas = reg.metas.lock_recover();
+        sessions
+            .iter()
+            .filter(|(_, s)| s.try_wait().is_none())
+            .filter(|(id, _)| metas.get(id).and_then(|m| m["worktree"].as_str()).is_some_and(&pred))
+            .map(|(_, s)| s.clone())
+            .collect()
+    };
+    for s in doomed {
+        s.kill();
+    }
+}
+
+/// Starts the automations when they are due. No tick: it sleeps until the next one is due, or until the list changes
+/// (`auto_wake`). Missed runs are not replayed.
 fn spawn_scheduler(reg: Arc<Registry>) {
     tokio::spawn(async move {
-        let mut tick = tokio::time::interval(Duration::from_secs(30));
-        // after a hibernation or a long stall the missed ticks are dropped, not replayed one right after another
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut n = 0u32;
-        loop {
-            tick.tick().await;
-            n += 1;
-            if n == 1 {
-                // folders parked by worktree removals in an earlier run
-                let r = reg.clone();
-                let _ = tokio::task::spawn_blocking(move || {
-                    for pr in crate::projects::load(&r.store) {
-                        for w in axelstra_core::git::worktree_list(std::path::Path::new(&pr.path)).unwrap_or_default() {
-                            if let Some(parent) = std::path::Path::new(&w.path).parent() {
-                                if !w.is_main {
-                                    axelstra_core::git::purge_trash(parent);
-                                }
-                            }
+        // folders parked by worktree removals in an earlier run
+        let r = reg.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            for pr in crate::projects::load(&r.store) {
+                for w in axelstra_core::git::worktree_list(std::path::Path::new(&pr.path)).unwrap_or_default() {
+                    if let Some(parent) = std::path::Path::new(&w.path).parent() {
+                        if !w.is_main {
+                            axelstra_core::git::purge_trash(parent);
                         }
                     }
-                })
-                .await;
+                }
             }
-            if n.is_multiple_of(2) {
-                // a crash or a kill skips the shutdown save: keep the agent terminals on disk every minute too
-                let r = reg.clone();
-                let _ = tokio::task::spawn_blocking(move || save_histories(&r)).await;
-            }
-            if n.is_multiple_of(20) && !reg.saved.with_file_name("janitor.off").exists() {
-                let r = reg.clone();
-                let _ = tokio::task::spawn_blocking(move || {
-                    for s in crate::janitor::sweep(&r.store, &|path| r.worktree_busy(path), false) {
-                        eprintln!("janitor: {s}");
-                    }
-                })
-                .await;
-            }
-            if n.is_multiple_of(4) {
-                let r = reg.clone();
-                let _ = tokio::task::spawn_blocking(move || misc::budget_check(&r)).await;
-            }
+        })
+        .await;
+        loop {
             let r = reg.clone();
-            let _ = tokio::task::spawn_blocking(move || {
+            let next = tokio::task::spawn_blocking(move || {
                 let path = crate::automations::store_path(&r.store);
                 // the file is claimed under the lock; the (slow) worktree and agent start run after it is released,
                 // so a UI save is never stuck behind a running automation
@@ -547,8 +771,153 @@ fn spawn_scheduler(reg: Arc<Registry>) {
                         eprintln!("automation {} failed: {e:#}", a.id);
                     }
                 }
+                let _g = r.auto_lock.lock_recover();
+                crate::automations::next_due_ts(&crate::automations::load(&path), crate::automations::now_ts())
             })
-            .await;
+            .await
+            .ok()
+            .flatten();
+            match next {
+                Some(at) => {
+                    // a clock that jumped (hibernation) makes the wait wrong at worst by one wake-up
+                    let wait = Duration::from_secs((at - crate::automations::now_ts()).clamp(1, 24 * 3600) as u64);
+                    tokio::select! {
+                        _ = tokio::time::sleep(wait) => {}
+                        _ = reg.auto_wake.notified() => {}
+                    }
+                }
+                None => reg.auto_wake.notified().await,
+            }
+        }
+    });
+}
+
+/// Reads the spending and reports level crossings. With no budget set it sleeps until the settings change
+/// (`budget_wake`); with one it looks every two minutes, as often as the agents' usage logs it reads are worth
+/// reading (they have no event to wait on).
+fn spawn_budget_loop(reg: Arc<Registry>) {
+    tokio::spawn(async move {
+        loop {
+            let r = reg.clone();
+            let has = tokio::task::spawn_blocking(move || !misc::budget_check(&r).is_empty()).await.unwrap_or(false);
+            if has {
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(120)) => {}
+                    _ = reg.budget_wake.notified() => {}
+                }
+            } else {
+                reg.budget_wake.notified().await;
+            }
+        }
+    });
+}
+
+/// Tells the app when a file in the data directory that other processes write changes: `dispatch.json` is written by
+/// the `axelstra dispatch` commands, which do not go through the daemon. Asleep until the OS reports a write.
+fn spawn_data_watch(reg: Arc<Registry>) {
+    use notify::{RecursiveMode, Watcher};
+    let Some(dir) = reg.saved.parent().map(|d| d.to_path_buf()) else { return };
+    std::thread::spawn(move || {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let Ok(mut w) = notify::recommended_watcher(tx) else { return };
+        if w.watch(&dir, RecursiveMode::NonRecursive).is_err() {
+            return;
+        }
+        while let Ok(ev) = rx.recv() {
+            let hit = |ev: &notify::Result<notify::Event>| {
+                ev.as_ref().is_ok_and(|e| {
+                    // reading the file (inotify reports it) is not a change
+                    !matches!(e.kind, notify::EventKind::Access(_))
+                        && e.paths.iter().any(|p| p.file_name().is_some_and(|n| n == "dispatch.json"))
+                })
+            };
+            if !hit(&ev) {
+                continue;
+            }
+            // a write is several events (temp file, rename): one announcement for the burst
+            std::thread::sleep(Duration::from_millis(150));
+            while rx.try_recv().is_ok() {}
+            reg.broadcast("dispatch.changed");
+        }
+    });
+}
+
+/// Removes the worktrees whose work is merged (see `janitor`) when something may have made one removable: at start,
+/// when a session ends (its worktree is no longer busy), after a merge, a `done`, a finished flow or orchestration.
+/// Kicks that come close together make one sweep, at most one a minute. `janitor.off` turns it off.
+fn spawn_janitor(reg: Arc<Registry>) {
+    const GAP: Duration = Duration::from_secs(60);
+    std::thread::spawn(move || {
+        let mut seen = 0;
+        let mut last: Option<Instant> = None;
+        loop {
+            seen = reg.janitor.wait(seen, None);
+            if let Some(left) = last.map(|l| GAP.saturating_sub(l.elapsed())).filter(|d| !d.is_zero()) {
+                // the kicks of the next minute are folded into this sweep
+                std::thread::sleep(left);
+                seen = reg.janitor.now();
+            }
+            last = Some(Instant::now());
+            if reg.closing.load(Ordering::SeqCst) || reg.saved.with_file_name("janitor.off").exists() {
+                continue;
+            }
+            // a session waiting to be restored still needs its worktree
+            let swept = crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path) || reg.worktree_pending(path), false);
+            for s in swept.iter().chain(reg.clean_leftovers(false).iter()) {
+                eprintln!("janitor: {s}");
+                // finished work that could not be integrated is also reported to the project's main agent
+                if s["code"].as_str().is_some_and(|c| c.starts_with("integrate.")) {
+                    tell_main_not_integrated(&reg, s);
+                }
+            }
+            if swept.iter().any(|s| s["removed"] == true) {
+                reap_orphans(&reg);
+                // the sessions saved for the removed worktrees go from sessions.json now
+                reg.persist();
+                reg.projects_changed();
+            }
+            reg.announce_events();
+        }
+    });
+}
+
+/// Tells watching connections (`session.changed`, see `ensure_session_notifier`) when the state of any session
+/// changed: started, exited, went quiet or working again, escalated, got a message... Woken by those events (`pulse`);
+/// its only timer is the moment the earliest working session would count as quiet, and with every session quiet it
+/// sleeps until the next event. An agent that just went quiet or ended has its screen saved, so a daemon that is
+/// killed or crashes still leaves the restored tab its history.
+fn spawn_session_monitor(reg: Arc<Registry>) {
+    use axelstra_core::pty::QUIET_MS;
+    std::thread::spawn(move || {
+        let mut seen = reg.pulse.now();
+        // (id, running, quiet, escalated, unread, finished)
+        let mut last: Vec<(u32, bool, bool, bool, usize, bool)> = vec![];
+        loop {
+            let mut next: Option<u64> = None;
+            let now: Vec<_> = {
+                let sessions = reg.sessions.lock_recover();
+                let mut ids: Vec<_> = sessions.keys().copied().collect();
+                ids.sort();
+                ids.into_iter()
+                    .map(|id| {
+                        let s = &sessions[&id];
+                        let (running, idle) = (s.try_wait().is_none(), s.idle_ms());
+                        if running && idle < QUIET_MS {
+                            next = Some(next.map_or(QUIET_MS - idle, |n| n.min(QUIET_MS - idle)));
+                        }
+                        (id, running, idle >= QUIET_MS, reg.bus.is_escalated(id), reg.bus.unread(id), reg.bus.finished(id).is_some())
+                    })
+                    .collect()
+            };
+            if now != last {
+                // working before, quiet or ended now
+                let settled: Vec<u32> =
+                    now.iter().filter(|n| (!n.1 || n.2) && last.iter().any(|l| l.0 == n.0 && l.1 && !l.2)).map(|n| n.0).collect();
+                last = now;
+                reg.broadcast("session.changed");
+                save_histories_of(&reg, &settled);
+            }
+            seen = reg.pulse.wait(seen, next.map(|ms| Duration::from_millis(ms + 20)));
         }
     });
 }
@@ -567,7 +936,7 @@ fn claim_automation(path: &std::path::Path, id: &str) -> Result<crate::automatio
     Ok(a)
 }
 
-fn run_automation(reg: &Registry, path: &std::path::Path, id: &str) -> Result<Value> {
+fn run_automation(reg: &Arc<Registry>, path: &std::path::Path, id: &str) -> Result<Value> {
     let a = {
         let _g = reg.auto_lock.lock_recover();
         claim_automation(path, id)?
@@ -576,7 +945,7 @@ fn run_automation(reg: &Registry, path: &std::path::Path, id: &str) -> Result<Va
 }
 
 /// Fresh worktree + agent session for a claimed automation. Takes no lock of its own.
-fn launch_automation(reg: &Registry, a: &crate::automations::Automation) -> Result<Value> {
+fn launch_automation(reg: &Arc<Registry>, a: &crate::automations::Automation) -> Result<Value> {
     let pr = crate::projects::find(&reg.store, &a.project)?;
     let stamp = chrono::Local::now().format("%m%d-%H%M").to_string();
     let wt = crate::projects::worktree_create(&pr, &format!("auto-{}-{stamp}", a.name))?;
@@ -646,6 +1015,12 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     let _ = std::fs::create_dir_all(&dir);
     write_hooks_json(&dir, std::env::current_exe().ok().as_deref());
     spawn_scheduler(reg.clone());
+    spawn_budget_loop(reg.clone());
+    spawn_data_watch(reg.clone());
+    spawn_session_monitor(reg.clone());
+    // the daemon starting is one of the moments to look for merged worktrees
+    reg.janitor.bump();
+    spawn_janitor(reg.clone());
     spawn_stall_watchdog(reg.clone());
     triggers::spawn_loop(reg.clone());
     spawn_idle_exit(reg.clone());
@@ -745,22 +1120,31 @@ async fn read_frame(rd: &mut (impl AsyncReadExt + Unpin), max: usize) -> std::io
 
 /// Keeps a stray daemon from lingering: with no connection, no running session and no enabled automation for
 /// ten minutes (`AXELSTRA_IDLE_EXIT_SECS`, 0 turns it off) it exits. The app normally stops it on quit.
+/// No polling: it looks again only when something happened (`pulse`: a connection, a session exiting, a request),
+/// and the one timer is the exit deadline, armed while idle.
 fn spawn_idle_exit(reg: Arc<Registry>) {
     let limit: u64 = std::env::var("AXELSTRA_IDLE_EXIT_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(600);
     if limit == 0 {
         return;
     }
+    let limit = Duration::from_secs(limit);
     std::thread::spawn(move || {
-        let mut idle = 0u64;
+        let mut seen = reg.pulse.now();
+        let mut idle_since: Option<Instant> = None;
         loop {
-            std::thread::sleep(Duration::from_secs(10));
             let busy = reg.clients.load(Ordering::SeqCst) > 0
                 || reg.sessions.lock_recover().values().any(|s| s.try_wait().is_none())
                 || crate::automations::load(&crate::automations::store_path(&reg.store)).iter().any(|a| a.enabled);
-            idle = if busy { 0 } else { idle + 10 };
-            if idle >= limit {
+            if busy {
+                idle_since = None;
+                seen = reg.pulse.wait(seen, None);
+                continue;
+            }
+            let left = limit.saturating_sub(idle_since.get_or_insert_with(Instant::now).elapsed());
+            if left.is_zero() {
                 std::process::exit(0);
             }
+            seen = reg.pulse.wait(seen, Some(left));
         }
     });
 }
@@ -770,6 +1154,7 @@ struct ClientGuard(Arc<Registry>);
 impl Drop for ClientGuard {
     fn drop(&mut self) {
         self.0.clients.fetch_sub(1, Ordering::SeqCst);
+        self.0.pulse.bump();
     }
 }
 
@@ -855,6 +1240,8 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
     for f in after {
         f();
     }
+    // a request may have changed what sessions show (a message, a hint, a removal): the monitor looks once
+    reg.pulse.bump();
 }
 
 /// Writes one chunk of keystrokes; a full backlog (the program is not reading) is waited out for a while rather than
@@ -873,6 +1260,7 @@ fn write_input(s: &Session, data: &[u8]) -> bool {
 
 async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Registry>, token: String, peer: Option<u32>) {
     reg.clients.fetch_add(1, Ordering::SeqCst);
+    reg.pulse.bump();
     let _guard = ClientGuard(reg.clone());
     let (mut rd, mut wr) = tokio::io::split(pipe);
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(OUT_QUEUE);
@@ -998,8 +1386,9 @@ fn take_history(reg: &Registry, key: &str) -> Option<String> {
     Some(format!("\x1b[2m── histórico anterior ──\r\n{body}\r\n── fim do histórico ──\x1b[0m\r\n"))
 }
 
-/// Tells a watching client when the state of any session changed (started, exited, went quiet, escalated, got a
-/// message...), so the UI can drop its fast polling. Cheap: it only looks at in-memory counters once a second.
+/// Lets a watching client hear when the state of any session changed (started, exited, went quiet, escalated, got a
+/// message...) and when the worktrees changed behind its back, so the UI does not poll. The events come from
+/// `spawn_session_monitor` and `projects_changed`; the client lists sessions itself when it connects.
 fn ensure_session_notifier(reg: &Arc<Registry>, tx: &Tx, subs: &mut HashMap<u32, Arc<AtomicBool>>) {
     const KEY: u32 = u32::MAX - 1;
     if subs.contains_key(&KEY) {
@@ -1007,50 +1396,25 @@ fn ensure_session_notifier(reg: &Arc<Registry>, tx: &Tx, subs: &mut HashMap<u32,
     }
     let stop = Arc::new(AtomicBool::new(false));
     subs.insert(KEY, stop.clone());
-    let (reg, tx) = (reg.clone(), tx.clone());
-    std::thread::spawn(move || {
-        let sig = || {
-            use std::hash::{Hash, Hasher};
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            let sessions = reg.sessions.lock_recover();
-            let mut ids: Vec<_> = sessions.keys().copied().collect();
-            ids.sort();
-            for id in ids {
-                let s = &sessions[&id];
-                (
-                    id,
-                    s.try_wait().is_none(),
-                    s.idle_ms() >= 1500,
-                    reg.bus.is_escalated(id),
-                    reg.bus.unread(id),
-                    reg.bus.finished(id).is_some(),
-                )
-                    .hash(&mut h);
-            }
-            h.finish()
-        };
-        // the client lists sessions itself when it connects: only changes after that are news
-        let mut last = sig();
-        let mut last_gen = reg.wt_gen.load(Ordering::SeqCst);
-        while !stop.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(1000));
-            // worktrees or projects changed through any client (the CLI included): the sidebar must list them again
-            let g = reg.wt_gen.load(Ordering::SeqCst);
-            if g != last_gen {
-                last_gen = g;
-                if tx.blocking_send(encode(EVENT, json!({"event": "projects.changed"}).to_string().as_bytes())).is_err() {
-                    return;
-                }
-            }
-            let now = sig();
-            if now != last {
-                last = now;
-                if tx.blocking_send(encode(EVENT, json!({"event": "session.changed"}).to_string().as_bytes())).is_err() {
-                    return;
-                }
-            }
-        }
-    });
+    let mut w = reg.watchers.lock_recover();
+    // connections that went away since the last event leave the list here too
+    w.retain(|(s, _)| !s.load(Ordering::SeqCst));
+    w.push((stop, tx.clone()));
+}
+
+/// Saves the screens of these sessions (agents with a history key only), for the next start to show dimmed.
+fn save_histories_of(reg: &Registry, ids: &[u32]) {
+    if ids.is_empty() {
+        return;
+    }
+    let picked: Vec<(String, Arc<Session>)> = {
+        let sessions = reg.sessions.lock_recover();
+        let metas = reg.metas.lock_recover();
+        ids.iter().filter_map(|id| Some((metas.get(id)?["key"].as_str()?.to_string(), sessions.get(id)?.clone()))).collect()
+    };
+    for (key, s) in picked {
+        save_history(reg, &key, &s.screen_lines(300));
+    }
 }
 
 /// The task file of an agent session, if it has one and the path is still one of ours.
@@ -1160,14 +1524,9 @@ fn session_list(reg: &Registry) -> Vec<Value> {
         .map(|(id, s, view, label, meta)| {
             let running = s.try_wait().is_none();
             let idle = view.idle_ms();
-            // quiet for a moment and the screen ends in a question: the agent waits for the user
-            let agent = meta.as_ref().map(|m| m["kind"] == "agent").unwrap_or(false);
-            let waiting = running
-                && (reg.bus.is_escalated(id)
-                    || (idle >= 1500
-                        && (axelstra_core::waiting::needs_input(&view.tail(4096))
-                            || (agent && axelstra_core::waiting::asks_question(&view.screen_tail(12)))))
-                    || reg.hints.waiting(id, view.since_input_ms(), idle));
+            // waiting is what the agent said (ask, escalate, a hook event), never read off its screen
+            let wait = if running { reg.wait_of(id, view.since_input_ms(), idle) } else { None };
+            let waiting = wait.is_some();
             let facts = stall_facts(reg, id, running, idle, view.since_input_ms(), meta.as_ref(), &busy);
             let stalled = crate::stall::is_stalled(&facts, stall_ms);
             let stall = stalled.then(|| {
@@ -1180,7 +1539,7 @@ fn session_list(reg: &Registry) -> Vec<Value> {
                 );
                 json!({"minutes": stall_min, "code": c.code, "params": c.params_json(), "text": c.to_string()})
             });
-            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "stalled": stalled, "stall": stall, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
+            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "wait": wait.map(|w| json!({"kind": w.kind.as_str(), "text": w.text})), "stalled": stalled, "stall": stall, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
         })
         .collect();
     v.sort_by_key(|x| x["id"].as_u64());
@@ -1238,6 +1597,9 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
     let out = dispatch_call(c);
     if mutating {
         forget_project_list(&reg);
+        // a change made from the CLI or a flow shows up in the app without it polling (once the reply is queued)
+        let r = reg.clone();
+        c.after.push(Box::new(move || r.broadcast("projects.changed")));
     }
     out
 }
@@ -1367,6 +1729,45 @@ mod registry_tests {
         assert_eq!(std::fs::read_to_string(bad).unwrap(), "[{ broken");
         let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("sessions.json")).unwrap()).unwrap();
         assert_eq!(saved, json!({"v": 1, "data": []}));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sessions_of_deleted_worktrees_are_pruned_at_start_after_a_backup() {
+        let dir = std::env::temp_dir().join(format!("axl-reg-prune-{}", std::process::id()));
+        let alive = dir.join("wt-alive");
+        std::fs::create_dir_all(&alive).unwrap();
+        let rec = |w: &std::path::Path| json!({"program": "x", "cwd": w.to_string_lossy(), "meta": {"worktree": w.to_string_lossy()}});
+        let gone = dir.join("wt-gone");
+        write_json(&dir.join("sessions.json"), &vec![rec(&alive), rec(&gone), rec(&gone)]).unwrap();
+        let reg = Registry::new(dir.join("projects.json"), "p".into(), "t".into());
+        assert_eq!(reg.pending.lock_recover().len(), 1);
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("sessions.json")).unwrap()).unwrap();
+        assert_eq!(saved["data"].as_array().unwrap().len(), 1);
+        let kept = std::fs::read_dir(dir.join("backups")).unwrap().count();
+        assert_eq!(kept, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_persist_drops_records_of_deleted_worktrees_with_their_sid_files() {
+        let dir = std::env::temp_dir().join(format!("axl-reg-persist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let alive = dir.join("wt-alive");
+        std::fs::create_dir_all(&alive).unwrap();
+        std::fs::create_dir_all(dir.join("sid")).unwrap();
+        let gone = dir.join("wt-gone");
+        let rec = |w: &std::path::Path, key: &str| json!({"program": "x", "cwd": w.to_string_lossy(), "meta": {"worktree": w.to_string_lossy(), "key": key}});
+        std::fs::write(dir.join("sid").join("aaa.json"), "{}").unwrap();
+        std::fs::write(dir.join("sid").join("bbb.json"), "{}").unwrap();
+        let reg = Registry::new(dir.join("projects.json"), "p".into(), "t".into());
+        *reg.pending.lock_recover() = vec![rec(&alive, "aaa"), rec(&gone, "bbb")];
+        reg.persist();
+        assert_eq!(reg.pending.lock_recover().len(), 1);
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("sessions.json")).unwrap()).unwrap();
+        assert_eq!(saved["data"].as_array().unwrap().len(), 1);
+        assert!(dir.join("sid").join("aaa.json").exists());
+        assert!(!dir.join("sid").join("bbb.json").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

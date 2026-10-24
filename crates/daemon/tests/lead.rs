@@ -55,14 +55,21 @@ fn info(c: &mut Client, id: u64) -> Value {
 fn the_first_agent_of_a_worktree_leads_and_tasks_report_to_it() {
     let root = std::env::temp_dir().join(format!("axelstra-lead-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
+    // the worktrees exist: sessions.json does not keep a session of a deleted one
+    let dir = |n: &str| {
+        let d = root.join(n);
+        std::fs::create_dir_all(&d).unwrap();
+        d.to_string_lossy().replace('\\', "/")
+    };
+    let (r_main, wt_a, wt_b, wt_c) = (dir("main"), dir("wt-a"), dir("wt-b"), dir("wt-c"));
     let mut c = start(&root, "a");
-    let main = spawn(&mut c, "C:/r/main", "claude", json!({"meta": {"main": true}}));
-    let lead = spawn(&mut c, "C:/r/wt-a", "claude", json!({}));
-    let t1 = spawn(&mut c, "C:/r/wt-a", "claude", json!({}));
-    let t2 = spawn(&mut c, "C:/r/wt-a", "claude", json!({}));
-    let other = spawn(&mut c, "C:/r/wt-b", "claude", json!({}));
+    let main = spawn(&mut c, &r_main, "claude", json!({"meta": {"main": true}}));
+    let lead = spawn(&mut c, &wt_a, "claude", json!({}));
+    let t1 = spawn(&mut c, &wt_a, "claude", json!({}));
+    let t2 = spawn(&mut c, &wt_a, "claude", json!({}));
+    let other = spawn(&mut c, &wt_b, "claude", json!({}));
     // a worker explicitly asked for in an empty worktree is a task, not its lead
-    let w = spawn(&mut c, "C:/r/wt-c", "claude", json!({"worker": true}));
+    let w = spawn(&mut c, &wt_c, "claude", json!({"worker": true}));
 
     let l = info(&mut c, lead);
     assert_eq!((l["label"].as_str(), l["meta"]["lead"].as_bool()), (Some("main"), Some(true)));
@@ -85,8 +92,8 @@ fn the_first_agent_of_a_worktree_leads_and_tasks_report_to_it() {
     let saved: Value = serde_json::from_str(&std::fs::read_to_string(root.join("sessions.json")).unwrap()).unwrap();
     let specs = saved["data"].as_array().unwrap();
     let spec = |label: &str, wt: &str| specs.iter().find(|s| s["label"] == label && s["meta"]["worktree"] == wt).cloned().unwrap();
-    assert_eq!(spec("main", "C:/r/wt-a")["meta"]["lead"], true);
-    assert!(spec("Tarefa 1", "C:/r/wt-a")["meta"]["lead"].is_null());
+    assert_eq!(spec("main", &wt_a)["meta"]["lead"], true);
+    assert!(spec("Tarefa 1", &wt_a)["meta"]["lead"].is_null());
 }
 
 #[test]
@@ -94,6 +101,11 @@ fn a_restart_restores_the_lead_and_old_sessions_stay_as_they_were() {
     let root = std::env::temp_dir().join(format!("axelstra-lead-restore-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
+    // the worktrees exist: a saved session of a deleted one is pruned at start
+    let wt_a = root.join("wt-a").to_string_lossy().replace('\\', "/");
+    let old_wt = root.join("old").to_string_lossy().replace('\\', "/");
+    std::fs::create_dir_all(&wt_a).unwrap();
+    std::fs::create_dir_all(&old_wt).unwrap();
     // saved by a daemon: a lead and its task, plus a session from before leads existed (a lone "Tarefa 1")
     let rec = |label: &str, wt: &str, extra: Value| {
         let (prog, args) = shell();
@@ -104,9 +116,9 @@ fn a_restart_restores_the_lead_and_old_sessions_stay_as_they_were() {
         json!({"program": prog, "args": args, "label": label, "meta": meta})
     };
     let saved = json!({"v": 1, "data": [
-        rec("main", "C:/r/wt-a", json!({"lead": true})),
-        rec("Tarefa 1", "C:/r/wt-a", json!({})),
-        rec("Tarefa 1", "C:/r/old", json!({})),
+        rec("main", &wt_a, json!({"lead": true})),
+        rec("Tarefa 1", &wt_a, json!({})),
+        rec("Tarefa 1", &old_wt, json!({})),
     ]});
     std::fs::write(root.join("sessions.json"), saved.to_string()).unwrap();
     let mut c = start(&root, "b");

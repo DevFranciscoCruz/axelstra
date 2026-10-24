@@ -7,7 +7,16 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "worktree.overview" => Ok(tokio::task::block_in_place(|| crate::overview::cached(&reg.store, &|path| reg.worktree_busy(path)))),
         "worktree.sweep" => {
             let dry = p["dry_run"].as_bool().unwrap_or(false);
-            let done = tokio::task::block_in_place(|| crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path), dry));
+            let done = tokio::task::block_in_place(|| {
+                let mut v = crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path), dry);
+                v.extend(reg.clean_leftovers(dry));
+                v
+            });
+            if !dry {
+                reg.persist();
+                reg.projects_changed();
+            }
+            reg.announce_events();
             Ok(json!({"swept": done}))
         }
         // worktrees the automatic sweep removed since the last call (the app turns them into a toast)
@@ -51,6 +60,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     return Ok(v.clone());
                 }
             }
+            // the app asks for the list when something changed in the repositories: the moment to notice a worktree deleted behind our back
+            reap_orphans(reg);
             let gen = reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst);
             let ps = crate::projects::load(&reg.store);
             let v: Vec<Value> = ps
@@ -197,6 +208,49 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             }
             Ok(v)
         }
+        "project.integrate" => {
+            let id = p["id"].as_str().ok_or_else(|| missing("id"))?;
+            crate::projects::set_integrate(&reg.store, id, p["auto"].as_bool(), p["push"].as_bool())?;
+            Ok(json!({}))
+        }
+        // the user asks for the integration of a finished worktree by hand (also when the project's automatic one is off)
+        "worktree.integrate" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let path = p["path"].as_str().ok_or_else(|| missing("path"))?;
+            let out = tokio::task::block_in_place(|| {
+                let wt = axelstra_core::git::worktree_list(std::path::Path::new(&pr.path))?
+                    .into_iter()
+                    .find(|w| crate::projects::norm_path(&w.path) == crate::projects::norm_path(path))
+                    .ok_or_else(|| axelstra_core::coded!("worktree.not_found", "not a worktree of this project"))?;
+                let branch = wt.branch.clone().unwrap_or_default();
+                if reg.worktree_busy(&wt.path) {
+                    return Err(axelstra_core::coded!("integrate.busy", "an agent is still working in {branch}", branch = branch));
+                }
+                let r = crate::integrate::integrate(&pr, &wt);
+                match &r {
+                    Err(e) => crate::integrate::set_attention(&wt.path, crate::integrate::as_coded(e, &branch)),
+                    Ok(_) => crate::integrate::clear_attention(&wt.path),
+                }
+                r
+            })?;
+            forget_project_list(reg);
+            // sessions saved for the folder that just went are dropped from sessions.json
+            reg.persist();
+            Ok(match out {
+                crate::integrate::Outcome::Nothing => {
+                    json!({"integrated": false, "into": "", "how": "none", "removed": false, "pushed": null})
+                }
+                crate::integrate::Outcome::Integrated { into, how, pushed, removed, push_error } => {
+                    let mut v = json!({"integrated": true, "into": into, "how": how, "removed": removed, "pushed": pushed});
+                    if let Some(c) = push_error {
+                        v["push_code"] = json!(c.code);
+                        v["push_params"] = c.params_json();
+                        v["push_text"] = json!(c.text);
+                    }
+                    v
+                }
+            })
+        }
         "worktree.remove" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let path = p["path"].as_str().ok_or_else(|| missing("path"))?;
@@ -224,6 +278,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             tokio::task::block_in_place(|| kill_and_wait(&doomed, Duration::from_secs(5)));
             tokio::task::block_in_place(|| crate::projects::worktree_remove(&pr, path))?;
             let _ = crate::projects::forget_parent(&reg.store, &pr.id, path);
+            reg.persist();
             Ok(json!({}))
         }
         m => anyhow::bail!("unknown method {m}"),

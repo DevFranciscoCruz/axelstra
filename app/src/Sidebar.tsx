@@ -46,6 +46,9 @@ import {
   refreshProjects,
   refreshSessions,
   selectWorktree,
+  selectIfStill,
+  openIfStill,
+  navStamp,
   openSession,
   sessionsOf,
   overview,
@@ -148,12 +151,13 @@ export function Sidebar() {
   const startLead = async (projectId: string, path: string, name: string) => {
     if (startingLead.has(norm(path))) return;
     startingLead.add(norm(path));
+    const stamp = navStamp();
     try {
       const agent = projectPrefsOf(projectId).agent;
       const key = agent && AGENTS[agent] ? agent : canonAgent(savedAgent() === "none" ? "claude" : savedAgent());
       const id = await launchDefaultAgent(projectId, path, key, AGENTS[key], undefined, undefined, projectTerse(projectId));
       await refreshSessions();
-      openSession(path, id);
+      openIfStill(stamp, path, id);
     } catch (e) {
       showNotice(T.leadFailed(name, errorText(e).slice(0, 120)));
     } finally {
@@ -178,6 +182,7 @@ export function Sidebar() {
       if (!name) return;
       // git checks the files out, which takes a while in a big repo: show the row at once
       setPendingWt({ project: projectId, name });
+      const stamp = navStamp();
       let w;
       try {
         w = await createWorktree(projectId, name);
@@ -189,7 +194,7 @@ export function Sidebar() {
       } finally {
         setPendingWt(null);
       }
-      selectWorktree(w.path);
+      selectIfStill(stamp, w.path);
       showNotice(T.created(name, w.env_copied?.length ? T.envCopied(w.env_copied.length) : "", w.env_skipped?.length ? T.envSkipped(w.env_skipped.length) : ""));
       // the worktree exists by now: a failing agent must not skip the setup, and the user reads a sentence, not the raw error
       if (newAgent() !== "none") {

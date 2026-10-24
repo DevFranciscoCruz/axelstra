@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Project {
     pub id: String,
     pub name: String,
@@ -21,6 +21,12 @@ pub struct Project {
     /// shown together under the parent. Entries of worktrees that no longer exist are harmless and ignored.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub parents: BTreeMap<String, String>,
+    /// integrate finished `ax/*` work into the default branch by itself (`integrate.rs`); absent means on
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_integrate: Option<bool>,
+    /// push the default branch after an automatic or manual integration; never on unless the user turned it on
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub push_after_integrate: bool,
 }
 
 /// The form of a worktree path used as a key: the shared comparison key (forward slashes, no trailing slash, no
@@ -155,7 +161,7 @@ pub fn add(store: &Path, path: &str) -> Result<Project> {
     while v.iter().any(|p| p.id == id) {
         id.push_str("-2");
     }
-    let p = Project { id, name, path: root_s, setup: None, parents: BTreeMap::new() };
+    let p = Project { id, name, path: root_s, setup: None, parents: BTreeMap::new(), ..Default::default() };
     v.push(p.clone());
     save(store, &v)?;
     Ok(p)
@@ -190,6 +196,20 @@ pub fn set_setup(store: &Path, id: &str, setup: Option<String>) -> Result<()> {
     let mut v = load_for_update(store)?;
     let p = v.iter_mut().find(|p| p.id == id).ok_or_else(|| coded!("project.unknown", "unknown project {id}", id = id))?;
     p.setup = setup.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    save(store, &v)
+}
+
+/// Sets the integration choices of a project; `None` leaves a choice as it was.
+pub fn set_integrate(store: &Path, id: &str, auto: Option<bool>, push: Option<bool>) -> Result<()> {
+    let _g = STORE_LOCK.lock_recover();
+    let mut v = load_for_update(store)?;
+    let p = v.iter_mut().find(|p| p.id == id).ok_or_else(|| coded!("project.unknown", "unknown project {id}", id = id))?;
+    if auto.is_some() {
+        p.auto_integrate = auto;
+    }
+    if let Some(push) = push {
+        p.push_after_integrate = push;
+    }
     save(store, &v)
 }
 
@@ -571,8 +591,15 @@ mod store_tests {
         let gone = r.join("gone").to_string_lossy().to_string();
         let store = r.join("projects.json");
         let list = vec![
-            Project { id: "gone".into(), name: "gone".into(), path: gone, setup: None, parents: BTreeMap::new() },
-            Project { id: "real".into(), name: "real".into(), path: real_s.clone(), setup: None, parents: BTreeMap::new() },
+            Project { id: "gone".into(), name: "gone".into(), path: gone, setup: None, parents: BTreeMap::new(), ..Default::default() },
+            Project {
+                id: "real".into(),
+                name: "real".into(),
+                path: real_s.clone(),
+                setup: None,
+                parents: BTreeMap::new(),
+                ..Default::default()
+            },
         ];
         save(&store, &list).unwrap();
         let wt = known_worktree(&store, &real_s).unwrap();
@@ -654,7 +681,7 @@ mod rename_tests {
         git::must(&repo, &["add", "."]).unwrap();
         git::must(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"]).unwrap();
         let path = git::canon(&repo).unwrap().to_string_lossy().to_string();
-        (root, Project { id: "p".into(), name: "proj".into(), path, setup: None, parents: BTreeMap::new() })
+        (root, Project { id: "p".into(), name: "proj".into(), path, setup: None, parents: BTreeMap::new(), ..Default::default() })
     }
 
     #[test]
@@ -761,7 +788,7 @@ mod parent_tests {
         git::must(&repo, &["add", "."]).unwrap();
         git::must(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"]).unwrap();
         let path = git::canon(&repo).unwrap().to_string_lossy().to_string();
-        let p = Project { id: "p".into(), name: "proj".into(), path, setup: None, parents: BTreeMap::new() };
+        let p = Project { id: "p".into(), name: "proj".into(), path, setup: None, parents: BTreeMap::new(), ..Default::default() };
         let store = root.join("projects.json");
         save(&store, std::slice::from_ref(&p)).unwrap();
         (root, p, store)

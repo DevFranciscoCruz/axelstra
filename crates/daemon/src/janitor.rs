@@ -3,6 +3,7 @@
 //! request was merged (squash merges leave no ancestor). A worktree with a running session that has not reported,
 //! uncommitted changes or unmerged work is never touched, and neither is a branch whose commits no other ref holds.
 
+use crate::integrate;
 use crate::projects::{self, Project};
 use anyhow::Result;
 use axelstra_core::exec::Captured;
@@ -20,7 +21,7 @@ const NET_TIMEOUT: Duration = Duration::from_secs(30);
 const NET_MAX_OUT: usize = 1 << 20;
 
 /// Runs `cmd` and kills its whole tree after `limit`; `None` when it cannot start or ran out of time.
-fn output_within(cmd: &mut Command, limit: Duration) -> Option<Captured> {
+pub(crate) fn output_within(cmd: &mut Command, limit: Duration) -> Option<Captured> {
     axelstra_core::exec::run_capped(cmd, limit, NET_MAX_OUT).ok().filter(|o| !o.timed_out)
 }
 
@@ -49,6 +50,10 @@ pub fn merged_reason_in(repo: &Path, branch: &str, default: &str, others: &[Stri
         if git::run(repo, &["merge-base", "--is-ancestor", branch, other]).map(|o| o.ok).unwrap_or(false) {
             return Some(format!("already in {other}"));
         }
+    }
+    // squash and rebase merges leave no ancestor: every commit has an equivalent in the default branch
+    if crate::cleanup::squash_merged(repo, branch, &upstream) || crate::cleanup::squash_merged(repo, branch, default) {
+        return Some(format!("its changes are already in {default}"));
     }
     let o = output_within(
         Command::new("gh").current_dir(repo).env("GH_PROMPT_DISABLED", "1").args([
@@ -97,6 +102,11 @@ pub fn take_events() -> Vec<Value> {
     std::mem::take(&mut *EVENTS.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+/// Whether the app has events to take (it is told over the watch stream, see `Registry::announce_events`).
+pub fn has_events() -> bool {
+    !EVENTS.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+}
+
 fn push_event(e: Value) {
     let mut q = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
     q.push(e);
@@ -104,6 +114,15 @@ fn push_event(e: Value) {
     if n > 100 {
         q.drain(..n - 100);
     }
+}
+
+/// How old an empty worktree (no agent, no changes, no commits of its own) must be before the sweep removes it, so one the
+/// user just made by hand is left alone. A worktree whose session reported `done` goes at the next sweep.
+const EMPTY_MIN_AGE_SECS: u64 = 10 * 60;
+
+fn attention_event(p: &Project, path: &str, branch: &str, why: &axelstra_core::msg::Coded) -> Value {
+    json!({"kind": "attention", "project": p.id, "path": path, "branch": branch, "code": why.code, "params": why.params_json(),
+           "text": why.text, "at": now_ms()})
 }
 
 fn sweep_project(p: &Project, busy: &dyn Fn(&str) -> bool, dry: bool, out: &mut Vec<Value>) -> Result<()> {
@@ -114,7 +133,56 @@ fn sweep_project(p: &Project, busy: &dyn Fn(&str) -> bool, dry: bool, out: &mut 
     let mut gone: Vec<String> = vec![];
     for w in git::worktree_list(repo)? {
         let Some(branch) = w.branch.clone().filter(|b| b.starts_with("ax/")) else { continue };
-        if w.is_main || busy(&w.path) || git::has_changes(Path::new(&w.path)).unwrap_or(true) {
+        if w.is_main || busy(&w.path) {
+            // an agent works here again: whatever kept the last report from being integrated is moot
+            if !w.is_main {
+                integrate::clear_attention(&w.path);
+            }
+            continue;
+        }
+        let dirty = git::has_changes(Path::new(&w.path)).unwrap_or(true);
+        // a lead (or `--report-to` worker) said `done` here: integrate its work, or flag why that is not possible
+        let reported = if dry { integrate::done_mark(&w.path, false) } else { integrate::done_mark(&w.path, true) };
+        if let (Some(ok), false) = (reported, dry) {
+            if integrate::auto_on(p) {
+                let result = if ok {
+                    integrate::integrate(p, &w)
+                } else {
+                    Err(axelstra_core::coded!(
+                        "integrate.not_ok",
+                        "the agent reported failed or blocked, so {branch} was not integrated",
+                        branch = branch
+                    ))
+                };
+                match result {
+                    Ok(integrate::Outcome::Integrated { into, how, pushed, removed, push_error }) => {
+                        integrate::clear_attention(&w.path);
+                        if removed {
+                            gone.push(branch.clone());
+                        }
+                        let why = format!("integrated into {into} ({how})");
+                        push_event(
+                            json!({"kind": "integrated", "project": p.id, "path": w.path, "branch": branch, "into": into, "how": how,
+                                          "pushed": pushed, "removed": removed, "why": why, "at": now_ms()}),
+                        );
+                        if let Some(c) = push_error {
+                            push_event(attention_event(p, &w.path, &branch, &c));
+                        }
+                        out.push(json!({"project": p.id, "path": w.path, "branch": branch, "into": into, "why": why, "removed": removed, "dry_run": false}));
+                        continue;
+                    }
+                    Ok(integrate::Outcome::Nothing) => {}
+                    Err(e) => {
+                        let why = integrate::as_coded(&e, &branch);
+                        integrate::set_attention(&w.path, why.clone());
+                        push_event(attention_event(p, &w.path, &branch, &why));
+                        out.push(json!({"project": p.id, "path": w.path, "branch": branch, "why": why.text, "code": why.code, "removed": false, "dry_run": false}));
+                        continue;
+                    }
+                }
+            }
+        }
+        if dirty {
             continue;
         }
         if !fetched {
@@ -131,7 +199,19 @@ fn sweep_project(p: &Project, busy: &dyn Fn(&str) -> bool, dry: bool, out: &mut 
             .filter_map(|o| o.branch)
             .filter(|b| b.starts_with("ax/") && *b != branch && !gone.contains(b))
             .collect();
-        let Some(why) = merged_reason_in(repo, &branch, &default, &others) else { continue };
+        let Some(why) = merged_reason_in(repo, &branch, &default, &others) else {
+            // nothing of its own and nothing to lose: an empty worktree nobody works in goes away after a few minutes
+            let old = reported.is_some() || integrate::branch_age_secs(repo, &branch).is_some_and(|a| a >= EMPTY_MIN_AGE_SECS);
+            if old && integrate::ahead_of(repo, &branch, &default) == 0 && !has_own_commits(repo, &branch) {
+                let removed = !dry && projects::worktree_remove(p, &w.path).is_ok();
+                if removed {
+                    gone.push(branch.clone());
+                    push_event(json!({"kind": "empty", "project": p.id, "path": w.path, "branch": branch, "at": now_ms()}));
+                }
+                out.push(json!({"project": p.id, "path": w.path, "branch": branch, "why": "empty", "removed": removed, "dry_run": dry}));
+            }
+            continue;
+        };
         let removed = !dry && projects::worktree_remove(p, &w.path).is_ok();
         let into = integrated_into(&why, &default);
         if removed {
@@ -150,8 +230,15 @@ fn now_ms() -> u64 {
 /// Sweeps every project; `busy(path)` says whether a live session works in that worktree.
 pub fn sweep(store: &Path, busy: &dyn Fn(&str) -> bool, dry: bool) -> Vec<Value> {
     let mut out = vec![];
-    for p in projects::load(store) {
-        let _ = sweep_project(&p, busy, dry, &mut out);
+    let all = projects::load(store);
+    for p in &all {
+        let _ = sweep_project(p, busy, dry, &mut out);
+        crate::cleanup::stale_branches(p, dry, &mut out);
+        crate::cleanup::prune_entries(p, dry, &mut out);
+    }
+    crate::cleanup::orphan_dirs(&all, busy, dry, &mut out);
+    if let Some(dir) = store.parent() {
+        crate::cleanup::rotate(dir, dry, &mut out);
     }
     out
 }

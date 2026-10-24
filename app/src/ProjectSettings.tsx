@@ -1,10 +1,10 @@
 import { For, Show, createResource, createSignal } from "solid-js";
-import { EnvSkip, projectEnvPreview, setProjectSetup } from "./api";
+import { EnvSkip, projectEnvPreview, setProjectIntegrate, setProjectSetup } from "./api";
 import { coded } from "./msg";
 import { Modal } from "./Modal";
 import { TriggerSettings } from "./TriggerSettings";
 import { projects, refreshProjects, setError } from "./store";
-import { Button, Field, Textarea } from "./ui";
+import { Button, CheckboxField, Field, Textarea } from "./ui";
 import { P } from "./strings.panels";
 
 /** why a file is left out of the next worktree: the daemon's message in the UI language, else its English text */
@@ -17,6 +17,20 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
   const [setup, setSetup] = createSignal(project()?.setup ?? "");
   const [saving, setSaving] = createSignal(false);
   const [preview, { refetch }] = createResource(() => props.projectId, projectEnvPreview);
+  const [auto, setAuto] = createSignal(project()?.auto_integrate !== false);
+  const [push, setPush] = createSignal(project()?.push_after_integrate === true);
+  // the two toggles save at once, sending only the one that changed; a failure puts it back
+  const toggle = async (key: "auto" | "push", v: boolean) => {
+    const set = key === "auto" ? setAuto : setPush;
+    set(v);
+    try {
+      await setProjectIntegrate(props.projectId, { [key]: v });
+      await refreshProjects();
+    } catch (e) {
+      set(!v);
+      setError(String(e));
+    }
+  };
   const dirty = () => setup().trim() !== (project()?.setup ?? "").trim();
 
   const save = async () => {
@@ -58,6 +72,15 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
       <div class="auto-note">
         {P.projectSettings.setupNote}
       </div>
+
+      <CheckboxField checked={auto()} onChange={(v) => void toggle("auto", v)}>
+        {P.projectSettings.autoIntegrate}
+      </CheckboxField>
+      <div class="auto-note">{P.projectSettings.autoIntegrateHint}</div>
+      <CheckboxField checked={push()} onChange={(v) => void toggle("push", v)}>
+        {P.projectSettings.pushAfter}
+      </CheckboxField>
+      <div class="auto-note">{P.projectSettings.pushAfterHint}</div>
 
       <TriggerSettings projectId={props.projectId} />
 

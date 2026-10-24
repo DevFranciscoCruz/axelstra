@@ -7,7 +7,7 @@ Your own session id is `$AXELSTRA_SESSION` (PowerShell: `$env:AXELSTRA_SESSION`)
 ## Discover
 
 - `axelstra projects` — registered projects (ids, paths, worktrees).
-- `axelstra ls [--json]` — live sessions: id, worktree, agent, state (`working`, `waiting`, `idle`).
+- `axelstra ls [--json]` — live sessions: id, worktree, agent, state (`working`, `waiting`, `idle`). `waiting` (red dot, bell, system notification) means the agent itself said it needs an answer; it is never guessed from what the terminal shows.
 - `axelstra limit [N]` — show or set how many workers may run at once (default 6). Starting more fails with "worker limit reached": wait for one to finish.
 
 ## Chain of command
@@ -176,6 +176,7 @@ Other rules of the lead:
 
 - Talk to main only through `axelstra done` / `ask` / `escalate` (they go to `$AXELSTRA_PARENT`). Workers never talk to main.
 - **Never wait silently for the human.** Writing "waiting for your decision" in the terminal tells nobody. Any decision or blocker goes up with `axelstra ask $AXELSTRA_PARENT "<question>"` (blocks until main answers) or `axelstra escalate "<problem>"`; a reversible choice you make yourself, noting it in the report. The same rule goes to every worker (see its prompt above).
+- **Do you need me? `axelstra ask`.** The only ways a session becomes **waiting** are `axelstra ask` / `axelstra escalate` (waiting with your question until the reply) and the agent's own hook events (Claude Code `Notification` permission/elicitation, Gemini `ToolPermission`, Codex `PermissionRequest`; `Stop`, `UserPromptSubmit` and the next input clear it). A sentence in the terminal such as "continuo à espera da tua decisão" or a final `?` changes nothing: if you need a decision, a confirmation or a permission, run `axelstra ask $AXELSTRA_PARENT "<question>"`. When a worker or lead goes waiting by event, its parent gets one message with the agent's own text.
 - **Stall watchdog.** An agent quiet for 5 minutes (Settings, "Agente parado") without `done`/`escalate` and with no running children is marked **stalled** (orange hourglass dot in the sidebar, never green), its parent gets an automatic message with the last screen line, and the app notifies. When you get that message, answer the worker (`axelstra msg <id> "…"`) or take over.
 - **Lifecycle.** A lead started by `dispatch new/send` is ephemeral like a `--report-to` worker: when it calls `axelstra done "<report>"` its session closes by itself, and the report is typed into main and kept in the task file. Finish with `done` only when everything is committed and verified. Main only has to read the report; it does not close leads or remove worktrees.
 - **Cleanup.** The janitor sweep (every 10 minutes, and a few seconds after every `done` or merge) removes a worktree and its branch when the branch is inside the default branch or inside another live `ax/*` branch (stacked integration). It never touches a worktree with uncommitted changes, with a session that has not reported (a session that called `done` and is quiet does not count as busy), or with unmerged work, and it never deletes a branch whose commits no other ref holds. Every removal shows a toast and a notification-center entry ("worktree X removido (integrado em Y)"). `axelstra worktree sweep [--dry-run]` runs it by hand.

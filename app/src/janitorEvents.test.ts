@@ -50,4 +50,39 @@ describe("handleJanitorEvents", () => {
     expect(toast).not.toHaveBeenCalled();
     expect(pushNotification).not.toHaveBeenCalled();
   });
+  it("integrated and empty events get their own text and info toast", () => {
+    handleJanitorEvents([
+      { ...ev("ax/a"), kind: "integrated", how: "ff", pushed: null },
+      { ...ev("ax/b"), kind: "empty" },
+    ]);
+    expect(toast).toHaveBeenNthCalledWith(1, {
+      text: "worktree a integrado em main e removido",
+      kind: "info",
+      key: "janitor:/wt/ax/a",
+    });
+    expect(pushNotification).toHaveBeenNthCalledWith(2, {
+      kind: "merged",
+      worktree: "/wt/ax/b",
+      text: "worktree vazio b removido",
+    });
+  });
+  it("attention shows the coded text as a warning keyed by path and code", () => {
+    handleJanitorEvents([
+      { ...ev("ax/c"), kind: "attention", code: "integrate.busy", params: { branch: "ax/c" }, text: "english" },
+      { ...ev("ax/d"), kind: "attention", code: "unknown.code", text: "english fallback" },
+    ]);
+    expect(toast).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        kind: "warn",
+        key: "janitor:/wt/ax/c:integrate.busy",
+        text: expect.stringContaining("ax/c"),
+      }),
+    );
+    expect(pushNotification).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ kind: "attention", worktree: "/wt/ax/c" }),
+    );
+    expect(toast).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: "english fallback" }));
+  });
 });
