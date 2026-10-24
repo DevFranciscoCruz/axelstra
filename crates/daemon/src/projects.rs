@@ -1,7 +1,7 @@
 //! Projects (git repos the user added) and their worktrees. State is one small
 //! JSON file; git itself is the source of truth for worktrees.
 
-use crate::store::{read_json, write_atomic, LockRecover};
+use crate::store::{read_json, write_json, LockRecover};
 use anyhow::{bail, Context, Result};
 use axelstra_core::git;
 use serde::{Deserialize, Serialize};
@@ -32,8 +32,19 @@ pub fn store_path() -> PathBuf {
     crate::proto::token_path().with_file_name("projects.json")
 }
 
+/// The saved projects. A file that exists but cannot be read is an error, never silently an empty list; a corrupt
+/// one was already moved aside by `read_json`, which recorded a notice.
+pub fn try_load(store: &Path) -> Result<Vec<Project>> {
+    Ok(read_json(store).with_context(|| format!("could not read {}", store.display()))?.unwrap_or_default())
+}
+
+/// `try_load` for read-only callers that cannot report: a read error is logged and recorded as a notice
+/// (`store::take_notices`) and the list is empty for that call only; nothing is saved back from it.
 pub fn load(store: &Path) -> Vec<Project> {
-    read_json(store).ok().flatten().unwrap_or_default()
+    try_load(store).unwrap_or_else(|e| {
+        crate::store::notice(format!("projects unavailable: {e:#}"));
+        Vec::new()
+    })
 }
 
 /// Serializes read-modify-write of the projects file: two UI calls adding projects at once must not drop one.
@@ -42,12 +53,12 @@ static STORE_LOCK: Mutex<()> = Mutex::new(());
 /// The list to modify and save back. Unlike `load`, a file that exists but cannot be read is an error, so an
 /// empty list is never saved over projects we merely failed to read (a corrupt file was moved to `.bad` by then).
 fn load_for_update(store: &Path) -> Result<Vec<Project>> {
-    Ok(read_json(store).with_context(|| format!("could not read {}", store.display()))?.unwrap_or_default())
+    try_load(store)
 }
 
 fn save(store: &Path, v: &[Project]) -> Result<()> {
-    // temp file + rename: a crash never leaves a half-written list
-    write_atomic(store, &serde_json::to_vec_pretty(v)?)?;
+    // versioned envelope, fsynced temp file + rename, rotating backups: a crash never leaves a half-written list
+    write_json(store, v)?;
     Ok(())
 }
 
@@ -149,7 +160,7 @@ pub fn remove(store: &Path, id: &str) -> Result<()> {
 /// A project whose folder is gone (or whose git fails) is skipped, not an error for every other project.
 pub fn known_worktree(store: &Path, path: &str) -> Result<PathBuf> {
     let want = path.replace('\\', "/").to_ascii_lowercase();
-    for p in load(store) {
+    for p in try_load(store)? {
         let Ok(list) = git::worktree_list(Path::new(&p.path)) else { continue };
         for w in list {
             if w.path.replace('\\', "/").to_ascii_lowercase() == want {
@@ -161,7 +172,7 @@ pub fn known_worktree(store: &Path, path: &str) -> Result<PathBuf> {
 }
 
 pub fn find(store: &Path, id: &str) -> Result<Project> {
-    load(store).into_iter().find(|p| p.id == id).with_context(|| format!("unknown project {id}"))
+    try_load(store)?.into_iter().find(|p| p.id == id).with_context(|| format!("unknown project {id}"))
 }
 
 /// New worktree on a new branch `ax/<name>` from the repo's current HEAD.
@@ -486,9 +497,16 @@ mod store_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let store = r.join("projects.json");
         std::fs::write(&store, "[{ not json").unwrap();
+        let _ = crate::store::take_notices();
         assert!(load(&store).is_empty());
         add(&store, &dir.to_string_lossy()).unwrap();
-        assert_eq!(std::fs::read_to_string(crate::store::bad_path(&store)).unwrap(), "[{ not json");
+        let bad = std::fs::read_dir(&r)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.file_name().unwrap().to_string_lossy().starts_with("projects.json.bad."))
+            .expect("corrupt file kept as .bad.<ts>");
+        assert_eq!(std::fs::read_to_string(bad).unwrap(), "[{ not json");
+        assert!(crate::store::take_notices().iter().any(|n| n.contains("projects.json")));
         assert_eq!(load(&store).len(), 1);
         let _ = std::fs::remove_dir_all(&r);
     }
@@ -499,7 +517,13 @@ mod store_tests {
         let store = r.join("projects.json");
         // a folder where the file should be: it exists but cannot be read
         std::fs::create_dir_all(&store).unwrap();
+        let _ = crate::store::take_notices();
+        assert!(try_load(&store).is_err());
+        assert!(known_worktree(&store, "x").is_err());
+        assert!(find(&store, "x").is_err());
+        // the read-only wrapper degrades to empty but surfaces a notice
         assert!(load(&store).is_empty());
+        assert!(crate::store::take_notices().iter().any(|n| n.contains("projects unavailable")));
         assert!(remove(&store, "x").is_err());
         assert!(store.is_dir());
         let _ = std::fs::remove_dir_all(&r);
