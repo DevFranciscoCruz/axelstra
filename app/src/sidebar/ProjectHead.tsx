@@ -4,6 +4,8 @@ import { Button, Input, cn } from "../ui";
 import { MenuItem, isMenuKey, showMenu, showMenuAt } from "../ContextMenu";
 import { P } from "../strings.panels";
 import { ProjectIcon } from "./ProjectIcon";
+import { HostBadge } from "../HostBadge";
+import { displayPath, hostOf } from "../paths";
 
 const T = P.sidebar;
 type Proj = {
@@ -11,6 +13,7 @@ type Proj = {
   name: string;
   path: string;
   slug?: string | null;
+  host?: string;
   icon_url?: string | null;
   setup?: string | null;
 };
@@ -29,7 +32,7 @@ export function ProjectHead(props: {
   return (
     <div
       class="project-head"
-      title={p().path}
+      title={displayPath(p().path)}
       onContextMenu={(e) => showMenu(e, props.menu())}
       onKeyDown={(e) => {
         // the menu key and Shift+F10 open the project menu from any button of the header
@@ -52,9 +55,10 @@ export function ProjectHead(props: {
         <Icon name={props.folded ? "chevRight" : "chevDown"} size={12} />
       </Button>
       <ProjectIcon id={p().id} name={p().name} url={p().icon_url} />
-      <span class="pname" title={p().slug ?? p().path}>
+      <span class="pname" title={p().slug ?? displayPath(p().path)}>
         {p().name}
       </span>
+      <Show when={p().host ?? hostOf(p().path)}>{(h) => <HostBadge host={h()} />}</Show>
       <Button variant="icon" size="glyph" title={T.newWorktree} aria-label={T.newWorktree} onClick={props.onNew}>
         <Icon name="plus" />
       </Button>
