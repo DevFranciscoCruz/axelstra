@@ -164,14 +164,14 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     if !snap.is_empty() {
                         let _ = tx.blocking_send(session_frame(OUTPUT, id, &snap));
                     }
-                    let mut quiet_ticks = 0u32;
                     loop {
                         if stop.load(Ordering::SeqCst) {
                             return;
                         }
-                        match rx.recv_timeout(Duration::from_millis(200)) {
+                        // blocks until the session prints or its stream ends (`watch_exit` ends it when the program
+                        // is gone, even if ConPTY keeps the pipe open); the 5 s wake-up is the heartbeat below
+                        match rx.recv_timeout(STREAM_HEARTBEAT) {
                             Ok(d) => {
-                                quiet_ticks = 0;
                                 if tx.blocking_send(session_frame(OUTPUT, id, &d)).is_err() {
                                     return;
                                 }
@@ -179,14 +179,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                             Err(RecvTimeoutError::Timeout) => {
                                 // an empty frame every 5 quiet seconds: a client that stopped listening (its tab closed) wakes up,
                                 // sees it is detached and hangs up, instead of staying blocked until this session prints again
-                                quiet_ticks += 1;
-                                if quiet_ticks >= 25 {
-                                    quiet_ticks = 0;
-                                    if tx.blocking_send(session_frame(OUTPUT, id, &[])).is_err() {
-                                        return;
-                                    }
+                                if tx.blocking_send(session_frame(OUTPUT, id, &[])).is_err() {
+                                    return;
                                 }
-                                // ConPTY may keep the output pipe open after the process is gone
                                 if s.try_wait().is_some() {
                                     while let Ok(d) = rx.recv_timeout(Duration::from_millis(150)) {
                                         let _ = tx.blocking_send(session_frame(OUTPUT, id, &d));

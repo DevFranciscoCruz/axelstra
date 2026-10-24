@@ -8,6 +8,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "worktree.sweep" => {
             let dry = p["dry_run"].as_bool().unwrap_or(false);
             let done = tokio::task::block_in_place(|| crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path), dry));
+            reg.announce_events();
             Ok(json!({"swept": done}))
         }
         // worktrees the automatic sweep removed since the last call (the app turns them into a toast)

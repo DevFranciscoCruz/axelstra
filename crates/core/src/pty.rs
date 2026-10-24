@@ -383,6 +383,15 @@ impl Session {
         self.shared.subscribe_with(SUB_QUEUE)
     }
 
+    /// Ends the output stream: subscribers get what is queued and then see the end, new ones get only the replay.
+    /// For when the program is gone but the pipe stays open (ConPTY can do that); the reader thread does the same
+    /// when the pipe closes.
+    pub fn end_stream(&self) {
+        let mut r = self.shared.ring.lock_recover();
+        self.shared.eof.store(true, Ordering::SeqCst);
+        r.subs.clear();
+    }
+
     /// An owned handle for reading output and activity without touching the session (see `View`).
     pub fn view(&self) -> View {
         View { shared: self.shared.clone(), size: self.size.clone() }

@@ -31,6 +31,8 @@ static INSTANCE: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
 /// down (they block) instead of growing the daemon's memory.
 type Tx = mpsc::Sender<Vec<u8>>;
 const OUT_QUEUE: usize = 1024;
+/// How long a terminal stream waits for output before it sends an empty frame (see `session.subscribe`).
+const STREAM_HEARTBEAT: Duration = Duration::from_secs(5);
 
 /// Lock order. Hold at most these in this order, never a later one while taking an earlier one:
 ///   auto_lock, sessions, labels, metas, specs, pending, then the leaf locks (runs, flows, plist, watchers, the pulses).
@@ -127,6 +129,20 @@ impl Registry {
         self.watchers.lock_recover().retain(|(stop, tx)| {
             !stop.load(Ordering::SeqCst) && !matches!(tx.try_send(frame.clone()), Err(mpsc::error::TrySendError::Closed(_)))
         });
+    }
+
+    /// Tells the app there is something to take for its toasts and notification center (`janitor.events`,
+    /// `triggers.events`, `budget.events`); it takes them with those calls, so it never asks on a timer.
+    fn announce_events(&self) {
+        if crate::janitor::has_events() {
+            self.broadcast("janitor.events");
+        }
+        if crate::triggers::has_events() {
+            self.broadcast("triggers.events");
+        }
+        if crate::budget::has_events() {
+            self.broadcast("budget.events");
+        }
     }
 
     /// The worktrees changed outside a request that already says so: drop the cached lists and tell the app.
@@ -315,6 +331,10 @@ fn watch_exit(reg: &Arc<Registry>, id: u32, s: Arc<Session>) {
     std::thread::spawn(move || {
         s.wait_exit();
         s.kill();
+        // the last output may still be on its way through the pipe: then the stream ends, which is what tells a
+        // terminal's subscribers that the program is gone
+        std::thread::sleep(Duration::from_millis(150));
+        s.end_stream();
         let Some(reg) = reg.upgrade() else { return };
         reg.hints.clear(id);
         reg.pulse.bump();
@@ -686,6 +706,35 @@ fn spawn_budget_loop(reg: Arc<Registry>) {
     });
 }
 
+/// Tells the app when a file in the data directory that other processes write changes: `dispatch.json` is written by
+/// the `axelstra dispatch` commands, which do not go through the daemon. Asleep until the OS reports a write.
+fn spawn_data_watch(reg: Arc<Registry>) {
+    use notify::{RecursiveMode, Watcher};
+    let Some(dir) = reg.saved.parent().map(|d| d.to_path_buf()) else { return };
+    std::thread::spawn(move || {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let Ok(mut w) = notify::recommended_watcher(tx) else { return };
+        if w.watch(&dir, RecursiveMode::NonRecursive).is_err() {
+            return;
+        }
+        while let Ok(ev) = rx.recv() {
+            let hit = |ev: &notify::Result<notify::Event>| {
+                ev.as_ref().is_ok_and(|e| {
+                    // reading the file (inotify reports it) is not a change
+                    !matches!(e.kind, notify::EventKind::Access(_)) && e.paths.iter().any(|p| p.file_name().is_some_and(|n| n == "dispatch.json"))
+                })
+            };
+            if !hit(&ev) {
+                continue;
+            }
+            // a write is several events (temp file, rename): one announcement for the burst
+            std::thread::sleep(Duration::from_millis(150));
+            while rx.try_recv().is_ok() {}
+            reg.broadcast("dispatch.changed");
+        }
+    });
+}
+
 /// Removes the worktrees whose work is merged (see `janitor`) when something may have made one removable: at start,
 /// when a session ends (its worktree is no longer busy), after a merge, a `done`, a finished flow or orchestration.
 /// Kicks that come close together make one sweep, at most one a minute. `janitor.off` turns it off.
@@ -714,6 +763,7 @@ fn spawn_janitor(reg: Arc<Registry>) {
                 reap_orphans(&reg);
                 reg.projects_changed();
             }
+            reg.announce_events();
         }
     });
 }
@@ -853,6 +903,7 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     write_hooks_json(&dir, std::env::current_exe().ok().as_deref());
     spawn_scheduler(reg.clone());
     spawn_budget_loop(reg.clone());
+    spawn_data_watch(reg.clone());
     spawn_session_monitor(reg.clone());
     // the daemon starting is one of the moments to look for merged worktrees
     reg.janitor.bump();

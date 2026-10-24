@@ -382,5 +382,6 @@ pub(super) fn budget_check(reg: &Arc<Registry>) -> Vec<crate::budget::Row> {
     if state != before {
         let _ = write_json(&path, &state);
     }
+    reg.announce_events();
     budget::status(&state, &budgets, &totals, date)
 }
