@@ -301,10 +301,12 @@ fn with_prompt_file(line: &str, file: &str, ps: bool) -> String {
 
 /// The flags that put `agent`'s interactive TUI on a first prompt, each with a leading space ("" when it needs none).
 /// A session started with a prompt by an agent or a script is unattended, so the agent is also told to trust the
-/// folder (gemini would stop at "Do you trust the files in this folder?").
-fn prompt_flags(agent: &str) -> String {
+/// folder (gemini would stop at "Do you trust the files in this folder?") unless `trusted` is false: a pull request's
+/// code, or a folder outside `ax/*`, is left to ask.
+fn prompt_flags(agent: &str, trusted: bool) -> String {
     let Some(a) = axelstra_core::agents::get(agent) else { return String::new() };
-    a.trust.iter().chain(a.interactive_prompt.unwrap_or(&[])).map(|f| format!(" {f}")).collect()
+    let trust: &[&str] = if trusted { a.trust } else { &[] };
+    trust.iter().chain(a.interactive_prompt.unwrap_or(&[])).map(|f| format!(" {f}")).collect()
 }
 
 /// Starts a claude/codex session in `worktree` (visible in the app); returns its session id.
@@ -356,7 +358,7 @@ pub(crate) fn spawn_agent(
         let full = if reap.is_some() && !pr.contains("axelstra done") { worker_prompt(pr) } else { pr.to_string() };
         // the text never goes through a command line: a file the shell reads, so <, >, &, quotes and newlines arrive as typed
         // an agent whose first prompt needs a flag (gemini: -i, which is explicit and also works before 0.65, where a bare prompt ran one-shot and exited) gets it here
-        line.push_str(&prompt_flags(agent));
+        line.push_str(&prompt_flags(agent, axelstra_core::git::folder_trusted(worktree)));
         let file = format!("{dir}/prompts/{}.txt", new_uuid());
         std::fs::create_dir_all(Path::new(&file).parent().context("bad data dir")?)?;
         std::fs::write(&file, &full).with_context(|| format!("cannot write {file}"))?;
@@ -673,8 +675,9 @@ mod tests {
 
     #[test]
     fn gemini_needs_the_interactive_prompt_flag_the_others_do_not() {
-        assert_eq!(prompt_flags("gemini"), " --skip-trust -i");
-        assert_eq!((prompt_flags("claude"), prompt_flags("codex"), prompt_flags("other")), (String::new(), String::new(), String::new()));
+        assert_eq!(prompt_flags("gemini", true), " --skip-trust -i");
+        assert_eq!(prompt_flags("gemini", false), " -i");
+        assert_eq!((prompt_flags("claude", true), prompt_flags("codex", true), prompt_flags("other", true)), (String::new(), String::new(), String::new()));
     }
 
     #[test]

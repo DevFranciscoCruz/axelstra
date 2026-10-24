@@ -247,6 +247,8 @@ pub fn worktree_from_pr_report(p: &Project, number: u64) -> Result<(git::Worktre
         )
     })?;
     let wt = create_at(p, &format!("pr-{number}"), "FETCH_HEAD", false)?.0;
+    // its code is not the user's: no agent started in it is told to trust the folder, even if the branch is renamed
+    git::mark_untrusted(Path::new(&wt.path))?;
     let warning = crate::wtenv::plan(repo).ok().filter(|pl| !pl.files.is_empty()).map(|pl| {
         axelstra_core::msg::Coded::new(
             "worktree.pr_env_not_copied",
@@ -733,6 +735,14 @@ mod rename_tests {
         let warning = warning.expect("the user is told");
         assert_eq!(warning.code, "worktree.pr_env_not_copied");
         assert!(warning.text.contains(".env") && warning.text.contains("NOT copied"), "{warning}");
+        // M8c: a pull request's worktree is never trusted for an unattended agent, even if its branch is renamed
+        let wd = Path::new(&w.path);
+        assert!(git::is_pr_code(wd) && !git::folder_trusted(wd));
+        git::must(wd, &["branch", "-m", "ax/renamed"]).unwrap();
+        assert!(git::is_pr_code(wd) && !git::folder_trusted(wd), "the marker outlives a rename");
+        let own = create_at(&p, "mine", "HEAD", false).unwrap().0;
+        assert!(git::folder_trusted(Path::new(&own.path)), "our own ax/* worktree is trusted");
+        assert!(!git::folder_trusted(Path::new(&p.path)), "the main checkout is not on an ax/* branch");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

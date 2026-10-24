@@ -588,7 +588,7 @@ fn launch_automation(reg: &Registry, a: &crate::automations::Automation) -> Resu
             if ag.locate().is_none() {
                 return Err(ag.missing_error());
             }
-            crate::automations::agent_command(&a.agent, &a.prompt)?
+            crate::automations::agent_command(&a.agent, &a.prompt, axelstra_core::git::folder_trusted(std::path::Path::new(&wt.path)))?
         }
     };
     let spawn = Spawn { program, args, cwd: Some(wt.path.clone().into()), env: vec![], cols: 120, rows: 30 };
