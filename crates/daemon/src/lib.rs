@@ -28,6 +28,7 @@ pub mod runner;
 pub mod server;
 pub mod skill;
 pub mod store;
+pub mod triggers;
 pub mod watcher;
 pub mod wtenv;
 pub mod wtstatus;

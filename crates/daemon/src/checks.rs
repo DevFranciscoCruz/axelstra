@@ -28,6 +28,8 @@ pub struct Status {
     pub number: u64,
     pub title: String,
     pub url: String,
+    /// Commit the PR head is at (gh's `headRefOid`); "" when gh did not say. CI results belong to this commit.
+    pub head_sha: String,
     /// "open" | "merged" | "closed"
     pub pr_state: String,
     pub draft: bool,
@@ -111,7 +113,7 @@ pub fn overall(checks: &[Check]) -> &'static str {
     }
 }
 
-/// Fills a Status from `gh pr view --json number,title,url,state,isDraft,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus`.
+/// Fills a Status from `gh pr view --json number,title,url,headRefOid,state,isDraft,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus`.
 /// `checks` is the list from `gh pr checks` when that worked.
 pub fn parse_view(json: &str, checks: Option<Vec<Check>>) -> Result<Status> {
     let v: Value = serde_json::from_str(json)?;
@@ -147,6 +149,7 @@ pub fn parse_view(json: &str, checks: Option<Vec<Check>>) -> Result<Status> {
         number: v["number"].as_u64().unwrap_or(0),
         title: s("title").to_string(),
         url: s("url").to_string(),
+        head_sha: s("headRefOid").to_string(),
         pr_state: pr_state.to_string(),
         draft,
         ci: ci.to_string(),
@@ -209,7 +212,7 @@ fn problem(kind: &str, detail: impl Into<String>) -> Status {
     Status { problem: kind.to_string(), detail: detail.into(), ci: "none".into(), mergeable: "unknown".into(), ..Status::default() }
 }
 
-const VIEW_FIELDS: &str = "number,title,url,state,isDraft,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus";
+const VIEW_FIELDS: &str = "number,title,url,headRefOid,state,isDraft,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus";
 
 /// State of the PR for the branch checked out in `wt`. A missing PR, a missing gh or a missing login are answers
 /// (the `problem` field), not errors: the panel shows each with its own hint.
@@ -321,7 +324,7 @@ mod tests {
       {"name":"docs","state":"SKIPPED","link":"","bucket":"skipping"},
       {"name":"e2e","state":"FAILURE","link":"https://x/3","bucket":"fail"}]"#;
 
-    const VIEW: &str = r#"{"number":12,"title":"Add thing","url":"https://github.com/o/r/pull/12","state":"OPEN","isDraft":false,
+    const VIEW: &str = r#"{"number":12,"title":"Add thing","url":"https://github.com/o/r/pull/12","headRefOid":"abc123","state":"OPEN","isDraft":false,
       "reviewDecision":"APPROVED","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN",
       "statusCheckRollup":[{"name":"build","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://x/1"},
                            {"context":"ci/legacy","state":"SUCCESS","targetUrl":"https://x/9"}]}"#;
@@ -370,6 +373,7 @@ mod tests {
     fn view_with_passing_rollup_can_merge() {
         let s = parse_view(VIEW, None).unwrap();
         assert_eq!((s.number, s.pr_state.as_str(), s.ci.as_str(), s.review.as_str()), (12, "open", "pass", "approved"));
+        assert_eq!(s.head_sha, "abc123");
         assert_eq!((s.mergeable.as_str(), s.merge_state.as_str()), ("yes", "clean"));
         assert_eq!(s.checks.len(), 2);
         assert!(s.can_merge);
