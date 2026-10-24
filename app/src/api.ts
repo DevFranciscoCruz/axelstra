@@ -325,6 +325,19 @@ let watchReady: Promise<void> | null = null;
 let channel: Channel<{ event?: string; worktree?: string }> | null = null;
 let unlisteners: Promise<() => void>[] = [];
 
+/** Events the daemon pushes on the watch stream besides the file, session and project ones: the app takes what changed
+ *  when one arrives instead of asking on a timer. */
+export type DaemonEvent = "janitor.events" | "triggers.events" | "budget.events" | "dispatch.changed";
+const eventSubs = new Map<string, Set<() => void>>();
+/** Runs `fn` each time the daemon announces `name` (and after the stream reconnects, in case one was missed); returns the unsubscribe. */
+export const onDaemonEvent = (name: DaemonEvent, fn: () => void): (() => void) => {
+  let set = eventSubs.get(name);
+  if (!set) eventSubs.set(name, (set = new Set()));
+  set.add(fn);
+  return () => void set.delete(fn);
+};
+const fire = (name: string) => eventSubs.get(name)?.forEach((f) => f());
+
 /** Drops the current Channel: its late messages go nowhere. (Tauri has no close for a Channel; the host replaces its end on the next watch_start.) */
 const dropChannel = () => {
   if (channel) channel.onmessage = () => {};
@@ -341,6 +354,7 @@ const startWatch = () => {
     if (m?.event === "fs.changed" && m.worktree) handlers.onChanged(m.worktree);
     else if (m?.event === "session.changed") handlers.onSessions?.();
     else if (m?.event === "projects.changed") handlers.onProjects?.();
+    else if (m?.event) fire(m.event);
   };
   return tauriInvoke<void>("watch_start", { onEvent: ch });
 };
@@ -351,7 +365,13 @@ const rewatch = () => {
   if (!wanted || !handlers || reconnecting) return;
   reconnecting = true;
   dropChannel();
-  void watchWorktree(lastWorktree, handlers.onChanged, handlers.onSessions, handlers.onProjects).finally(() => (reconnecting = false));
+  void watchWorktree(lastWorktree, handlers.onChanged, handlers.onSessions, handlers.onProjects).finally(() => {
+    reconnecting = false;
+    // whatever happened while the stream was down is not coming as an event: look once
+    handlers?.onSessions?.();
+    handlers?.onProjects?.();
+    for (const name of eventSubs.keys()) fire(name);
+  });
 };
 export const watchWorktree = async (worktree: string | null, onChanged: (worktree: string) => void, onSessions?: () => void, onProjects?: () => void) => {
   handlers = { onChanged, onSessions, onProjects };

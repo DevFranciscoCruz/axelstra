@@ -130,6 +130,27 @@ pub fn due_now(list: &[Automation], now_ts: i64) -> Vec<String> {
     list.iter().filter(|a| due(a, now, local(a.last_run))).map(|a| a.id.clone()).collect()
 }
 
+/// When the next enabled automation becomes due (unix seconds), for a scheduler that sleeps exactly until then.
+/// Expects the ones due at `now_ts` to have run (their `last_run` moved); `None` when nothing is enabled.
+pub fn next_due_ts(list: &[Automation], now_ts: i64) -> Option<i64> {
+    let now = local(now_ts);
+    list.iter()
+        .filter(|a| a.enabled)
+        .filter_map(|a| {
+            let at = match &a.schedule {
+                Schedule::Interval { minutes } => local(a.last_run) + Duration::minutes(*minutes as i64),
+                // the latest slot is at or before now: the next one is a day (or a week) later
+                Schedule::Daily { .. } => latest_slot(&a.schedule, now, now).ok()? + Duration::days(1),
+                Schedule::Weekly { .. } => latest_slot(&a.schedule, now, now).ok()? + Duration::days(7),
+            };
+            // a local time skipped by a DST change falls an hour later
+            let ts =
+                Local.from_local_datetime(&at).earliest().or_else(|| Local.from_local_datetime(&(at + Duration::hours(1))).earliest())?;
+            Some(ts.timestamp().max(now_ts))
+        })
+        .min()
+}
+
 pub fn now_ts() -> i64 {
     DateTime::<Local>::from(std::time::SystemTime::now()).timestamp()
 }
@@ -259,6 +280,26 @@ mod tests {
         b.agent = "rm".into();
         assert!(validate(&b).is_err());
         assert!(validate(&auto(Schedule::Daily { time: "10:00".into() })).is_ok());
+    }
+
+    #[test]
+    fn next_due_is_the_earliest_enabled_slot() {
+        let ts = |d: NaiveDateTime| Local.from_local_datetime(&d).earliest().unwrap().timestamp();
+        let now = ts(at(2026, 10, 20, 10, 0));
+        let mut every = auto(Schedule::Interval { minutes: 30 });
+        every.last_run = ts(at(2026, 10, 20, 9, 50));
+        let daily = auto(Schedule::Daily { time: "09:00".into() });
+        // 2026-10-20 is a Tuesday: Wednesday's 08:00 is tomorrow
+        let weekly = auto(Schedule::Weekly { day: 2, time: "08:00".into() });
+        assert_eq!(next_due_ts(std::slice::from_ref(&every), now), Some(ts(at(2026, 10, 20, 10, 20))));
+        assert_eq!(next_due_ts(std::slice::from_ref(&daily), now), Some(ts(at(2026, 10, 21, 9, 0))));
+        assert_eq!(next_due_ts(std::slice::from_ref(&weekly), now), Some(ts(at(2026, 10, 21, 8, 0))));
+        assert_eq!(next_due_ts(&[daily.clone(), weekly.clone(), every.clone()], now), Some(ts(at(2026, 10, 20, 10, 20))));
+        // an overdue interval is due now, never in the past; nothing enabled means no timer at all
+        every.last_run = ts(at(2026, 10, 20, 8, 0));
+        assert_eq!(next_due_ts(std::slice::from_ref(&every), now), Some(now));
+        every.enabled = false;
+        assert_eq!(next_due_ts(&[every], now), None);
     }
 
     #[test]

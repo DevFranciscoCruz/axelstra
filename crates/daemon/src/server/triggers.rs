@@ -81,6 +81,7 @@ pub(super) fn spawn_loop(reg: Arc<Registry>) {
                 // sessions changed: watchers refresh
                 reg.wt_gen.fetch_add(1, Ordering::SeqCst);
             }
+            reg.announce_events();
             std::thread::sleep(Duration::from_secs(trig::POLL_SECS));
         }
     });

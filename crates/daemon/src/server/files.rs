@@ -49,8 +49,16 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             }
             let stop = Arc::new(AtomicBool::new(false));
             let (tx2, path) = (tx.clone(), wt.to_string_lossy().to_string());
+            let weak = Arc::downgrade(reg);
             tokio::task::block_in_place(|| {
                 crate::watcher::start(wt, stop.clone(), move || {
+                    // the worktree itself was deleted (outside the app): its sessions have nothing left to show
+                    if !std::path::Path::new(&path).exists() {
+                        if let Some(r) = weak.upgrade() {
+                            reap_orphans(&r);
+                            r.projects_changed();
+                        }
+                    }
                     let ev = json!({"event": "fs.changed", "worktree": path});
                     let _ = tx2.blocking_send(encode(EVENT, ev.to_string().as_bytes()));
                 })

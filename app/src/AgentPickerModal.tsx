@@ -23,7 +23,12 @@ export function AgentPickerModal(props: { project: string | undefined; done: (ag
           <Select
             value={choice()}
             label={S.app.agent}
-            options={agentKeys().map((a) => ({ value: a, label: agentLabel(a), icon: hasIcon(a) ? a : undefined }))}
+            options={agentKeys().map((a) => ({
+              value: a,
+              label: agentLabel(a),
+              desc: S.agentDescs[a],
+              icon: hasIcon(a) ? a : undefined,
+            }))}
             onChange={setChoice}
           />
         </Field>
