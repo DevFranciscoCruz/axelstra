@@ -43,8 +43,8 @@ enum Cmd {
     /// Claude Code status line command used by Axelstra sessions (not meant to be run by hand)
     #[command(hide = true)]
     StatuslineTee,
-    /// Agent hook: tell the daemon what the agent in this session is doing (`axelstra hook claude Stop`).
-    /// `axelstra hook install claude` adds the status hooks to Claude Code's settings, `axelstra hook status claude` checks them
+    /// Agent hook: tell the daemon what the agent in this session is doing (`axelstra hook claude Stop`, `axelstra hook gemini AfterAgent`).
+    /// `axelstra hook install claude|gemini` adds the status hooks to that agent's settings, `axelstra hook status claude|gemini` checks them
     #[command(hide = true)]
     Hook { agent: String, event: String },
     /// Print a bundled agent guide: `axelstra skills get axelstration`
@@ -54,7 +54,7 @@ enum Cmd {
         #[arg(value_parser = ["axelstration"])]
         name: String,
     },
-    /// Install the /axelstration skill for Claude Code and Codex
+    /// Install the /axelstration skill for Claude Code, Codex and Gemini CLI
     InstallSkill,
     /// Queue a message for another session; agents get a one-line notice, `axelstra inbox` reads it
     Msg {
@@ -476,7 +476,7 @@ fn main() -> Result<()> {
             for f in axelstra_daemon::skill::install_forced()? {
                 println!("installed {}", f.display());
             }
-            println!("use it as /axelstration in Claude Code or Codex");
+            println!("use it as /axelstration in Claude Code or Codex; Gemini CLI activates it on its own");
         }
         Cmd::Plan { repo } => {
             let cards: Vec<_> = card::load_dir(&repo.join(".kanban"))?.into_iter().filter(|c| c.meta.status == "todo").collect();

@@ -144,8 +144,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "budget.check" => Ok(json!({"budgets": tokio::task::block_in_place(|| budget_check(reg))})),
         // the level crossings since the last call (the app turns them into a toast and a notification)
         "budget.events" => Ok(json!({"events": crate::budget::take_events()})),
-        "hooks.status" => Ok(crate::hooks::status()?),
-        "hooks.install" => tokio::task::block_in_place(crate::hooks::install),
+        // `agent` (claude by default, or gemini) picks whose settings file is read or written
+        "hooks.status" => Ok(crate::hooks::status_for(p["agent"].as_str().unwrap_or("claude"))?),
+        "hooks.install" => tokio::task::block_in_place(|| crate::hooks::install_for(p["agent"].as_str().unwrap_or("claude"))),
         "ping" => Ok(hello_info()),
         // what the daemon recovered or lost on its own (a state file moved aside, restored from a backup): shown once
         "audit.list" => {
