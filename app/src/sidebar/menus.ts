@@ -114,7 +114,10 @@ export const projectMenu = (
         run: () => setProjectPref(p.id, { agent: undefined }),
       },
       ...agentKeys().map((a) => ({
-        label: projectPrefsOf(p.id).agent && canonAgent(projectPrefsOf(p.id).agent!) === a ? `${agentLabel(a)} ✓` : agentLabel(a),
+        label:
+          projectPrefsOf(p.id).agent && canonAgent(projectPrefsOf(p.id).agent!) === a
+            ? `${agentLabel(a)} ✓`
+            : agentLabel(a),
         icon: hasIcon(a) ? a : undefined,
         run: () => setProjectPref(p.id, { agent: a }),
       })),
