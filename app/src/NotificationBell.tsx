@@ -1,7 +1,7 @@
-import { For, Show, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createSignal, on, onCleanup } from "solid-js";
 import { moveIndex } from "./a11y";
 import { isTopModal, popModal, pushModal } from "./modalStack";
-import { NotifEntry, NotifKind, clearAll, markAllRead, notifications, unreadCount } from "./notifications";
+import { NotifEntry, NotifKind, clearAll, markAllRead, notifications, notificationsOpenRequest, unreadCount } from "./notifications";
 import { ago } from "./time";
 import "./notifications.css";
 import { Button, cn } from "./ui";
@@ -78,6 +78,8 @@ export function NotificationBell(props: { onJump: (e: NotifEntry) => void }) {
     queueMicrotask(() => (pop?.querySelector<HTMLElement>(".notif-item") ?? pop?.querySelector<HTMLElement>(FOCUSABLE))?.focus());
   };
   onCleanup(() => close(false));
+  // the palette asks for the list
+  createEffect(on(notificationsOpenRequest, () => !open() && show(), { defer: true }));
 
   const jump = (e: NotifEntry) => {
     close(false);

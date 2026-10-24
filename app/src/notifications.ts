@@ -107,3 +107,8 @@ export const shipEvents = (prev: ShipStatus | null, next: ShipStatus, worktree: 
   }
   return out;
 };
+
+/** the palette (or anything else) asks the bell to open its list: the bell reacts to every change of this counter */
+const [openRequest, setOpenRequest] = createSignal(0);
+export { openRequest as notificationsOpenRequest };
+export const requestNotificationsOpen = () => setOpenRequest((n) => n + 1);
