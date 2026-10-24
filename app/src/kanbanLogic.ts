@@ -1,3 +1,4 @@
+import { count } from "./strings";
 import type { KCard, OrchTrust, OrchTrustCard } from "./api";
 
 /** `bypass*` modes (bypassPermissions, bypass-permissions…) run an agent with no supervision at all */
@@ -26,7 +27,7 @@ export type StartPlan = {
 
 /** What the user is asked and what is sent on yes. `trust` is null when the daemon has no `orch.trust_info`. */
 export function planStart(n: number, trust: OrchTrust | null, legacyCmds: string[]): StartPlan {
-  const head = `Despachar ${n} agente(s) para os cartões em "Para fazer"? Cada um corre num worktree isolado e o resultado é integrado num branch novo (orch/…). Nada é enviado para o remote.`;
+  const head = `Despachar ${count(n, "agente", "agentes")} para os cartões em "Para fazer"? Cada um corre num worktree isolado e o resultado é integrado num branch novo (orch/…). Nada é enviado para o remote.`;
   if (!trust) {
     return {
       message: head + (legacyCmds.length ? `\n\nEstes comandos de aceitação vão correr na sua máquina:\n${legacyCmds.join("\n")}\n\nSó confirme se confia nestes cartões.` : ""),

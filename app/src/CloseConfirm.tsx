@@ -1,3 +1,4 @@
+import { count, plural } from "./strings";
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -37,8 +38,8 @@ export function CloseConfirm() {
           {running() === 0
             ? "Não há sessões em execução."
             : keep()
-              ? `${running()} ${running() === 1 ? "sessão continua" : "sessões continuam"} a correr em segundo plano (e consomem recursos) até voltar a abrir a aplicação.`
-              : `${running()} ${running() === 1 ? "sessão é fechada" : "sessões são fechadas"} e nada fica a consumir. ${running() === 1 ? "Volta" : "Voltam"} quando abrir a aplicação outra vez; os agentes retomam a conversa.`}
+              ? `${count(running(), "sessão continua", "sessões continuam")} a correr em segundo plano (e consomem recursos) até voltar a abrir a aplicação.`
+              : `${count(running(), "sessão é fechada", "sessões são fechadas")} e nada fica a consumir. ${plural(running(), "Volta", "Voltam")} quando abrir a aplicação outra vez; os agentes retomam a conversa.`}
         </div>
         <CheckboxField checked={keep()} onChange={setKeep}>Manter sessões e automatizações a correr em segundo plano</CheckboxField>
         <CheckboxField checked={skip()} onChange={setSkip}>Não perguntar novamente</CheckboxField>

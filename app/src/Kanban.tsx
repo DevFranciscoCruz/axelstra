@@ -196,7 +196,7 @@ export function Kanban(props: { project: string }) {
     act(async () => {
       const wt = taskWt(c.meta.id);
       if (!wt) throw new Error("worktree desconhecido");
-      if (!(await ask(`Enviar o branch de "${c.meta.title || c.meta.id}" e criar um pull request no GitHub?`, { title: "Pull request", kind: "warning" }))) return;
+      if (!(await ask(`Enviar o branch de "${c.meta.title || c.meta.id}" e criar um PR no GitHub?`, { title: "PR", kind: "warning" }))) return;
       await gitPush(wt);
       setErr(`Pull request criado: ${await gitPr(wt, c.meta.title || c.meta.id, c.body)}`);
     });
@@ -297,7 +297,7 @@ export function Kanban(props: { project: string }) {
                         <div class="kchips" role="group" aria-label="Ações do cartão" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                           <Button size="sm" onClick={() => openWt(c.meta.id)}>Abrir worktree</Button>
                           <Button size="sm" onClick={() => void retry(c)}>Tentar integrar de novo</Button>
-                          <Button size="sm" onClick={() => void openPr(c)}>Abrir pull request</Button>
+                          <Button size="sm" onClick={() => void openPr(c)}>Abrir PR</Button>
                         </div>
                       </Show>
                       <div

@@ -118,7 +118,7 @@ export function ChangesPanel() {
     });
   };
   const doPr = async () => {
-    if (!(await ask(`Criar um pull request de "${branch()}" no GitHub?`, { title: "Pull request", kind: "warning" }))) return;
+    if (!(await ask(`Criar um PR de "${branch()}" no GitHub?`, { title: "PR", kind: "warning" }))) return;
     await act(async () => {
       const url = await gitPr(selectedWorktree()!, prTitle(), "", changesMode() === "main" ? baseRef() : undefined);
       setPrOpen(false);
@@ -198,7 +198,7 @@ export function ChangesPanel() {
       <Show when={prOpen()}>
         <div class="prow sc-pr">
           <Input
-            placeholder="Título do pull request"
+            placeholder="Título do PR"
             value={prTitle()}
             onInput={(e) => setPrTitle(e.currentTarget.value)}
             onKeyDown={(e) => e.key === "Enter" && prTitle().trim() && void doPr()}

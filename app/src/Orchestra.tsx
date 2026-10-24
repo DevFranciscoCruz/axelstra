@@ -1,3 +1,4 @@
+import { count } from "./strings";
 import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import { createPoller } from "./poller";
 import { Icon } from "./Icon";
@@ -116,7 +117,7 @@ export function Orchestra() {
     <Modal label="Orquestração" onClose={() => setShowOrchestra(false)} class="modal auto">
       <div class="m-title" style={{ "font-weight": "600" }}>Orquestração</div>
       <div class="orch-head auto-note">
-        {workerCount()} {workerCount() === 1 ? "worker a correr" : "workers a correr"} · limite
+        {count(workerCount(), "worker a correr", "workers a correr")} · limite
         <Input
           class="orch-limit w-16"
           type="number"
