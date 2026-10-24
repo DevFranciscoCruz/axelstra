@@ -42,7 +42,7 @@ fn one_daemon_serves_every_new_method_and_reports_proto_19() {
     });
     std::thread::sleep(Duration::from_millis(300));
     let mut c = Client::connect(&pipe, &token).unwrap();
-    assert_eq!(PROTO, 19, "wave 2 merged as 18; host.info, host.browse, hosts in settings and hooks.* taking `agent` (Gemini) make 19");
+    assert_eq!(PROTO, 20, "wave 2 merged as 18; 19 added host.info, host.browse, hosts and agent-aware hooks.*; the stall watchdog (stalled, stall_minutes) makes 20");
     assert_eq!(c.proto, 19);
     // bogus arguments: any answer is fine except "unknown method" (the daemon lacks it) or an agent refusal
     for m in NEW_METHODS {
