@@ -2,11 +2,16 @@ name: release
 # Push a tag `vX.Y.Z` to build the installers and attach them to the GitHub Release. The Windows
 # installer and the macOS .app.tar.gz are signed for the in-app updater; a last job merges the platform
 # entries into latest.json, which the app reads from releases/latest/download. The macOS app is signed
-# with a Developer ID and notarized when the Apple secrets exist (see the README), unsigned otherwise.
+# with a Developer ID and notarized; a real release FAILS if the Apple secrets are missing (a dry run
+# only warns and builds unsigned). See docs/RELEASING.md for key custody, rotation and the setup.
 #
-# Needed in the repo settings: secrets TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
-# For a signed macOS build also: APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
+# Signing secrets live in the protected GitHub Environment `release` (required reviewers, deployment
+# branches/tags limited to `v*`), not in repository secrets: TAURI_SIGNING_PRIVATE_KEY and
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD; APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
 # APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD (app-specific password) and APPLE_TEAM_ID.
+# Optional, Windows Authenticode through Azure Trusted Signing: AZURE_TENANT_ID, AZURE_CLIENT_ID,
+# AZURE_CLIENT_SECRET, TS_ENDPOINT, TS_ACCOUNT, TS_PROFILE (all Environment secrets).
+# The final `publish` job uses the Environment `release-publish` (add a reviewer there for a manual gate).
 on:
   push:
     tags: ['v*']
@@ -61,6 +66,31 @@ jobs:
             if [[ -n "$PREV" ]]; then echo; echo "**Full changelog**: https://github.com/${{ github.repository }}/compare/$PREV...${GITHUB_REF_NAME}"; fi
           } > notes.md
           cat notes.md
+      # git-cliff groups the commit subjects (cliff.toml). Any failure falls back to the plain list above.
+      - name: Changelog (git-cliff)
+        id: cliff
+        continue-on-error: true
+        uses: orhun/git-cliff-action@v4 # TODO pin by SHA (not verifiable offline)
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: cliff-notes.md
+      - name: Use the git-cliff notes
+        if: steps.cliff.outcome == 'success'
+        run: |
+          if [[ -s cliff-notes.md ]] && grep -q '^- ' cliff-notes.md; then
+            PREV=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+            {
+              echo "## What's changed"
+              echo
+              cat cliff-notes.md
+              if [[ -n "$PREV" ]]; then echo; echo "**Full changelog**: https://github.com/${{ github.repository }}/compare/$PREV...${GITHUB_REF_NAME}"; fi
+            } > notes.md
+          else
+            echo "::warning::git-cliff produced no notes, keeping the plain commit list"
+          fi
+          cat notes.md
       - name: Create the draft
         run: |
           V="${GITHUB_REF_NAME#v}"
@@ -72,20 +102,34 @@ jobs:
             gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Axelstra $V" --notes-file notes.md
           fi
   release:
-    name: release (${{ matrix.os }})
+    name: release (${{ matrix.key }})
     needs: [gate, ci, draft]
     # draft is skipped on a dry run, which is fine
     if: ${{ !cancelled() && needs.gate.result == 'success' && needs.ci.result == 'success' && (needs.draft.result == 'success' || needs.draft.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - { os: windows-latest, key: windows-x86_64, experimental: false }
+          - { os: macos-latest, key: darwin-aarch64, experimental: false }
+          # Intel mac, built natively. Experimental until a release proves it: a failure here does not block the
+          # release, latest.json just has no darwin-x86_64 entry (Intel installs get no update until it ships).
+          - { os: macos-15-intel, key: darwin-x86_64, experimental: true }
     # Swap for the self-hosted runner label if the repo gets access to one.
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    # the signing secrets are Environment secrets: reviewers and tag rules of `release` apply here
+    environment: release
     timeout-minutes: 60
     env:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
-      HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      HAS_TRUSTED_SIGNING: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.TS_ENDPOINT != '' && secrets.TS_ACCOUNT != '' && secrets.TS_PROFILE != '' }}
+      # Release binaries keep line tables and are not stripped here, so rustc emits .pdb (Windows) and
+      # .dSYM (macOS) next to them; they are uploaded as a workflow artifact below. Cargo.toml keeps
+      # `strip = true` for local builds (on MSVC, strip suppresses the .pdb altogether).
+      CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
+      CARGO_PROFILE_RELEASE_STRIP: none
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: packed
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with: { fetch-depth: 0 }
@@ -119,6 +163,33 @@ jobs:
         if: runner.os == 'macOS'
         run: sh scripts/prepare-sidecar.sh
 
+      # No silent unsigned Mac: a real release without the Apple secrets fails here. A dry run only warns.
+      - name: Check the Apple signing secrets (macOS)
+        if: runner.os == 'macOS'
+        id: apple
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          MISSING=""
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [[ -n "${!v}" ]] || MISSING="$MISSING $v"
+          done
+          if [[ -z "$MISSING" ]]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$DRY_RUN" == "true" ]]; then
+            echo "::warning::Apple secrets missing ($MISSING ): dry run builds an UNSIGNED app"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Apple secrets missing in the 'release' environment:$MISSING. Refusing to ship an unsigned macOS app."
+            exit 1
+          fi
+
       - name: Build the installer (Windows)
         if: runner.os == 'Windows'
         working-directory: app
@@ -127,10 +198,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --config src-tauri/tauri.release.conf.json --config '{"version":"${{ steps.v.outputs.version }}","bundle":{"createUpdaterArtifacts":true}}'
       # macOS: the .app.tar.gz is what the in-app updater downloads, the .dmg is the first install.
-      # With the Apple secrets set the app is signed with the Developer ID and notarized; without them it
-      # is built unsigned, as before.
+      # Signed with the Developer ID and notarized (the check above fails a real release without the secrets);
+      # the unsigned build below only ever runs on a dry run.
       - name: Build the app and disk image (macOS, signed)
-        if: runner.os == 'macOS' && env.HAS_APPLE == 'true'
+        if: runner.os == 'macOS' && steps.apple.outputs.ok == 'true'
         working-directory: app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -142,28 +213,102 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npx tauri build --bundles app,dmg --config src-tauri/tauri.release.conf.json --config '{"version":"${{ steps.v.outputs.version }}","bundle":{"createUpdaterArtifacts":true}}'
-      - name: Build the app and disk image (macOS, unsigned)
-        if: runner.os == 'macOS' && env.HAS_APPLE != 'true'
+      - name: Build the app and disk image (macOS, unsigned, dry run only)
+        if: runner.os == 'macOS' && steps.apple.outputs.ok != 'true'
         working-directory: app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --bundles app,dmg --config src-tauri/tauri.release.conf.json --config '{"version":"${{ steps.v.outputs.version }}","bundle":{"createUpdaterArtifacts":true}}'
+      # The app links the sherpa speech engine statically, so the bundle must hold no loose .dylib. If one ever
+      # appears it has to carry the same team ID as the app, because the entitlement
+      # com.apple.security.cs.disable-library-validation is NOT granted (see docs/RELEASING.md).
+      - name: Verify the macOS signature
+        if: runner.os == 'macOS' && steps.apple.outputs.ok == 'true'
+        shell: bash
+        run: |
+          APP=$(ls -d target/release/bundle/macos/*.app | head -n 1)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          TEAM=$(codesign -dv "$APP" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+          echo "app team id: $TEAM"
+          [[ -n "$TEAM" && "$TEAM" != "not set" ]] || { echo "::error::app has no team id"; exit 1; }
+          if codesign -d --entitlements - "$APP" 2>&1 | grep -q 'disable-library-validation'; then
+            echo "::error::disable-library-validation is set on the signed app"; exit 1
+          fi
+          while IFS= read -r lib; do
+            T=$(codesign -dv "$lib" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+            [[ "$T" == "$TEAM" ]] || { echo "::error::$lib has team id '$T', expected '$TEAM'"; exit 1; }
+            echo "ok $lib"
+          done < <(find "$APP" \( -name '*.dylib' -o -name '*.so' \))
+
+      # Optional Windows Authenticode through Azure Trusted Signing. Skipped when the secrets are absent and
+      # never fails the release: an unsigned installer is only a SmartScreen warning. The updater .sig covers
+      # the exact installer bytes, so it is regenerated right after signing (and only then).
+      - name: Authenticode (Windows, Azure Trusted Signing)
+        id: authenticode
+        if: runner.os == 'Windows' && env.HAS_TRUSTED_SIGNING == 'true'
+        continue-on-error: true
+        uses: azure/trusted-signing-action@v0.5.1 # TODO pin by SHA (not verifiable offline)
+        with:
+          endpoint: ${{ secrets.TS_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.TS_PROFILE }}
+          files-folder: ${{ github.workspace }}\target\release\bundle\nsis
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      - name: Re-sign the signed installer for the updater (Windows)
+        if: runner.os == 'Windows' && steps.authenticode.outcome == 'success'
+        working-directory: app
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          # a stale .sig would break every update, so this step is allowed to fail the job
+          for f in ../target/release/bundle/nsis/*-setup.exe; do npx tauri signer sign "$f"; done
+
+      - name: Collect debug symbols
+        shell: bash
+        run: |
+          mkdir -p symbols
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp target/release/*.pdb symbols/ 2>/dev/null || true
+          else
+            cp -R target/release/*.dSYM symbols/ 2>/dev/null || true
+          fi
+          ls -l symbols || true
+      # Workflow artifacts are readable by anyone who can read this repo: no secrets belong in symbols.
+      - name: Keep the debug symbols
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: symbols-${{ matrix.key }}-${{ steps.v.outputs.version }}
+          path: symbols/
+          if-no-files-found: warn
+          retention-days: 90
+
       - name: Stage artifacts
         shell: bash
         run: |
           mkdir -p out
+          KEY="${{ matrix.key }}"
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             cp target/release/bundle/nsis/*-setup.exe out/
             FILE=$(basename out/*-setup.exe)
             cp "target/release/bundle/nsis/$FILE.sig" "out/$FILE.sig"
-            KEY=windows-x86_64
           else
             cp target/release/bundle/dmg/*.dmg out/
-            cp target/release/bundle/macos/*.app.tar.gz out/
-            FILE=$(basename out/*.app.tar.gz)
-            cp "target/release/bundle/macos/$FILE.sig" "out/$FILE.sig"
-            KEY=darwin-aarch64
+            # Tauri names the updater archive Axelstra.app.tar.gz for every arch: add the arch so the Intel
+            # and Apple silicon files do not overwrite each other on the release
+            SRC=$(basename target/release/bundle/macos/*.app.tar.gz)
+            FILE="Axelstra_${{ steps.v.outputs.version }}_${KEY#darwin-}.app.tar.gz"
+            cp "target/release/bundle/macos/$SRC" "out/$FILE"
+            cp "target/release/bundle/macos/$SRC.sig" "out/$FILE.sig"
           fi
           # this platform's entry for latest.json, merged by the manifest job once every platform is up
           node scripts/write-latest-json.mjs --fragment --key "$KEY" --sig-file "out/$FILE.sig"             --url "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME:-v0.0.0}/$FILE" --out "out/platform-$KEY.json"
@@ -174,13 +319,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # the draft job created the release; errors here are real
+          # the draft job created the release; errors here are real. --clobber only ever replaces assets of
+          # this still-draft release (a re-run); a published release is immutable, so refuse to touch it.
+          [[ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" == "true" ]] || { echo "::error::$GITHUB_REF_NAME is already published; assets are immutable"; exit 1; }
           gh release upload "$GITHUB_REF_NAME" out/* --clobber
       - name: Keep the dry-run installer on the run
         if: env.DRY_RUN == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: axelstra-dry-run-${{ runner.os }}
+          name: axelstra-dry-run-${{ matrix.key }}
           path: out/
           retention-days: 7
 
@@ -243,6 +390,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          [[ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" == "true" ]] || { echo "::error::$GITHUB_REF_NAME is already published; assets are immutable"; exit 1; }
           gh release upload "$GITHUB_REF_NAME" out/* --clobber
       - name: Keep the dry-run files on the run
         if: env.DRY_RUN == 'true'
@@ -274,6 +422,7 @@ jobs:
           gh release view "$GITHUB_REF_NAME" --json body --jq .body > notes.md
           node scripts/write-latest-json.mjs --version "$V" --notes-file notes.md --out latest.json frag/platform-*.json
           cat latest.json
+          [[ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" == "true" ]] || { echo "::error::$GITHUB_REF_NAME is already published; latest.json is immutable"; exit 1; }
           gh release upload "$GITHUB_REF_NAME" latest.json --clobber
           for f in frag/platform-*.json; do gh release delete-asset "$GITHUB_REF_NAME" "$(basename "$f")" --yes; done
       - name: Fetch the dry-run fragments
@@ -305,6 +454,8 @@ jobs:
     needs: [manifest, linux]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # last gate before clients see the release: put a required reviewer on this Environment
+    environment: release-publish
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
