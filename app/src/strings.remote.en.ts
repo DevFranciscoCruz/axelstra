@@ -1,0 +1,98 @@
+import { type Widen, count } from "./i18n";
+import { type ptR, R } from "./strings.remote";
+import type { HostState } from "./api";
+import type { RemoteFailure, SpecProblem } from "./hostLogic";
+
+/** English texts of the remote hosts (M7b): badge, Settings section and the "add remote project" flow. */
+export const enR: Widen<typeof ptR> = {
+  state: {
+    idle: "disconnected",
+    connecting: "connecting…",
+    ok: "connected",
+    lost: "connection lost",
+    auth: "authentication missing",
+  } as Record<HostState, string>,
+  stateOf: (name: string, s: HostState) => `Host ${name}: ${R.state[s]}`,
+  badgeTip: (name: string, spec: string, s: HostState) => `${name} (${spec}) · ${R.state[s]}`,
+  reconnect: "Reconnect",
+  reconnectTip: (name: string) => `Reconnect to host ${name}`,
+  reconnecting: (name: string) => `Connecting to host ${name}…`,
+  reconnected: (name: string) => `Connected to ${name}.`,
+  reconnectFailed: (name: string, why: string) => `Could not connect to ${name}: ${why}`,
+  remoteNoDocker: "Not available for remote projects",
+  openInRemote: "Open in… (not available for remotes)",
+  remoteNoOpen: "Opening externally is not available for remote projects",
+  remoteNoComputer: "Screen control does not work for remote projects",
+  offline: (name: string) => `Host ${name} is not connected.`,
+
+  // Settings
+  section: "Remote hosts",
+  sectionNote:
+    "Machines running another daemon (a WSL distro or a server over SSH). Each has its own projects, worktrees and agents.",
+  none: "No hosts yet.",
+  remove: "Remove",
+  removeTip: (name: string) => `Remove host ${name}`,
+  removeAsk: (name: string) => `Remove host ${name}? Its projects stop appearing here; nothing is deleted on the host.`,
+  removed: (name: string) => `Host ${name} removed.`,
+  addTitle: "Add host",
+  name: "Name",
+  namePh: "e.g. server",
+  spec: "Specification",
+  specPh: "ssh:user@server or wsl:Ubuntu",
+  specHint: "wsl:<distro> or ssh:[user@]server[:port]. SSH key or agent only: it never asks for a password.",
+  nameEmpty: "Give the host a name.",
+  add: "Add host",
+  adding: "Adding…",
+  added: (name: string) => `Host ${name} added.`,
+  addFailed: (why: string) => `Could not add the host: ${why}`,
+  builds: (proto: number | undefined, build: string | undefined) =>
+    [proto != null ? `proto ${proto}` : "", build ?? ""].filter(Boolean).join(" · "),
+  spec_problem: {
+    empty: "Enter the specification.",
+    space: "The specification cannot contain spaces or line breaks.",
+    dash: "No part of the specification can start with “-”.",
+    scheme: "Start with wsl: or ssh:.",
+    distro: "Invalid distro: use letters, numbers, “.”, “_” and “-”.",
+    host: "Invalid server: use a name, an IP or an IPv6 in square brackets.",
+    user: "Invalid user: use letters, numbers, “.”, “_” and “-”.",
+    port: "The port must be between 1 and 65535.",
+  } as Record<SpecProblem, string>,
+
+  // add remote project
+  addRemote: "Add remote project…",
+  addRemoteTitle: "Add remote project",
+  host: "Host",
+  hostNone: "Choose a host",
+  newHost: "Add new host…",
+  path: "Folder on the host",
+  pathPh: "/home/user/project",
+  pathHint: "Absolute path on the host. Enter opens the folder selected in the list.",
+  pathEmpty: "Enter the folder path.",
+  pathRelative: "The path must be absolute (start with “/” or a drive, like “C:”).",
+  browse: "Browse",
+  browseLabel: "Folders in",
+  crumbs: "Current path",
+  up: "Parent folder",
+  home: "Home folder",
+  folders: "Folders",
+  emptyDir: "No subfolders.",
+  gitTip: "git repository",
+  truncated: "List truncated: enter the full path.",
+  browsing: "Listing…",
+  browseCount: (n: number) => count(n, "folder", "folders"),
+  use: "Use this folder",
+  confirm: "Add project",
+  confirming: "Adding…",
+  projectAdded: (name: string, host: string) => `Project ${name} added on ${host}.`,
+  cancelled: "Add cancelled.",
+  waitingHost: (name: string) => `Connecting to ${name}…`,
+  failure: {
+    auth: "Authentication missing. Use an SSH key or ssh-agent: Axelstra never asks for a password.",
+    "no-axelstra":
+      "The axelstra command does not exist on the host (or is not on the PATH of a non-interactive session). Install it there.",
+    "no-daemon": "The daemon is not running on the host. Start it there with “axelstra daemon” and reconnect.",
+    unreachable: "Could not reach the host (network, name or timeout).",
+    other: "The connection to the host failed.",
+  } as Record<RemoteFailure, string>,
+  detail: "Detail",
+};

@@ -1,5 +1,6 @@
 import type { SessionInfo } from "./api";
 import { norm } from "./store";
+import { L } from "./strings.logic";
 
 /** Last folder of a path: the name a worktree goes by in the list. */
 export const folderName = (path?: string | null) => (path ?? "").replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() ?? "";
@@ -7,7 +8,7 @@ export const folderName = (path?: string | null) => (path ?? "").replace(/\\/g, 
 /** What an agent row in the sidebar shows besides the state dot: the name, the agent kind as a small tag and, when
  *  the agent runs in another worktree than the one it is listed under (a worker), that worktree's name. */
 export const agentRowInfo = (s: Pick<SessionInfo, "id" | "label" | "meta">, listedUnder: string, shownName?: string) => {
-  const name = (shownName ?? s.label ?? "").trim() || `Sessão ${s.id}`;
+  const name = (shownName ?? s.label ?? "").trim() || L.session(s.id);
   const kind = s.meta?.agent ?? "";
   const own = s.meta?.worktree;
   const worktree = own && norm(own) !== norm(listedUnder) ? folderName(own) : "";

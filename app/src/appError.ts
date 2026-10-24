@@ -1,3 +1,4 @@
+import { L } from "./strings.logic";
 /** A failed daemon/host call: which method, and a message that is always readable text. */
 export class AppError extends Error {
   method: string;
@@ -25,9 +26,9 @@ export const errorText = (e: unknown): string => {
     } catch {
       /* circular: fall through */
     }
-    return "Erro desconhecido";
+    return L.unknownError;
   }
-  return e === undefined || e === null ? "Erro desconhecido" : String(e);
+  return e === undefined || e === null ? L.unknownError : String(e);
 };
 
 /** Wraps any failure of `method` as an AppError with a readable message. */

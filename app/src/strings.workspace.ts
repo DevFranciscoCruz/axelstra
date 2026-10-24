@@ -1,7 +1,9 @@
-import { count, plural } from "./strings";
+import { dict } from "./i18n";
+import { enWS } from "./strings.workspace.en";
+import { count, plural } from "./i18n";
 
 /** pt-PT texts of the workspace export / import section of Settings. */
-export const WS = {
+export const ptWS = {
   title: "Configuração do espaço de trabalho",
   note: "Guarda os projetos, as automatizações, as definições e os cartões kanban num ficheiro, ou traz-os de outra máquina. Nunca inclui tokens, sessões nem registos.",
   export: "Exportar…",
@@ -66,3 +68,5 @@ export const WS = {
   doneTitle: "Configuração importada: ",
   restartHint: " Reinicia o Axelstra para aplicar as definições.",
 };
+
+export const WS = dict(ptWS, enWS);

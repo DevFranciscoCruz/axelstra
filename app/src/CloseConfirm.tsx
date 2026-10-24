@@ -1,4 +1,5 @@
-import { count, plural } from "./strings";
+import { S } from "./strings";
+import { U } from "./strings.ui";
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -32,21 +33,21 @@ export function CloseConfirm() {
   };
   return (
     <Show when={open()}>
-      <Modal label="Fechar janela" onClose={() => setOpen(false)}>
-        <div class="m-title font-semibold">Fechar o Axelstra?</div>
+      <Modal label={U.closeConfirm.label} onClose={() => setOpen(false)}>
+        <div class="m-title font-semibold">{U.closeConfirm.title}</div>
         <div class="auto-note">
           {running() === 0
-            ? "Não há sessões em execução."
+            ? U.closeConfirm.none
             : keep()
-              ? `${count(running(), "sessão continua", "sessões continuam")} a correr em segundo plano (e consomem recursos) até voltar a abrir a aplicação.`
-              : `${count(running(), "sessão é fechada", "sessões são fechadas")} e nada fica a consumir. ${plural(running(), "Volta", "Voltam")} quando abrir a aplicação outra vez; os agentes retomam a conversa.`}
+              ? U.closeConfirm.keepOn(running())
+              : U.closeConfirm.keepOff(running())}
         </div>
-        <CheckboxField checked={keep()} onChange={setKeep}>Manter sessões e automatizações a correr em segundo plano</CheckboxField>
-        <CheckboxField checked={skip()} onChange={setSkip}>Não perguntar novamente</CheckboxField>
+        <CheckboxField checked={keep()} onChange={setKeep}>{U.closeConfirm.keepBackground}</CheckboxField>
+        <CheckboxField checked={skip()} onChange={setSkip}>{U.closeConfirm.dontAsk}</CheckboxField>
         <div class="m-actions">
-          <Button onClick={() => setOpen(false)}>Cancelar</Button>
+          <Button onClick={() => setOpen(false)}>{S.cancel}</Button>
           <Button variant="default" ref={(el: HTMLButtonElement) => queueMicrotask(() => el.focus())} onClick={confirm}>
-            Fechar
+            {S.close}
           </Button>
         </div>
       </Modal>

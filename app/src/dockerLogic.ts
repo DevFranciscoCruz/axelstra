@@ -6,15 +6,46 @@ export type Filter = "all" | "running" | "stopped";
 export type Group = { project: string; workingDir: string; items: DockerContainer[]; running: number };
 
 const STATES: Record<string, { text: string; cls: "on" | "warn" | "off" }> = {
-  running: { text: P.docker.states.running, cls: "on" },
-  paused: { text: P.docker.states.paused, cls: "warn" },
-  restarting: { text: P.docker.states.restarting, cls: "warn" },
-  created: { text: P.docker.states.created, cls: "off" },
-  exited: { text: P.docker.states.exited, cls: "off" },
-  dead: { text: P.docker.states.dead, cls: "off" },
+  running: {
+    get text() {
+      return P.docker.states.running;
+    },
+    cls: "on",
+  },
+  paused: {
+    get text() {
+      return P.docker.states.paused;
+    },
+    cls: "warn",
+  },
+  restarting: {
+    get text() {
+      return P.docker.states.restarting;
+    },
+    cls: "warn",
+  },
+  created: {
+    get text() {
+      return P.docker.states.created;
+    },
+    cls: "off",
+  },
+  exited: {
+    get text() {
+      return P.docker.states.exited;
+    },
+    cls: "off",
+  },
+  dead: {
+    get text() {
+      return P.docker.states.dead;
+    },
+    cls: "off",
+  },
 };
 /** Label and colour class of a container state; the label is always shown, the colour is only a hint. */
-export const stateInfo = (state: string) => STATES[state] ?? { text: state || P.docker.states.unknown, cls: "off" as const };
+export const stateInfo = (state: string) =>
+  STATES[state] ?? { text: state || P.docker.states.unknown, cls: "off" as const };
 
 export const isRunning = (c: DockerContainer) => c.state === "running";
 
@@ -24,7 +55,9 @@ export const filterContainers = (list: DockerContainer[], query: string, filter:
   return list.filter((c) => {
     if (filter === "running" && !isRunning(c)) return false;
     if (filter === "stopped" && isRunning(c)) return false;
-    const hay = [c.name, c.image, c.project, c.service, ...c.ports.map((p) => String(p.host ?? p.container))].join(" ").toLowerCase();
+    const hay = [c.name, c.image, c.project, c.service, ...c.ports.map((p) => String(p.host ?? p.container))]
+      .join(" ")
+      .toLowerCase();
     return words.every((w) => hay.includes(w));
   });
 };
@@ -38,13 +71,19 @@ export const groupByProject = (list: DockerContainer[]): Group[] => {
     if (isRunning(c)) g.running++;
     by.set(c.project, g);
   }
-  return [...by.values()].sort((a, b) => (a.project === "" ? 1 : b.project === "" ? -1 : a.project.localeCompare(b.project)));
+  return [...by.values()].sort((a, b) =>
+    a.project === "" ? 1 : b.project === "" ? -1 : a.project.localeCompare(b.project),
+  );
 };
 
 export type PortChip = { label: string; url: string | null };
 /** A published port opens http://localhost:PORT; a port that is only exposed is shown but not clickable. */
 export const portChips = (ports: DockerPort[]): PortChip[] =>
-  ports.map((p) => (p.host != null ? { label: p.host === p.container ? `${p.host}` : `${p.host}→${p.container}`, url: `http://localhost:${p.host}` } : { label: `${p.container}`, url: null }));
+  ports.map((p) =>
+    p.host != null
+      ? { label: p.host === p.container ? `${p.host}` : `${p.host}→${p.container}`, url: `http://localhost:${p.host}` }
+      : { label: `${p.container}`, url: null },
+  );
 
 /** "2026-10-18 11:09:52 +0100 BST" as the instant it names */
 export const parseCreated = (s: string): number | null => {
@@ -71,7 +110,9 @@ export const ago = (ms: number | null, now = Date.now()) => {
 export const imageUsers = (img: DockerImage, containers: DockerContainer[]) =>
   containers.filter((c) => {
     const ref = c.image.includes(":") || c.image.includes("@") ? c.image : `${c.image}:latest`;
-    return img.tags.includes(ref) || (c.image.length >= 6 && img.id.startsWith(c.image.replace(/^sha256:/, "").slice(0, 12)));
+    return (
+      img.tags.includes(ref) || (c.image.length >= 6 && img.id.startsWith(c.image.replace(/^sha256:/, "").slice(0, 12)))
+    );
   });
 
 const SECRET = /(pass(word|wd)?|secret|token|api[_-]?key|private|credential|auth)/i;

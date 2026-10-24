@@ -18,7 +18,7 @@ import { handleJanitorEvents } from "./janitorEvents";
 import { handleTriggerEvents } from "./triggerEvents";
 import { createPoller } from "./poller";
 import { wtName } from "./Usage";
-import { S, count } from "./strings";
+import { S } from "./strings";
 import { onTauriEvent } from "./tauriEvents";
 import {
   norm,
@@ -40,6 +40,7 @@ import {
   toast,
   watchHosts,
 } from "./store";
+import { L } from "./strings.logic";
 
 /** Everything the shell starts when it opens: startup checks, session restore, pollers, daemon events, the worktree watch and the dev-server port lookup. */
 export function useBootstrap() {
@@ -106,8 +107,8 @@ export function useBootstrap() {
           void refreshSessions();
           if (!r) return;
           const bits: string[] = [];
-          if (r.restored) bits.push(count(r.restored, "sessão restaurada", "sessões restauradas"));
-          if (r.skipped) bits.push(count(r.skipped, "conversa vazia ignorada", "conversas vazias ignoradas"));
+          if (r.restored) bits.push(L.restore.restored(r.restored));
+          if (r.skipped) bits.push(L.restore.skipped(r.skipped));
           if (r.failed.length) bits.push(S.app.restoreFailedList(r.failed));
           if (bits.length) showNotice(`${prefix}: ${bits.join(" · ")}.`);
         });

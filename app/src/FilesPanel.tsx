@@ -16,7 +16,7 @@ import { S } from "./strings";
 import { P } from "./strings.panels";
 
 /** labels of the two "new" entries, kept when a menu is trimmed to them */
-const NEW_ITEMS: string[] = [P.files.newFile, P.files.newFolder];
+const newItems = (): string[] => [P.files.newFile, P.files.newFolder];
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf("/")));
 const baseOf = (p: string) => p.slice(p.lastIndexOf("/") + 1);
@@ -406,7 +406,7 @@ export function FilesPanel() {
       <div
         class="rlist"
         onContextMenu={(e) => {
-          if (e.target === e.currentTarget && wt()) showMenu(e, fileMenu(wt()!, "", true).filter((i) => "separator" in i || NEW_ITEMS.includes(i.label)).slice(0, 2));
+          if (e.target === e.currentTarget && wt()) showMenu(e, fileMenu(wt()!, "", true).filter((i) => "separator" in i || newItems().includes(i.label)).slice(0, 2));
         }}
       >
         <Show when={dq() && mode() === "names"}>
@@ -456,9 +456,9 @@ export function FilesPanel() {
               <>
                 <div
                   class="file root"
-                  {...press(() => toggle(""), "button", menuKey(() => fileMenu(w, "", true).filter((i) => "separator" in i || NEW_ITEMS.includes(i.label)).slice(0, 2)))}
+                  {...press(() => toggle(""), "button", menuKey(() => fileMenu(w, "", true).filter((i) => "separator" in i || newItems().includes(i.label)).slice(0, 2)))}
                   aria-expanded={isOpen("")}
-                  onContextMenu={(e) => showMenu(e, fileMenu(w, "", true).filter((i) => "separator" in i || NEW_ITEMS.includes(i.label)).slice(0, 2))}
+                  onContextMenu={(e) => showMenu(e, fileMenu(w, "", true).filter((i) => "separator" in i || newItems().includes(i.label)).slice(0, 2))}
                 >
                   <span class="twisty">
                     <Chevron open={isOpen("")} />

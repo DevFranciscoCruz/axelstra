@@ -1,9 +1,11 @@
-import { count } from "./strings";
+import { dict } from "./i18n";
+import { enR } from "./strings.remote.en";
+import { count } from "./i18n";
 import type { HostState } from "./api";
 import type { RemoteFailure, SpecProblem } from "./hostLogic";
 
 /** pt-PT texts of the remote hosts (M7b): badge, Settings section and the "adicionar projeto remoto" flow. */
-export const R = {
+export const ptR = {
   state: {
     idle: "desligado",
     connecting: "a ligar…",
@@ -96,3 +98,5 @@ export const R = {
   } as Record<RemoteFailure, string>,
   detail: "Detalhe",
 };
+
+export const R = dict(ptR, enR);

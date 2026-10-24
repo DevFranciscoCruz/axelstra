@@ -26,6 +26,7 @@ import {
   toggleSidebar,
 } from "./store";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
+import { LOCALES, locale, setLocale } from "./i18n";
 import { listening, toggleVoice } from "./Voice";
 
 /** What the palette needs from the App that only it owns. */
@@ -46,6 +47,7 @@ const showPanel = (tab: "files" | "changes" | "pulls" | "timeline") => {
   setRightTab(tab);
   if (!showRightPanel()) toggleRightPanel();
 };
+const cycleLocale = () => setLocale(LOCALES[(LOCALES.indexOf(locale()) + 1) % LOCALES.length]);
 const cycleTheme = () => setAppTheme(APP_THEMES[(APP_THEMES.indexOf(appTheme()) + 1) % APP_THEMES.length]);
 
 /** The palette's commands that can run right now (see commands.ts for the list they come from). */
@@ -58,6 +60,7 @@ export function buildPaletteActions(d: PaletteDeps) {
     toggleRight: { run: toggleRightPanel, label: showRightPanel() ? S.palette.hideRight : S.palette.showRight },
     docker: { run: () => guarded(() => setView({ kind: "docker" })) },
     notifications: { run: requestNotificationsOpen },
+    language: { run: cycleLocale },
     theme: { run: cycleTheme, label: S.palette.theme(S.appThemes[appTheme()]) },
     searchChats: { run: () => setShowAgentSearch(true) },
     voice: { run: () => void toggleVoice(), label: listening() ? S.palette.stopVoice : undefined },

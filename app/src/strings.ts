@@ -1,3 +1,5 @@
+import { count, dict } from "./i18n";
+import { enS } from "./strings.en";
 /** UI texts of the settings screen and the terminal, in one place and in pt-PT (gestor, ligar, ficheiro, ecrã). */
 /**
  * Glossary (pt-PT). One word per thing, so the screens agree:
@@ -5,13 +7,9 @@
  *   enviar (push) / obter (pull), integrar = merge ("integrado", not "merged"), descartar, remoto, daemon, terminal.
  * Counts agree in number: use `plural(n, "worktree", "worktrees")`, never "worktree(s)" or a hand-made ternary.
  */
-const rules = new Intl.PluralRules("pt-PT");
-/** `one` for exactly 1, `other` otherwise (pt-PT says "0 worktrees"). Returns the word only. */
-export const plural = (n: number, one: string, other: string): string => (rules.select(n) === "one" ? one : other);
-/** "1 worktree" / "3 worktrees" */
-export const count = (n: number, one: string, other: string): string => `${n} ${plural(n, one, other)}`;
+export { plural, count } from "./i18n";
 
-export const S = {
+export const ptS = {
   settings: "Definições",
   close: "Fechar",
   loading: "A carregar…",
@@ -241,3 +239,5 @@ export const S = {
   projectRemoved: (n: string) => `Projeto tirado da lista: ${n}`,
   deleteFailed: (n: string, e: unknown) => `Não foi possível apagar "${n}": ${String(e).replace(/^Error: /, "")}`,
 } as const;
+
+export const S = dict(ptS, enS);

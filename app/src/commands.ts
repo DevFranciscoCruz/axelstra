@@ -1,3 +1,4 @@
+import { L, type ptL } from "./strings.logic";
 /**
  * The one list of commands. The palette offers every command that has a handler right now; the cheat sheet (?) lists
  * every command that has keys. A shortcut added here shows up in both.
@@ -16,86 +17,63 @@ export type Command = {
   palette?: boolean;
 };
 
-export const GROUP_LABEL: Record<CommandGroup, string> = {
-  geral: "Geral",
-  vista: "Vista",
-  separadores: "Separadores e terminais",
-  worktree: "Worktrees e projetos",
-  ferramentas: "Ferramentas",
-  rato: "Rato",
-};
+/** the words come from the dictionary at read time, so the palette and the cheat sheet follow the language */
+export const GROUP_LABEL: Record<CommandGroup, string> = L.groups;
 
-export const COMMANDS: Command[] = [
-  { id: "palette", label: "Paleta de comandos", keys: "Ctrl+K", group: "geral", palette: false },
-  { id: "settings", label: "Definições", keys: "Ctrl+,", group: "geral" },
-  { id: "shortcuts", label: "Atalhos de teclado", keys: "?", group: "geral" },
-  {
-    id: "contextMenu",
-    label: "Menu de contexto do elemento focado",
-    keys: "Shift+F10",
-    group: "geral",
-    palette: false,
-  },
-  {
-    id: "confirm",
-    label: "Confirmar o diálogo, o cartão ou o commit",
-    keys: "Ctrl+Enter",
-    group: "geral",
-    palette: false,
-  },
+type Raw = { id: keyof typeof ptL.cmd; keys?: string; group: CommandGroup; palette?: boolean };
+const RAW: Raw[] = [
+  { id: "palette", keys: "Ctrl+K", group: "geral", palette: false },
+  { id: "settings", keys: "Ctrl+,", group: "geral" },
+  { id: "shortcuts", keys: "?", group: "geral" },
+  { id: "contextMenu", keys: "Shift+F10", group: "geral", palette: false },
+  { id: "confirm", keys: "Ctrl+Enter", group: "geral", palette: false },
 
-  { id: "toggleSidebar", label: "Mostrar/ocultar projetos", keys: "Ctrl+B", group: "vista" },
-  { id: "toggleRight", label: "Mostrar/ocultar painel direito", keys: "Ctrl+Shift+B", group: "vista" },
-  { id: "panelFiles", label: "Painel: ficheiros", hint: "painel", group: "vista" },
-  { id: "panelChanges", label: "Painel: alterações", hint: "painel", group: "vista" },
-  { id: "panelPulls", label: "Painel: PRs e problemas", hint: "painel", group: "vista" },
-  { id: "docker", label: "Docker", hint: "vista", group: "vista" },
-  { id: "kanban", label: "Kanban", hint: "vista", group: "vista" },
-  { id: "notifications", label: "Notificações", hint: "histórico de avisos", group: "vista" },
-  { id: "theme", label: "Mudar o tema", hint: "sistema → escuro → claro", group: "vista" },
+  { id: "toggleSidebar", keys: "Ctrl+B", group: "vista" },
+  { id: "toggleRight", keys: "Ctrl+Shift+B", group: "vista" },
+  { id: "panelFiles", group: "vista" },
+  { id: "panelChanges", group: "vista" },
+  { id: "panelPulls", group: "vista" },
+  { id: "docker", group: "vista" },
+  { id: "kanban", group: "vista" },
+  { id: "notifications", group: "vista" },
+  { id: "theme", group: "vista" },
+  { id: "language", group: "vista" },
 
-  {
-    id: "nextTab",
-    label: "Separador seguinte / anterior",
-    keys: "Ctrl+Tab / Ctrl+Shift+Tab",
-    group: "separadores",
-    palette: false,
-  },
-  { id: "gotoTab", label: "Ir para o separador n", keys: "Ctrl+1 … Ctrl+9", group: "separadores", palette: false },
-  { id: "reopen", label: "Reabrir o último separador fechado", keys: "Ctrl+Shift+T", group: "separadores" },
-  { id: "nextWaiting", label: "Ir para o próximo agente à espera de resposta", keys: "Ctrl+J", group: "separadores" },
-  { id: "rename", label: "Mudar o nome do separador", keys: "F2", group: "separadores" },
-  { id: "termFind", label: "Procurar no terminal", keys: "Ctrl+F", group: "separadores", palette: false },
-  { id: "newAgent", label: "Novo agente", group: "separadores", hint: "agente" },
-  { id: "newTerminal", label: "Novo terminal", group: "separadores", hint: "terminal" },
-  { id: "split", label: "Dividir terminal", group: "separadores", hint: "vista" },
+  { id: "nextTab", keys: "Ctrl+Tab / Ctrl+Shift+Tab", group: "separadores", palette: false },
+  { id: "gotoTab", keys: "Ctrl+1 … Ctrl+9", group: "separadores", palette: false },
+  { id: "reopen", keys: "Ctrl+Shift+T", group: "separadores" },
+  { id: "nextWaiting", keys: "Ctrl+J", group: "separadores" },
+  { id: "rename", keys: "F2", group: "separadores" },
+  { id: "termFind", keys: "Ctrl+F", group: "separadores", palette: false },
+  { id: "newAgent", group: "separadores" },
+  { id: "newTerminal", group: "separadores" },
+  { id: "split", group: "separadores" },
 
-  { id: "newWorktree", label: "Novo worktree", hint: "worktree", group: "worktree" },
-  { id: "removeWorktree", label: "Remover worktree atual", hint: "worktree", group: "worktree" },
+  { id: "newWorktree", group: "worktree" },
+  { id: "removeWorktree", group: "worktree" },
 
-  { id: "searchChats", label: "Pesquisar conversas", keys: "Ctrl+Shift+F", group: "ferramentas" },
-  { id: "voice", label: "Ditado por voz", keys: "Ctrl+Shift+M", group: "ferramentas" },
-  { id: "orchestra", label: "Orquestração: agentes e workers", hint: "ferramenta", group: "ferramentas" },
-  { id: "dispatcher", label: "Despachante", hint: "pedidos enviados a cada worktree", group: "ferramentas" },
-  { id: "addRemote", label: "Adicionar projeto remoto", hint: "anfitrião SSH ou WSL", group: "worktree" },
-  { id: "automations", label: "Automatizações", hint: "agendamento", group: "ferramentas" },
-  { id: "computer", label: "Controlo do ecrã pelos agentes", hint: "permissão", group: "ferramentas" },
-  {
-    id: "restartDaemon",
-    label: "Reiniciar o daemon",
-    hint: "fecha os terminais; os agentes retomam",
-    group: "ferramentas",
-  },
+  { id: "searchChats", keys: "Ctrl+Shift+F", group: "ferramentas" },
+  { id: "voice", keys: "Ctrl+Shift+M", group: "ferramentas" },
+  { id: "orchestra", group: "ferramentas" },
+  { id: "dispatcher", group: "ferramentas" },
+  { id: "addRemote", group: "worktree" },
+  { id: "automations", group: "ferramentas" },
+  { id: "computer", group: "ferramentas" },
+  { id: "restartDaemon", group: "ferramentas" },
 
-  {
-    id: "tabRename",
-    label: "Mudar o nome de um separador",
-    keys: "Duplo clique no separador",
-    group: "rato",
-    palette: false,
-  },
-  { id: "tabClose", label: "Fechar um separador", keys: "Clique do meio no separador", group: "rato", palette: false },
+  { id: "tabRename", group: "rato", palette: false },
+  { id: "tabClose", group: "rato", palette: false },
 ];
+
+type CmdText = { label: string; hint?: string; keys?: string };
+export const COMMANDS: Command[] = RAW.map((r) => {
+  const text = (): CmdText => L.cmd[r.id];
+  return Object.defineProperties({ id: r.id, group: r.group, palette: r.palette } as Command, {
+    label: { get: () => text().label, enumerable: true },
+    hint: { get: () => text().hint, enumerable: true },
+    keys: { get: () => r.keys ?? text().keys, enumerable: true },
+  });
+});
 
 const byId = new Map(COMMANDS.map((c) => [c.id, c]));
 export const commandById = (id: string): Command | undefined => byId.get(id);
@@ -123,5 +101,7 @@ export const paletteCommands = (
   COMMANDS.flatMap((c) => {
     const h = handlers[c.id];
     if (!h || c.palette === false) return [];
-    return [{ id: c.id, label: h.label ?? c.label, hint: c.keys ? fmtKeys(c.keys) : (c.hint ?? "ação"), run: h.run }];
+    return [
+      { id: c.id, label: h.label ?? c.label, hint: c.keys ? fmtKeys(c.keys) : (c.hint ?? L.actionHint), run: h.run },
+    ];
   });

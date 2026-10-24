@@ -4,16 +4,18 @@ import { Modal } from "./Modal";
 import { K } from "./keyboard";
 import { setShowShortcuts } from "./store";
 import { Button } from "./ui";
+import { S } from "./strings";
+import { U } from "./strings.ui";
 
 /** Cheat sheet with every keyboard shortcut (opened with ?), grouped; fed by the command registry like the palette */
 export function Shortcuts() {
   const close = () => setShowShortcuts(false);
   return (
-    <Modal label="Atalhos de teclado" class="modal settings" onClose={close}>
+    <Modal label={U.shortcuts.title} class="modal settings" onClose={close}>
       <div class="auto-head">
-        <strong>Atalhos de teclado</strong>
+        <strong>{U.shortcuts.title}</strong>
         <span class="grow" />
-        <Button onClick={close}>Fechar</Button>
+        <Button onClick={close}>{S.close}</Button>
       </div>
       <div class="disp-list">
         <For each={cheatSheet()}>

@@ -10,6 +10,7 @@ import { clearError, setError } from "./notify";
 import { pruneTabState } from "./tabs";
 import { guarded, keepSame, setSplitSession, showView } from "./ui";
 import { setChanges } from "./git";
+import { L } from "../strings.logic";
 
 export const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
 
@@ -83,19 +84,9 @@ const trackAgents = (list: SessionInfo[]) => {
     const since = workingSince.get(s.id);
     if (Date.now() - appStart < NOTIFY_GRACE_MS || !since || Date.now() - since < NOTIFY_MIN_WORK_MS) continue;
     const name = wtPath.split(/[\\/]/).pop() ?? wtPath;
-    const who = s.label ?? "O agente";
-    const [head, body] =
-      state === "done"
-        ? [`${who} terminou · ${name}`, `${who} acabou a tarefa na worktree "${name}". Abre para rever o resultado.`]
-        : state === "waiting"
-          ? [
-              `${who} precisa de ti · ${name}`,
-              `${who} fez uma pergunta na worktree "${name}" e precisa da tua resposta para continuar.`,
-            ]
-          : [
-              `${who} parou · ${name}`,
-              `${who} ficou parado na worktree "${name}" sem terminar. Abre para ver o que aconteceu.`,
-            ];
+    const who = s.label ?? L.defaultAgent;
+    const T = state === "done" ? L.notify.done : state === "waiting" ? L.notify.waiting : L.notify.stopped;
+    const [head, body] = [T.head(who, name), T.body(who, name)];
     void notify(head, body, wtPath, s.id, state === "waiting");
     // a session that merely went quiet is not worth a line in the centre (it is the common case, and not an error)
     if (state === "done" || state === "waiting")

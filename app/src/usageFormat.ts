@@ -1,3 +1,5 @@
+import { L } from "./strings.logic";
+
 /** tokens per worktree, summed over the Claude and Codex conversations that ran there */
 export type WtUsage = { worktree: string; input: number; output: number; cache_read: number; cache_write: number; claude_sessions: number; codex_sessions: number };
 
@@ -18,8 +20,8 @@ export const totalOf = (list: WtUsage[]): Omit<WtUsage, "worktree"> =>
 /** one line per worktree for a tooltip; `nameOf` turns a path into what the sidebar calls it */
 export const usageTip = (list: WtUsage[], nameOf: (path: string) => string) => {
   const rows = ranked(list);
-  if (!rows.length) return "Nenhum agente usou tokens nestes worktrees";
+  if (!rows.length) return L.usage.none;
   const t = totalOf(rows);
-  const head = `Tokens dos agentes (Claude e Codex): ${fmtTokens(spentOf(t))} gastos · ${fmtTokens(t.cache_read)} de cache lida`;
-  return [head, ...rows.map((u) => `${nameOf(u.worktree)}: ${fmtTokens(spentOf(u))} (entrada ${fmtTokens(u.input)} · saída ${fmtTokens(u.output)} · cache ${fmtTokens(u.cache_write)}/${fmtTokens(u.cache_read)})`)].join("\n");
+  const head = L.usage.head(fmtTokens(spentOf(t)), fmtTokens(t.cache_read));
+  return [head, ...rows.map((u) => L.usage.row(nameOf(u.worktree), fmtTokens(spentOf(u)), fmtTokens(u.input), fmtTokens(u.output), fmtTokens(u.cache_write), fmtTokens(u.cache_read)))].join("\n");
 };

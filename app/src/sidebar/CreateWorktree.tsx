@@ -3,6 +3,8 @@ import { Select, Button, Field, Input } from "../ui";
 import { hasIcon } from "../Icon";
 import { agentLabel } from "../agentLabel";
 import { agentKeys } from "../store";
+import { S } from "../strings";
+import { U } from "../strings.ui";
 
 /** The "Novo worktree" dialog: the name (also the branch) and the agent started in it. */
 export function CreateWorktree(props: {
@@ -15,14 +17,14 @@ export function CreateWorktree(props: {
   onSubmit: () => void;
 }) {
   return (
-    <Modal label="Novo worktree" dirty={!!props.newName.trim()} onClose={props.onClose}>
-      <div class="m-title font-semibold">Novo worktree</div>
-      <Field label="Projeto" full>
+    <Modal label={U.createWorktree.title} dirty={!!props.newName.trim()} onClose={props.onClose}>
+      <div class="m-title font-semibold">{U.createWorktree.title}</div>
+      <Field label={U.createWorktree.project} full>
         <Input value={props.name} disabled />
       </Field>
-      <Field label="Nome" full>
+      <Field label={U.createWorktree.name} full>
         <Input
-          placeholder="nome do worktree (também o nome do branch)"
+          placeholder={U.createWorktree.namePh}
           value={props.newName}
           onInput={(e) => props.setNewName(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -34,21 +36,21 @@ export function CreateWorktree(props: {
           ref={(el) => queueMicrotask(() => el.focus())}
         />
       </Field>
-      <Field label="Agente" full>
+      <Field label={U.createWorktree.agent} full>
         <Select
           value={props.newAgent}
-          label="Agente"
+          label={U.createWorktree.agent}
           options={[
-            { value: "none", label: "Nenhum (só o worktree)" },
+            { value: "none", label: U.createWorktree.noAgent },
             ...agentKeys().map((a) => ({ value: a, label: agentLabel(a), icon: hasIcon(a) ? a : undefined })),
           ]}
           onChange={props.setNewAgent}
         />
       </Field>
       <div class="m-actions">
-        <Button onClick={props.onClose}>Cancelar</Button>
+        <Button onClick={props.onClose}>{S.cancel}</Button>
         <Button variant="default" disabled={!props.newName.trim()} onClick={props.onSubmit}>
-          Criar worktree
+          {U.createWorktree.create}
         </Button>
       </div>
     </Modal>

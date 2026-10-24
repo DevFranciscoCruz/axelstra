@@ -3,6 +3,7 @@ import { askSave } from "../Confirm";
 import type { Commit, SessionInfo, Terse } from "../api";
 import { norm } from "../paths";
 import { createPersisted, isRecord, isStringArray, readJson, readString, writeJson, writeString } from "../persist";
+import { L } from "../strings.logic";
 
 export * from "./layout";
 
@@ -92,7 +93,7 @@ export const setEditorSaver = (f: (() => Promise<boolean>) | null) => {
 /** true when the editor has nothing unsaved or the user chose to save it or drop it; false on cancel or a failed save */
 export const confirmDiscard = async () => {
   if (!editorDirty()) return true;
-  const r = await askSave("Há alterações por guardar neste ficheiro.", "Editor");
+  const r = await askSave(L.unsavedFile, L.editorTitle);
   if (r === "discard") return true;
   if (r === "cancel") return false;
   return (await editorSaver?.()) === true;

@@ -1,9 +1,10 @@
 import type { JanitorEvent } from "./api";
 import { pushNotification } from "./notifications";
 import { toast } from "./toasts";
+import { L } from "./strings.logic";
 
 export const janitorText = (e: Pick<JanitorEvent, "branch" | "into">): string =>
-  `worktree ${e.branch.replace(/^ax\//, "")} removido (integrado em ${e.into})`;
+  L.notify.janitor(e.branch.replace(/^ax\//, ""), e.into);
 
 /** One toast and one bell entry per removed worktree; both dedupe by path. Returns how many events were handled. */
 export const handleJanitorEvents = (events: JanitorEvent[]): number => {

@@ -4,6 +4,8 @@ import { Modal } from "./Modal";
 import { StateDot } from "./StateDot";
 import { dispatchTopics, norm, projects, selectWorktree, sessionState, sessionsOf, setShowDispatcher, watchDispatch } from "./store";
 import { Button } from "./ui";
+import { S } from "./strings";
+import { U } from "./strings.ui";
 
 /** Live view of what the main session dispatched: one card per topic (worktree) with its latest requests. */
 export function Dispatcher() {
@@ -12,12 +14,12 @@ export function Dispatcher() {
   const meta = dispatchTopics;
 
   const topics = createMemo(() => {
-    const out: { project: string; path: string; branch: string; title: string; requests: string[]; archived: boolean; updated: number }[] = [];
+    const out: { project: string; path: string; branch: string | null; title: string; requests: string[]; archived: boolean; updated: number }[] = [];
     for (const p of projects()) {
       for (const w of p.worktrees) {
         const m = meta()[norm(w.path)];
         if (!m || w.is_main) continue;
-        out.push({ project: p.name, path: w.path, branch: w.branch ?? "(destacado)", title: m.title ?? w.branch ?? w.path, requests: m.requests ?? [], archived: !!m.archived, updated: m.updated ?? 0 });
+        out.push({ project: p.name, path: w.path, branch: w.branch, title: m.title ?? w.branch ?? w.path, requests: m.requests ?? [], archived: !!m.archived, updated: m.updated ?? 0 });
       }
     }
     return out.sort((a, b) => Number(a.archived) - Number(b.archived) || b.updated - a.updated);
@@ -25,22 +27,22 @@ export function Dispatcher() {
 
   const stateOf = (path: string) => {
     const agents = sessionsOf(path).filter((s) => s.meta?.kind === "agent");
-    if (agents.some((s) => sessionState(s) === "waiting")) return { dot: "waiting" as const, text: "à espera de resposta" };
-    if (agents.some((s) => sessionState(s) === "working")) return { dot: "working" as const, text: "a trabalhar" };
-    if (agents.some((s) => s.running)) return { dot: "idle" as const, text: "parado" };
-    return { dot: "none" as const, text: "sem agente" };
+    if (agents.some((s) => sessionState(s) === "waiting")) return { dot: "waiting" as const, text: U.dispatcher.waiting };
+    if (agents.some((s) => sessionState(s) === "working")) return { dot: "working" as const, text: U.dispatcher.working };
+    if (agents.some((s) => s.running)) return { dot: "idle" as const, text: U.dispatcher.idle };
+    return { dot: "none" as const, text: U.dispatcher.noAgent };
   };
 
   return (
-    <Modal label="Despachante" class="modal settings" onClose={() => setShowDispatcher(false)}>
+    <Modal label={U.dispatcher.title} class="modal settings" onClose={() => setShowDispatcher(false)}>
       <div class="auto-head">
-        <strong>Despachante</strong>
+        <strong>{U.dispatcher.title}</strong>
         <span class="grow" />
-        <Button onClick={() => setShowDispatcher(false)}>Fechar</Button>
+        <Button onClick={() => setShowDispatcher(false)}>{S.close}</Button>
       </div>
-      <p class="auto-note">Cada pedido feito na main vai para o worktree do seu tópico. Aqui vês para onde foi cada um.</p>
+      <p class="auto-note">{U.dispatcher.note}</p>
       <div class="disp-list">
-        <For each={topics()} fallback={<div class="auto-note">Ainda não há pedidos despachados. Pede algo ao agente da main.</div>}>
+        <For each={topics()} fallback={<div class="auto-note">{U.dispatcher.empty}</div>}>
           {(t) => {
             const st = () => stateOf(t.path);
             return (
@@ -48,13 +50,13 @@ export function Dispatcher() {
                 <div class="disp-head">
                   <StateDot state={st().dot} />
                   <strong class="disp-title">{t.title}</strong>
-                  <span class="auto-note">{t.archived ? "arquivado" : st().text}</span>
+                  <span class="auto-note">{t.archived ? U.dispatcher.archived : st().text}</span>
                   <span class="grow" />
                   <Button
                     size="icon"
                     variant="ghost"
-                    title="Abrir este worktree"
-                    aria-label="Abrir este worktree"
+                    title={U.dispatcher.openWorktree}
+                    aria-label={U.dispatcher.openWorktree}
                     onClick={() => {
                       selectWorktree(t.path);
                       setShowDispatcher(false);
@@ -63,7 +65,7 @@ export function Dispatcher() {
                     <Icon name="external" />
                   </Button>
                 </div>
-                <div class="auto-note">{t.project} · {t.branch}</div>
+                <div class="auto-note">{t.project} · {t.branch ?? S.detached}</div>
                 <Show when={t.requests.length > 0}>
                   <ol class="disp-reqs">
                     <For each={t.requests.slice(-3).reverse()}>{(r) => <li>{r}</li>}</For>

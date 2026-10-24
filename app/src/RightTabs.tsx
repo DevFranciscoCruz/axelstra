@@ -2,6 +2,7 @@ import { Show } from "solid-js";
 import { Button, Tabs, TabsList, TabsTrigger } from "./ui";
 import { K } from "./keyboard";
 import { P } from "./strings.panels";
+import { U } from "./strings.ui";
 import { PanelIcon } from "./PanelIcon";
 import { changes, rightTab, setRightTab, toggleRightPanel } from "./store";
 
@@ -18,14 +19,14 @@ export function RightTabs() {
   );
   return (
     <Tabs value={rightTab()} onChange={(v) => setRightTab(v as RightTab)} class="flex gap-0.5 border-b border-[var(--line)] px-2 pt-1.5">
-      <TabsList aria-label="Painel direito">
-        {tab("files", "Ficheiros")}
-        {tab("changes", "Alterações")}
-        {tab("pulls", "PRs")}
+      <TabsList aria-label={U.rightTabs.label}>
+        {tab("files", U.rightTabs.files)}
+        {tab("changes", U.rightTabs.changes)}
+        {tab("pulls", U.rightTabs.prs)}
         {tab("timeline", P.timeline.tab)}
       </TabsList>
       <span class="flex-1" />
-      <Button variant="icon" size="icon" class="text-foreground" title={K("Esconder painel direito (Ctrl+Shift+B)")} aria-label={K("Esconder painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>
+      <Button variant="icon" size="icon" class="text-foreground" title={K(U.rightTabs.hide)} aria-label={K(U.rightTabs.hide)} onClick={toggleRightPanel}>
         <PanelIcon side="right" on={true} />
       </Button>
     </Tabs>

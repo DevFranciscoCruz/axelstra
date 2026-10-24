@@ -9,6 +9,7 @@ import { installErrorHooks } from "./errorHooks";
 import { logFrontendError } from "./api";
 import { errorText } from "./appError";
 import { hydrateUi } from "./uiState";
+import { initLocale } from "./i18n";
 
 initTheme();
 // an unhandled rejection is a failure nobody reported: log it and say so on screen instead of failing silently
@@ -26,6 +27,7 @@ const Gallery = lazy(() => import("./ui/Gallery").then((m) => ({ default: m.Gall
 // notifications) is restored first and App/store are imported only afterwards
 void hydrateUi()
   .catch((e) => console.debug("hydrateUi", e))
+  .then(initLocale)
   .then(() => import("./App"))
   .then(({ App }) => {
     // `#ui` opens the component reference page instead of the app
