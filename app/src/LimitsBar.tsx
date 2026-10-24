@@ -2,6 +2,7 @@ import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-j
 import { createPoller } from "./poller";
 import { ClaudeStatus, CodexLimits, CodexWindow, agentStatus, codexLimits } from "./api";
 import { activeSession, sessions } from "./store";
+import { P } from "./strings.panels";
 
 /** time until a reset: "1h 49m", "4d", "29d 23h" */
 export const until = (secs: number) => {
@@ -32,7 +33,7 @@ const Meter = (p: { pct?: number; label: string; tip: string }) => (
       <span class="lim-bar">
         <i classList={{ warn: p.pct! >= 70, bad: p.pct! >= 90 }} style={{ width: `${Math.min(100, p.pct!)}%` }} />
       </span>
-      <span>{Math.round(p.pct!)}% usado</span>
+      <span>{P.limits.used(Math.round(p.pct!))}</span>
       <Show when={p.label}>
         <span class="lim-dim">{p.label}</span>
       </Show>
@@ -90,7 +91,7 @@ export function LimitsBar() {
   return (
     <div class="limits">
       <Show when={ctxPct() !== undefined}>
-        <span class="lim" title={`Contexto da conversa: ${Math.round(ctxPct()!)}% de ${kfmt(ctxTotal())}`}>
+        <span class="lim" title={P.limits.ctxTip(Math.round(ctxPct()!), kfmt(ctxTotal()))}>
           <span class="lim-dim">ctx</span>
           <span class="lim-bar">
             <i classList={{ warn: ctxPct()! >= 70, bad: ctxPct()! >= 90 }} style={{ width: `${Math.min(100, ctxPct()!)}%` }} />
@@ -102,13 +103,13 @@ export function LimitsBar() {
       </Show>
       <Show when={five() || week()}>
         <ClaudeIcon />
-        <Meter pct={five()?.used_percentage} label={left(five())} tip="Claude: limite de 5 horas" />
-        <Meter pct={week()?.used_percentage} label={left(week())} tip="Claude: limite semanal" />
+        <Meter pct={five()?.used_percentage} label={left(five())} tip={P.limits.claude5h} />
+        <Meter pct={week()?.used_percentage} label={left(week())} tip={P.limits.claudeWeek} />
       </Show>
       <Show when={cx()?.primary || cx()?.secondary}>
         <CodexIcon />
-        <Meter pct={cx()?.primary?.used_percent} label={fmtSecs(codexSecs(cx()?.primary, cx()?.as_of))} tip="Codex: janela curta" />
-        <Meter pct={cx()?.secondary?.used_percent} label={fmtSecs(codexSecs(cx()?.secondary, cx()?.as_of))} tip="Codex: janela semanal" />
+        <Meter pct={cx()?.primary?.used_percent} label={fmtSecs(codexSecs(cx()?.primary, cx()?.as_of))} tip={P.limits.codexShort} />
+        <Meter pct={cx()?.secondary?.used_percent} label={fmtSecs(codexSecs(cx()?.secondary, cx()?.as_of))} tip={P.limits.codexWeek} />
       </Show>
     </div>
   );

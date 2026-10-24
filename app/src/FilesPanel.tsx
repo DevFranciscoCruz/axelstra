@@ -11,8 +11,11 @@ import { FsEntry, GrepHit, fsCreate, fsDelete, fsGrep, fsList, fsRename, fsSearc
 import { MenuItem, menuKey, showMenu } from "./ContextMenu";
 import { RightTabs } from "./RightTabs";
 import { changes, findWorktree, fsTick, guarded, openFile, selectedWorktree, setError, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban, rightTab, showNotice } from "./store";
-import { S, count } from "./strings";
+import { S } from "./strings";
+import { P } from "./strings.panels";
 
+/** labels of the two "new" entries, kept when a menu is trimmed to them */
+const NEW_ITEMS: string[] = [P.files.newFile, P.files.newFolder];
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf("/")));
 const baseOf = (p: string) => p.slice(p.lastIndexOf("/") + 1);
@@ -168,12 +171,12 @@ function Dir(props: { wt: string; path: string; depth: number }) {
       <For each={page().shown}>{(e) => <Node wt={props.wt} dir={props.path} e={e} depth={props.depth} />}</For>
       <Show when={page().hidden > 0}>
         <Button variant="outline" size="sm" class="show-more" style={{ "margin-left": `${8 + props.depth * 12}px` }} onClick={() => setLimit(limit() + PAGE)}>
-          Mostrar mais ({page().hidden})
+          {P.files.showMore(page().hidden)}
         </Button>
       </Show>
       <Show when={entries() !== null && entries()!.length === 0 && !newHere()}>
         <div class="empty" style={{ "padding-left": `${8 + props.depth * 12}px` }}>
-          (vazio)
+          {P.files.empty}
         </div>
       </Show>
     </>
@@ -186,25 +189,25 @@ function fileMenu(wt: string, path: string, dir: boolean): MenuItem[] {
   const copy = (text: string) => invoke("clipboard_write", { text }).catch((e) => setError(String(e)));
   const here = dir ? path : parentOf(path);
   return [
-    ...(dir ? [] : [{ label: "Abrir", icon: "external", run: () => openPath(path) } as MenuItem]),
-    { label: "Novo ficheiro", icon: "plus", run: () => (expand(here), setEditing({ mode: "file", parent: here })) },
-    { label: "Nova pasta", icon: "folder", run: () => (expand(here), setEditing({ mode: "dir", parent: here })) },
+    ...(dir ? [] : [{ label: P.files.open, icon: "external", run: () => openPath(path) } as MenuItem]),
+    { label: P.files.newFile, icon: "plus", run: () => (expand(here), setEditing({ mode: "file", parent: here })) },
+    { label: P.files.newFolder, icon: "folder", run: () => (expand(here), setEditing({ mode: "dir", parent: here })) },
     { separator: true },
-    { label: "Copiar caminho", icon: "copy", run: () => copy(abs.replace(/\//g, "\\")) },
-    { label: "Copiar caminho relativo", icon: "copy", run: () => copy(path) },
-    { label: "Mostrar no explorador", icon: "folder", run: () => revealItemInDir(abs.replace(/\//g, "\\")).catch((e) => setError(String(e))) },
+    { label: P.files.copyPath, icon: "copy", run: () => copy(abs.replace(/\//g, "\\")) },
+    { label: P.files.copyRelative, icon: "copy", run: () => copy(path) },
+    { label: P.files.reveal, icon: "folder", run: () => revealItemInDir(abs.replace(/\//g, "\\")).catch((e) => setError(String(e))) },
     { separator: true },
-    { label: "Mudar o nome", icon: "pencil", run: () => setEditing({ mode: "rename", parent: parentOf(path), target: path }) },
+    { label: P.files.rename, icon: "pencil", run: () => setEditing({ mode: "rename", parent: parentOf(path), target: path }) },
     {
-      label: "Apagar",
+      label: P.files.delete,
       icon: "x",
       danger: true,
       run: async () => {
-        const ok = await ask(`Apagar "${baseOf(path)}"?\n\n${dir ? "A pasta e tudo o que tem dentro são apagados" : "O ficheiro é apagado"} do disco e não vão para o lixo.`, {
-          title: "Apagar",
+        const ok = await ask(P.files.deleteAsk(baseOf(path), dir), {
+          title: P.files.delete,
           kind: "danger",
-          okLabel: "Apagar",
-          cancelLabel: "Cancelar",
+          okLabel: P.files.delete,
+          cancelLabel: P.files.cancel,
         });
         if (!ok) return;
         try {
@@ -247,10 +250,10 @@ function Delta(props: { t: Tally | undefined; folder?: boolean; binary?: boolean
       {(t) => (
         <span class="nums">
           <Show when={props.folder}>
-            <span class="fcount" title={count(t().files ?? 0, "ficheiro alterado", "ficheiros alterados")}>{t().files}</span>
+            <span class="fcount" title={P.files.changedFiles(t().files ?? 0)}>{t().files}</span>
           </Show>
           <Show when={props.binary}>
-            <span class="fbin">bin</span>
+            <span class="fbin">{P.files.bin}</span>
           </Show>
           <Show when={t().added > 0}>
             <span class="add">+{t().added}</span>
@@ -357,15 +360,15 @@ export function FilesPanel() {
       <RightTabs />
       <div class="rtools fp-head">
         <strong class="fp-title" title={info()?.project.name}>
-          {info()?.project.name ?? "Ficheiros"}
+          {info()?.project.name ?? P.files.title}
         </strong>
         <span class="grow" />
-        <Button variant="icon" size="icon" title="Recolher tudo" aria-label="Recolher tudo" onClick={() => setExpanded(new Set([""]))}>
+        <Button variant="icon" size="icon" title={P.files.collapse} aria-label={P.files.collapse} onClick={() => setExpanded(new Set([""]))}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 5h10M5 8.5h6M7 12h2" />
           </svg>
         </Button>
-        <Button variant="icon" size="icon" title="Atualizar" aria-label="Atualizar" onClick={() => setGen(gen() + 1)}>
+        <Button variant="icon" size="icon" title={P.files.refresh} aria-label={P.files.refresh} onClick={() => setGen(gen() + 1)}>
           <Icon name="refresh" />
         </Button>
       </div>
@@ -373,8 +376,8 @@ export function FilesPanel() {
         <Input
           class="fsearch"
           type="search"
-          placeholder="Procurar ficheiros…"
-          aria-label="Procurar ficheiros"
+          placeholder={P.files.searchPlaceholder}
+          aria-label={P.files.searchLabel}
           value={q()}
           onInput={(e) => onSearch(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -385,12 +388,12 @@ export function FilesPanel() {
           }}
         />
         <Tabs value={mode()} onChange={(v) => (setMode(v as "names" | "contents"), setDq(q().trim()))}>
-          <TabsList variant="segmented" aria-label="Pesquisar em">
+          <TabsList variant="segmented" aria-label={P.files.searchIn}>
             <TabsTrigger variant="segmented" value="names">
-              Nomes
+              {P.files.names}
             </TabsTrigger>
             <TabsTrigger variant="segmented" value="contents">
-              Conteúdo
+              {P.files.contents}
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -398,11 +401,11 @@ export function FilesPanel() {
       <div
         class="rlist"
         onContextMenu={(e) => {
-          if (e.target === e.currentTarget && wt()) showMenu(e, fileMenu(wt()!, "", true).filter((i) => "separator" in i || ["Novo ficheiro", "Nova pasta"].includes(i.label)).slice(0, 2));
+          if (e.target === e.currentTarget && wt()) showMenu(e, fileMenu(wt()!, "", true).filter((i) => "separator" in i || NEW_ITEMS.includes(i.label)).slice(0, 2));
         }}
       >
         <Show when={dq() && mode() === "names"}>
-          <For each={names() ?? []} fallback={<div class="empty">{names.loading ? "A procurar…" : "Nenhum ficheiro"}</div>}>
+          <For each={names() ?? []} fallback={<div class="empty">{names.loading ? P.files.searching : P.files.noFile}</div>}>
             {(f) => {
               const i = f.lastIndexOf("/");
               return (
@@ -418,7 +421,7 @@ export function FilesPanel() {
           </For>
         </Show>
         <Show when={dq() && mode() === "contents"}>
-          <For each={grouped()} fallback={<div class="empty">{hits.loading ? "A procurar…" : "Sem resultados"}</div>}>
+          <For each={grouped()} fallback={<div class="empty">{hits.loading ? P.files.searching : P.files.noResults}</div>}>
             {([path, list]) => (
               <div class="ghit">
                 <div class="file" {...press(() => openPath(path), "button", menuKey(() => fileMenu(wt()!, path, false)))} onContextMenu={(e) => showMenu(e, fileMenu(wt()!, path, false))} title={path}>
@@ -448,9 +451,9 @@ export function FilesPanel() {
               <>
                 <div
                   class="file root"
-                  {...press(() => toggle(""), "button", menuKey(() => fileMenu(w, "", true).filter((i) => "separator" in i || ["Novo ficheiro", "Nova pasta"].includes(i.label)).slice(0, 2)))}
+                  {...press(() => toggle(""), "button", menuKey(() => fileMenu(w, "", true).filter((i) => "separator" in i || NEW_ITEMS.includes(i.label)).slice(0, 2)))}
                   aria-expanded={isOpen("")}
-                  onContextMenu={(e) => showMenu(e, fileMenu(w, "", true).filter((i) => "separator" in i || ["Novo ficheiro", "Nova pasta"].includes(i.label)).slice(0, 2))}
+                  onContextMenu={(e) => showMenu(e, fileMenu(w, "", true).filter((i) => "separator" in i || NEW_ITEMS.includes(i.label)).slice(0, 2))}
                 >
                   <span class="twisty">
                     <Chevron open={isOpen("")} />

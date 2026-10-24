@@ -4,6 +4,7 @@ import { TokenUsage, agentUsage, worktreeUsage } from "./api";
 import { activeSession, projects, sessions } from "./store";
 import { WtUsage, fmtTokens as fmt, ranked, spentOf, totalOf, usageTip } from "./usageFormat";
 import { Button } from "./ui";
+import { P } from "./strings.panels";
 
 const [wtUsage, setWtUsage] = createSignal<WtUsage[]>([]);
 let lastLoad = 0;
@@ -68,27 +69,25 @@ function WorktreeUsageList() {
   return (
     <Show when={rows().length}>
       <span class="wt-usage" style={{ "align-self": "center" }}>
-        <Button ref={btn} variant="link" size="bare" class="cursor-default self-center px-2 text-xs hover:text-muted-foreground" title={wtUsageTip(list())} aria-label={`Tokens por worktree: ${fmt(spentOf(total()))}`} aria-haspopup="dialog" aria-expanded={open()} onClick={() => setOpen(!open())}>
+        <Button ref={btn} variant="link" size="bare" class="cursor-default self-center px-2 text-xs hover:text-muted-foreground" title={wtUsageTip(list())} aria-label={P.usage.perWtTotal(fmt(spentOf(total())))} aria-haspopup="dialog" aria-expanded={open()} onClick={() => setOpen(!open())}>
           Σ {fmt(spentOf(total()))}
         </Button>
         <Show when={open()}>
-          <div ref={pop} class="wt-usage-pop" role="dialog" aria-label="Tokens por worktree" tabindex="-1">
-            <div class="wup-note">Tokens gastos por worktree (Claude e Codex)</div>
+          <div ref={pop} class="wt-usage-pop" role="dialog" aria-label={P.usage.perWt} tabindex="-1">
+            <div class="wup-note">{P.usage.note}</div>
             <For each={rows()}>
               {(u) => (
-                <div class="wup-row" title={`${u.worktree}
-entrada ${u.input.toLocaleString()} · saída ${u.output.toLocaleString()} · cache escrita ${u.cache_write.toLocaleString()} · cache lida ${u.cache_read.toLocaleString()}
-${u.claude_sessions} conversas Claude · ${u.codex_sessions} Codex`}>
+                <div class="wup-row" title={P.usage.rowTip(u.worktree, u.input.toLocaleString(), u.output.toLocaleString(), u.cache_write.toLocaleString(), u.cache_read.toLocaleString(), u.claude_sessions, u.codex_sessions)}>
                   <span class="wup-name">{wtName(u.worktree)}</span>
                   <span>{fmt(spentOf(u))}</span>
                 </div>
               )}
             </For>
             <div class="wup-row wup-total">
-              <span>Total</span>
+              <span>{P.usage.total}</span>
               <span>{fmt(spentOf(total()))}</span>
             </div>
-            <div class="wup-note wup-foot">Cache lida: {fmt(total().cache_read)} (fora do total). Só tokens, sem custo estimado.</div>
+            <div class="wup-note wup-foot">{P.usage.foot(fmt(total().cache_read))}</div>
           </div>
         </Show>
       </span>
@@ -130,7 +129,7 @@ export function UsageChip() {
     <Show when={usage() && usage()!.messages > 0}>
       <span
         class="usage-chip"
-        title={`Contexto da conversa: ${ctx().toLocaleString()} tokens (o mesmo número da linha de estado do Claude). Gasto acumulado ${fmt(spent())}, a soma de todos os turnos. Entrada ${usage()!.input.toLocaleString()} · saída ${usage()!.output.toLocaleString()} · cache escrita ${usage()!.cache_write.toLocaleString()} · cache lida ${usage()!.cache_read.toLocaleString()} (${usage()!.messages} mensagens)`}
+        title={P.usage.chipTip(ctx().toLocaleString(), fmt(spent()), usage()!.input.toLocaleString(), usage()!.output.toLocaleString(), usage()!.cache_write.toLocaleString(), usage()!.cache_read.toLocaleString(), usage()!.messages)}
       >
         {fmt(ctx())} ctx
       </span>
