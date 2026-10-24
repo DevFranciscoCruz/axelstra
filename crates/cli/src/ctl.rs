@@ -356,7 +356,7 @@ pub(crate) fn spawn_agent(
             pr.to_string()
         };
         // the text never goes through a command line: a file the shell reads, so <, >, &, quotes and newlines arrive as typed
-        // an agent whose first prompt needs a flag (gemini: -i, else a bare prompt runs one-shot and exits) gets it here
+        // an agent whose first prompt needs a flag (gemini: -i, which is explicit and also works before 0.65, where a bare prompt ran one-shot and exited) gets it here
         line.push_str(&prompt_flags(agent));
         let file = format!("{dir}/prompts/{}.txt", new_uuid());
         std::fs::create_dir_all(Path::new(&file).parent().context("bad data dir")?)?;

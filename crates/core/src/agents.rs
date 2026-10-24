@@ -2,7 +2,9 @@
 //! unattended, and whether they resume. Everything is array argv; there is no shell string in here.
 //!
 //! Flags checked against the installed CLI's own `--help` on this machine: claude 2.1.309 and codex-cli 0.154.0.
-//! UNVERIFIED (CLI not installed here, taken from the official docs): every gemini flag.
+//! gemini-cli 0.65.0 (installed in a throwaway prefix): `-i/--prompt-interactive` starts the TUI on a prompt, `-p/--prompt`
+//! is headless, `--approval-mode default|auto_edit|yolo|plan` is a choice list, `--resume latest|N|UUID` reopens a
+//! conversation of the current folder (no error when there is none). `--skip-trust` exists but is not passed (docs/AGENTS.md).
 //! `codex --full-auto` no longer exists in 0.154, so codex uses `--sandbox workspace-write` instead.
 
 use anyhow::{bail, Result};
