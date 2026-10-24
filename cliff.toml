@@ -1,0 +1,36 @@
+# git-cliff config for the release notes (release.yml). Commit subjects here are plain English
+# ("Fix clippy redundant_closure ...", "Add toast on delete"), with the odd Conventional Commit, so groups
+# are picked by the first word. Merge commits are skipped; anything unmatched lands in "Other changes".
+[changelog]
+header = ""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}\
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}\
+- {{ commit.message | split(pat="\n") | first | trim | upper_first }}
+{% endfor %}
+{% endfor %}\
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = false
+filter_unconformable = false
+filter_commits = false
+tag_pattern = "v[0-9].*"
+topo_order = false
+sort_commits = "oldest"
+commit_parsers = [
+  { message = "^Merge ", skip = true },
+  { message = "^Revert ", skip = true },
+  { message = "(?i)^(release|bump version|stamp version)", skip = true },
+  { message = "(?i)^(feat|feature|add|implement|introduce|support)\b", group = "<!-- 0 -->Added" },
+  { message = "(?i)^(sec|security|harden|restrict|sanitize)\b", group = "<!-- 1 -->Security" },
+  { message = "(?i)^(fix|repair|correct|resolve|handle|prevent|avoid)\b", group = "<!-- 2 -->Fixed" },
+  { message = "(?i)^(perf|speed|optimi[sz]e)\b", group = "<!-- 3 -->Performance" },
+  { message = "(?i)^(refactor|clean|simplify|rename|move|remove|drop|replace|update|change|rework)\b", group = "<!-- 4 -->Changed" },
+  { message = "(?i)^(docs?|readme)\b", group = "<!-- 5 -->Documentation" },
+  { message = "(?i)^(test|ci|build|chore|deps|lint|fmt|style)\b", group = "<!-- 6 -->Maintenance" },
+  { message = ".*", group = "<!-- 7 -->Other changes" },
+]

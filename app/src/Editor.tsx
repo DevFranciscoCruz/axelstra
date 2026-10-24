@@ -12,6 +12,8 @@ import { Opened, fsRead, fsStat, fsWrite } from "./api";
 import { isLight } from "./theme";
 import { fsTick, guarded, setEditorDirty, setEditorSaver, setOpenFile } from "./store";
 import { clampLine, describeReadError, docDiffers, isLarge, sizeLabel } from "./editorLogic";
+import { createPoller, type Poller } from "./poller";
+import { P } from "./strings.panels";
 
 /** Language packs load on demand so the editor itself stays small. */
 async function languageFor(path: string): Promise<Extension> {
@@ -120,7 +122,7 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
       base = text;
       setDirty(false);
       setConflict(false);
-      setMsg("Guardado");
+      setMsg(P.editor.saved);
       setTimeout(() => setMsg(""), 1500);
       return true;
     } catch (e) {
@@ -131,9 +133,9 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
     }
   };
 
-  let timer: ReturnType<typeof setInterval> | undefined;
+  let poller: Poller | undefined;
   // cleanup is registered synchronously (before any await), otherwise it would never run
-  onCleanup(() => clearInterval(timer));
+  onCleanup(() => poller?.stop());
   onMount(() => {
     view = new EditorView({
       parent: host,
@@ -185,7 +187,7 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
       }
     };
     checkNow = () => void check();
-    timer = setInterval(check, 30000);
+    poller = createPoller(check, 30000);
   });
   // same file, new line (clicking another link to it)
   createEffect(on(() => props.initialLine, () => meta && gotoLine(), { defer: true }));
@@ -204,30 +206,30 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
       <div class="editor-bar">
         <span class="epath">{props.path}</span>
         <Show when={dirty()}>
-          <span class="edirty" title="Alterações por guardar">
+          <span class="edirty" title={P.editor.unsaved}>
             <i class="bdot" />
           </span>
         </Show>
         <span class="emsg" role="status" aria-live="polite">{msg()}</span>
-        <Button variant="icon" size="icon" disabled={!dirty()} title={K("Guardar (Ctrl+S)")} onClick={() => void save()}>
-          Guardar
+        <Button variant="icon" size="icon" disabled={!dirty()} title={K(P.editor.saveTip)} onClick={() => void save()}>
+          {P.editor.save}
         </Button>
-        <Button variant="icon" size="icon" title="Fechar" aria-label="Fechar" onClick={() => guarded(() => setOpenFile(null))}>
+        <Button variant="icon" size="icon" title={P.editor.close} aria-label={P.editor.close} onClick={() => guarded(() => setOpenFile(null))}>
           <Icon name="x" />
         </Button>
       </div>
       <Show when={conflict()}>
         <div class="econflict">
-          O ficheiro mudou no disco.
-          <Button size="sm" onClick={() => void load().catch((e) => setMsg(String(e.message ?? e)))}>Recarregar (perde as minhas alterações)</Button>
-          <Button size="sm" onClick={() => void save(true)}>Sobrescrever</Button>
+          {P.editor.changedOnDisk}
+          <Button size="sm" onClick={() => void load().catch((e) => setMsg(String(e.message ?? e)))}>{P.editor.reload}</Button>
+          <Button size="sm" onClick={() => void save(true)}>{P.editor.overwrite}</Button>
         </div>
       </Show>
       <Show when={bigSize() > 0}>
         <div class="econflict">
-          Ficheiro grande ({sizeLabel(bigSize())}): abrir pode deixar o editor lento.
-          <Button size="sm" onClick={openBig}>Abrir mesmo assim</Button>
-          <Button size="sm" onClick={() => guarded(() => setOpenFile(null))}>Fechar</Button>
+          {P.editor.large(sizeLabel(bigSize()))}
+          <Button size="sm" onClick={openBig}>{P.editor.openAnyway}</Button>
+          <Button size="sm" onClick={() => guarded(() => setOpenFile(null))}>{P.editor.close}</Button>
         </div>
       </Show>
       <div class="editor-host" ref={host} style={refused() || bigSize() > 0 ? { display: "none" } : undefined} />

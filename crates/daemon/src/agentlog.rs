@@ -1,11 +1,11 @@
 //! Reads the transcripts the agent CLIs (Claude, Codex, Gemini) already keep on disk: full-text search across past
 //! conversations and token usage of one session. Nothing is indexed or cached on disk; files are
 //! scanned on demand, newest first, so an idle daemon costs nothing.
-use crate::store::LockRecover;
+use axelstra_core::sync::LockRecover;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
@@ -118,14 +118,43 @@ fn snippet(text: &str, needle_lc: &str) -> Option<String> {
     Some(text[start..end].split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
-fn search_file(p: &Path, agent: &'static str, needle_lc: &str, per_file: usize, out: &mut Vec<Hit>) {
-    let Ok(f) = std::fs::File::open(p) else { return };
+/// Lines longer than this are skipped by the search (a pasted binary blob is not worth a parse).
+const MAX_SEARCH_LINE: usize = 8 << 20;
+/// Total bytes one search reads before it stops with what it found.
+const SEARCH_BUDGET: u64 = 512 << 20;
+
+/// True when `needle_lc` (lowercase) can be in `line`. For an ASCII needle this is a byte scan with no copy of the
+/// line; a needle with other letters is compared on the lowercased text, as Unicode case folding is not bytewise.
+fn may_contain(line: &[u8], needle_lc: &str) -> bool {
+    if needle_lc.is_ascii() {
+        let n = needle_lc.as_bytes();
+        return line.len() >= n.len() && line.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n));
+    }
+    String::from_utf8_lossy(line).to_lowercase().contains(needle_lc)
+}
+
+/// Searches one transcript; returns the bytes read so the caller can bound the whole search.
+fn search_file(p: &Path, agent: &'static str, needle_lc: &str, per_file: usize, out: &mut Vec<Hit>) -> u64 {
+    let Ok(f) = std::fs::File::open(p) else { return 0 };
     let session = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let ts = mtime(p);
     let mut cwd = String::new();
     let mut found = 0;
-    for line in BufReader::new(f).lines().map_while(Result::ok) {
+    let mut read = 0u64;
+    let mut r = BufReader::new(f);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        let n = match r.read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        read += n as u64;
+        if buf.len() > MAX_SEARCH_LINE {
+            continue;
+        }
         if cwd.is_empty() {
+            let line = String::from_utf8_lossy(&buf);
             if let Some(i) = line.find("\"cwd\":\"") {
                 let rest = &line[i + 7..];
                 if let Some(j) = rest.find('"') {
@@ -133,19 +162,21 @@ fn search_file(p: &Path, agent: &'static str, needle_lc: &str, per_file: usize, 
                 }
             }
         }
-        // cheap pre-filter on the raw line before parsing it
-        if !line.to_lowercase().contains(needle_lc) {
+        // cheap pre-filter on the raw bytes before decoding or parsing the line
+        if !may_contain(&buf, needle_lc) {
             continue;
         }
+        let line = String::from_utf8_lossy(&buf);
         let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
         if let Some(sn) = snippet(&line_text(&v), needle_lc) {
             out.push(Hit { agent, session: session.clone(), cwd: cwd.clone(), ts, snippet: sn, project: None });
             found += 1;
             if found >= per_file {
-                return;
+                break;
             }
         }
     }
+    read
 }
 
 /// Newest conversations first; at most `max` hits, two per conversation.
@@ -169,15 +200,19 @@ pub fn search(query: &str, max: usize) -> Vec<Hit> {
     }
     files.sort_by_key(|(p, _)| std::cmp::Reverse(mtime(p)));
     let mut hits = vec![];
+    let mut spent = 0u64;
     // the newest 400 conversations are plenty; older ones are a click away in the CLI's own picker
     for (p, agent) in files.into_iter().take(400) {
         if agent == "gemini" {
             search_gemini(&p, &needle, 2, &mut hits);
         } else {
-            search_file(&p, agent, &needle, 2, &mut hits);
+            spent += search_file(&p, agent, &needle, 2, &mut hits);
         }
         if hits.len() >= max {
             hits.truncate(max);
+            break;
+        }
+        if spent >= SEARCH_BUDGET {
             break;
         }
     }
@@ -502,17 +537,31 @@ pub fn newest_codex_files(root: &Path, want: usize) -> Vec<PathBuf> {
     out
 }
 
+/// The last `max` bytes of `f` (of length `len`) as text. Cutting at a byte offset can land inside a multibyte
+/// character or in the middle of a line: bytes are decoded lossily and, when the cut was not at the start, the
+/// partial first line is dropped, so a pt-BR or emoji transcript still yields its totals.
+fn read_tail(f: &mut std::fs::File, len: u64, max: u64) -> Option<String> {
+    use std::io::{Seek, SeekFrom};
+    let start = len.saturating_sub(max);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::new();
+    f.take(max).read_to_end(&mut bytes).ok()?;
+    let mut text = String::from_utf8_lossy(&bytes).into_owned();
+    if start > 0 {
+        text = match text.find('\n') {
+            Some(i) => text.split_off(i + 1),
+            None => String::new(),
+        };
+    }
+    Some(text)
+}
+
 /// Rate limits from the newest Codex session file that has them (looks at its last 256 KB).
 pub fn codex_limits() -> Option<Value> {
-    use std::io::{Read, Seek, SeekFrom};
     for path in newest_codex_files(&codex_root()?, 5) {
         let Ok(mut f) = std::fs::File::open(&path) else { continue };
         let Ok(len) = f.metadata().map(|m| m.len()) else { continue };
-        if f.seek(SeekFrom::Start(len.saturating_sub(256 * 1024))).is_err() {
-            continue;
-        }
-        let mut text = String::new();
-        let _ = f.read_to_string(&mut text);
+        let Some(text) = read_tail(&mut f, len, TAIL_BYTES) else { continue };
         if let Some(mut rl) = parse_codex_limits(text.lines().map(String::from)) {
             rl["as_of"] = serde_json::json!(mtime(&path));
             return Some(rl);
@@ -522,6 +571,19 @@ pub fn codex_limits() -> Option<Value> {
 }
 
 /// per transcript: (length, mtime, bytes already consumed, totals so far)
+/// Look-back window of the tail reads.
+const TAIL_BYTES: u64 = 256 * 1024;
+/// Entries each per-file cache keeps; past it the least recently modified transcripts are dropped.
+const CACHE_CAP: usize = 256;
+
+/// Makes room for one more entry: drops the entries with the oldest mtime until the map is under `CACHE_CAP`.
+fn evict<V>(map: &mut HashMap<PathBuf, V>, mtime_of: impl Fn(&V) -> u64) {
+    while map.len() >= CACHE_CAP {
+        let Some(oldest) = map.iter().min_by_key(|(_, v)| mtime_of(v)).map(|(k, _)| k.clone()) else { return };
+        map.remove(&oldest);
+    }
+}
+
 static CACHE: Mutex<Option<HashMap<PathBuf, ClaudeEntry>>> = Mutex::new(None);
 type ClaudeEntry = (u64, u64, u64, UsageAcc);
 
@@ -540,17 +602,14 @@ pub fn claude_usage(cwd: &str, session_id: Option<&str>) -> Option<Usage> {
 }
 
 /// Totals of one Claude transcript, kept between calls so a growing file is only read from where it stopped.
+/// The cache lock is held only to take and put back the entry, never while reading the file.
 fn file_usage(path: PathBuf) -> Option<Usage> {
     let meta = std::fs::metadata(&path).ok()?;
     let (len, mt) = (meta.len(), mtime(&path));
-    let mut cache = CACHE.lock_recover();
-    let map = cache.get_or_insert_with(HashMap::new);
-    let mut prev = map.remove(&path);
+    let prev = CACHE.lock_recover().get_or_insert_with(HashMap::new).get(&path).cloned();
     if let Some((l, m, _, acc)) = &prev {
         if *l == len && *m == mt {
-            let u = acc.u.clone();
-            map.insert(path, prev.take().unwrap());
-            return Some(u);
+            return Some(acc.u.clone());
         }
     }
     // the file only grows: continue after the last complete line already read; a shorter file starts over
@@ -561,18 +620,23 @@ fn file_usage(path: PathBuf) -> Option<Usage> {
     let mut f = std::fs::File::open(&path).ok()?;
     std::io::Seek::seek(&mut f, std::io::SeekFrom::Start(off)).ok()?;
     let mut r = BufReader::new(f);
-    let mut line = String::new();
+    let mut line = Vec::new();
     loop {
         line.clear();
-        let n = std::io::BufRead::read_line(&mut r, &mut line).ok()?;
+        let n = r.read_until(b'\n', &mut line).ok()?;
         // a last line without its newline may still be being written: leave it for the next read
-        if n == 0 || !line.ends_with('\n') {
+        if n == 0 || !line.ends_with(b"\n") {
             break;
         }
         off += n as u64;
-        acc.feed(&line);
+        acc.feed(&String::from_utf8_lossy(&line));
     }
     let u = acc.u.clone();
+    let mut cache = CACHE.lock_recover();
+    let map = cache.get_or_insert_with(HashMap::new);
+    if !map.contains_key(&path) {
+        evict(map, |e| e.1);
+    }
     map.insert(path, (len, mt, off, acc));
     Some(u)
 }
@@ -602,11 +666,6 @@ impl WorktreeUsage {
             _ => self.codex_sessions += 1,
         }
     }
-}
-
-/// Paths from the UI and from the logs differ in case, slashes and a `\\?\` prefix on Windows.
-fn norm_path(p: &str) -> String {
-    p.trim_start_matches(r"\\?\").replace('\\', "/").trim_end_matches('/').to_lowercase()
 }
 
 /// A Codex session file: the folder it ran in (`session_meta`, first line) and its token totals. The
@@ -647,26 +706,58 @@ static CODEX_CACHE: Mutex<Option<HashMap<PathBuf, CodexEntry>>> = Mutex::new(Non
 type CodexEntry = (u64, u64, Option<String>, Usage);
 
 fn codex_file(path: &Path) -> Option<(Option<String>, Usage)> {
-    use std::io::{Read, Seek, SeekFrom};
     let meta = std::fs::metadata(path).ok()?;
     let (len, mt) = (meta.len(), mtime(path));
-    let mut cache = CODEX_CACHE.lock_recover();
-    let map = cache.get_or_insert_with(HashMap::new);
-    if let Some((l, m, cwd, u)) = map.get(path) {
+    if let Some((l, m, cwd, u)) = CODEX_CACHE.lock_recover().get_or_insert_with(HashMap::new).get(path) {
         if *l == len && *m == mt {
             return Some((cwd.clone(), u.clone()));
         }
     }
     let mut f = std::fs::File::open(path).ok()?;
     // the folder is on the first line, the running totals at the end: read those two ends
-    let mut head = String::new();
-    BufReader::new(&f).read_line(&mut head).ok()?;
-    f.seek(SeekFrom::Start(len.saturating_sub(256 * 1024))).ok()?;
-    let mut tail = String::new();
-    let _ = f.read_to_string(&mut tail);
+    let mut head = Vec::new();
+    BufReader::new(&f).read_until(b'\n', &mut head).ok()?;
+    let head = String::from_utf8_lossy(&head).into_owned();
+    let tail = read_tail(&mut f, len, TAIL_BYTES)?;
     let (cwd, u) = codex_totals(std::iter::once(head).chain(tail.lines().map(String::from)));
+    let mut cache = CODEX_CACHE.lock_recover();
+    let map = cache.get_or_insert_with(HashMap::new);
+    if !map.contains_key(path) {
+        evict(map, |e| e.1);
+    }
     map.insert(path.to_path_buf(), (len, mt, cwd.clone(), u.clone()));
     Some((cwd, u))
+}
+
+/// Codex rollout listing, kept while the newest date folders have not changed (`YYYY/MM/DD` sorts by name, and new
+/// rollouts only appear in the newest day or open a new one, which touches the month).
+static CODEX_LIST: Mutex<Option<(PathBuf, u64, Vec<PathBuf>)>> = Mutex::new(None);
+
+/// Cheap change marker of a date-tree: the mtimes along the chain of the newest folder at each level.
+fn newest_chain_stamp(root: &Path, depth: usize) -> u64 {
+    let (mut dir, mut stamp) = (root.to_path_buf(), 0u64);
+    for _ in 0..=depth {
+        stamp = stamp.wrapping_mul(31).wrapping_add(mtime(&dir));
+        let newest = std::fs::read_dir(&dir).into_iter().flatten().flatten().filter(|e| e.path().is_dir()).max_by_key(|e| e.file_name());
+        match newest {
+            Some(e) => dir = e.path(),
+            None => break,
+        }
+    }
+    stamp
+}
+
+fn codex_listing(root: &Path) -> Vec<PathBuf> {
+    let stamp = newest_chain_stamp(root, 4);
+    if let Some((r, s, files)) = CODEX_LIST.lock_recover().as_ref() {
+        if r == root && *s == stamp {
+            return files.clone();
+        }
+    }
+    let mut files = vec![];
+    jsonl_files(root, 4, &mut files);
+    *CODEX_LIST.lock_recover() = Some((root.to_path_buf(), stamp, files.clone()));
+    files
 }
 
 /// Token totals per worktree, in the order given. Claude's folder per worktree is read directly; Codex
@@ -685,8 +776,7 @@ pub fn worktree_usage(worktrees: &[String]) -> Vec<WorktreeUsage> {
         }
     }
     if let Some(root) = codex_root() {
-        let mut files = vec![];
-        jsonl_files(&root, 4, &mut files);
+        let files = codex_listing(&root);
         let sessions: Vec<(String, Usage)> = files.iter().filter_map(|f| codex_file(f)).filter_map(|(cwd, u)| Some((cwd?, u))).collect();
         add_codex(&mut out, &sessions);
     }
@@ -707,12 +797,8 @@ pub fn worktree_usage(worktrees: &[String]) -> Vec<WorktreeUsage> {
 /// Adds each Codex session (folder, totals) to the worktree it ran in, or in one of its subfolders.
 fn add_codex(out: &mut [WorktreeUsage], sessions: &[(String, Usage)]) {
     for (cwd, u) in sessions {
-        let c = norm_path(cwd);
         // the longest match wins, so a worktree nested in another one is not counted twice
-        let best = out.iter().enumerate().filter(|(_, w)| {
-            let n = norm_path(&w.worktree);
-            c == n || c.starts_with(&format!("{n}/"))
-        });
+        let best = out.iter().enumerate().filter(|(_, w)| axelstra_core::paths::is_within(cwd, &w.worktree));
         if let Some((i, _)) = best.max_by_key(|(_, w)| w.worktree.len()) {
             out[i].add(u, "codex");
         }
@@ -920,5 +1006,60 @@ mod tests {
         let u = file_usage(f.clone()).unwrap();
         assert_eq!((u.input, u.output, u.messages), (11, 7, 2));
         let _ = std::fs::remove_file(&f);
+    }
+
+    #[test]
+    fn a_tail_cut_inside_a_multibyte_char_still_yields_whole_lines() {
+        let dir = std::env::temp_dir().join(format!("axl-tail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("r.jsonl");
+        let first = r#"{"type":"session_meta","payload":{"cwd":"/w/ç"}}"#;
+        let last =
+            r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":50,"output_tokens":9}}}}"#;
+        // enough 2-byte characters that the 256 KiB cut lands inside one, in both parities
+        for pad in ["ç", "xç"] {
+            let filler = format!(
+                "{{\"t\":\"{}\"}}
+",
+                pad.repeat(200_000)
+            );
+            std::fs::write(
+                &f,
+                format!(
+                    "{first}
+{filler}{last}
+"
+                ),
+            )
+            .unwrap();
+            let (cwd, u) = codex_file(&f).unwrap();
+            assert_eq!(cwd.as_deref(), Some("/w/ç"));
+            assert_eq!((u.input, u.output), (50, 9), "pad {pad}");
+            let mut h = std::fs::File::open(&f).unwrap();
+            let len = h.metadata().unwrap().len();
+            let tail = read_tail(&mut h, len, TAIL_BYTES).unwrap();
+            assert_eq!(tail.trim_end(), last);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn caches_stay_bounded_dropping_the_oldest() {
+        let mut m: HashMap<PathBuf, u64> = HashMap::new();
+        for i in 0..(CACHE_CAP as u64 + 40) {
+            if !m.contains_key(&PathBuf::from(format!("f{i}"))) {
+                evict(&mut m, |v| *v);
+            }
+            m.insert(PathBuf::from(format!("f{i}")), i);
+        }
+        assert_eq!(m.len(), CACHE_CAP);
+        assert!(!m.contains_key(&PathBuf::from("f0")) && m.contains_key(&PathBuf::from(format!("f{}", CACHE_CAP + 39))));
+    }
+
+    #[test]
+    fn the_byte_prefilter_ignores_ascii_case_and_never_misses_other_scripts() {
+        assert!(may_contain(b"{\"text\":\"Hello World\"}", "hello"));
+        assert!(!may_contain(b"{\"text\":\"Help\"}", "hello"));
+        assert!(may_contain("{\"text\":\"AÇÃO\"}".as_bytes(), "ação"));
     }
 }

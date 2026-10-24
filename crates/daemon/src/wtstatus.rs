@@ -43,7 +43,7 @@ pub fn status_cached(worktree: &str) -> Status {
         time::{Duration, Instant},
     };
     static CACHE: Mutex<Option<HashMap<String, (Instant, Status)>>> = Mutex::new(None);
-    let key = worktree.replace('\\', "/").to_ascii_lowercase();
+    let key = axelstra_core::paths::norm(worktree);
     if let Ok(mut g) = CACHE.lock() {
         let map = g.get_or_insert_with(HashMap::new);
         if let Some((at, st)) = map.get(&key) {

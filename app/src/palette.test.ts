@@ -51,6 +51,39 @@ describe("command palette", () => {
     expect(under).toHaveBeenCalledTimes(1);
   });
 
+  it("Enter with no match stays open and says so", () => {
+    mount(3);
+    const input = document.querySelector<HTMLInputElement>(".pal-input")!;
+    input.value = "zzzz";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(document.querySelector(".pal")).not.toBeNull();
+    expect(document.querySelector(".pal-empty")!.textContent).toContain("zzzz");
+  });
+
+  it("a row under a still pointer is not selected, a moving pointer selects", () => {
+    mount(5);
+    const rows = document.querySelectorAll<HTMLElement>(".pal-item");
+    rows[3].dispatchEvent(new MouseEvent("mouseenter", { bubbles: true, clientX: 5, clientY: 5 }));
+    expect(rows[0].classList.contains("on")).toBe(true);
+    rows[3].dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 6, clientY: 6 }));
+    expect(rows[3].classList.contains("on")).toBe(true);
+  });
+
+  it("ranks by match quality and remembers what was run", () => {
+    dispose = render(() => createComponent(Palette, { actions: () => [{ id: "a", label: "Reiniciar daemon", run: () => {} }, { id: "b", label: "Definições", run: () => {} }, { id: "c", label: "Docker", run: () => {} }] }), document.body);
+    press({ key: "k", ctrlKey: true });
+    const labels = () => [...document.querySelectorAll(".pal-item span:first-child")].map((e) => e.textContent);
+    const input = document.querySelector<HTMLInputElement>(".pal-input")!;
+    input.value = "d";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(labels()).toEqual(["Docker", "Definições", "Reiniciar daemon"]);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    press({ key: "k", ctrlKey: true });
+    expect(labels()[0]).toBe("Definições");
+  });
+
   it("gives focus back to the dialog it was opened over", () => {
     mount(3);
     const under = document.querySelector('[aria-label="Por baixo"]')!;

@@ -1,4 +1,5 @@
 import { createSignal } from "solid-js";
+import { readString, writeString } from "./persist";
 import { setTermPrefs } from "./termprefs";
 
 export type AppTheme = "auto" | "dark" | "light";
@@ -6,12 +7,8 @@ export const APP_THEMES: AppTheme[] = ["auto", "dark", "light"];
 const KEY = "axelstra.theme";
 
 const stored = (): AppTheme => {
-  try {
-    const v = localStorage.getItem(KEY);
-    return v === "dark" || v === "light" ? v : "auto";
-  } catch {
-    return "auto";
-  }
+  const v = readString(KEY);
+  return v === "dark" || v === "light" ? v : "auto";
 };
 
 const systemLight = () => {
@@ -34,11 +31,7 @@ const apply = () => {
 
 export const setAppTheme = (t: AppTheme) => {
   setAppThemeSig(t);
-  try {
-    localStorage.setItem(KEY, t);
-  } catch {
-    /* storage unavailable: the choice lasts until restart */
-  }
+  writeString(KEY, t); // storage unavailable: the choice lasts until restart
   apply();
   syncTerminal();
 };

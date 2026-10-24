@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::json;
@@ -28,7 +29,7 @@ fn finds_the_dev_server_of_a_worktree() {
     sh(&repo, &["add", "-A"]);
     sh(&repo, &["commit", "-qm", "init"]);
 
-    let pipe = format!("{}-ports-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-ports-{}", common::base_pipe(), std::process::id());
     let token = "o".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {

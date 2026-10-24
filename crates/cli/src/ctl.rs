@@ -65,6 +65,7 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             };
             let r = c.call("worktree.create", json!({"project": pid, "name": name, "parent": parent}))?;
             println!("{}", r["path"].as_str().unwrap_or_default());
+            eprintln!("note: a worktree needs a lead (\"main\") agent from the start: the first agent started there becomes it, and later agents are its tasks. Start it now: `axelstra agent <path> --prompt \"<theme goal>\" --report-to` (or use `axelstra dispatch new`, which does both).");
         }
         Cmd::Worktree { cmd: WtCmd::Rm { path } } => {
             let projects = c.call("project.list", json!({}))?;
@@ -100,6 +101,19 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
         }
         Cmd::Agent { worktree, agent, prompt, prompt_file, report_to, when, idle_secs, lines } => {
             let prompt = resolve_prompt(prompt, prompt_file.as_deref(), &mut std::io::stdin())?;
+            if std::env::var("AXELSTRA_SESSION").is_ok() {
+                let projects = c.call("project.list", json!({}))?;
+                if let Ok((p, wt)) = find_worktree(&projects, &worktree) {
+                    let in_main = p["worktrees"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|w| w["path"].as_str() == Some(wt.as_str()) && w["is_main"] == json!(true));
+                    if in_main {
+                        eprintln!("warning: {wt} is the project's main checkout. The main session only dispatches: it never runs workers there. Use `axelstra dispatch new <project> <name> \"<request>\"` to give the theme its own worktree and lead agent.");
+                    }
+                }
+            }
             let reap = reap_for(report_to, when.as_deref(), "idle", idle_secs, lines, std::env::var("AXELSTRA_SESSION").ok().as_deref())?;
             println!("{}", spawn_agent(&mut c, &worktree, &agent, prompt.as_deref(), reap, false)?);
         }

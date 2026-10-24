@@ -65,7 +65,7 @@ describe("terminal prefs", () => {
   it("falls back to defaults for missing or broken data", () => {
     expect(parsePrefs(null)).toEqual(DEFAULT_PREFS);
     expect(parsePrefs("{nope")).toEqual(DEFAULT_PREFS);
-    expect(parsePrefs('{"theme":"light","fontSize":99,"fontFamily":" Fira Code "}')).toEqual({ theme: "light", fontSize: 32, fontFamily: "Fira Code" });
+    expect(parsePrefs('{"theme":"light","fontSize":99,"fontFamily":" Fira Code "}')).toEqual({ theme: "light", fontSize: 32, fontFamily: "Fira Code", screenReader: false });
   });
   it("clamps and zooms the font", () => {
     expect(clampFont(2)).toBe(8);

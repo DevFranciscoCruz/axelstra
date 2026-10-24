@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- loose test doubles for the arguments of the mocked invoke */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls: { method: string; params: Record<string, any> }[] = [];
@@ -113,6 +114,16 @@ describe("restoreSessions", () => {
     const spawn = calls.find((c) => c.method === "session.spawn")!;
     expect(spawn.params.label).toBe("Tarefa 3");
     expect(spawn.params.meta.note).toBe("C:/data/notes/p/Tarefa 3.md");
+  });
+
+  it("hands a restored lead back as the lead, and leaves a plain task alone", async () => {
+    const ag = (label: string, extra: object) => ({ program: "pwsh.exe", label, meta: { kind: "agent", agent: "claude", project: "p", worktree: "C:/w/a", key: label, resume: label, ...extra } });
+    pending = [ag("main", { lead: true }), ag("Tarefa 1", {})];
+    await restoreSessions();
+    const spawns = calls.filter((c) => c.method === "session.spawn");
+    expect(spawns[0].params.label).toBe("main");
+    expect(spawns[0].params.meta.lead).toBe(true);
+    expect(spawns[1].params.meta.lead).toBeUndefined();
   });
 
   it("uses each project's own reply style and reads settings once per distinct level", async () => {

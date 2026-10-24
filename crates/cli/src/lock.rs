@@ -53,17 +53,83 @@ pub fn run(name: &str, slots: usize, timeout: u64, command: &[String]) -> Result
     if command.is_empty() {
         bail!("no command given");
     }
-    let (_held, _slot) = acquire(name, clamp_slots(slots), Duration::from_secs(timeout))?;
-    let status = Command::new(&command[0]).args(&command[1..]).status()?;
+    let (held, _slot) = acquire(name, clamp_slots(slots), Duration::from_secs(timeout))?;
+    let mut cmd = Command::new(&command[0]);
+    cmd.args(&command[1..]);
+    // If this process dies (killed, its terminal closed), the OS releases the slot at once; the command must not keep
+    // running unserialized behind it. On Windows it lives in a kill-on-close Job Object, so it dies with us. On Unix
+    // it inherits the lock file (flock belongs to the open file description, so the slot stays held until the command
+    // and everything it started have exited) and, on Linux, also gets SIGKILL when we die.
+    #[cfg(windows)]
+    let (job, mut child) = {
+        let job = axelstra_core::job::Job::new()?;
+        let child = job.spawn(&mut cmd)?;
+        (job, child)
+    };
+    #[cfg(unix)]
+    let mut child = unix::spawn(&mut cmd, &held)?;
+    let status = child.wait()?;
+    #[cfg(windows)]
+    job.kill();
+    drop(held);
     Ok(status.code().unwrap_or(1))
+}
+
+#[cfg(unix)]
+mod unix {
+    use super::*;
+    use std::os::unix::io::AsRawFd;
+    use std::os::unix::process::CommandExt;
+    use std::process::Child;
+
+    /// Spawns the command holding the lock file open (not close-on-exec). It stays in our process group and keeps the
+    /// terminal: a group of its own would stop on SIGTTIN when it reads stdin.
+    pub fn spawn(cmd: &mut Command, held: &File) -> Result<Child> {
+        let fd = held.as_raw_fd();
+        let parent = unsafe { libc::getpid() };
+        // SAFETY: only async-signal-safe calls (fcntl, prctl, getppid) between fork and exec.
+        unsafe {
+            cmd.pre_exec(move || {
+                let flags = libc::fcntl(fd, libc::F_GETFD);
+                if flags < 0 || libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                {
+                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL as libc::c_ulong, 0, 0, 0) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    // the lock process may have died between fork and prctl
+                    if libc::getppid() != parent {
+                        return Err(std::io::Error::other("axelstra lock exited before the command started"));
+                    }
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "android")))]
+                let _ = parent;
+                Ok(())
+            });
+        }
+        Ok(cmd.spawn()?)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Locks live under the data dir: point it at a temp dir first, never the real one (docs/TESTING.md).
+    fn isolate() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let d = std::env::temp_dir().join(format!("axelstra-test-lock-{}", std::process::id()));
+            std::fs::create_dir_all(&d).unwrap();
+            std::env::set_var("AXELSTRA_DATA_DIR", d);
+        });
+    }
+
     #[test]
     fn a_second_holder_waits_until_the_first_lets_go() {
+        isolate();
         let name = format!("t{}", std::process::id());
         let (a, _) = acquire(&name, 1, Duration::from_secs(1)).unwrap();
         assert!(acquire(&name, 1, Duration::from_millis(600)).is_err());
@@ -80,6 +146,7 @@ mod tests {
 
     #[test]
     fn two_slots_allow_two_holders() {
+        isolate();
         let name = format!("s{}", std::process::id());
         let (a, _) = acquire(&name, 2, Duration::from_secs(1)).unwrap();
         let (b, _) = acquire(&name, 2, Duration::from_secs(1)).unwrap();

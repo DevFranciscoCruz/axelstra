@@ -1,28 +1,27 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { createPersistedFlag } from "./persist";
+import { createPoller } from "./poller";
+import { S } from "./strings";
 import { invoke } from "@tauri-apps/api/core";
-import { findWorktree, openSession, refreshProjects, selectWorktree, selectedWorktree, sessionState, sessions, showNotice, tabLabel } from "./store";
-import { worktreeOverview, worktreeSweep } from "./api";
+import { findWorktree, openSession, overview, refreshOverview, refreshProjects, selectWorktree, selectedWorktree, sessionState, setShowShortcuts, sessions, showNotice, tabLabel, watchOverview } from "./store";
+import { worktreeSweep } from "./api";
+import { errorText } from "./appError";
 import { ask } from "./Confirm";
 import { StateDot } from "./StateDot";
 import { Icon } from "./Icon";
-import { countsFor, groupAgents, mergedList, type AgentEntry, type OverviewProject } from "./statusGroups";
+import { countsFor, groupAgents, mergedList, type AgentEntry } from "./statusGroups";
 import { LimitsBar } from "./LimitsBar";
 import { hoverIntent, keepInside } from "./hoverIntent";
 import { NotificationBell } from "./NotificationBell";
 import { pollWtUsage, wtUsageTip } from "./Usage";
 import { ranked, spentOf, totalOf, fmtTokens } from "./usageFormat";
 import { Button, cn } from "./ui";
+import { K } from "./keyboard";
+import "./shell.css";
 
 type Usage = { app: number; daemon: number; sessions: number; ports: { port: number; pid: number }[]; cpu: number | null; gpu: number | null; gpu_adapters: [string, number][] };
 
 const KEY = "axelstra.keepAwake";
-const stored = () => {
-  try {
-    return localStorage.getItem(KEY) === "1";
-  } catch {
-    return false;
-  }
-};
 
 const fmt = (b: number) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(2)} GB` : `${Math.round(b / 1024 ** 2)} MB`);
 
@@ -100,24 +99,23 @@ function Popover(props: { chip: JSX.Element; label: string; onOpen?: () => void;
 
 /** Thin bar under the whole window: keep-awake, memory used by Axelstra, running terminals, dev-server ports. */
 export function StatusBar() {
-  const [awake, setAwake] = createSignal(stored());
+  const [awake, setAwake] = createPersistedFlag(KEY, false);
   const [usage, setUsage] = createSignal<Usage | null>(null);
   const groups = () => groupAgents(sessions(), sessionState, tabLabel);
   const running = () => groups().running.length;
-  const [overview, setOverview] = createSignal<OverviewProject[]>([]);
   const currentProject = () => findWorktree(selectedWorktree())?.project.id ?? null;
   const counts = () => countsFor(overview(), currentProject());
-  const loadOverview = () => void worktreeOverview().then(setOverview).catch(() => 0);
+  const loadOverview = () => void refreshOverview();
   const clean = async () => {
     const list = mergedList(overview());
     if (!list.length) return;
-    const ok = await ask(`Remover ${list.length} worktree(s) já merged, de todos os projetos?\n\n${list.map((m) => `${m.project}: ${m.branch}`).join("\n")}`, { title: "Limpar merged", kind: "warning", okLabel: "Remover", cancelLabel: "Cancelar" });
+    const ok = await ask(S.status.cleanAsk(list.length, list.map((m) => `${m.project}: ${m.branch}`).join("\n")), { title: S.status.cleanTitle, kind: "warning", okLabel: S.status.remove, cancelLabel: S.cancel });
     if (!ok) return;
     try {
       const done = (await worktreeSweep()).filter((x) => x.removed).length;
-      showNotice(done === 1 ? "1 worktree removida" : `${done} worktrees removidas`);
+      showNotice(S.status.removed(done));
     } catch (e) {
-      showNotice(String(e));
+      showNotice(errorText(e));
     }
     await refreshProjects();
     loadOverview();
@@ -128,11 +126,6 @@ export function StatusBar() {
   const toggle = () => {
     const on = !awake();
     setAwake(on);
-    try {
-      localStorage.setItem(KEY, on ? "1" : "0");
-    } catch {
-      /* storage unavailable */
-    }
     void invoke<boolean>("keep_awake", { on })
       .then((held) => setAwakeOk(held || !on))
       .catch(() => 0);
@@ -149,15 +142,14 @@ export function StatusBar() {
 
   onMount(() => {
     if (awake()) void invoke<boolean>("keep_awake", { on: true }).then(setAwakeOk).catch(() => 0);
-    void poll();
-    loadOverview();
-    const t = setInterval(() => void poll(), 5000);
-    const t2 = setInterval(() => !document.hidden && loadOverview(), 15000);
-    const vis = () => void poll();
+    // memory every 5 s while the window shows; the counts come from the poll the sidebar shares (store.watchOverview)
+    const mem = createPoller(poll, 5000);
+    const unwatch = watchOverview();
+    const vis = () => !document.hidden && mem.now();
     document.addEventListener("visibilitychange", vis);
     onCleanup(() => {
-      clearInterval(t);
-      clearInterval(t2);
+      mem.stop();
+      unwatch();
       document.removeEventListener("visibilitychange", vis);
     });
   });
@@ -168,20 +160,20 @@ export function StatusBar() {
   };
   const memTip = () => {
     const u = usage();
-    if (!u) return "Memória usada pelo Axelstra";
-    return `Memória do Axelstra\nAplicação: ${fmt(u.app)}\nDaemon: ${fmt(u.daemon)}\nTerminais e agentes: ${fmt(u.sessions)}`;
+    if (!u) return S.status.memTitle;
+    return S.status.memTip(fmt(u.app), fmt(u.daemon), fmt(u.sessions));
   };
   const ports = () => usage()?.ports ?? [];
   const pct = (n: number) => (n < 10 ? n.toFixed(1) : String(Math.round(n)));
 
   return (
     <div class="statusbar">
-      <Button variant="row" size="xs" class={cn("sb-item cursor-pointer hover:bg-foreground/10 hover:text-foreground", awake() && "text-[var(--ok)]")} title={awakeOk() ? "Impedir que o computador adormeça" : "Não disponível neste sistema: falta o systemd-inhibit"} aria-pressed={awake()} onClick={toggle}>
+      <Button variant="row" size="xs" class={cn("sb-item cursor-pointer hover:bg-foreground/10 hover:text-foreground", awake() && "text-[var(--ok)]")} title={awakeOk() ? S.status.awake : S.status.awakeNA} aria-pressed={awake()} onClick={toggle}>
         <svg {...svg}>
           <path d="M3 7h8v3a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7zM11 8h1a1.5 1.5 0 0 1 0 3h-1M5 2.5v2M8 2.5v2" />
         </svg>
         <span class="size-2 rounded-full" classList={{ "bg-[var(--ok)]": awake() && awakeOk(), "bg-[var(--err)]": !awake(), "bg-[var(--muted)]": awake() && !awakeOk() }} aria-hidden="true" />
-        <span class="sr-only">{awake() ? (awakeOk() ? "Ligado" : "n/d") : "Desligado"}</span>
+        <span class="sr-only">{awake() ? (awakeOk() ? S.status.on : S.status.na) : S.status.off}</span>
       </Button>
       <span class="sb-item" title={memTip()}>
         <svg {...svg}>
@@ -191,7 +183,7 @@ export function StatusBar() {
         <span>{usage() ? fmt(total()) : "–"}</span>
       </span>
       <Show when={usage()?.cpu != null}>
-        <span class="sb-item" title="CPU usada pelo Axelstra (app, daemon, terminais e agentes), em % do computador">
+        <span class="sb-item" title={S.status.cpuTip}>
           <svg {...svg}>
             <rect x="4" y="4" width="8" height="8" rx="1" />
             <path d="M6.5 1.5v2.5M9.5 1.5v2.5M6.5 12v2.5M9.5 12v2.5M1.5 6.5H4M1.5 9.5H4M12 6.5h2.5M12 9.5h2.5" />
@@ -215,7 +207,7 @@ export function StatusBar() {
         </span>
       </Show>
       <Popover
-        label={`${running()} agentes a correr`}
+        label={S.status.agentsRunning(running())}
         chip={
           <>
             <svg {...svg}>
@@ -229,9 +221,9 @@ export function StatusBar() {
           <For
             each={
               [
-                ["A correr", "working", groups().running],
-                ["Parados", "idle", groups().idle],
-                ["A aguardar resposta", "waiting", groups().waiting],
+                [S.status.running, "working", groups().running],
+                [S.status.stopped, "idle", groups().idle],
+                [S.status.waiting, "waiting", groups().waiting],
               ] as [string, "working" | "idle" | "waiting", AgentEntry[]][]
             }
           >
@@ -240,7 +232,7 @@ export function StatusBar() {
                 <div class="sb-head">
                   {title} <span class="lim-dim">({list.length})</span>
                 </div>
-                <For each={list} fallback={<div class="sb-empty">Nenhum</div>}>
+                <For each={list} fallback={<div class="sb-empty">{S.status.none}</div>}>
                   {(a) => (
                     <Button
                       variant="row"
@@ -263,7 +255,7 @@ export function StatusBar() {
         )}
       </Popover>
       <Popover
-        label={`${counts().current.total} worktrees do projeto atual`}
+        label={S.status.wtOfProject(counts().current.total)}
         onOpen={loadOverview}
         chip={
           <>
@@ -277,21 +269,21 @@ export function StatusBar() {
             <table class="sb-table">
               <thead>
                 <tr>
-                  <th scope="col">Worktrees</th>
-                  <th scope="col">Todos</th>
-                  <th scope="col">Este projeto</th>
+                  <th scope="col">{S.status.worktrees}</th>
+                  <th scope="col">{S.status.all}</th>
+                  <th scope="col">{S.status.thisProject}</th>
                 </tr>
               </thead>
               <tbody>
                 <For
                   each={
                     [
-                      ["Total", "total"],
-                      ["Com alterações por guardar", "dirty"],
-                      ["Commits à frente do remoto", "ahead"],
-                      ["Atrás do remoto", "behind"],
-                      ["Já merged (seguras de remover)", "merged"],
-                      ["Sem agente a correr", "no_agent"],
+                      [S.status.total, "total"],
+                      [S.status.dirty, "dirty"],
+                      [S.status.ahead, "ahead"],
+                      [S.status.behind, "behind"],
+                      [S.status.merged, "merged"],
+                      [S.status.noAgent, "no_agent"],
                     ] as const
                   }
                 >
@@ -306,7 +298,7 @@ export function StatusBar() {
               </tbody>
             </table>
             <Show when={mergedList(overview()).length}>
-              <div class="sb-head">Já merged</div>
+              <div class="sb-head">{S.status.mergedHead}</div>
               <ul class="sb-merged">
                 <For each={mergedList(overview())}>
                   {(m) => (
@@ -317,18 +309,22 @@ export function StatusBar() {
                 </For>
               </ul>
               <Button variant="outline" size="sm" class="mx-1.5 mb-0.5 mt-1" onClick={() => void clean()}>
-                Limpar merged
+                {S.status.cleanTitle}
               </Button>
             </Show>
           </>
         )}
       </Popover>
-      <span class="sb-item" title={ports().length ? ports().map((p) => `:${p.port}`).join("\n") : "Nenhuma porta de servidor aberta"}>
+      <span class="sb-item" title={ports().length ? ports().map((p) => `:${p.port}`).join("\n") : S.status.noPorts}>
         <svg {...svg}>
           <path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v2.5a3.5 3.5 0 0 1-7 0V5.5zM8 11.5v2" />
         </svg>
         <span>{ports().length}</span>
       </span>
+      <Button variant="row" size="xs" class="sb-item cursor-pointer hover:bg-foreground/10 hover:text-foreground" title={K("Atalhos de teclado (?)")} aria-label={S.status.shortcutsHint} onClick={() => setShowShortcuts(true)}>
+        <kbd>?</kbd>
+        <span class="hint-keys">{S.status.shortcutsHint}</span>
+      </Button>
       <NotificationBell onJump={(e) => { if (e.session != null && e.worktree) openSession(e.worktree, e.session); else if (e.worktree) selectWorktree(e.worktree); }} />
       <LimitsBar />
     </div>

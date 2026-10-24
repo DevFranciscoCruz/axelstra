@@ -4,8 +4,21 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # the release workflow runs the whole of CI before it builds anything
+  workflow_call:
 permissions: { contents: read }
 jobs:
+  # the three version fields (Cargo.toml workspace, package.json, tauri.conf.json) must agree, and the
+  # stamp script that the release relies on must pass its own tests
+  versions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with: { node-version-file: .nvmrc }
+      - run: node scripts/stamp-version.mjs --self-test
+      - run: node scripts/stamp-version.mjs --check
   test:
     strategy:
       fail-fast: false
@@ -33,17 +46,80 @@ jobs:
       - run: cargo test --release -p axelstra-app
       # the debug test exe links the release CRT too (see app/src-tauri/build.rs)
       - run: cargo test -p axelstra-app
+  # the distributed macOS target: compile errors in the host show up here instead of at release time
+  host-macos:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - run: cargo check -p axelstra-app
+  # cfg(unix) and macOS-only code is never seen by the Windows lint job; lint the engine crates there too
+  lint-unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with: { components: "clippy" }
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - run: cargo clippy -p axelstra-core -p axelstra-daemon -p axelstra --all-targets -- -D warnings
+  # boots the real binary: daemon in a throwaway data dir, `axelstra ls`, a session, kill (tools/smoke.mjs)
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with: { node-version-file: .nvmrc }
+      - run: cargo build -p axelstra
+      - run: node tools/smoke.mjs
+  # Drives the real desktop app (production CSP, bundled frontend) over WebView2's DevTools port: boot, a session, restore
+  # (tools/e2e.mjs, docs/E2E.md). Not blocking: it needs a display session and a GUI runner, so it stays advisory until it
+  # has proven stable.
+  e2e:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with: { node-version-file: .nvmrc }
+      - run: npm ci && npm run build
+        working-directory: app
+      - run: cargo build -p axelstra
+      - run: cargo build -p axelstra-app --features tauri/custom-protocol
+      - run: node tools/e2e.mjs
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with: { fetch-depth: 0 } # the format check diffs against origin/main
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with: { node-version: 22 }
+        with: { node-version-file: .nvmrc }
       - run: npm ci
         working-directory: app
       - run: npx tsc --noEmit
         working-directory: app
+      # warnings are listed, errors fail (app/eslint.config.js)
+      - run: npm run lint
+        working-directory: app
+      # prettier on the files this branch added or changed only (scripts/check-format.mjs); the tree is not reformatted
+      - run: node scripts/check-format.mjs
       - run: npm test
         working-directory: app
   lint:
@@ -71,23 +147,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
       - run: cargo check -p axelstra-app
-  # Blocks on known vulnerabilities (cargo: any advisory of kind vulnerability; npm: high and critical in what ships).
-  # Unmaintained, unsound and yanked notices stay warnings. npm audit skips dev dependencies: the test runner is not shipped.
-  audit:
+  # cargo-deny: advisories (vulnerabilities fail; unmaintained and yanked stay warnings), licenses, bans, sources.
+  # The advisory ignores live in deny.toml with an expiry date; tools/check-deny-expiry.mjs fails once one lapses.
+  deny:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with: { node-version: 22 }
-      - run: cargo install cargo-audit --locked
-      # zip 4.6.1 comes only from tauri-plugin-updater 2.x (fixed in zip 9, which needs the 3.0 alpha of the plugin).
-      # Ignored until the plugin ships a stable release on it; the updater only unpacks archives signed by us.
-      - run: >
-          cargo audit
-          --ignore RUSTSEC-2026-0367
-          --ignore RUSTSEC-2026-0368
-          --ignore RUSTSEC-2026-0369
+        with: { node-version-file: .nvmrc }
+      - run: cargo install cargo-deny --locked
+      - run: cargo deny check advisories licenses bans sources
+      - run: node tools/check-deny-expiry.mjs
+  # Blocks on known npm vulnerabilities (high and critical in what ships). npm audit skips dev dependencies: the test runner is not shipped.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with: { node-version-file: .nvmrc }
       - run: npm audit --omit=dev --audit-level=high
         working-directory: app

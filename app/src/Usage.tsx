@@ -1,8 +1,10 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { createPoller } from "./poller";
 import { TokenUsage, agentUsage, worktreeUsage } from "./api";
 import { activeSession, projects, sessions } from "./store";
 import { WtUsage, fmtTokens as fmt, ranked, spentOf, totalOf, usageTip } from "./usageFormat";
 import { Button } from "./ui";
+import { P } from "./strings.panels";
 
 const [wtUsage, setWtUsage] = createSignal<WtUsage[]>([]);
 let lastLoad = 0;
@@ -24,8 +26,8 @@ export const loadWtUsage = () => {
 export const pollWtUsage = () => {
   onMount(() => {
     loadWtUsage();
-    const t = setInterval(loadWtUsage, 30000);
-    onCleanup(() => clearInterval(t));
+    const t = createPoller(loadWtUsage, 30000);
+    onCleanup(t.stop);
   });
   return wtUsage;
 };
@@ -47,7 +49,17 @@ function WorktreeUsageList() {
   const close = (e: Event) => {
     if (!(e.target as HTMLElement | null)?.closest?.(".wt-usage")) setOpen(false);
   };
-  const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+  let btn: HTMLButtonElement | undefined;
+  let pop: HTMLDivElement | undefined;
+  const esc = (e: KeyboardEvent) => {
+    if (e.key !== "Escape" || !open()) return;
+    setOpen(false);
+    btn?.focus();
+  };
+  // focus moves into the popover when it opens and goes back to the chip when it closes
+  createEffect(() => {
+    if (open()) queueMicrotask(() => pop?.focus());
+  });
   document.addEventListener("mousedown", close);
   document.addEventListener("keydown", esc);
   onCleanup(() => {
@@ -56,32 +68,26 @@ function WorktreeUsageList() {
   });
   return (
     <Show when={rows().length}>
-      <span class="wt-usage" style={{ "align-self": "center" }}>
-        <Button variant="link" size="bare" class="cursor-default self-center px-2 text-xs hover:text-muted-foreground" title={wtUsageTip(list())} aria-expanded={open()} onClick={() => setOpen(!open())}>
+      <span class="wt-usage self-center">
+        <Button ref={btn} variant="link" size="bare" class="cursor-default self-center px-2 text-xs hover:text-muted-foreground" title={wtUsageTip(list())} aria-label={P.usage.perWtTotal(fmt(spentOf(total())))} aria-haspopup="dialog" aria-expanded={open()} onClick={() => setOpen(!open())}>
           Σ {fmt(spentOf(total()))}
         </Button>
         <Show when={open()}>
-          <div
-            role="dialog"
-            aria-label="Tokens por worktree"
-            style={{ position: "fixed", top: "40px", right: "12px", "z-index": 50, background: "var(--panel, #222)", border: "1px solid var(--border, #444)", "border-radius": "6px", padding: "8px 10px", "font-size": "11px", "max-width": "360px", "box-shadow": "0 4px 16px rgba(0,0,0,.35)" }}
-          >
-            <div style={{ color: "var(--muted)", "margin-bottom": "4px" }}>Tokens gastos por worktree (Claude e Codex)</div>
+          <div ref={pop} class="wt-usage-pop" role="dialog" aria-label={P.usage.perWt} tabindex="-1">
+            <div class="wup-note">{P.usage.note}</div>
             <For each={rows()}>
               {(u) => (
-                <div style={{ display: "flex", gap: "12px", "justify-content": "space-between" }} title={`${u.worktree}
-entrada ${u.input.toLocaleString()} · saída ${u.output.toLocaleString()} · cache escrita ${u.cache_write.toLocaleString()} · cache lida ${u.cache_read.toLocaleString()}
-${u.claude_sessions} conversas Claude · ${u.codex_sessions} Codex`}>
-                  <span style={{ overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }}>{wtName(u.worktree)}</span>
+                <div class="wup-row" title={P.usage.rowTip(u.worktree, u.input.toLocaleString(), u.output.toLocaleString(), u.cache_write.toLocaleString(), u.cache_read.toLocaleString(), u.claude_sessions, u.codex_sessions)}>
+                  <span class="wup-name">{wtName(u.worktree)}</span>
                   <span>{fmt(spentOf(u))}</span>
                 </div>
               )}
             </For>
-            <div style={{ display: "flex", "justify-content": "space-between", "border-top": "1px solid var(--border, #444)", "margin-top": "4px", "padding-top": "4px" }}>
-              <span>Total</span>
+            <div class="wup-row wup-total">
+              <span>{P.usage.total}</span>
               <span>{fmt(spentOf(total()))}</span>
             </div>
-            <div style={{ color: "var(--muted)", "margin-top": "4px" }}>Cache lida: {fmt(total().cache_read)} (fora do total). Só tokens, sem custo estimado.</div>
+            <div class="wup-note wup-foot">{P.usage.foot(fmt(total().cache_read))}</div>
           </div>
         </Show>
       </span>
@@ -104,17 +110,15 @@ export function UsageChip() {
     setUsage(null);
     if (!cwd) return;
     let alive = true;
-    const load = () => {
-      if (document.hidden) return;
-      void agentUsage(cwd, conv)
+    const load = () =>
+      agentUsage(cwd, conv)
         .then((u) => alive && setUsage(u))
         .catch(() => alive && setUsage(null));
-    };
-    load();
-    const t = setInterval(load, 15000);
+    if (!document.hidden) void load();
+    const t = createPoller(load, 15000);
     onCleanup(() => {
       alive = false;
-      clearInterval(t);
+      t.stop();
     });
   });
   const spent = () => (usage() ? usage()!.input + usage()!.output + usage()!.cache_write : 0);
@@ -125,7 +129,7 @@ export function UsageChip() {
     <Show when={usage() && usage()!.messages > 0}>
       <span
         class="usage-chip"
-        title={`Contexto da conversa: ${ctx().toLocaleString()} tokens (o mesmo número da linha de estado do Claude). Gasto acumulado ${fmt(spent())}, a soma de todos os turnos. Entrada ${usage()!.input.toLocaleString()} · saída ${usage()!.output.toLocaleString()} · cache escrita ${usage()!.cache_write.toLocaleString()} · cache lida ${usage()!.cache_read.toLocaleString()} (${usage()!.messages} mensagens)`}
+        title={P.usage.chipTip(ctx().toLocaleString(), fmt(spent()), usage()!.input.toLocaleString(), usage()!.output.toLocaleString(), usage()!.cache_write.toLocaleString(), usage()!.cache_read.toLocaleString(), usage()!.messages)}
       >
         {fmt(ctx())} ctx
       </span>

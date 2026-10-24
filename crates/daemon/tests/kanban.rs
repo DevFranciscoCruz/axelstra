@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::json;
@@ -28,7 +29,7 @@ fn cards_crud_and_git_exclusion() {
     sh(&repo, &["add", "-A"]);
     sh(&repo, &["commit", "-qm", "init"]);
 
-    let pipe = format!("{}-kb-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-kb-{}", common::base_pipe(), std::process::id());
     let token = "k".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {
