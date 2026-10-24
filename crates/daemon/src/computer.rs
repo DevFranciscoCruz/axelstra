@@ -47,7 +47,7 @@ pub fn call(method: &str, p: &Value) -> Result<Value> {
         "computer.click" => {
             let button = p["button"].as_str().unwrap_or("left");
             if !["left", "right", "middle"].contains(&button) {
-                bail!("--button must be left, right or middle");
+                return Err(axelstra_core::coded!("computer.bad_button", "--button must be left, right or middle"));
             }
             let (ox, oy) = origin(window_arg(p))?;
             sys::click(ox + int(p, "x"), oy + int(p, "y"), button, p["double"].as_bool() == Some(true))?;
@@ -73,7 +73,7 @@ pub fn call(method: &str, p: &Value) -> Result<Value> {
             Ok(json!({}))
         }
         "computer.focus" => {
-            sys::focus(window_arg(p).ok_or_else(|| anyhow::anyhow!("window is required"))?)?;
+            sys::focus(window_arg(p).ok_or_else(|| axelstra_core::coded!("computer.window_required", "window is required"))?)?;
             Ok(json!({}))
         }
         _ => bail!("unknown method {method}"),
@@ -86,7 +86,9 @@ fn origin(window: Option<u64>) -> Result<(i32, i32)> {
         None => Ok((0, 0)),
         Some(id) => {
             let w = sys::windows()?.into_iter().find(|w| w.id == id);
-            w.map(|w| (w.x, w.y)).ok_or_else(|| anyhow::anyhow!("no window with id {id} (see `axelstra computer windows`)"))
+            w.map(|w| (w.x, w.y)).ok_or_else(|| {
+                axelstra_core::coded!("computer.no_window", "no window with id {id} (see `axelstra computer windows`)", id = id)
+            })
         }
     }
 }
@@ -94,10 +96,10 @@ fn origin(window: Option<u64>) -> Result<(i32, i32)> {
 /// Splits "ctrl+shift+s" into modifiers and the final key name.
 pub fn parse_combo(combo: &str) -> Result<(Vec<String>, String)> {
     let parts: Vec<String> = combo.split('+').map(|p| p.trim().to_ascii_lowercase()).filter(|p| !p.is_empty()).collect();
-    let Some((key, mods)) = parts.split_last() else { bail!("empty key combination") };
+    let Some((key, mods)) = parts.split_last() else { return Err(axelstra_core::coded!("computer.empty_combo", "empty key combination")) };
     for m in mods {
         if !["ctrl", "control", "shift", "alt", "option", "win", "cmd", "command", "meta", "super"].contains(&m.as_str()) {
-            bail!("unknown modifier {m:?} (ctrl, shift, alt, win/cmd)");
+            return Err(axelstra_core::coded!("computer.bad_modifier", "unknown modifier {m:?} (ctrl, shift, alt, win/cmd)", m = m));
         }
     }
     Ok((mods.to_vec(), key.clone()))
@@ -206,7 +208,7 @@ mod sys {
                 ),
             };
             if w <= 0 || h <= 0 {
-                bail!("nothing to capture (is the window minimized?)");
+                return Err(axelstra_core::coded!("computer.nothing_to_capture", "nothing to capture (is the window minimized?)"));
             }
             let screen = GetDC(std::ptr::null_mut());
             let mem = CreateCompatibleDC(screen);
@@ -234,7 +236,7 @@ mod sys {
             DeleteDC(mem);
             ReleaseDC(std::ptr::null_mut(), screen);
             if lines == 0 {
-                bail!("could not read the screen contents");
+                return Err(axelstra_core::coded!("computer.read_failed", "could not read the screen contents"));
             }
             for p in px.as_chunks_mut::<4>().0 {
                 p.swap(0, 2); // BGRA -> RGBA
@@ -321,7 +323,7 @@ mod sys {
                 VK_F1 + n[1..].parse::<u16>().unwrap() - 1
             }
             n if n.len() == 1 && n.as_bytes()[0].is_ascii_alphanumeric() => n.as_bytes()[0].to_ascii_uppercase() as u16,
-            n => bail!("unknown key {n:?}"),
+            n => return Err(axelstra_core::coded!("computer.unknown_key", "unknown key {n:?}", n = n)),
         })
     }
 
@@ -341,7 +343,7 @@ mod sys {
         let h = id as usize as HWND;
         unsafe {
             if IsWindow(h) == 0 {
-                bail!("no window with id {id}");
+                return Err(axelstra_core::coded!("computer.no_window", "no window with id {id}", id = id));
             }
             if IsIconic(h) != 0 {
                 ShowWindow(h, SW_RESTORE);
@@ -363,10 +365,11 @@ mod sys {
     fn osa(script: &str) -> Result<String> {
         let o = Command::new("osascript").args(["-e", script]).output()?;
         if !o.status.success() {
-            bail!(
-                "{} (macOS asks for Accessibility and Screen Recording permission for the terminal app)",
-                String::from_utf8_lossy(&o.stderr).trim()
-            );
+            return Err(axelstra_core::coded!(
+                "computer.macos_permission",
+                "{detail} (macOS asks for Accessibility and Screen Recording permission for the terminal app)",
+                detail = String::from_utf8_lossy(&o.stderr).trim()
+            ));
         }
         Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
     }
@@ -407,11 +410,14 @@ end tell"#)?;
         let mut cmd = Command::new("screencapture");
         cmd.arg("-x");
         if let Some(id) = window {
-            let w = windows()?.into_iter().find(|w| w.id == id).ok_or_else(|| anyhow::anyhow!("no window with id {id}"))?;
+            let w = windows()?
+                .into_iter()
+                .find(|w| w.id == id)
+                .ok_or_else(|| axelstra_core::coded!("computer.no_window", "no window with id {id}", id = id))?;
             cmd.arg("-R").arg(format!("{},{},{},{}", w.x, w.y, w.w, w.h));
         }
         if !cmd.arg(&tmp).status()?.success() {
-            bail!("screencapture failed (Screen Recording permission?)");
+            return Err(axelstra_core::coded!("computer.capture_failed", "screencapture failed (Screen Recording permission?)"));
         }
         let dec = png::Decoder::new(std::fs::File::open(&tmp)?);
         let mut reader = dec.read_info()?;
@@ -422,14 +428,14 @@ end tell"#)?;
         let rgba = match info.color_type {
             png::ColorType::Rgba => buf,
             png::ColorType::Rgb => buf.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
-            _ => bail!("unexpected screenshot format"),
+            _ => return Err(axelstra_core::coded!("computer.bad_format", "unexpected screenshot format")),
         };
         Ok((info.width as i32, info.height as i32, rgba))
     }
 
     pub fn click(x: i32, y: i32, button: &str, double: bool) -> Result<()> {
         if button != "left" {
-            bail!("only left clicks are supported on macOS");
+            return Err(axelstra_core::coded!("computer.left_only", "only left clicks are supported on macOS"));
         }
         osa(&format!("tell application \"System Events\" to click at {{{x}, {y}}}"))?;
         if double {
@@ -498,7 +504,7 @@ end tell"#)?;
 mod sys {
     use super::*;
     fn no<T>() -> Result<T> {
-        bail!("screen control is only available on Windows and macOS")
+        Err(axelstra_core::coded!("computer.unsupported", "screen control is only available on Windows and macOS"))
     }
     pub fn windows() -> Result<Vec<Win>> {
         no()

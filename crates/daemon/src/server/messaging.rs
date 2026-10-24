@@ -6,7 +6,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
     let agent = &*c.agent;
     match req.method.as_str() {
         "msg.send" => {
-            let to = p["to"].as_u64().and_then(|x| u32::try_from(x).ok()).ok_or_else(|| anyhow::anyhow!("missing to"))?;
+            let to = p["to"].as_u64().and_then(|x| u32::try_from(x).ok()).ok_or_else(|| missing("to"))?;
             // an agent speaks as itself: the sender is the session its connection authenticated as, whatever `from` says
             let from = match *agent {
                 Some(me) => Some(me),
@@ -14,9 +14,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             };
             let kind = p["kind"].as_str().unwrap_or("message");
             if !["message", "ask", "reply", "done", "escalate"].contains(&kind) {
-                anyhow::bail!("unknown message kind {kind}");
+                return Err(axelstra_core::coded!("msg.unknown_kind", "unknown message kind {kind}", kind = kind));
             }
-            let target = reg.get(to).ok_or_else(|| anyhow::anyhow!("no such session {to}"))?;
+            let target = reg.get(to).ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = to))?;
             let text = p["text"].as_str().unwrap_or_default();
             let m = reg.bus.send(from, to, kind, text, p["reply_to"].as_u64(), p["thread"].as_str().map(String::from));
             // the summary of a finished agent goes into the Relatorio section of its task file
@@ -39,8 +39,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({"id": m.id}))
         }
         "notes.read" | "notes.append" | "notes.export" => {
-            let id = p["session"].as_u64().and_then(|x| u32::try_from(x).ok()).ok_or_else(|| anyhow::anyhow!("missing session"))?;
-            let note = note_path(reg, id).ok_or_else(|| anyhow::anyhow!("esta sessão não tem ficheiro de tarefa"))?;
+            let id = p["session"].as_u64().and_then(|x| u32::try_from(x).ok()).ok_or_else(|| missing("session"))?;
+            let note =
+                note_path(reg, id).ok_or_else(|| axelstra_core::coded!("notes.session_without_file", "this session has no task file"))?;
             match req.method.as_str() {
                 "notes.read" => {
                     let name = note.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -71,21 +72,22 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "notes.read_file" => {
             let root = crate::notes::root(reg.saved.parent().unwrap_or(std::path::Path::new("")));
             let project = p["project"].as_str().unwrap_or_default();
-            let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
-            let note = crate::notes::file_of(&root, project, name).ok_or_else(|| anyhow::anyhow!("ficheiro de tarefa não encontrado"))?;
+            let name = p["name"].as_str().ok_or_else(|| missing("name"))?;
+            let note = crate::notes::file_of(&root, project, name)
+                .ok_or_else(|| axelstra_core::coded!("notes.not_found", "task file not found"))?;
             Ok(json!({"text": crate::notes::read(&note)?, "path": note.to_string_lossy(), "name": name}))
         }
         "msg.inbox" => {
-            let to = p["session"].as_u64().and_then(|x| u32::try_from(x).ok()).ok_or_else(|| anyhow::anyhow!("missing session"))?;
+            let to = p["session"].as_u64().and_then(|x| u32::try_from(x).ok()).ok_or_else(|| missing("session"))?;
             let list = reg.bus.inbox(to, p["all"].as_bool() == Some(true), p["mark"].as_bool() != Some(false));
             Ok(json!(list))
         }
         "msg.thread" => {
-            let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
+            let name = p["name"].as_str().ok_or_else(|| missing("name"))?;
             Ok(json!(reg.bus.thread(name)))
         }
         "msg.reply_of" => {
-            let id = p["id"].as_u64().ok_or_else(|| anyhow::anyhow!("missing id"))?;
+            let id = p["id"].as_u64().ok_or_else(|| missing("id"))?;
             Ok(json!({"reply": reg.bus.reply_to(id), "original": reg.bus.get(id)}))
         }
         m => anyhow::bail!("unknown method {m}"),

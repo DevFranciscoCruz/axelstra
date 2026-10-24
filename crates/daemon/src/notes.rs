@@ -3,7 +3,7 @@
 //! its goal and a "Relatorio" section. The files live in the app data directory, outside the repository, in one
 //! folder per project; `axelstra note` and `axelstra done` append to them, the app reads and exports them.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -139,7 +139,7 @@ fn create(dir: &Path, name: &str, body: &str) -> Result<PathBuf> {
             Err(e) => return Err(e.into()),
         }
     }
-    bail!("too many task files named {base}")
+    Err(axelstra_core::coded!("notes.too_many_files", "too many task files named {base}", base = base))
 }
 
 /// True when `p` is an existing markdown file inside the notes folder. A path that came from a client is only
@@ -204,13 +204,13 @@ pub fn on_spawn(root: &Path, label: Option<&str>, meta: &mut Option<Value>, goal
 pub fn append(path: &Path, title: &str, text: &str) -> Result<()> {
     let text = text.trim();
     if text.is_empty() {
-        bail!("nothing to write");
+        return Err(axelstra_core::coded!("notes.empty_text", "nothing to write"));
     }
     if text.len() > MAX_APPEND {
-        bail!("text too long (max {} KB)", MAX_APPEND / 1024);
+        return Err(axelstra_core::coded!("notes.text_too_long", "text too long (max {kb} KB)", kb = MAX_APPEND / 1024));
     }
     if std::fs::metadata(path)?.len() > MAX_FILE {
-        bail!("the task file is full");
+        return Err(axelstra_core::coded!("notes.file_full", "the task file is full"));
     }
     let mut f = std::fs::OpenOptions::new().append(true).open(path)?;
     std::io::Write::write_all(&mut f, format!("\n### {} - {title}\n\n{text}\n", stamp()).as_bytes())?;
@@ -229,7 +229,7 @@ pub fn split_status(body: &str) -> (&str, &str) {
 
 pub fn read(path: &Path) -> Result<String> {
     if std::fs::metadata(path)?.len() > MAX_FILE * 2 {
-        bail!("the task file is too large to show");
+        return Err(axelstra_core::coded!("notes.too_large", "the task file is too large to show"));
     }
     Ok(std::fs::read_to_string(path)?)
 }
@@ -312,18 +312,22 @@ fn is_link(md: &std::fs::Metadata) -> bool {
 /// Copies the task file into `worktree/.axelstra/`. Never replaces a file already there unless `overwrite`.
 /// The caller checked that `worktree` is a known worktree.
 pub fn export(note: &Path, worktree: &Path, overwrite: bool) -> Result<PathBuf> {
-    let name = note.file_name().ok_or_else(|| anyhow::anyhow!("bad task file"))?;
+    let name = note.file_name().ok_or_else(|| axelstra_core::coded!("notes.bad_file", "bad task file"))?;
     let dir = worktree.join(".axelstra");
     if std::fs::symlink_metadata(&dir).is_ok_and(|m| is_link(&m)) {
-        bail!("{} is a link; refusing to export through it", dir.display());
+        return Err(axelstra_core::coded!("notes.link_dir", "{path} is a link; refusing to export through it", path = dir.display()));
     }
     std::fs::create_dir_all(&dir)?;
     let target = dir.join(name);
     if std::fs::symlink_metadata(&target).is_ok_and(|m| is_link(&m)) {
-        bail!("{} is a link; refusing to overwrite it", target.display());
+        return Err(axelstra_core::coded!("notes.link_target", "{path} is a link; refusing to overwrite it", path = target.display()));
     }
     if target.exists() && !overwrite {
-        bail!("{} already exists; export again with overwrite to replace it", target.display());
+        return Err(axelstra_core::coded!(
+            "notes.exists",
+            "{path} already exists; export again with overwrite to replace it",
+            path = target.display()
+        ));
     }
     std::fs::copy(note, &target)?;
     Ok(target)
@@ -563,5 +567,29 @@ mod tests {
         assert!(file_of(&root, "p-bywt", &found[0].name).is_some());
         assert!(file_of(&root, "p-bywt", "../../x").is_none());
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod code_tests {
+    use super::*;
+    use axelstra_core::msg::find;
+
+    #[test]
+    fn errors_carry_codes() {
+        let dir = std::env::temp_dir().join(format!("axl-notes-code-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.md");
+        std::fs::write(&f, "x").unwrap();
+        assert_eq!(find(&append(&f, "t", "  ").unwrap_err()).unwrap().code, "notes.empty_text");
+        let long = "y".repeat(MAX_APPEND + 1);
+        let e = append(&f, "t", &long).unwrap_err();
+        assert_eq!(find(&e).unwrap().code, "notes.text_too_long");
+        assert_eq!(find(&e).unwrap().params["kb"], (MAX_APPEND / 1024).to_string());
+        let wt = dir.join("wt");
+        std::fs::create_dir_all(wt.join(".axelstra")).unwrap();
+        export(&f, &wt, false).unwrap();
+        assert_eq!(find(&export(&f, &wt, false).unwrap_err()).unwrap().code, "notes.exists");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -3,7 +3,7 @@ use crate::card::{self, Card};
 use crate::git::{self, Merge};
 use crate::msg::Coded;
 use crate::runner::{AgentSpawn, Handle, ProcessRunner, Runner};
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -552,7 +552,7 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
         None => {
             let a = agents::require(&t.card.meta.agent)?;
             if a.locate().is_none() {
-                bail!("{}", a.missing_message());
+                return Err(a.missing_error());
             }
             agents::resolve_argv(a, agent_command(a.id, &t.card.meta.permission_mode, runner.interactive())?)
         }
@@ -812,7 +812,7 @@ mod tests {
         assert_eq!(agent_command("codex", "auto", true).unwrap(), ["codex", "--sandbox", "workspace-write", p]);
         assert_eq!(agent_command("gemini", "auto", false).unwrap(), ["gemini", "--approval-mode", "auto_edit", "-p", p]);
         assert_eq!(agent_command("gemini", "auto", true).unwrap(), ["gemini", "--approval-mode", "auto_edit", "-i", p]);
-        assert!(agent_command("rm", "auto", false).unwrap_err().to_string().contains("desconhecido"));
+        assert!(agent_command("rm", "auto", false).unwrap_err().to_string().contains("unknown agent"));
         assert!(agent_command("claude", "--evil", false).is_err());
     }
 

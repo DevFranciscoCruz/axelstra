@@ -305,6 +305,6 @@ mod tests {
         }
         let mut a = auto(Schedule::Interval { minutes: 30 });
         a.agent = "rm".into();
-        assert!(validate(&a).unwrap_err().to_string().contains("desconhecido"));
+        assert!(validate(&a).unwrap_err().to_string().contains("unknown agent"));
     }
 }

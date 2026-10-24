@@ -236,7 +236,7 @@ pub fn worktree_from_pr(p: &Project, number: u64) -> Result<git::Worktree> {
 
 /// Same, plus a warning when the project's `.worktreeinclude` would have copied git-ignored files (`.env`, keys):
 /// the code of a pull request is not trusted, so nothing is copied into its worktree and the user is told.
-pub fn worktree_from_pr_report(p: &Project, number: u64) -> Result<(git::Worktree, Option<String>)> {
+pub fn worktree_from_pr_report(p: &Project, number: u64) -> Result<(git::Worktree, Option<axelstra_core::msg::Coded>)> {
     let repo = Path::new(&p.path);
     git::must(repo, &["fetch", "origin", &format!("pull/{number}/head")]).map_err(|e| {
         coded!(
@@ -248,10 +248,14 @@ pub fn worktree_from_pr_report(p: &Project, number: u64) -> Result<(git::Worktre
     })?;
     let wt = create_at(p, &format!("pr-{number}"), "FETCH_HEAD", false)?.0;
     let warning = crate::wtenv::plan(repo).ok().filter(|pl| !pl.files.is_empty()).map(|pl| {
-        format!(
-            "{} ignored file(s) from .worktreeinclude ({}) were NOT copied into this pull request's worktree, because its code is not trusted; copy them by hand if you need them",
-            pl.files.len(),
-            pl.files.join(", ")
+        axelstra_core::msg::Coded::new(
+            "worktree.pr_env_not_copied",
+            format!(
+                "{} ignored file(s) from .worktreeinclude ({}) were NOT copied into this pull request's worktree, because its code is not trusted; copy them by hand if you need them",
+                pl.files.len(),
+                pl.files.join(", ")
+            ),
+            &[("count", pl.files.len().to_string()), ("files", pl.files.join(", "))],
         )
     });
     Ok((wt, warning))
@@ -727,7 +731,8 @@ mod rename_tests {
         let (w, warning) = worktree_from_pr_report(&p, 7).unwrap();
         assert!(!Path::new(&w.path).join(".env").exists(), "untrusted code must not see the .env");
         let warning = warning.expect("the user is told");
-        assert!(warning.contains(".env") && warning.contains("NOT copied"), "{warning}");
+        assert_eq!(warning.code, "worktree.pr_env_not_copied");
+        assert!(warning.text.contains(".env") && warning.text.contains("NOT copied"), "{warning}");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

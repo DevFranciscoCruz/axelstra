@@ -43,7 +43,7 @@ impl Runner for DaemonRunner {
                 "meta": {"worktree": s.cwd, "kind": "agent"},
             }),
         )?;
-        let id = r["id"].as_u64().ok_or_else(|| anyhow::anyhow!("daemon returned no id"))? as u32;
+        let id = r["id"].as_u64().ok_or_else(|| axelstra_core::coded!("daemon.no_id", "daemon returned no id"))? as u32;
         accept_trust_prompt(self.pipe.clone(), self.token.clone(), id);
         Ok(Box::new(SessionHandle { client: self.client.clone(), id }))
     }

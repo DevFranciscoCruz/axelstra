@@ -2,7 +2,7 @@
 //! thin discovery stub (`SKILL.md`); the real guide is served by `axelstra skills get axelstration`, so the
 //! instructions always match the installed binary. The stub goes to the shared `~/.agents/skills` (read by
 //! Codex, Gemini CLI and others) and to `~/.claude/skills` (Claude Code).
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use std::path::PathBuf;
 
 const STUB: &str = include_str!("../../../skills/axelstration/SKILL.md");
@@ -24,7 +24,10 @@ pub fn terse_rules(level: &str) -> Option<&'static str> {
 }
 
 fn home() -> Result<PathBuf> {
-    std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).ok_or_else(|| anyhow!("no home directory"))
+    std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+        .ok_or_else(|| axelstra_core::coded!("daemon.no_home", "no home directory"))
 }
 
 /// (skills folder, folders whose existence says the user has an agent CLI that reads it)

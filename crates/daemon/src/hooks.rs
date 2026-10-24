@@ -6,7 +6,7 @@
 //! valid JSON is refused untouched.
 
 use crate::store;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 
@@ -29,7 +29,7 @@ fn events_of(agent: &str) -> &'static [&'static str] {
 
 fn check_agent(agent: &str) -> Result<()> {
     if !AGENTS.contains(&agent) {
-        bail!("só o claude e o gemini têm hooks");
+        return Err(axelstra_core::coded!("hooks.unsupported_agent", "only claude and gemini have hooks"));
     }
     Ok(())
 }
@@ -46,7 +46,7 @@ pub fn settings_path() -> Result<PathBuf> {
 /// The user-level settings file of `agent` (`~/.claude/settings.json`, `~/.gemini/settings.json`).
 pub fn settings_path_of(agent: &str) -> Result<PathBuf> {
     check_agent(agent)?;
-    Ok(home().context("no home directory")?.join(format!(".{agent}")).join("settings.json"))
+    Ok(home().ok_or_else(|| axelstra_core::coded!("daemon.no_home", "no home directory"))?.join(format!(".{agent}")).join("settings.json"))
 }
 
 /// The command Claude runs for `event`: this executable by absolute path, so the hook never depends on what sits first
@@ -72,17 +72,23 @@ fn load(path: &Path) -> Result<(Value, Option<Vec<u8>>)> {
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((json!({}), None)),
-        Err(e) => return Err(e).with_context(|| format!("ler {}", path.display())),
+        Err(e) => return Err(axelstra_core::coded!("hooks.read_failed", "reading {path}: {detail}", path = path.display(), detail = e)),
     };
     let text = String::from_utf8_lossy(&bytes);
     let text = text.trim_start_matches('\u{feff}');
     if text.trim().is_empty() {
         return Ok((json!({}), Some(bytes)));
     }
-    let v: Value = serde_json::from_str(text)
-        .map_err(|e| anyhow::anyhow!("{} não é JSON válido ({e}); não lhe toquei. Corrige-o à mão e tenta outra vez.", path.display()))?;
+    let v: Value = serde_json::from_str(text).map_err(|e| {
+        axelstra_core::coded!(
+            "hooks.not_json",
+            "{path} is not valid JSON ({detail}); I did not touch it. Fix it by hand and try again.",
+            path = path.display(),
+            detail = e
+        )
+    })?;
     if !v.is_object() {
-        bail!("{} não é um objeto JSON; não lhe toquei.", path.display());
+        return Err(axelstra_core::coded!("hooks.not_object", "{path} is not a JSON object; I did not touch it.", path = path.display()));
     }
     Ok((v, Some(bytes)))
 }
@@ -119,6 +125,10 @@ pub fn status_at_of(agent: &str, path: &Path) -> Value {
         Err(e) => {
             let mut v = status_of(agent, path, &json!({}), true);
             v["problem"] = json!(e.to_string());
+            if let Some(c) = axelstra_core::msg::find(&e) {
+                v["problem_code"] = json!(c.code);
+                v["problem_params"] = c.params_json();
+            }
             v
         }
     }
@@ -137,11 +147,24 @@ pub fn status_for(agent: &str) -> Result<Value> {
 fn merge(agent: &str, root: &mut Value, path: &Path) -> Result<bool> {
     let obj = root.as_object_mut().context("settings root is not an object")?;
     let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
-    let Some(hooks) = hooks.as_object_mut() else { bail!("\"hooks\" em {} não é um objeto; não lhe toquei.", path.display()) };
+    let Some(hooks) = hooks.as_object_mut() else {
+        return Err(axelstra_core::coded!(
+            "hooks.hooks_not_object",
+            "\"hooks\" in {path} is not an object; I did not touch it.",
+            path = path.display()
+        ));
+    };
     let mut changed = false;
     for event in events_of(agent).iter().copied() {
         let list = hooks.entry(event).or_insert_with(|| json!([]));
-        let Some(list) = list.as_array_mut() else { bail!("\"hooks.{event}\" em {} não é uma lista; não lhe toquei.", path.display()) };
+        let Some(list) = list.as_array_mut() else {
+            return Err(axelstra_core::coded!(
+                "hooks.event_not_list",
+                "\"hooks.{event}\" in {path} is not a list; I did not touch it.",
+                event = event,
+                path = path.display()
+            ));
+        };
         // an entry written by an earlier release names `axelstra` bare: it is pointed at this executable
         let want = command(agent, event);
         for h in list.iter_mut().filter_map(|e| e["hooks"].as_array_mut()).flatten() {
@@ -177,12 +200,21 @@ pub fn install_at_of(agent: &str, path: &Path) -> Result<Value> {
     if let Some(bytes) = original.as_ref().filter(|b| !b.is_empty()) {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let b = path.with_file_name(format!("{name}.axelstra-backup-{}", chrono::Local::now().format("%Y%m%d-%H%M%S%3f")));
-        store::write_atomic(&b, bytes).with_context(|| format!("escrever a cópia de segurança {}", b.display()))?;
+        store::write_atomic(&b, bytes).map_err(|e| {
+            axelstra_core::coded!(
+                "hooks.backup_failed",
+                "writing the backup copy {path}: {detail}",
+                path = b.display(),
+                detail = format!("{e:#}")
+            )
+        })?;
         backup = json!(b.to_string_lossy());
     }
     let mut text = serde_json::to_string_pretty(&root)?;
     text.push('\n');
-    store::write_atomic(path, text.as_bytes()).with_context(|| format!("escrever {}", path.display()))?;
+    store::write_atomic(path, text.as_bytes()).map_err(|e| {
+        axelstra_core::coded!("hooks.write_failed", "writing {path}: {detail}", path = path.display(), detail = format!("{e:#}"))
+    })?;
     let mut v = status_of(agent, path, &root, true);
     v["changed"] = json!(true);
     v["backup"] = backup;
@@ -305,7 +337,7 @@ mod tests {
         let f = tmp("invalid");
         std::fs::write(&f, "{ not json").unwrap();
         let e = install_at(&f).unwrap_err().to_string();
-        assert!(e.contains("não é JSON válido"), "{e}");
+        assert!(e.contains("is not valid JSON"), "{e}");
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "{ not json");
         assert!(backups(&f).is_empty());
         assert!(status_at(&f)["problem"].is_string());
@@ -370,5 +402,27 @@ mod tests {
         assert!(settings_path_of("codex").is_err());
         assert!(install_at_of("codex", Path::new("x")).is_err());
         assert!(settings_path_of("gemini").unwrap().ends_with(".gemini/settings.json") || cfg!(windows));
+    }
+}
+
+#[cfg(test)]
+mod code_tests {
+    use super::*;
+    use axelstra_core::msg::find;
+
+    #[test]
+    fn errors_carry_codes_and_the_status_problem_too() {
+        let dir = std::env::temp_dir().join(format!("axl-hooks-code-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("settings.json");
+        std::fs::write(&f, "{ not json").unwrap();
+        assert_eq!(find(&install_at(&f).unwrap_err()).unwrap().code, "hooks.not_json");
+        let st = status_at(&f);
+        assert_eq!(st["problem_code"], "hooks.not_json");
+        assert!(st["problem_params"]["path"].is_string());
+        std::fs::write(&f, "[1]").unwrap();
+        assert_eq!(find(&install_at(&f).unwrap_err()).unwrap().code, "hooks.not_object");
+        assert_eq!(find(&settings_path_of("codex").unwrap_err()).unwrap().code, "hooks.unsupported_agent");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

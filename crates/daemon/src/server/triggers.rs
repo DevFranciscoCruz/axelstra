@@ -48,7 +48,7 @@ impl trig::Env for DaemonEnv {
             Err(_) => {
                 let ag = axelstra_core::agents::require(trig::AGENT)?;
                 if ag.locate().is_none() {
-                    anyhow::bail!("{}", ag.missing_message());
+                    return Err(ag.missing_error());
                 }
                 crate::automations::agent_command(trig::AGENT, prompt)?
             }
@@ -62,7 +62,7 @@ impl trig::Env for DaemonEnv {
             json!({"program": program, "args": args, "cwd": worktree, "label": trig::AGENT, "meta": meta,
                    "goal": "Corrigir o CI (disparado automaticamente)", "cols": 120, "rows": 30}),
         )?;
-        r["id"].as_u64().and_then(|i| u32::try_from(i).ok()).ok_or_else(|| anyhow::anyhow!("daemon returned no id"))
+        r["id"].as_u64().and_then(|i| u32::try_from(i).ok()).ok_or_else(|| axelstra_core::coded!("daemon.no_id", "daemon returned no id"))
     }
 }
 
@@ -127,7 +127,13 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     None | Some(Value::Null) => Ok(None),
                     Some(v) => match v.as_u64().filter(|n| (lo..=hi).contains(n)) {
                         Some(n) => Ok(Some(n)),
-                        None => anyhow::bail!("{k} must be a whole number from {lo} to {hi}"),
+                        None => Err(axelstra_core::coded!(
+                            "triggers.bad_number",
+                            "{k} must be a whole number from {lo} to {hi}",
+                            k = k,
+                            lo = lo,
+                            hi = hi
+                        )),
                     },
                 }
             };
@@ -135,12 +141,16 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let max = int("max_per_hour", u64::from(trig::MAX_PER_HOUR_RANGE.0), u64::from(trig::MAX_PER_HOUR_RANGE.1))?;
             let want = match p.get("ci_fix") {
                 None | Some(Value::Null) => None,
-                Some(v) => Some(v.as_bool().ok_or_else(|| anyhow::anyhow!("ci_fix must be true or false"))?),
+                Some(v) => Some(v.as_bool().ok_or_else(|| axelstra_core::coded!("triggers.bad_ci_fix", "ci_fix must be true or false"))?),
             };
             // the first enabling is something the user typed, not a flag
             if want == Some(true) && t.confirmed_at.is_none() {
                 if p["confirm"].as_str() != Some(trig::CONFIRM_WORD) {
-                    anyhow::bail!("enabling needs confirm = \"{}\" the first time", trig::CONFIRM_WORD);
+                    return Err(axelstra_core::coded!(
+                        "triggers.confirm_needed",
+                        "enabling needs confirm = \"{word}\" the first time",
+                        word = trig::CONFIRM_WORD
+                    ));
                 }
                 t.confirmed_at = Some(u64::try_from(crate::automations::now_ts()).unwrap_or(0));
             }

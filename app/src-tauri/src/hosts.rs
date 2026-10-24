@@ -11,6 +11,7 @@
 //! and one connection per attached terminal, each of them its own `ssh`/`wsl.exe` child speaking to `axelstra bridge`.
 
 use anyhow::{Context, Result};
+use axelstra_core::msg::Coded;
 use axelstra_daemon::client::{Client, Frame};
 use axelstra_daemon::remote::RemoteSpec;
 use serde_json::{json, Value};
@@ -97,7 +98,7 @@ struct Walk<'a> {
     method: &'a str,
     slot_host: &'a dyn Fn(u32) -> Option<String>,
     hosts: BTreeSet<String>,
-    err: Option<String>,
+    err: Option<Coded>,
 }
 
 impl Walk<'_> {
@@ -131,7 +132,13 @@ impl Walk<'_> {
                                 self.hosts.insert(h);
                                 *v = json!(raw);
                             }
-                            None => self.err = Some(format!("sessão {g} de um anfitrião que já não existe")),
+                            None => {
+                                self.err = Some(Coded::new(
+                                    "host.stale_session",
+                                    format!("session {g} belongs to a host that no longer exists"),
+                                    &[("id", g.to_string())],
+                                ))
+                            }
                         }
                     }
                 }
@@ -141,16 +148,16 @@ impl Walk<'_> {
     }
 }
 
-fn host_known(h: &str, known: &dyn Fn(&str) -> bool) -> Result<(), String> {
+fn host_known(h: &str, known: &dyn Fn(&str) -> bool) -> Result<(), Coded> {
     if h == LOCAL || known(h) {
         Ok(())
     } else {
-        Err(format!("anfitrião desconhecido: {h}"))
+        Err(Coded::new("host.unknown", format!("unknown host: {h}"), &[("host", h.to_string())]))
     }
 }
 
 /// Decides which host a call is for and rewrites its params for that host.
-pub fn plan(method: &str, params: &Value, slot_host: &dyn Fn(u32) -> Option<String>, known: &dyn Fn(&str) -> bool) -> Result<Plan, String> {
+pub fn plan(method: &str, params: &Value, slot_host: &dyn Fn(u32) -> Option<String>, known: &dyn Fn(&str) -> bool) -> Result<Plan, Coded> {
     if FAN.contains(&method) {
         return Ok(Plan::Fan);
     }
@@ -202,12 +209,16 @@ pub fn plan(method: &str, params: &Value, slot_host: &dyn Fn(u32) -> Option<Stri
     let mut hosts = w.hosts.into_iter();
     let Some(first) = hosts.next() else { return Ok(Plan::Local) };
     if hosts.next().is_some() {
-        return Err("o pedido mistura anfitriões diferentes".into());
+        return Err(Coded::new("host.mixed", "the request mixes different hosts".into(), &[]));
     }
     host_known(&first, known)?;
     let family = method.split('.').next().unwrap_or_default();
     if LOCAL_ONLY.contains(&family) {
-        return Err(format!("{method} não é suportado em projetos remotos"));
+        return Err(Coded::new(
+            "host.remote_unsupported",
+            format!("{method} is not supported on remote projects"),
+            &[("method", method.to_string())],
+        ));
     }
     Ok(Plan::Remote(first, p))
 }
@@ -372,6 +383,8 @@ pub enum Which {
 struct Info {
     state: St,
     error: Option<String>,
+    /// the code of `error` when it is a single coded message (no tool output appended)
+    error_code: Option<Coded>,
     proto: Option<u64>,
     build: Option<String>,
     next_try: Instant,
@@ -429,7 +442,15 @@ impl Remote {
     fn new(def: Def) -> Arc<Remote> {
         Arc::new(Remote {
             def,
-            info: Mutex::new(Info { state: St::Idle, error: None, proto: None, build: None, next_try: Instant::now(), fails: 0 }),
+            info: Mutex::new(Info {
+                state: St::Idle,
+                error: None,
+                error_code: None,
+                proto: None,
+                build: None,
+                next_try: Instant::now(),
+                fails: 0,
+            }),
             control: Mutex::new(None),
             bg: Mutex::new(None),
             input: Mutex::new(None),
@@ -450,6 +471,10 @@ impl Remote {
         v["state"] = json!(i.state.name());
         if let Some(e) = &i.error {
             v["error"] = json!(e);
+            if let Some(c) = &i.error_code {
+                v["error_code"] = json!(c.code);
+                v["error_params"] = c.params_json();
+            }
         }
         if let Some(p) = i.proto {
             v["proto"] = json!(p);
@@ -469,6 +494,10 @@ impl Remote {
     }
 
     fn set_state(&self, state: St, error: Option<String>) {
+        self.set_state_coded(state, error, None);
+    }
+
+    fn set_state_coded(&self, state: St, error: Option<String>, code: Option<Coded>) {
         {
             let mut i = lock(&self.info);
             if i.state == state && i.error == error {
@@ -476,10 +505,15 @@ impl Remote {
             }
             i.state = state;
             i.error = error.clone();
+            i.error_code = code.clone();
         }
         let mut p = json!({"id": self.def.id, "state": state.name()});
         if let Some(e) = error {
             p["error"] = json!(e);
+            if let Some(c) = code {
+                p["error_code"] = json!(c.code);
+                p["error_params"] = c.params_json();
+            }
         }
         emit("host-state", p);
     }
@@ -497,7 +531,8 @@ impl Remote {
             let wait = if auth { 60 } else { (5 * u64::from(i.fails)).min(60) };
             i.next_try = Instant::now() + Duration::from_secs(wait);
         }
-        self.set_state(if auth { St::Auth } else { St::Lost }, Some(msg));
+        let code = if e.chain().count() == 1 { axelstra_core::msg::find(e).cloned() } else { None };
+        self.set_state_coded(if auth { St::Auth } else { St::Lost }, Some(msg), code);
     }
 
     /// Drops every connection and kills the children (the event reader holds a clone that would keep its child alive).
@@ -548,7 +583,7 @@ impl Remote {
 
     /// Event connection: its end is how a dead link is noticed (ssh pings it every 15 s), so it is always open.
     fn start_watch(self: &Arc<Self>) -> Result<()> {
-        let w = self.open().context("ligação de eventos")?;
+        let w = self.open().context("event connection")?;
         let mut rd = w.try_clone()?;
         *lock(&self.watch) = Some(w);
         let me = self.clone();
@@ -564,7 +599,7 @@ impl Remote {
                 }
             }
             if me.link.load(Ordering::SeqCst) == link && me.state() != St::Idle {
-                me.mark_lost(&anyhow::anyhow!("a ligação a {} terminou", me.def.name));
+                me.mark_lost(&axelstra_core::coded!("host.link_ended", "the connection to {name} ended", name = me.def.name));
             }
         })?;
         Ok(())
@@ -584,12 +619,13 @@ impl Remote {
         let i = lock(&self.info);
         match i.state {
             St::Ok | St::Idle | St::Connecting => Ok(()),
-            St::Lost | St::Auth => anyhow::bail!(
-                "sem ligação a {} ({}): {}",
-                self.def.name,
-                i.state.name(),
-                i.error.as_deref().unwrap_or("sem detalhe").lines().next().unwrap_or("")
-            ),
+            St::Lost | St::Auth => Err(axelstra_core::coded!(
+                "host.not_connected",
+                "no connection to {name} ({state}): {detail}",
+                name = self.def.name,
+                state = i.state.name(),
+                detail = i.error.as_deref().unwrap_or("no detail").lines().next().unwrap_or("")
+            )),
         }
     }
 
@@ -633,7 +669,9 @@ pub fn with_remote<T>(h: &Arc<Remote>, which: Which, retry: bool, f: impl Fn(&mu
         h.ensure(which)?;
         g = lock(slot);
     }
-    let Some(c) = g.as_mut() else { anyhow::bail!("sem ligação a {}", h.def.name) };
+    let Some(c) = g.as_mut() else {
+        return Err(axelstra_core::coded!("host.no_link", "no connection to {name}", name = h.def.name));
+    };
     match f(c) {
         Ok(v) => Ok(v),
         Err(e) if e.downcast_ref::<axelstra_daemon::client::Remote>().is_some() => Err(e),
@@ -648,7 +686,11 @@ pub fn with_remote<T>(h: &Arc<Remote>, which: Which, retry: bool, f: impl Fn(&mu
                     None => Err(e),
                 }
             } else {
-                Err(e.context(format!("a ligação a {} caiu durante o pedido; confirma o estado antes de repetir", h.def.name)))
+                Err(e.context(axelstra_core::coded!(
+                    "host.link_dropped",
+                    "the connection to {name} dropped during the request; check the state before repeating it",
+                    name = h.def.name
+                )))
             }
         }
     }
@@ -690,10 +732,10 @@ fn list_host(h: &Arc<Remote>, method: &str) -> Result<Value> {
 /// `local` runs the call on this machine's daemon with the page's own params.
 pub fn route(method: &str, params: Value, bg: bool, retry: bool, local: &dyn Fn(&str, Value) -> Result<Value>) -> Result<Value> {
     let which = if bg { Which::Bg } else { Which::Control };
-    match plan(method, &params, &slot_host, &known).map_err(anyhow::Error::msg)? {
+    match plan(method, &params, &slot_host, &known).map_err(Coded::into_error)? {
         Plan::Local => local(method, params),
         Plan::Remote(id, p) => {
-            let h = get(&id).context("anfitrião desconhecido")?;
+            let h = get(&id).ok_or_else(|| axelstra_core::coded!("host.unknown", "unknown host: {host}", host = id))?;
             call_host(&h, which, method, p, retry)
         }
         Plan::Split(calls) => {
@@ -750,11 +792,11 @@ pub fn watch_target(worktree: Option<&str>) -> Result<Option<String>> {
     }
     match (worktree, new_host) {
         (Some(w), Some(host)) => {
-            let h = get(&host).context("anfitrião desconhecido")?;
+            let h = get(&host).ok_or_else(|| axelstra_core::coded!("host.unknown", "unknown host: {host}", host = host))?;
             let rest = untag(w).map(|(_, r)| r).unwrap_or_default().to_string();
             h.require_up()?;
             let mut g = lock(&h.watch);
-            let c = g.as_mut().with_context(|| format!("sem ligação a {}", h.def.name))?;
+            let c = g.as_mut().ok_or_else(|| axelstra_core::coded!("host.no_link", "no connection to {name}", name = h.def.name))?;
             c.send("watch.subscribe", json!({"worktree": rest}))?;
             Ok(None)
         }
@@ -813,23 +855,25 @@ fn save(c: &mut Client, defs: &[Def]) -> Result<()> {
 pub fn add(c: &mut Client, name: &str, spec: &str, bin: Option<&str>) -> Result<Value> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 40 || name.chars().any(char::is_control) {
-        anyhow::bail!("nome inválido: 1 a 40 caracteres");
+        return Err(axelstra_core::coded!("host.name_invalid_add", "invalid name: 1 to 40 characters"));
     }
     let parsed = RemoteSpec::parse(spec)?;
     let spec = spec.trim().to_string();
     let mut cur = persisted();
     if cur.len() >= MAX_HOSTS {
-        anyhow::bail!("máximo de {MAX_HOSTS} anfitriões");
+        return Err(axelstra_core::coded!("host.too_many", "at most {max} hosts", max = MAX_HOSTS));
     }
     if cur.iter().any(|d| d.spec == spec) {
-        anyhow::bail!("já existe um anfitrião com a especificação {spec}");
+        return Err(axelstra_core::coded!("host.spec_exists", "a host with the spec {spec} already exists", spec = spec));
     }
     let bin = bin.map(str::trim).filter(|b| !b.is_empty()).map(String::from);
     if let Some(b) = &bin {
         parsed.with_bin(b)?;
     }
     let id = slug(name, &|i| cur.iter().any(|d| d.id == i));
-    let slot = (1..=MAX_SLOT).find(|s| !cur.iter().any(|d| d.slot == *s)).context("sem slots livres")?;
+    let slot = (1..=MAX_SLOT)
+        .find(|s| !cur.iter().any(|d| d.slot == *s))
+        .ok_or_else(|| axelstra_core::coded!("host.no_free_slot", "no free slots"))?;
     let def = Def { id, name: name.to_string(), spec, slot, bin };
     cur.push(def.clone());
     save(c, &cur)?;
@@ -845,7 +889,7 @@ pub fn remove(c: &mut Client, id: &str) -> Result<()> {
     let before = cur.len();
     cur.retain(|d| d.id != id);
     if cur.len() == before {
-        anyhow::bail!("anfitrião desconhecido: {id}");
+        return Err(axelstra_core::coded!("host.unknown", "unknown host: {host}", host = id));
     }
     save(c, &cur)?;
     let gone = {
@@ -876,7 +920,7 @@ mod tests {
     fn known_h(h: &str) -> bool {
         matches!(h, "lab" | "wsl1")
     }
-    fn plan_of(m: &str, p: Value) -> Result<Plan, String> {
+    fn plan_of(m: &str, p: Value) -> Result<Plan, Coded> {
         plan(m, &p, &hosts, &known_h)
     }
 
@@ -931,14 +975,14 @@ mod tests {
     fn mixing_hosts_or_unknown_hosts_fail() {
         assert!(plan_of("worktree.rename", json!({"path": "@lab:/a", "name": "x", "parent": "@wsl1:/b"})).is_err());
         assert!(plan_of("session.kill", json!({"worktree": "@lab:/a", "id": gid(2, 1)})).is_err());
-        assert!(plan_of("fs.read", json!({"worktree": "@nope:/a"})).unwrap_err().contains("desconhecido"));
+        assert!(plan_of("fs.read", json!({"worktree": "@nope:/a"})).unwrap_err().code == "host.unknown");
         assert!(plan_of("session.kill", json!({"id": gid(9, 1)})).is_err());
     }
 
     #[test]
     fn this_machines_only_methods_are_refused_for_remote_projects() {
         for m in ["docker.open_shell", "open.editor", "computer.enable", "automation.run"] {
-            assert!(plan_of(m, json!({"worktree": "@lab:/x"})).unwrap_err().contains("remotos"), "{m}");
+            assert!(plan_of(m, json!({"worktree": "@lab:/x"})).unwrap_err().code == "host.remote_unsupported", "{m}");
         }
         assert_eq!(plan_of("docker.open_shell", json!({"worktree": "C:\\x"})), Ok(Plan::Local));
     }

@@ -5,14 +5,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
     let (p, reg, tx) = (c.p, c.reg, c.tx);
     let subs = &mut *c.subs;
     let after = &mut *c.after;
-    let sid = || -> Result<u32> {
-        p.get("id").and_then(Value::as_u64).and_then(|x| u32::try_from(x).ok()).ok_or_else(|| anyhow::anyhow!("missing id"))
+    let sid = || -> Result<u32> { p.get("id").and_then(Value::as_u64).and_then(|x| u32::try_from(x).ok()).ok_or_else(|| missing("id")) };
+    let session = || -> Result<Arc<Session>> {
+        let id = sid()?;
+        reg.get(id).ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = id))
     };
-    let session = || -> Result<Arc<Session>> { reg.get(sid()?).ok_or_else(|| anyhow::anyhow!("no such session")) };
     match req.method.as_str() {
         "session.spawn" => {
             let mut s = Spawn {
-                program: p["program"].as_str().ok_or_else(|| anyhow::anyhow!("missing program"))?.into(),
+                program: p["program"].as_str().ok_or_else(|| missing("program"))?.into(),
                 args: p["args"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
                 cwd: p["cwd"].as_str().map(Into::into),
                 env: p["env"]
@@ -64,9 +65,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
                 let (live, max) = (reg.bus.live_workers(alive), reg.bus.limit());
                 if live >= max {
-                    anyhow::bail!(
-                        "worker limit reached ({live} running, max {max}): wait for one to finish or raise it with `axelstra limit N`"
-                    );
+                    return Err(axelstra_core::coded!(
+                        "session.worker_limit",
+                        "worker limit reached ({live} running, max {max}): wait for one to finish or raise it with `axelstra limit N`",
+                        live = live,
+                        max = max
+                    ));
                 }
             }
             if let Some(par) = parent {
@@ -139,7 +143,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         // an agent's hook (`axelstra hook`) says what it is doing: waiting, idle or working
         "session.hint" => {
             let state = axelstra_core::waiting::HintState::parse(p["state"].as_str().unwrap_or_default())
-                .ok_or_else(|| anyhow::anyhow!("state must be waiting, idle or working"))?;
+                .ok_or_else(|| axelstra_core::coded!("session.bad_state", "state must be waiting, idle or working"))?;
             session()?;
             reg.hints.set(sid()?, state);
             Ok(json!({}))

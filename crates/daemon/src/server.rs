@@ -286,11 +286,16 @@ fn ui_settings(saved: &Value) -> (&str, bool, &str) {
     (shell, saved["notify_sound"] != json!(false), mode)
 }
 
+/// The error of a request without a required parameter.
+pub(crate) fn missing(name: &str) -> anyhow::Error {
+    axelstra_core::coded!("rpc.missing_param", "missing {name}", name = name)
+}
+
 /// Copies the keys of a `settings.set` patch that are present into `saved`, rejecting invalid values.
 pub(crate) fn apply_ui_settings(saved: &mut Value, p: &Value) -> Result<()> {
     if let Some(s) = p["shell"].as_str() {
         if !SHELLS.contains(&s) {
-            return Err(anyhow::anyhow!("shell must be auto, pwsh, powershell, bash, wsl or cmd"));
+            return Err(axelstra_core::coded!("settings.bad_shell", "shell must be auto, pwsh, powershell, bash, wsl or cmd"));
         }
         saved["shell"] = json!(s);
     }
@@ -299,7 +304,7 @@ pub(crate) fn apply_ui_settings(saved: &mut Value, p: &Value) -> Result<()> {
     }
     if let Some(m) = p["notify_mode"].as_str() {
         if !NOTIFY_MODES.contains(&m) {
-            return Err(anyhow::anyhow!("notify_mode must be all, waiting or off"));
+            return Err(axelstra_core::coded!("settings.bad_notify_mode", "notify_mode must be all, waiting or off"));
         }
         saved["notify_mode"] = json!(m);
     }
@@ -317,13 +322,13 @@ const UI_MAX_TOTAL: usize = 512 * 1024;
 /// in its localStorage (pinned worktrees, folded groups, the notification list...), so they survive a changed WebView
 /// profile or a reinstall. A null value removes the key. Nothing is applied unless the whole patch is valid.
 fn apply_ui_state(saved: &mut Value, patch: &Value) -> Result<()> {
-    let patch = patch.as_object().ok_or_else(|| anyhow::anyhow!("ui must be an object of strings"))?;
+    let patch = patch.as_object().ok_or_else(|| axelstra_core::coded!("settings.ui_not_object", "ui must be an object of strings"))?;
     let mut ui = saved["ui"].as_object().cloned().unwrap_or_default();
     for (k, v) in patch {
         let key_ok =
             k.len() <= 64 && k.starts_with("axelstra.") && k.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
         if !key_ok {
-            anyhow::bail!("ui key {k:?} is not allowed");
+            return Err(axelstra_core::coded!("settings.ui_key_not_allowed", "ui key {k:?} is not allowed", k = k));
         }
         match v {
             Value::Null => {
@@ -332,12 +337,24 @@ fn apply_ui_state(saved: &mut Value, patch: &Value) -> Result<()> {
             Value::String(s) if s.len() <= UI_MAX_VALUE => {
                 ui.insert(k.clone(), v.clone());
             }
-            _ => anyhow::bail!("ui value for {k:?} must be a string of at most {UI_MAX_VALUE} bytes"),
+            _ => {
+                return Err(axelstra_core::coded!(
+                    "settings.ui_bad_value",
+                    "ui value for {k:?} must be a string of at most {max} bytes",
+                    k = k,
+                    max = UI_MAX_VALUE
+                ))
+            }
         }
     }
     let total: usize = ui.values().filter_map(Value::as_str).map(str::len).sum();
     if ui.len() > UI_MAX_KEYS || total > UI_MAX_TOTAL {
-        anyhow::bail!("ui state is too large ({} keys, {total} bytes)", ui.len());
+        return Err(axelstra_core::coded!(
+            "settings.ui_too_large",
+            "ui state is too large ({keys} keys, {total} bytes)",
+            keys = ui.len(),
+            total = total
+        ));
     }
     saved["ui"] = Value::Object(ui);
     Ok(())
@@ -537,7 +554,10 @@ fn spawn_scheduler(reg: Arc<Registry>) {
 /// Marks the automation as started now and returns it. The caller holds `auto_lock`.
 fn claim_automation(path: &std::path::Path, id: &str) -> Result<crate::automations::Automation> {
     let mut list = crate::automations::load(path);
-    let a = list.iter_mut().find(|a| a.id == id).ok_or_else(|| anyhow::anyhow!("unknown automation {id}"))?;
+    let a = list
+        .iter_mut()
+        .find(|a| a.id == id)
+        .ok_or_else(|| axelstra_core::coded!("automation.unknown", "unknown automation {id}", id = id))?;
     a.last_run = crate::automations::now_ts();
     let a = a.clone();
     crate::automations::save_all(path, &list)?;
@@ -563,7 +583,7 @@ fn launch_automation(reg: &Registry, a: &crate::automations::Automation) -> Resu
         Err(_) => {
             let ag = axelstra_core::agents::require(&a.agent)?;
             if ag.locate().is_none() {
-                anyhow::bail!("{}", ag.missing_message());
+                return Err(ag.missing_error());
             }
             crate::automations::agent_command(&a.agent, &a.prompt)?
         }
@@ -685,7 +705,7 @@ async fn accept_loop(path: &str, reg: Arc<Registry>, token: String) -> Result<()
     // a live daemon owns the socket; a leftover file from a crashed one is replaced
     if std::path::Path::new(path).exists() {
         if std::os::unix::net::UnixStream::connect(path).is_ok() {
-            anyhow::bail!("another daemon is already listening on {path}");
+            return Err(axelstra_core::coded!("daemon.already_running", "another daemon is already listening on {path}", path = path));
         }
         std::fs::remove_file(path)?;
     }
@@ -798,7 +818,9 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
                 after: &mut after,
             })
         }))
-        .unwrap_or_else(|_| Err(anyhow::anyhow!("erro interno do daemon em {} (ver crash.log)", req.method)));
+        .unwrap_or_else(|_| {
+            Err(axelstra_core::coded!("daemon.internal_error", "internal daemon error in {method} (see crash.log)", method = req.method))
+        });
         (req, res, after)
     })
     .await;
@@ -1102,12 +1124,20 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
         reg.wt_gen.fetch_add(1, Ordering::SeqCst);
     }
     if c.agent.is_some() && agent_forbidden(&req.method, p) {
-        anyhow::bail!("{} is not allowed to agents: it is done by the user in the app", req.method);
+        return Err(axelstra_core::coded!(
+            "rpc.agent_forbidden",
+            "{method} is not allowed to agents: it is done by the user in the app",
+            method = req.method
+        ));
     }
     // an agent reads its own inbox and writes only its own task file: its credential names the session
     if let (Some(me), "msg.inbox" | "notes.append") = (*c.agent, req.method.as_str()) {
         if p["session"].as_u64() != Some(u64::from(me)) {
-            anyhow::bail!("{} is only allowed for the agent's own session", req.method);
+            return Err(axelstra_core::coded!(
+                "rpc.agent_own_session",
+                "{method} is only allowed for the agent's own session",
+                method = req.method
+            ));
         }
     }
     match req.method.split('.').next().unwrap_or_default() {
