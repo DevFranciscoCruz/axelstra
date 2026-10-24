@@ -11,7 +11,7 @@ import { ago } from "./time";
 import { DOT_LABEL, dotOfSession, dotOfWorktree } from "./agentState";
 import { agentRowInfo, agentRowLabel, overlapsOf, overlapTitle } from "./agentRow";
 import { NoteView, openNote } from "./NoteView";
-import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
+import { MenuItem, isMenuKey, showMenu, showMenuAt } from "./ContextMenu";
 import { invoke } from "@tauri-apps/api/core";
 import { press } from "./a11y";
 import { S } from "./strings";
@@ -507,7 +507,18 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
           });
           return (
           <div class="project" classList={{ collapsed: projFolded(p.id) }}>
-            <div class="project-head" title={p.path} onContextMenu={(e) => showMenu(e, projectMenu(p))}>
+            <div
+              class="project-head"
+              title={p.path}
+              onContextMenu={(e) => showMenu(e, projectMenu(p))}
+              onKeyDown={(e) => {
+                // the menu key and Shift+F10 open the project menu from any button of the header
+                if (!isMenuKey(e)) return;
+                e.preventDefault();
+                const r = e.currentTarget.getBoundingClientRect();
+                showMenuAt(r.left + 24, r.bottom, projectMenu(p));
+              }}
+            >
               <Button
                 type="button"
                 variant="icon"
@@ -603,7 +614,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
                     style={depth() > 0 ? { "margin-left": `${depth() * 14}px` } : undefined}
                     onKeyDown={(e) => {
                       // the menu key and Shift+F10 open the row menu from the keyboard
-                      if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+                      if (isMenuKey(e)) {
                         e.preventDefault();
                         const r = e.currentTarget.getBoundingClientRect();
                         showMenuAt(r.left + 24, r.bottom, worktreeMenu(p, w, label(), ri()?.members));

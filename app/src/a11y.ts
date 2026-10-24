@@ -1,11 +1,13 @@
 import type { JSX } from "solid-js";
 
-/** Makes a clickable div/span reachable and operable from the keyboard. */
-export const press = (fn: (e: Event) => void, role: "button" | "tab" | "option" = "button"): JSX.HTMLAttributes<any> => ({
+/** Makes a clickable div/span reachable and operable from the keyboard. `extra` sees every key first (a row's own shortcuts, its menu key) so an explicit onKeyDown does not replace Enter/Space. */
+export const press = (fn: (e: Event) => void, role: "button" | "tab" | "option" = "button", extra?: (e: KeyboardEvent & { currentTarget: HTMLElement }) => void): JSX.HTMLAttributes<any> => ({
   role,
   tabindex: 0,
   onClick: fn,
   onKeyDown: (e) => {
+    extra?.(e);
+    if (e.defaultPrevented) return;
     if (e.target !== e.currentTarget) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
