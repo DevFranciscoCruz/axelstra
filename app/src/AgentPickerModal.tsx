@@ -20,7 +20,7 @@ export function AgentPickerModal(props: { project: string | undefined; done: (ag
           <Select value={choice()} label={S.app.agent} iconOnly options={agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))} onChange={setChoice} />
         </Field>
       </div>
-      <div class="m-actions" style={{ "justify-content": "flex-end" }}>
+      <div class="m-actions">
         <Button onClick={() => props.done(null)}>{S.cancel}</Button>
         <Button variant="default" onClick={go} ref={(el) => queueMicrotask(() => el.focus())}>
           {S.app.open}

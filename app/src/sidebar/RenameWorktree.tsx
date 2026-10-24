@@ -6,7 +6,7 @@ import { Button, Field, Input } from "../ui";
 export function RenameWorktree(props: { current: string; value: string; error: string; onInput: (v: string) => void; onClose: () => void; onSubmit: () => void }) {
   return (
     <Modal label="Mudar o nome do worktree" dirty={props.value.trim() !== props.current} onClose={props.onClose}>
-      <div class="m-title" style={{ "font-weight": "600" }}>Mudar o nome do worktree</div>
+      <div class="m-title font-semibold">Mudar o nome do worktree</div>
       <Field label="Nome" full><Input
           value={props.value}
           onInput={(e) => props.onInput(e.currentTarget.value)}
@@ -16,7 +16,7 @@ export function RenameWorktree(props: { current: string; value: string; error: s
       <Show when={props.error}>
         <div class="note-status bad" role="alert">{props.error}</div>
       </Show>
-      <div class="m-actions" style={{ "justify-content": "flex-end" }}>
+      <div class="m-actions">
         <Button onClick={props.onClose}>Cancelar</Button>
         <Button variant="default" disabled={!props.value.trim() || props.value.trim() === props.current} onClick={props.onSubmit}>
           Mudar o nome

@@ -115,7 +115,7 @@ export function Orchestra() {
 
   return (
     <Modal label={P.orchestra.title} onClose={() => setShowOrchestra(false)} class="modal auto">
-      <div class="m-title" style={{ "font-weight": "600" }}>{P.orchestra.title}</div>
+      <div class="m-title font-semibold">{P.orchestra.title}</div>
       <div class="orch-head auto-note">
         {P.orchestra.running(workerCount())}{P.orchestra.limit}
         <Input
@@ -133,7 +133,7 @@ export function Orchestra() {
         <For each={roots()}>{(s) => <Row s={s} depth={0} />}</For>
         <For each={orphans()}>{(s) => <Row s={s} depth={1} />}</For>
         <Show when={loners().length > 0}>
-          <div class="auto-note" style={{ "margin-top": "10px" }}>{P.orchestra.others}</div>
+          <div class="auto-note mt-2.5">{P.orchestra.others}</div>
           <For each={loners()}>{(s) => <Row s={s} depth={0} />}</For>
         </Show>
         <Show when={roots().length === 0 && orphans().length === 0 && loners().length === 0}>

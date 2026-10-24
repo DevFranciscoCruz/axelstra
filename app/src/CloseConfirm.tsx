@@ -33,7 +33,7 @@ export function CloseConfirm() {
   return (
     <Show when={open()}>
       <Modal label="Fechar janela" onClose={() => setOpen(false)}>
-        <div class="m-title" style={{ "font-weight": "600" }}>Fechar o Axelstra?</div>
+        <div class="m-title font-semibold">Fechar o Axelstra?</div>
         <div class="auto-note">
           {running() === 0
             ? "Não há sessões em execução."
@@ -43,7 +43,7 @@ export function CloseConfirm() {
         </div>
         <CheckboxField checked={keep()} onChange={setKeep}>Manter sessões e automatizações a correr em segundo plano</CheckboxField>
         <CheckboxField checked={skip()} onChange={setSkip}>Não perguntar novamente</CheckboxField>
-        <div class="m-actions" style={{ "justify-content": "flex-end" }}>
+        <div class="m-actions">
           <Button onClick={() => setOpen(false)}>Cancelar</Button>
           <Button variant="default" ref={(el: HTMLButtonElement) => queueMicrotask(() => el.focus())} onClick={confirm}>
             Fechar

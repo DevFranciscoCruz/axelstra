@@ -59,23 +59,8 @@ export function ErrorToast(props: { children?: JSX.Element }) {
       <div class="sr-only" role="alert" aria-atomic="true">
         {latestText("error")}
       </div>
-      <div
-        style={{
-          position: "fixed",
-          left: "50%",
-          bottom: "36px", // above the status bar (24px)
-          transform: "translateX(-50%)",
-          "z-index": 60,
-          display: "flex",
-          "flex-direction": "column",
-          gap: "8px",
-          "align-items": "stretch",
-          "max-width": "min(560px, 92vw)",
-          // the empty stack must not catch clicks meant for the app below it
-          "pointer-events": "none",
-        }}
-      >
-        <div style={{ display: "contents", "pointer-events": "auto" }}>
+      <div class="toast-stack">
+        <div class="toast-stack-in">
           <Show when={daemonReconnecting()}>
             <div class="error-toast notice" style={FLOW}>
               <span class="et-msg">{S.toast.reconnecting}</span>
