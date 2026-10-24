@@ -56,7 +56,6 @@ fn serve_hung(pipe: String) {
 fn a_hung_daemon_times_out_with_a_clear_error() {
     let pipe = format!("{}-hung-{}", common::base_pipe(), std::process::id());
     serve_hung(pipe.clone());
-    common::wait_ready(&pipe, &token);
     // a stuck test must not hang the suite
     std::thread::spawn(|| {
         std::thread::sleep(Duration::from_secs(60));
