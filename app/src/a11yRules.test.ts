@@ -54,6 +54,25 @@ describe("styles", () => {
     for (const bg of BACKGROUNDS) expect(contrast(muted, bg), `${muted} on ${bg}`).toBeGreaterThanOrEqual(4.5);
   });
 
+  // the first block of the stylesheet is the dark theme, the data-theme="light" block the light one
+  const light = /:root\[data-theme="light"\]\s*\{([^}]*)\}/.exec(css)![1];
+  const lightToken = (name: string) => new RegExp(name + ":\\s*(#[0-9a-fA-F]{6})").exec(light)![1];
+
+  it("--ok, --warn and --danger are at least 4.5:1 on --panel in both themes", () => {
+    for (const name of ["--ok", "--warn", "--danger"]) {
+      expect(contrast(token(name), token("--panel")), `dark ${name}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(lightToken(name), lightToken("--panel")), `light ${name}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("light --muted is readable on the light surfaces", () => {
+    for (const bg of ["--bg", "--panel", "--s1", "--s2"]) expect(contrast(lightToken("--muted"), lightToken(bg)), bg).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("finished worktree rows do not fade with opacity", () => {
+    expect(/\.item\.wt\.finished\s*\{[^}]*opacity/.test(css)).toBe(false);
+  });
+
   it("the project letter is readable on the accent", () => {
     expect(contrast(token("--on-accent"), token("--accent"))).toBeGreaterThanOrEqual(4.5);
     expect(/\.picon\.letter[^}]*color: var\(--on-accent\)/.test(css)).toBe(true);
