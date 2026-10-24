@@ -216,7 +216,7 @@ export const nudge = async (id: number, text: string) => {
 };
 
 /** What an agent should be told about the restart: it was mid-task, and/or workers it started were stopped. */
-export const restartNote = (interrupted: boolean, lost: string[]) => {
+const restartNote = (interrupted: boolean, lost: string[]) => {
   const parts: string[] = [];
   if (interrupted) parts.push("Axelstra was restarted and this conversation was resumed. You were in the middle of a task: continue where you left off.");
   if (lost.length) {
@@ -405,7 +405,6 @@ export const projectLogo = (id: string) => call<{ data_url: string | null }>("pr
 export const setProjectSetup = (id: string, setup: string) => call("project.setup", { id, setup });
 export const detectPackageManagers = (id: string) => call<{ installed: string[]; suggested: string | null; package_json?: boolean }>("pm.detect", { id });
 export type DispatchMeta = Record<string, { title?: string; archived?: boolean; requests?: string[]; updated?: number }>;
-export const dispatchMeta = () => call<DispatchMeta>("dispatch.meta");
 export const removeProject = (id: string) => call("project.remove", { id });
 export type EnvSkip = { path: string; reason: string };
 /** worktree.create also says what .worktreeinclude copied into the new worktree and what it left out */

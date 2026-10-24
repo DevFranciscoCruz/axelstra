@@ -5,23 +5,12 @@ import { Button } from "./ui";
 import { createPoller } from "./poller";
 import { errorText } from "./appError";
 import { S } from "./strings";
+import { readString, writeString } from "./persist";
 
 /** the version the user said "later" to: remembered, so a restart does not bring the same card back */
 const DISMISSED_KEY = "axelstra.updateDismissed";
-const loadDismissed = () => {
-  try {
-    return localStorage.getItem(DISMISSED_KEY);
-  } catch {
-    return null;
-  }
-};
-const saveDismissed = (v: string) => {
-  try {
-    localStorage.setItem(DISMISSED_KEY, v);
-  } catch {
-    /* storage unavailable: it just comes back next start */
-  }
-};
+const loadDismissed = () => readString(DISMISSED_KEY);
+const saveDismissed = (v: string) => writeString(DISMISSED_KEY, v); // storage unavailable: it just comes back next start
 // the card lives inside the shared toast stack (ErrorToast), so it flows there instead of floating on its own
 const FLOW = { position: "static", width: "auto", animation: "none" } as const;
 

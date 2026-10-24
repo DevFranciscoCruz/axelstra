@@ -1,5 +1,6 @@
 import { createSignal } from "solid-js";
 import type { ShipStatus } from "./api";
+import { readString, writeJson } from "./persist";
 
 export type NotifKind = "done" | "waiting" | "ci-fail" | "ci-pass" | "merged" | "error";
 
@@ -61,20 +62,8 @@ export const parseStored = (raw: string | null): NotifEntry[] => {
 
 export const unreadOf = (list: NotifEntry[]) => list.filter((e) => !e.read).length;
 
-const load = () => {
-  try {
-    return parseStored(localStorage.getItem(KEY));
-  } catch {
-    return [];
-  }
-};
-const save = (list: NotifEntry[]) => {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(list));
-  } catch {
-    /* private mode or full: the list lives on in memory */
-  }
-};
+const load = () => parseStored(readString(KEY));
+const save = (list: NotifEntry[]) => writeJson(KEY, list); // private mode or full: the list lives on in memory
 
 export const [notifications, setNotifications] = createSignal<NotifEntry[]>(load());
 export const unreadCount = () => unreadOf(notifications());

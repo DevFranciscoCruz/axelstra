@@ -25,6 +25,24 @@ export const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && 
 /** an array with its non-conforming members dropped */
 export const filterArray = <T>(v: unknown, ok: (x: unknown) => x is T): T[] => (Array.isArray(v) ? v.filter(ok) : []);
 
+/** the raw string under `key`; storage that is missing or throws gives null */
+export const readString = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+/** saves a raw string; storage that is missing, full or blocked is not an error */
+export const writeString = (key: string, v: string): void => {
+  try {
+    localStorage.setItem(key, v);
+  } catch {
+    /* storage unavailable */
+  }
+};
+
 /** saves `v` as JSON under `key`; storage that is missing, full or blocked is not an error (the value lasts until restart) */
 export const writeJson = (key: string, v: unknown): void => {
   try {
