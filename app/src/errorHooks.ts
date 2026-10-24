@@ -27,8 +27,9 @@ export function formatError(kind: string, value: unknown, where?: string): Error
   return { kind, message: clip(message, MAX_MESSAGE), stack: clip(stack, MAX_STACK) };
 }
 
-/** Installs window.onerror + unhandledrejection; `send` must never throw into the page. */
-export function installErrorHooks(send: (r: ErrorReport) => void, target: Window = window): void {
+/** Installs window.onerror + unhandledrejection; `send` must never throw into the page.
+ *  `onRejection` also gets every unhandled rejection (the app shows it as an error toast instead of failing silently). */
+export function installErrorHooks(send: (r: ErrorReport) => void, target: Window = window, onRejection?: (reason: unknown, r: ErrorReport) => void): void {
   const safe = (r: ErrorReport) => {
     try {
       send(r);
@@ -41,6 +42,12 @@ export function installErrorHooks(send: (r: ErrorReport) => void, target: Window
     safe(formatError("error", e.error ?? e.message, where));
   });
   target.addEventListener("unhandledrejection", (e: PromiseRejectionEvent) => {
-    safe(formatError("unhandledrejection", e.reason));
+    const r = formatError("unhandledrejection", e.reason);
+    safe(r);
+    try {
+      onRejection?.(e.reason, r);
+    } catch {
+      /* showing the failure must not cause errors */
+    }
   });
 }

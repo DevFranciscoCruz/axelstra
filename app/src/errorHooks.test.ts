@@ -50,3 +50,21 @@ describe("installErrorHooks", () => {
     expect(got[1]).toMatchObject({ kind: "unhandledrejection", message: "nope" });
   });
 });
+
+describe("installErrorHooks onRejection", () => {
+  it("hands unhandled rejections to onRejection, not plain errors, and survives it throwing", () => {
+    const target = new EventTarget();
+    const seen: unknown[] = [];
+    installErrorHooks(
+      () => {},
+      target as unknown as Window,
+      (reason) => {
+        seen.push(reason);
+        throw new Error("toast failed");
+      },
+    );
+    target.dispatchEvent(Object.assign(new Event("error"), { error: new Error("oops"), message: "oops" }));
+    target.dispatchEvent(Object.assign(new Event("unhandledrejection"), { reason: "nope" }));
+    expect(seen).toEqual(["nope"]);
+  });
+});

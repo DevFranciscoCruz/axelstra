@@ -3,6 +3,7 @@ import { projectEnvPreview, setProjectSetup } from "./api";
 import { Modal } from "./Modal";
 import { projects, refreshProjects, setError } from "./store";
 import { Button, Field, Input } from "./ui";
+import { P } from "./strings.panels";
 
 const LIST = { margin: "0", "padding-left": "18px", "font-family": "monospace", "font-size": "12px", "line-height": "1.5" };
 
@@ -28,17 +29,17 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
   };
 
   return (
-    <Modal label={`Definições de ${project()?.name ?? "projeto"}`} class="modal" dirty={dirty()} onClose={props.onClose}>
+    <Modal label={P.projectSettings.labelOf(project()?.name ?? P.projectSettings.project)} class="modal" dirty={dirty()} onClose={props.onClose}>
       <div class="auto-head">
         <strong>{project()?.name}</strong>
         <span class="grow" />
-        <Button onClick={props.onClose}>Fechar</Button>
+        <Button onClick={props.onClose}>{P.projectSettings.close}</Button>
       </div>
 
-      <Field label="Comando de setup">
+      <Field label={P.projectSettings.setup}>
         <Input
           id="ps-setup"
-          placeholder="ex.: bun install (vazio = nenhum)"
+          placeholder={P.projectSettings.setupPlaceholder}
           value={setup()}
           onInput={(e) => setSetup(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -47,28 +48,26 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
         />
       </Field>
       <div class="auto-note">
-        Corre num terminal visível de cada worktree novo. Fica guardado só nesta app, nunca no repositório: um repositório clonado não consegue
-        mandar o Axelstra correr comandos.
+        {P.projectSettings.setupNote}
       </div>
 
-      <div class="text-xs text-muted-foreground">Ficheiros copiados para worktrees novos</div>
+      <div class="text-xs text-muted-foreground">{P.projectSettings.copied}</div>
       <div class="auto-note">
-        Lista no ficheiro <code>.worktreeinclude</code>, na raiz do projeto, os padrões (sintaxe do .gitignore) dos ficheiros ignorados pelo git
-        a copiar do checkout principal, por exemplo <code>.env</code> ou <code>.env.local</code>. Máximo de 50 ficheiros de 5 MB cada.
+        {P.projectSettings.includePre}<code>.worktreeinclude</code>{P.projectSettings.includeMid}<code>.env</code>{P.projectSettings.includeOr}<code>.env.local</code>{P.projectSettings.includePost}
       </div>
-      <Show when={preview.state === "ready"} fallback={<div class="auto-note">{preview.error ? "Não foi possível ler a lista." : "A ler…"}</div>}>
+      <Show when={preview.state === "ready"} fallback={<div class="auto-note">{preview.error ? P.projectSettings.readFailed : P.projectSettings.reading}</div>}>
         <Show
           when={preview()!.has_file}
-          fallback={<div class="auto-note">Este projeto não tem <code>.worktreeinclude</code>: nada será copiado.</div>}
+          fallback={<div class="auto-note">{P.projectSettings.noFilePre}<code>.worktreeinclude</code>{P.projectSettings.noFilePost}</div>}
         >
-          <Show when={preview()!.files.length} fallback={<div class="auto-note">Nenhum ficheiro ignorado corresponde aos padrões.</div>}>
-            <ul style={LIST} aria-label="Ficheiros que serão copiados">
+          <Show when={preview()!.files.length} fallback={<div class="auto-note">{P.projectSettings.noMatch}</div>}>
+            <ul style={LIST} aria-label={P.projectSettings.willCopy}>
               <For each={preview()!.files}>{(f) => <li>{f}</li>}</For>
             </ul>
           </Show>
           <Show when={preview()!.skipped.length}>
-            <div class="auto-note">Ficam de fora:</div>
-            <ul style={LIST} aria-label="Ficheiros que ficam de fora">
+            <div class="auto-note">{P.projectSettings.skippedHead}</div>
+            <ul style={LIST} aria-label={P.projectSettings.skippedLabel}>
               <For each={preview()!.skipped}>
                 {(s) => (
                   <li>
@@ -82,10 +81,10 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
       </Show>
 
       <div class="m-actions">
-        <Button onClick={() => void refetch()}>Atualizar lista</Button>
+        <Button onClick={() => void refetch()}>{P.projectSettings.refresh}</Button>
         <span class="grow" />
         <Button variant="default" disabled={saving() || !dirty()} onClick={() => void save()}>
-          Guardar
+          {P.projectSettings.save}
         </Button>
       </div>
     </Modal>

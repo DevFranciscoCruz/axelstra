@@ -1,18 +1,31 @@
 import { Dialog as K } from "@kobalte/core/dialog";
-import { JSX, onCleanup, onMount } from "solid-js";
+import { JSX, createEffect, onCleanup, onMount } from "solid-js";
+import { Portal } from "solid-js/web";
 import { menuOpen } from "../ContextMenu";
-import { isTopModal, popModal, pushModal } from "../modalStack";
+import { isTopModal, popModal, pushModal, syncShell } from "../modalStack";
 
 const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
-export type DialogProps = { label: string; onClose: () => void; dirty?: boolean; class?: string; backClass?: string; children: JSX.Element };
+export type DialogProps = {
+  label: string;
+  onClose: () => void;
+  /** unsaved input: a click on the backdrop must not close (and lose) it */
+  dirty?: boolean;
+  /** false: the backdrop never closes this dialog (a choice that must be made on purpose) */
+  closeOnBackdrop?: boolean;
+  class?: string;
+  backClass?: string;
+  children: JSX.Element;
+};
 
-/** Dialog shell on Kobalte: Esc closes (top dialog only), Tab stays inside, focus returns to where it came from.
- *  Kobalte supplies the dialog semantics; Esc, Tab and the backdrop are handled here so stacked dialogs, menus and
- *  Selects keep the layering rules of `modalStack`. It is not modal on purpose: that would block the menus that
- *  open above a dialog. */
+/** Modal dialog shell on Kobalte. Real modality: the dialog sits in a portal on <body>, the app shell
+ *  (`data-app-shell`) is made `inert` while any dialog is open, and a dialog under another one is inert too. Esc closes the
+ *  top dialog only, Tab stays inside it, and focus goes back to where it came from. Kobalte supplies the semantics;
+ *  Esc, Tab and the backdrop are handled here so stacked dialogs, menus and Selects keep the layering rules of
+ *  `modalStack` (menus live outside the shell, so they still open above a dialog). */
 export function Dialog(props: DialogProps) {
   let box: HTMLDivElement | undefined;
+  let back: HTMLDivElement | undefined;
   const from = document.activeElement as HTMLElement | null;
   const id = pushModal();
   const onKey = (e: KeyboardEvent) => {
@@ -42,31 +55,54 @@ export function Dialog(props: DialogProps) {
       }
     }
   };
+  // only the top dialog is interactive; the ones under it wait, inert
+  createEffect(() => {
+    const top = isTopModal(id);
+    if (!back) return;
+    if (top) back.removeAttribute("inert");
+    else back.setAttribute("inert", "");
+  });
   onMount(() => {
     window.addEventListener("keydown", onKey, true);
-    if (box && !box.contains(document.activeElement)) box.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    syncShell();
+    // the portal content may be created just after mount: then look for it on the next microtask
+    const focusIn = () => {
+      if (box && !box.contains(document.activeElement)) box.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    };
+    focusIn();
+    if (!box) queueMicrotask(focusIn);
   });
   onCleanup(() => {
     window.removeEventListener("keydown", onKey, true);
     popModal(id);
-    from?.focus?.();
+    // the shell (or the dialog underneath) may still be inert for a moment: try now, then once more
+    const back = () => from?.isConnected && document.activeElement !== from && from.focus?.();
+    back();
+    queueMicrotask(back);
   });
+  const backdrop = (e: MouseEvent) => {
+    if (e.target !== e.currentTarget) return;
+    if (props.dirty || props.closeOnBackdrop === false || !isTopModal(id) || menuOpen()) return;
+    props.onClose();
+  };
   return (
-    <K open modal={false} preventScroll={false}>
-      <div class={props.backClass ?? "modal-back"} onMouseDown={(e) => e.target === e.currentTarget && !props.dirty && props.onClose()}>
-        <K.Content
-          ref={box}
-          class={props.class ?? "modal"}
-          aria-modal="true"
-          aria-label={props.label}
-          onEscapeKeyDown={(e) => e.preventDefault()}
-          onInteractOutside={(e) => e.preventDefault()}
-          onOpenAutoFocus={(e) => e.preventDefault()}
-          onCloseAutoFocus={(e) => e.preventDefault()}
-        >
-          {props.children}
-        </K.Content>
-      </div>
-    </K>
+    <Portal>
+      <K open modal={false} preventScroll={false}>
+        <div ref={back} class={props.backClass ?? "modal-back"} onMouseDown={backdrop}>
+          <K.Content
+            ref={box}
+            class={props.class ?? "modal"}
+            aria-modal="true"
+            aria-label={props.label}
+            onEscapeKeyDown={(e) => e.preventDefault()}
+            onInteractOutside={(e) => e.preventDefault()}
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            onCloseAutoFocus={(e) => e.preventDefault()}
+          >
+            {props.children}
+          </K.Content>
+        </div>
+      </K>
+    </Portal>
   );
 }
