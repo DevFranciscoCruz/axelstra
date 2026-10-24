@@ -200,7 +200,7 @@ pub fn known_worktree(store: &Path, path: &str) -> Result<PathBuf> {
             }
         }
     }
-    bail!("not a worktree of a registered project")
+    Err(axelstra_core::coded!("worktree.unknown", "not a worktree of a registered project: {path}", path = path))
 }
 
 pub fn find(store: &Path, id: &str) -> Result<Project> {

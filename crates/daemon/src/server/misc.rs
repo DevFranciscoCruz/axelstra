@@ -218,7 +218,23 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             reg.wt_gen.fetch_add(1, Ordering::SeqCst);
             Ok(serde_json::to_value(out)?)
         }
-        "notices.take" => Ok(json!({"notices": crate::store::take_notices()})),
+        "notices.take" => {
+            // `notices` stays the English lines; `items` (additive) pairs each with its message code, when it has one
+            let items = crate::store::take_notice_items();
+            let items: Vec<Value> = items
+                .iter()
+                .map(|(t, c)| {
+                    let mut o = json!({"text": t});
+                    if let Some(c) = c {
+                        o["code"] = json!(c.code);
+                        o["params"] = c.params_json();
+                    }
+                    o
+                })
+                .collect();
+            let notices: Vec<&str> = items.iter().filter_map(|i| i["text"].as_str()).collect();
+            Ok(json!({"notices": notices, "items": items}))
+        }
         // used by the app updater: the installer cannot replace a running axelstra.exe.
         // Sessions die with the daemon (Job Objects), so the UI warns before calling this.
         "daemon.shutdown" => {

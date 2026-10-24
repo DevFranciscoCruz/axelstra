@@ -1,5 +1,6 @@
+use crate::coded;
 use crate::sync::LockRecover;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread::sleep;
@@ -55,10 +56,15 @@ pub fn run_timeout(cwd: &Path, args: &[&str], limit: Duration) -> Result<Out> {
         .args(args);
     let o = crate::exec::run_capped(&mut cmd, limit, RUN_MAX_BYTES).with_context(|| format!("spawn git {args:?}"))?;
     if o.timed_out {
-        bail!("git {} timed out after {}s", args.first().unwrap_or(&""), limit.as_secs());
+        return Err(coded!("git.timeout", "git {cmd} timed out after {secs}s", cmd = args.first().unwrap_or(&""), secs = limit.as_secs()));
     }
     if o.truncated {
-        bail!("git {} printed more than {} MiB", args.first().unwrap_or(&""), RUN_MAX_BYTES >> 20);
+        return Err(coded!(
+            "git.too_big",
+            "git {cmd} printed more than {mib} MiB",
+            cmd = args.first().unwrap_or(&""),
+            mib = RUN_MAX_BYTES >> 20
+        ));
     }
     Ok(Out { ok: o.success(), stdout: o.stdout_lossy().trim().to_string(), stderr: o.stderr_lossy().trim().to_string() })
 }
@@ -66,9 +72,51 @@ pub fn run_timeout(cwd: &Path, args: &[&str], limit: Duration) -> Result<Out> {
 pub fn must(cwd: &Path, args: &[&str]) -> Result<String> {
     let o = run(cwd, args)?;
     if !o.ok {
-        bail!("git {} failed: {}", args.join(" "), o.stderr);
+        return Err(failure(args, &o.stderr));
     }
     Ok(o.stdout)
+}
+
+/// The error for a git command that exited non-zero: `git.failed` unless its stderr is one of the usual causes, which
+/// get a code of their own so the UI can say what to do (the English text keeps git's own words).
+pub fn failure(args: &[&str], stderr: &str) -> anyhow::Error {
+    let (cmd, detail) = (args.join(" "), stderr);
+    match classify_failure(stderr) {
+        Some("git.not_repo") => coded!("git.not_repo", "git {cmd} failed: {detail}", cmd = cmd, detail = detail),
+        Some("git.dirty") => coded!("git.dirty", "git {cmd} failed: {detail}", cmd = cmd, detail = detail),
+        Some("git.exists") => coded!("git.exists", "git {cmd} failed: {detail}", cmd = cmd, detail = detail),
+        Some("git.remote") => coded!("git.remote", "git {cmd} failed: {detail}", cmd = cmd, detail = detail),
+        Some("git.rejected") => coded!("git.rejected", "git {cmd} failed: {detail}", cmd = cmd, detail = detail),
+        Some("git.conflicts") => coded!("git.conflicts", "git {cmd} failed: {detail}", cmd = cmd, detail = detail),
+        Some("git.nothing_to_commit") => coded!("git.nothing_to_commit", "git {cmd} failed: {detail}", cmd = cmd, detail = detail),
+        Some("git.bad_ref") => coded!("git.bad_ref", "git {cmd} failed: {detail}", cmd = cmd, detail = detail),
+        _ => coded!("git.failed", "git {cmd} failed: {detail}", cmd = cmd, detail = detail),
+    }
+}
+
+/// Which usual cause git's stderr names, as a message code.
+pub fn classify_failure(stderr: &str) -> Option<&'static str> {
+    let m = stderr.to_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|n| m.contains(n));
+    if has(&["not a git repository"]) {
+        Some("git.not_repo")
+    } else if has(&["contains modified or untracked files", "local changes would be overwritten"]) {
+        Some("git.dirty")
+    } else if has(&["is already checked out", "already exists"]) {
+        Some("git.exists")
+    } else if has(&["could not read from remote", "authentication failed", "permission denied (publickey)", "could not resolve host"]) {
+        Some("git.remote")
+    } else if has(&["non-fast-forward", "failed to push", "rejected"]) {
+        Some("git.rejected")
+    } else if has(&["merge conflict", "automatic merge failed", "conflict ("]) {
+        Some("git.conflicts")
+    } else if has(&["nothing to commit", "no changes added to commit"]) {
+        Some("git.nothing_to_commit")
+    } else if has(&["did not match", "unknown revision", "bad revision", "not a valid object name", "invalid reference"]) {
+        Some("git.bad_ref")
+    } else {
+        None
+    }
 }
 
 /// Absolute common git dir, shared by every worktree of the repo.
@@ -402,5 +450,34 @@ mod run_tests {
         assert!(WT_CACHE.lock_recover().as_ref().is_none_or(|m| !m.contains_key(&key)));
         assert_eq!(a.len(), worktree_list(&dir).unwrap().len());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+
+    #[test]
+    fn stderr_picks_the_usual_causes() {
+        let c = |s: &str| classify_failure(s);
+        assert_eq!(c("fatal: not a git repository (or any parent)"), Some("git.not_repo"));
+        assert_eq!(c("error: Your local changes would be overwritten by merge"), Some("git.dirty"));
+        assert_eq!(c("fatal: 'x' is already checked out at 'y'"), Some("git.exists"));
+        assert_eq!(c("fatal: Could not read from remote repository."), Some("git.remote"));
+        assert_eq!(c(" ! [rejected] main -> main (non-fast-forward)"), Some("git.rejected"));
+        assert_eq!(c("CONFLICT (content): Merge conflict in a.rs"), Some("git.conflicts"));
+        assert_eq!(c("nothing to commit, working tree clean"), Some("git.nothing_to_commit"));
+        assert_eq!(c("fatal: bad revision 'zz'"), Some("git.bad_ref"));
+        assert_eq!(c("something else"), None);
+    }
+
+    #[test]
+    fn failure_keeps_git_words_and_carries_the_code() {
+        let e = failure(&["push", "origin"], "fatal: not a git repository");
+        assert_eq!(format!("{e}"), "git push origin failed: fatal: not a git repository");
+        let c = crate::msg::find(&e).unwrap();
+        assert_eq!(c.code, "git.not_repo");
+        assert_eq!(c.params["cmd"], "push origin");
+        assert_eq!(crate::msg::find(&failure(&["x"], "weird")).unwrap().code, "git.failed");
     }
 }

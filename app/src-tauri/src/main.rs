@@ -402,21 +402,45 @@ fn with_client<T>(slot: &Mutex<Option<Client>>, retry: bool, f: impl Fn(&mut Cli
 }
 
 #[tauri::command]
-async fn daemon_call(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, String> {
+async fn daemon_call(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, CallError> {
     check_call(&method, &params)?;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || routed(&st, &method, params, false)).await.map_err(|e| e.to_string())?
 }
 
 /// One call, to this machine's daemon or (when its paths or session id say so) to a remote host's.
-fn routed(st: &State, method: &str, params: Value, bg: bool) -> Result<Value, String> {
+fn routed(st: &State, method: &str, params: Value, bg: bool) -> Result<Value, CallError> {
     let slot = if bg { &st.bg } else { &st.control };
     let local = |m: &str, p: Value| with_client(slot, read_only(m), |c| c.call(m, p.clone()));
-    hosts::route(method, params, bg, read_only(method), &local).map_err(|e| format!("{e:#}"))
+    hosts::route(method, params, bg, read_only(method), &local).map_err(|e| CallError::from(&e))
+}
+
+/// What a failed call rejects with in the webview: the English `message` (what an old frontend shows) and, when the
+/// daemon (or this host) raised a coded error, its `code` and `params`, which the UI translates. See `axelstra_core::msg`.
+#[derive(serde::Serialize, Debug)]
+struct CallError {
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<std::collections::BTreeMap<String, String>>,
+}
+
+impl From<&anyhow::Error> for CallError {
+    fn from(e: &anyhow::Error) -> Self {
+        let c = axelstra_core::msg::find(e);
+        CallError { message: format!("{e:#}"), code: c.map(|c| c.code.clone()), params: c.map(|c| c.params.clone()) }
+    }
+}
+
+impl From<String> for CallError {
+    fn from(message: String) -> Self {
+        CallError { message, code: None, params: None }
+    }
 }
 
 #[tauri::command]
-async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, String> {
+async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, CallError> {
     check_call(&method, &params)?;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || routed(&st, &method, params, true)).await.map_err(|e| e.to_string())?
@@ -438,11 +462,11 @@ fn pick_folder(app: &tauri::AppHandle, title: &str, start: Option<std::path::Pat
 
 /// Native folder pick, then `project.add` with that path. Returns the daemon's project, or null when cancelled.
 #[tauri::command]
-async fn project_add_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, String> {
+async fn project_add_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, CallError> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(path) = pick_folder(&app, &title, None)? else { return Ok(Value::Null) };
-        with_client(&st.control, false, |c| c.call("project.add", json!({"path": path}))).map_err(|e| format!("{e:#}"))
+        let Some(path) = pick_folder(&app, &title, None).map_err(CallError::from)? else { return Ok(Value::Null) };
+        with_client(&st.control, false, |c| c.call("project.add", json!({"path": path}))).map_err(|e| CallError::from(&e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -451,11 +475,13 @@ async fn project_add_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<Sta
 /// Native pick of the backup folder (it opens on `<data dir>/backups`), then `backup.restore` with that path.
 /// Returns the daemon's answer, or null when cancelled.
 #[tauri::command]
-async fn backup_restore_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, String> {
+async fn backup_restore_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, CallError> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(path) = pick_folder(&app, &title, Some(proto::data_dir().join("backups")))? else { return Ok(Value::Null) };
-        with_client(&st.control, false, |c| c.call("backup.restore", json!({"path": path}))).map_err(|e| format!("{e:#}"))
+        let Some(path) = pick_folder(&app, &title, Some(proto::data_dir().join("backups"))).map_err(CallError::from)? else {
+            return Ok(Value::Null);
+        };
+        with_client(&st.control, false, |c| c.call("backup.restore", json!({"path": path}))).map_err(|e| CallError::from(&e))
     })
     .await
     .map_err(|e| e.to_string())?
