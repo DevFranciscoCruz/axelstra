@@ -2,7 +2,7 @@ import { Show, createSignal } from "solid-js";
 import { Modal } from "./Modal";
 import { Button } from "./ui";
 
-type Opts = { title?: string; kind?: "warning" | "info" | "error"; okLabel?: string; cancelLabel?: string };
+type Opts = { title?: string; kind?: "danger" | "warning" | "info" | "error"; okLabel?: string; cancelLabel?: string };
 type Pending = { message: string; opts: Opts; resolve: (ok: boolean) => void; /** a third button: its label, and what answering it resolves */ third?: { label: string; resolve: () => void } };
 
 const [pending, setPending] = createSignal<Pending | null>(null);
@@ -24,8 +24,11 @@ export const askSave = (message: string, title: string) =>
 /** discarding unsaved text (a draft, an edited form) */
 export const askDiscard = (what: string) => ask(`${what} Descartar as alterações?`, { title: "Descartar alterações", kind: "warning", okLabel: "Descartar", cancelLabel: "Continuar a editar" });
 
-/** a warning or an error is about something that cannot be undone: the safe button gets the focus, not the one that proceeds */
-export const focusesCancel = (kind: Opts["kind"]) => kind === "warning" || kind === "error";
+/** a danger or an error is about something that cannot be undone, a warning about something that is merely consequential (push, merge): both focus the safe button, not the one that proceeds */
+export const focusesCancel = (kind: Opts["kind"]) => kind === "danger" || kind === "warning" || kind === "error";
+
+/** only irreversible actions get the red confirm button */
+export const isDanger = (kind: Opts["kind"]) => kind === "danger" || kind === "error";
 
 const answerThird = () => {
   const p = pending();
@@ -54,7 +57,7 @@ export function ConfirmHost() {
           <div class="m-actions" style={{ "justify-content": "flex-end" }}>
             <Button ref={(el: HTMLButtonElement) => focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(false)}>{p.opts.cancelLabel ?? "Cancelar"}</Button>
             <Show when={p.third}>{(t) => <Button variant="destructive" onClick={answerThird}>{t().label}</Button>}</Show>
-            <Button variant={focusesCancel(p.opts.kind) && !p.third ? "destructive" : "default"} class={focusesCancel(p.opts.kind) && !p.third ? "primary kind-warn" : "primary"} ref={(el: HTMLButtonElement) => !focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(true)}>
+            <Button variant={isDanger(p.opts.kind) && !p.third ? "destructive" : "default"} class={isDanger(p.opts.kind) && !p.third ? "primary kind-warn" : "primary"} ref={(el: HTMLButtonElement) => !focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(true)}>
               {p.opts.okLabel ?? "Sim"}
             </Button>
           </div>

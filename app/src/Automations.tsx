@@ -86,7 +86,7 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
     });
 
   const remove = async (a: Automation) => {
-    const ok = await ask(`Apagar a automatização "${a.name}"?`, { title: "Apagar", kind: "warning", okLabel: "Apagar", cancelLabel: "Cancelar" });
+    const ok = await ask(`Apagar a automatização "${a.name}"?`, { title: "Apagar", kind: "danger", okLabel: "Apagar", cancelLabel: "Cancelar" });
     if (!ok) return;
     try {
       await deleteAutomation(a.id);

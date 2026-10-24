@@ -146,12 +146,12 @@ export function DockerView() {
       force: `Remover à força "${c.name}"? O contentor é morto sem aviso (SIGKILL) e apagado. Os ficheiros que só existem dentro dele perdem-se.`,
       volumes: `Remover "${c.name}" e os seus volumes anónimos? Os dados guardados nesses volumes perdem-se. Volumes com nome ficam.`,
     }[mode];
-    if (!(await ask(what, { title: mode === "force" ? "Remover à força" : "Remover contentor", kind: "warning", okLabel: mode === "force" ? "Remover à força" : "Remover", cancelLabel: "Cancelar" }))) return;
+    if (!(await ask(what, { title: mode === "force" ? "Remover à força" : "Remover contentor", kind: "danger", okLabel: mode === "force" ? "Remover à força" : "Remover", cancelLabel: "Cancelar" }))) return;
     if (selId() === c.id) setSelId(null);
     await doAction("container.remove", c, "Removido", { force: mode === "force", volumes: mode === "volumes" });
   };
   const confirmKill = async (c: DockerContainer) => {
-    if (await ask(`Matar "${c.name}" sem aviso (SIGKILL)? Não tem oportunidade de guardar nada.`, { title: "Matar contentor", kind: "warning", okLabel: "Matar", cancelLabel: "Cancelar" })) await doAction("container.kill", c, "Morto");
+    if (await ask(`Matar "${c.name}" sem aviso (SIGKILL)? Não tem oportunidade de guardar nada.`, { title: "Matar contentor", kind: "danger", okLabel: "Matar", cancelLabel: "Cancelar" })) await doAction("container.kill", c, "Morto");
   };
 
   const bulk = async (group: string, items: DockerContainer[], kind: "up" | "stop" | "rm") => {
@@ -161,7 +161,7 @@ export function DockerView() {
     if (kind === "stop") todo = items.filter(isRunning);
     if (!todo.length) return say(kind === "up" ? `"${label}" já está a correr.` : `"${label}" não tem nada a correr.`);
     if (kind === "stop" && !(await ask(`Parar ${todo.length} contentor(es) de "${label}"?\n${todo.map((c) => c.name).join("\n")}`, { title: "Parar grupo", kind: "warning", okLabel: "Parar", cancelLabel: "Cancelar" }))) return;
-    if (kind === "rm" && !(await ask(`Apagar ${todo.length} contentor(es) de "${label}", mesmo os que estão a correr?\n${todo.map((c) => c.name).join("\n")}\n\nOs ficheiros que só existem dentro deles perdem-se. Os volumes ficam.`, { title: "Apagar grupo", kind: "warning", okLabel: "Apagar", cancelLabel: "Cancelar" }))) return;
+    if (kind === "rm" && !(await ask(`Apagar ${todo.length} contentor(es) de "${label}", mesmo os que estão a correr?\n${todo.map((c) => c.name).join("\n")}\n\nOs ficheiros que só existem dentro deles perdem-se. Os volumes ficam.`, { title: "Apagar grupo", kind: "danger", okLabel: "Apagar", cancelLabel: "Cancelar" }))) return;
     const action: DockerAction = kind === "up" ? "container.start" : kind === "stop" ? "container.stop" : "container.remove";
     await act(`${kind === "up" ? "Iniciados" : kind === "stop" ? "Parados" : "Apagados"} ${todo.length} em "${label}"`, async () => {
       const failed: string[] = [];
@@ -190,7 +190,7 @@ export function DockerView() {
       images: "Remover as imagens sem nome nem etiqueta (dangling), que nenhum contentor usa? Imagens com nome ficam.",
       volumes: "Remover os volumes anónimos que nenhum contentor usa? Os dados guardados neles perdem-se. Volumes com nome ficam.",
     }[kind];
-    return ask(text, { title: "Limpar", kind: "warning", okLabel: "Limpar", cancelLabel: "Cancelar" }).then((ok) => {
+    return ask(text, { title: "Limpar", kind: "danger", okLabel: "Limpar", cancelLabel: "Cancelar" }).then((ok) => {
       if (!ok) return;
       void act("Limpeza feita.", async () => {
         const out = await dockerAction(`prune.${kind}` as DockerAction);
@@ -400,13 +400,13 @@ export function DockerView() {
 
             <Show when={nav() === "volumes"}>
               <VolumesList list={volumes()} q={q()} busy={busy()} onRemove={async (v) => {
-                if (await ask(`Remover o volume "${v.name}"? Os dados guardados nele perdem-se.`, { title: "Remover volume", kind: "warning", okLabel: "Remover", cancelLabel: "Cancelar" }))
+                if (await ask(`Remover o volume "${v.name}"? Os dados guardados nele perdem-se.`, { title: "Remover volume", kind: "danger", okLabel: "Remover", cancelLabel: "Cancelar" }))
                   await act(`Volume removido: ${v.name}`, () => dockerAction("volume.remove", { id: v.name }));
               }} />
             </Show>
             <Show when={nav() === "images"}>
               <ImagesList list={images()} q={q()} busy={busy()} onRemove={async (i) => {
-                if (await ask(`Remover a imagem ${i.tags[0] ?? i.id}? Pode ser descarregada ou construída de novo.`, { title: "Remover imagem", kind: "warning", okLabel: "Remover", cancelLabel: "Cancelar" }))
+                if (await ask(`Remover a imagem ${i.tags[0] ?? i.id}? Pode ser descarregada ou construída de novo.`, { title: "Remover imagem", kind: "danger", okLabel: "Remover", cancelLabel: "Cancelar" }))
                   await act(`Imagem removida: ${i.tags[0] ?? i.id}`, () => dockerAction("image.remove", { id: i.id }));
               }} />
             </Show>

@@ -376,7 +376,7 @@ export function Sidebar() {
   const cleanFinished = async (names: string[]) => {
     const ok = await ask(
       `Remover os worktrees concluídos (${names.length})?\n\n${names.join("\n")}\n\nA limpeza remove todos os worktrees já merged, de todos os projetos.`,
-      { title: "Limpar concluídos", kind: "warning", okLabel: "Remover", cancelLabel: "Cancelar" },
+      { title: "Limpar concluídos", kind: "danger", okLabel: "Remover", cancelLabel: "Cancelar" },
     );
     if (!ok) return;
     try {
@@ -446,7 +446,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
     const lost = risks.length ? `\n\nVais perder: ${risks.join("; ")}.` : "\n\nNão há alterações nem commits por enviar.";
     const ok = await ask(
       `Remover o worktree "${name}"?${lost}\n\nA pasta e o branch são apagados e os terminais dele são fechados.`,
-      { title: "Remover worktree", kind: "warning" },
+      { title: "Remover worktree", kind: "danger" },
     );
     if (!ok || removing.has(norm(path))) return;
     removing.add(norm(path));
