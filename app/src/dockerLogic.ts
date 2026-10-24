@@ -87,3 +87,15 @@ export const joinPath = (dir: string, name: string) => {
   if (name === "..") return dir.replace(/\/[^/]*\/?$/, "") || "/";
   return `${dir.replace(/\/$/, "")}/${name}`;
 };
+
+/** a request token: only the answer to the latest request may be applied, an older one that arrives late is dropped */
+export const createLatest = () => {
+  let n = 0;
+  return { next: () => ++n, isCurrent: (t: number) => t === n };
+};
+
+/** drops the remembered shells whose session is gone, so the map does not grow with every closed one */
+export const pruneShells = (shells: Map<string, number>, liveIds: Iterable<number>) => {
+  const live = new Set(liveIds);
+  for (const [cid, sid] of shells) if (!live.has(sid)) shells.delete(cid);
+};
