@@ -151,3 +151,19 @@ export const projectMenu = (
   { separator: true },
   { label: P.sidebar.dropLabel, icon: "x", danger: true, run: () => d.dropProject(p.id, p.name) },
 ];
+
+export type AgentMenuDeps = Pick<MenuDeps, "run" | "copy"> & {
+  open: () => void;
+  /** closes the session the way its tab closes (with the same confirmation) */
+  end: () => void;
+};
+
+/** Right-click menu of an agent row in the sidebar; `wt` is the worktree the session works in. */
+export const agentMenu = (d: AgentMenuDeps, id: number, wt: string): MenuItem[] => [
+  { label: T.agentOpen, icon: "play", run: d.open },
+  { label: T.agentCopyId, icon: "copy", run: () => d.copy(String(id)) },
+  { label: T.agentCopyWt, icon: "copy", run: () => d.copy(remotePathOf(wt)) },
+  { label: T.agentReveal, icon: "folder", disabled: isRemote(wt), run: () => d.run(() => revealItemInDir(wt)) },
+  { separator: true },
+  { label: T.agentEnd, icon: "x", danger: true, run: d.end },
+];
