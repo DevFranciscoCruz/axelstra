@@ -80,7 +80,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(
                 json!({"terse": terse, "rules": crate::skill::terse_rules(terse), "pm": pm, "installed": installed, "auto_install": saved["auto_install"] == json!(true),
                 "shell": shell, "notify_sound": notify_sound, "notify_mode": notify_mode, "ui": saved["ui"].as_object().cloned().unwrap_or_default(),
-                "budgets": crate::budget::validate(&saved["budgets"]).unwrap_or_else(|_| json!({}))}),
+                "budgets": crate::budget::validate(&saved["budgets"]).unwrap_or_else(|_| json!({})),
+                "hosts": crate::hosts::validate(&saved["hosts"]).unwrap_or_else(|_| json!([]))}),
             )
         }
         "settings.set" => {
@@ -106,6 +107,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             // replaces the whole budgets setting; null removes it
             if let Some(b) = p.get("budgets") {
                 saved["budgets"] = if b.is_null() { json!({}) } else { crate::budget::validate(b)? };
+            }
+            // replaces the whole host registry; null removes it
+            if let Some(h) = p.get("hosts") {
+                saved["hosts"] = crate::hosts::validate(h)?;
             }
             write_json(&reg.saved.with_file_name("settings.json"), &saved)?;
             Ok(json!({}))
