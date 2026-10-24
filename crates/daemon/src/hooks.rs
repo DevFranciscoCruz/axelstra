@@ -1,5 +1,5 @@
-//! Installs the three Axelstra status hooks into Claude Code's `~/.claude/settings.json` (Notification, Stop,
-//! UserPromptSubmit) or Gemini CLI's `~/.gemini/settings.json` (Notification, BeforeAgent, AfterAgent), so the user
+//! Installs the Axelstra status hooks into Claude Code's `~/.claude/settings.json` (Notification, Stop,
+//! UserPromptSubmit) or Gemini CLI's `~/.gemini/settings.json` (Notification, BeforeAgent, AfterAgent, AfterTool), so the user
 //! does not paste a snippet by hand. Both files share the `hooks` shape; only the events and the agent name differ. The file belongs to the user and to other
 //! tools: it is merged, never rewritten from a template. Nothing is removed or reordered (serde_json keeps key
 //! order, see `preserve_order`), a timestamped backup is written first, the write is atomic, and a file that is not
@@ -12,14 +12,15 @@ use std::path::{Path, PathBuf};
 
 /// Claude Code hook events Axelstra listens to, as `axelstra hook claude EVENT` understands them.
 pub const EVENTS: [&str; 3] = ["Notification", "Stop", "UserPromptSubmit"];
-/// Gemini CLI hook events (UNVERIFIED against an install, from its hooks reference): a prompt was submitted, the turn
-/// ended, a tool permission is asked.
-pub const GEMINI_EVENTS: [&str; 3] = ["Notification", "AfterAgent", "BeforeAgent"];
+/// Gemini CLI hook events, all verified firing in gemini-cli 0.65.0 (a real install against a stub model server):
+/// a prompt was submitted (BeforeAgent), the turn ended (AfterAgent), a tool permission is asked (Notification, type
+/// ToolPermission), a tool finished (AfterTool: the permission was answered, back to working).
+pub const GEMINI_EVENTS: [&str; 4] = ["Notification", "AfterAgent", "BeforeAgent", "AfterTool"];
 
 /// The agents whose settings Axelstra can write hooks into.
 pub const AGENTS: [&str; 2] = ["claude", "gemini"];
 
-fn events_of(agent: &str) -> &'static [&'static str] {
+pub fn events_of(agent: &str) -> &'static [&'static str] {
     if agent == "gemini" {
         &GEMINI_EVENTS
     } else {
@@ -52,7 +53,13 @@ pub fn settings_path_of(agent: &str) -> Result<PathBuf> {
 /// The command Claude runs for `event`: this executable by absolute path, so the hook never depends on what sits first
 /// on PATH (it receives the agent's prompts). Falls back to the bare name only when the path is unknown.
 fn command(agent: &str, event: &str) -> String {
+    // Gemini runs a hook through PowerShell on Windows (bash elsewhere): there a quoted path alone is a string, not a call
+    command_for(agent, event, cfg!(windows) && agent == "gemini")
+}
+
+fn command_for(agent: &str, event: &str, powershell: bool) -> String {
     match std::env::current_exe() {
+        Ok(exe) if powershell => format!("& '{}' hook {agent} {event}", exe.display().to_string().replace('\'', "''")),
         Ok(exe) => format!("\"{}\" hook {agent} {event}", exe.display()),
         Err(_) => format!("axelstra hook {agent} {event}"),
     }
@@ -61,7 +68,7 @@ fn command(agent: &str, event: &str) -> String {
 /// True for a hook command that is ours for `event`, whether written by an earlier release (bare `axelstra`) or by this one.
 fn is_ours(cmd: &str, agent: &str, event: &str) -> bool {
     let Some(prog) = cmd.trim().strip_suffix(&format!(" hook {agent} {event}")) else { return false };
-    let prog = prog.trim().trim_matches('"');
+    let prog = prog.trim().trim_start_matches('&').trim().trim_matches(['"', '\'']);
     let name = prog.rsplit(['/', '\\']).next().unwrap_or(prog).to_ascii_lowercase();
     name.starts_with("axelstra")
 }
@@ -151,7 +158,12 @@ fn merge(agent: &str, root: &mut Value, path: &Path) -> Result<bool> {
             }
         }
         if !entry_present(list, agent, event) {
-            list.push(json!({ "hooks": [{ "type": "command", "command": command(agent, event) }] }));
+            let mut hook = json!({ "type": "command", "command": command(agent, event) });
+            if agent == "gemini" {
+                // shown by Gemini's `/hooks panel`; the hook itself bounds its run time (1.5 s)
+                hook["name"] = json!(format!("axelstra-{}", event.to_ascii_lowercase()));
+            }
+            list.push(json!({ "hooks": [hook] }));
             changed = true;
         }
     }
@@ -354,7 +366,8 @@ mod tests {
         assert_eq!((r["changed"].clone(), r["installed"].clone()), (json!(true), json!(true)));
         let v = read(&f);
         let keys: Vec<_> = v["hooks"].as_object().unwrap().keys().cloned().collect();
-        assert_eq!(keys, ["AfterAgent", "Notification", "BeforeAgent"]);
+        assert_eq!(keys, ["AfterAgent", "Notification", "BeforeAgent", "AfterTool"]);
+        assert_eq!(v["hooks"]["AfterTool"][0]["hooks"][0]["name"], "axelstra-aftertool");
         assert_eq!(v["hooks"]["AfterAgent"][0]["hooks"][0]["command"], "my-notify");
         assert_eq!(v["hooks"]["AfterAgent"][1]["hooks"][0]["command"], command("gemini", "AfterAgent"));
         assert!(v["hooks"].get("Stop").is_none() && v["general"]["vimMode"] == true);
@@ -362,6 +375,33 @@ mod tests {
         // second run is a no-op, and a claude hook command is not mistaken for a gemini one
         assert_eq!(install_at_of("gemini", &f).unwrap()["changed"], false);
         assert!(!is_ours(&command("claude", "Notification"), "gemini", "Notification"));
+        let _ = std::fs::remove_dir_all(f.parent().unwrap());
+    }
+
+    #[test]
+    fn gemini_hooks_on_windows_are_a_powershell_call_not_a_bare_string() {
+        // Gemini 0.65 runs a hook as `powershell -NoProfile -Command <command>` on Windows, where a quoted path
+        // followed by arguments is a parse error: the command is a call (`&`) of a single-quoted path
+        let ps = command_for("gemini", "AfterAgent", true);
+        assert!(ps.starts_with("& '") && ps.ends_with("' hook gemini AfterAgent"), "{ps}");
+        let sh = command_for("gemini", "AfterAgent", false);
+        assert!(sh.starts_with('"') && sh.ends_with("\" hook gemini AfterAgent"), "{sh}");
+        // either spelling is ours, whatever was installed before, and a lookalike is not
+        assert!(is_ours(&ps, "gemini", "AfterAgent") && is_ours(&sh, "gemini", "AfterAgent"));
+        assert!(is_ours(r"& 'C:\Program Files\Axelstra\axelstra.exe' hook gemini AfterTool", "gemini", "AfterTool"));
+        assert!(!is_ours(r"& 'C:\evil\rm.exe' hook gemini AfterTool", "gemini", "AfterTool"));
+    }
+
+    #[test]
+    fn an_older_quoted_gemini_command_is_rewritten_not_duplicated() {
+        let f = tmp("gemini-old");
+        let old = r#"{"hooks":{"AfterAgent":[{"hooks":[{"type":"command","command":"\"C:\\old\\axelstra.exe\" hook gemini AfterAgent"}]}]}}"#;
+        std::fs::write(&f, old).unwrap();
+        let r = install_at_of("gemini", &f).unwrap();
+        assert_eq!(r["changed"], true);
+        let v = read(&f);
+        assert_eq!(v["hooks"]["AfterAgent"].as_array().unwrap().len(), 1);
+        assert_eq!(v["hooks"]["AfterAgent"][0]["hooks"][0]["command"], command("gemini", "AfterAgent"));
         let _ = std::fs::remove_dir_all(f.parent().unwrap());
     }
 

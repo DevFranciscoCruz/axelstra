@@ -1,5 +1,5 @@
 //! `axelstra hook claude EVENT` / `axelstra hook gemini EVENT`: called by Claude Code's hooks (Notification, Stop,
-//! UserPromptSubmit) or Gemini CLI's (Notification, BeforeAgent, AfterAgent) inside a session Axelstra started. It tells the daemon whether the agent waits for the user, is idle or is working, so the sidebar
+//! UserPromptSubmit) or Gemini CLI's (Notification, BeforeAgent, AfterAgent, AfterTool) inside a session Axelstra started. It tells the daemon whether the agent waits for the user, is idle or is working, so the sidebar
 //! dot is right even when the screen shows no recognisable prompt. It never fails and gives up fast; it prints nothing, except `{}` for Gemini, whose hooks must answer with JSON.
 
 use axelstra_daemon::{client::Client, proto};
@@ -12,8 +12,8 @@ pub fn state_of(event: &str) -> Option<&'static str> {
         "notification" => Some("waiting"),
         "stop" => Some("idle"),
         "userpromptsubmit" => Some("working"),
-        // Gemini CLI: a prompt was submitted / the turn ended
-        "beforeagent" => Some("working"),
+        // Gemini CLI: a prompt was submitted / the turn ended / a tool ran, so its permission prompt was answered
+        "beforeagent" | "aftertool" => Some("working"),
         "afteragent" => Some("idle"),
         _ => None,
     }
@@ -52,8 +52,8 @@ fn report(action: &str, agent: &str, v: &serde_json::Value) -> String {
             (true, None) => format!("Hooks instalados em {path}."),
         };
     }
-    let events = if agent == "gemini" { axelstra_daemon::hooks::GEMINI_EVENTS } else { axelstra_daemon::hooks::EVENTS };
-    let missing: Vec<&str> = events.into_iter().filter(|e| v["events"][e] != json!(true)).collect();
+    let events = axelstra_daemon::hooks::events_of(agent);
+    let missing: Vec<&str> = events.iter().copied().filter(|e| v["events"][e] != json!(true)).collect();
     if missing.is_empty() {
         format!("Hooks instalados em {path}.")
     } else {
@@ -93,6 +93,7 @@ mod tests {
         assert_eq!(state_of("UserPromptSubmit"), Some("working"));
         assert_eq!(state_of("PreToolUse"), None);
         assert_eq!((state_of("BeforeAgent"), state_of("AfterAgent")), (Some("working"), Some("idle")));
+        assert_eq!((state_of("AfterTool"), state_of("BeforeTool")), (Some("working"), None));
     }
 
     #[test]
@@ -113,7 +114,7 @@ mod tests {
 
     #[test]
     fn a_gemini_report_names_its_own_missing_events() {
-        let st = json!({"path": "p", "events": {"Notification": true, "AfterAgent": false, "BeforeAgent": true}});
+        let st = json!({"path": "p", "events": {"Notification": true, "AfterAgent": false, "BeforeAgent": true, "AfterTool": true}});
         let r = report("status", "gemini", &st);
         assert!(r.contains("Faltam hooks em p: AfterAgent") && r.ends_with("axelstra hook install gemini"), "{r}");
     }
