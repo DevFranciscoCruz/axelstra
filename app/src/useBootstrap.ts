@@ -8,10 +8,12 @@ import {
   restoreSessions,
   stopWatch,
   storeNotices,
+  triggersEvents,
   watchWorktree,
 } from "./api";
 import { errorText } from "./appError";
 import { handleJanitorEvents } from "./janitorEvents";
+import { handleTriggerEvents } from "./triggerEvents";
 import { createPoller } from "./poller";
 import { S, count } from "./strings";
 import { onTauriEvent } from "./tauriEvents";
@@ -143,6 +145,11 @@ export function useBootstrap() {
           .catch((e) => console.debug("janitor.events", e)),
       15000,
     );
+    // what the CI-fix trigger did (started a fix task, or held back by a limit)
+    const triggers = createPoller(
+      () => triggersEvents().then(handleTriggerEvents).catch((e) => console.debug("triggers.events", e)),
+      15000,
+    );
     const onFocus = () => {
       void refreshChanges();
       void refreshProjects();
@@ -153,6 +160,7 @@ export function useBootstrap() {
       mid.stop();
       slow.stop();
       janitor.stop();
+      triggers.stop();
       stopWatch();
       window.removeEventListener("focus", onFocus);
       unlisten.forEach((u) => u());
