@@ -76,8 +76,7 @@ pub const WAIT_TEXT_MAX: usize = 500;
 
 /// The text an agent sent, safe to store and show: no control characters, trimmed, at most `WAIT_TEXT_MAX` characters.
 pub fn clean_text(text: &str) -> String {
-    let t: String = text.chars().filter(|c| *c == '
-' || !c.is_control()).collect();
+    let t: String = text.chars().filter(|c| *c == '\n' || !c.is_control()).collect();
     let t = t.trim();
     match t.char_indices().nth(WAIT_TEXT_MAX) {
         Some((i, _)) => format!("{}…", t[..i].trim_end()),
@@ -213,7 +212,6 @@ mod tests {
         }
         assert_eq!(WaitKind::parse("screen"), None);
         assert_eq!(clean_text("  a[31m b
-
 "), "a[31m b");
         assert_eq!(clean_text(&"x".repeat(900)).chars().count(), WAIT_TEXT_MAX + 1);
     }
