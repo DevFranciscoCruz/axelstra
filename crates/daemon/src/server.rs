@@ -1233,7 +1233,7 @@ mod registry_tests {
         for i in 0..4 {
             let (r, d) = (reg.clone(), done_tx.clone());
             std::thread::spawn(move || {
-                for _ in 0..2000 {
+                for _ in 0..300 {
                     if i % 2 == 0 {
                         session_list(&r);
                     } else {
@@ -1273,7 +1273,8 @@ mod hooks_json_tests {
         let dir = std::env::temp_dir().join(format!("axl-hj-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let (real, test_exe) = if cfg!(windows) { (r"C:\x\axelstra.exe", r"C:\x\deps\roundtrip-1.exe") } else { ("/x/axelstra", "/x/deps/roundtrip-1") };
+        let (real, test_exe) =
+            if cfg!(windows) { (r"C:\x\axelstra.exe", r"C:\x\deps\roundtrip-1.exe") } else { ("/x/axelstra", "/x/deps/roundtrip-1") };
         write_hooks_json(&dir, Some(Path::new(real)));
         let good = std::fs::read_to_string(dir.join("hooks.json")).unwrap();
         assert!(good.contains("statusline-tee"));

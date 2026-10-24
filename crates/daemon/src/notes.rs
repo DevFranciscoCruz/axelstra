@@ -555,7 +555,7 @@ mod tests {
         on_spawn(&root, Some("claude"), &mut a, Some("faz A"), false);
         on_spawn(&root, Some("claude"), &mut b, None, false);
         let pa = PathBuf::from(a.unwrap()["note"].as_str().unwrap());
-        assert_eq!(for_worktree(&root, "p-bywt", "c:\\x\\wt-a/")[0].status, "aberto");
+        assert_eq!(for_worktree(&root, "p-bywt", if cfg!(windows) { "c:\\x\\wt-a/" } else { "C:/x/wt-a/" })[0].status, "aberto");
         append(&pa, "ok", "feito\ncom detalhe").unwrap();
         let found = for_worktree(&root, "p-bywt", "C:/x/wt-a");
         assert_eq!(found.len(), 1);

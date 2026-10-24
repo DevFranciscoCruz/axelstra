@@ -505,9 +505,11 @@ mod tests {
     fn system_writes_share_the_input_queue_with_typing() {
         let s = spawn_shell();
         let eol = if cfg!(windows) { "\r\n" } else { "\n" };
-        s.write(format!("echo typed-aa{eol}").as_bytes()).unwrap();
-        s.write_system(format!("echo system-bb{eol}").as_bytes()).unwrap();
-        s.write(format!("echo typed-cc{eol}").as_bytes()).unwrap();
+        // the tty echoes what is typed, so on Unix the command text must not contain the word its output prints
+        let q = if cfg!(windows) { "" } else { "''" };
+        s.write(format!("echo typed-a{q}a{eol}").as_bytes()).unwrap();
+        s.write_system(format!("echo system-b{q}b{eol}").as_bytes()).unwrap();
+        s.write(format!("echo typed-c{q}c{eol}").as_bytes()).unwrap();
         assert!(wait_for(&s, "typed-cc"));
         let out = String::from_utf8_lossy(&s.tail(8192)).into_owned();
         let (a, b, c) = (out.rfind("typed-aa"), out.rfind("system-bb"), out.rfind("typed-cc"));
