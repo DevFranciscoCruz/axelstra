@@ -42,8 +42,8 @@ fn one_daemon_serves_every_new_method_and_reports_proto_18() {
     });
     std::thread::sleep(Duration::from_millis(300));
     let mut c = Client::connect(&pipe, &token).unwrap();
-    assert_eq!(PROTO, 18, "three branches claimed 17; the merged contract is 18");
-    assert_eq!(c.proto, 18);
+    assert_eq!(PROTO, 19, "wave 2 merged to 18; hooks.* taking `agent` (Gemini) makes it 19");
+    assert_eq!(c.proto, 19);
     // bogus arguments: any answer is fine except "unknown method" (the daemon lacks it) or an agent refusal
     for m in NEW_METHODS {
         if let Err(e) = c.call(m, json!({"project": "x", "worktree": "x", "path": "x"})) {
