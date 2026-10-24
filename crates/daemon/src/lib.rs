@@ -1,10 +1,12 @@
 pub mod agentlog;
 pub mod audit;
 pub mod automations;
+pub mod backup;
 pub mod changes;
 pub mod checks;
 pub mod client;
 pub mod docker;
+pub mod envtools;
 pub mod fsops;
 pub mod gh;
 pub mod hooks;

@@ -161,6 +161,11 @@ fn parse_state<T: DeserializeOwned>(text: &str) -> Result<T, String> {
     serde_json::from_value(data).map_err(|e| e.to_string())
 }
 
+/// Whether `text` is a state file this version can read (envelope or legacy bare value), without touching any file.
+pub fn validate_state(text: &str) -> Result<(), String> {
+    parse_state::<Value>(text).map(|_| ())
+}
+
 /// Where a file that could not be parsed is kept: `projects.json.bad.<unix-timestamp>`, with a counter appended if
 /// that name is taken, so an earlier one is never overwritten.
 fn bad_path(path: &Path) -> PathBuf {

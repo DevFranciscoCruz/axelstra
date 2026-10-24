@@ -84,6 +84,8 @@ fn agent_role_cannot_use_app_only_calls() {
         ("project.setup", json!({"id": "x", "setup": "rm -rf /"})),
         ("hooks.install", json!({})),
         ("orch.start", json!({"project": "x"})),
+        ("backup.export", json!({})),
+        ("backup.restore", json!({"path": "x"})),
     ] {
         let e = agent.call(m, p).unwrap_err().to_string();
         assert!(e.contains("not allowed to agents"), "{m}: {e}");
