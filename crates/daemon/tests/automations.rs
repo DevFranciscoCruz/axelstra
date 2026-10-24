@@ -43,7 +43,7 @@ fn save_run_and_delete() {
             .block_on(server::serve_with_store(p, t, s))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();
     let pid = c.call("project.add", json!({"path": &repo})).unwrap()["id"].as_str().unwrap().to_string();
 

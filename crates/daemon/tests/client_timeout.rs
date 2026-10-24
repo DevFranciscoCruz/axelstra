@@ -26,13 +26,16 @@ async fn hung_daemon(mut conn: impl tokio::io::AsyncRead + AsyncWrite + Unpin) {
     }
 }
 
+/// Starts the hung daemon and returns once its pipe exists, so the caller connects to a listener that is there.
 fn serve_hung(pipe: String) {
+    let (up, ready) = std::sync::mpsc::channel::<()>();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         rt.block_on(async move {
             #[cfg(windows)]
             {
                 let server = tokio::net::windows::named_pipe::ServerOptions::new().first_pipe_instance(true).create(&pipe).unwrap();
+                up.send(()).unwrap();
                 server.connect().await.unwrap();
                 hung_daemon(server).await;
             }
@@ -40,18 +43,20 @@ fn serve_hung(pipe: String) {
             {
                 let _ = std::fs::remove_file(&pipe);
                 let l = tokio::net::UnixListener::bind(&pipe).unwrap();
+                up.send(()).unwrap();
                 let (conn, _) = l.accept().await.unwrap();
                 hung_daemon(conn).await;
             }
         });
     });
+    ready.recv_timeout(Duration::from_secs(30)).expect("the hung daemon never started listening");
 }
 
 #[test]
 fn a_hung_daemon_times_out_with_a_clear_error() {
     let pipe = format!("{}-hung-{}", common::base_pipe(), std::process::id());
     serve_hung(pipe.clone());
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     // a stuck test must not hang the suite
     std::thread::spawn(|| {
         std::thread::sleep(Duration::from_secs(60));

@@ -37,7 +37,7 @@ fn finished_worker_reports_to_parent_and_disappears() {
             .block_on(server::serve_with_store(p, t, s))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();
 
     let (prog, args) = shell();

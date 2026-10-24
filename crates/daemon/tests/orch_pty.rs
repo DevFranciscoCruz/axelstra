@@ -36,7 +36,7 @@ fn agents_run_in_daemon_sessions_and_get_cleaned_up() {
             .block_on(server::serve_with_store(p, t, common::store("srv")))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
 
     let root = std::env::temp_dir().join(format!("axelstra-pty-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);

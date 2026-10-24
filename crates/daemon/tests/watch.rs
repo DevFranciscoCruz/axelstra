@@ -43,7 +43,7 @@ fn change_events_are_filtered_and_debounced() {
             .block_on(server::serve_with_store(p, t, s))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();
     c.call("project.add", json!({"path": &repo})).unwrap();
     let wt = c.call("project.list", json!({})).unwrap()[0]["worktrees"][0]["path"].clone();
@@ -125,7 +125,7 @@ fn worktree_created_by_another_client_is_announced() {
             .block_on(server::serve_with_store(p, t, s))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     let mut cli = Client::connect(&pipe, &token).unwrap();
     cli.call("project.add", json!({"path": &repo})).unwrap();
     let projects = cli.call("project.list", json!({})).unwrap();

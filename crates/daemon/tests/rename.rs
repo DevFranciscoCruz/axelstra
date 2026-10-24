@@ -26,7 +26,7 @@ fn rename_persists_with_the_session() {
             .block_on(server::serve_with_store(p, t, s))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();
 
     let sid = c

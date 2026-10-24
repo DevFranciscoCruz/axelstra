@@ -20,7 +20,7 @@ fn a_coded_error_keeps_its_code_and_params_through_the_wire() {
             .block_on(server::serve_with_store(p, t, common::store("codes")))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();
     let e = c.call("git.changes", json!({"worktree": "nowhere/at/all"})).unwrap_err();
     assert!(e.downcast_ref::<Remote>().is_some(), "{e:#}");

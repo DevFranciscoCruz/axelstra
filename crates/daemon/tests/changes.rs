@@ -46,7 +46,7 @@ fn changes_and_diff() {
             .block_on(server::serve_with_store(p, t, s))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();
 
     let pr = c.call("project.add", json!({"path": &repo})).unwrap();

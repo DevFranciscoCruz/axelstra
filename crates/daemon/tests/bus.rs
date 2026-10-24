@@ -46,7 +46,7 @@ fn messages_ask_done_escalate_and_the_worker_limit() {
             .block_on(server::serve_with_store(p, t, s))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();
 
     let boss = spawn(&mut c, "boss", json!({}));

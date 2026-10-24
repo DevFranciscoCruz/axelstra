@@ -59,7 +59,7 @@ fn sending_a_comment_needs_a_live_lead_and_a_known_worktree() {
             .block_on(server::serve_with_store(p, t, s))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();
     c.call("project.add", json!({"path": &repo})).unwrap();
     let list = c.call("project.list", json!({})).unwrap();
