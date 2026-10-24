@@ -14,8 +14,9 @@ const TTL: Duration = Duration::from_secs(10);
 
 static CACHE: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
 
+/// Key of `dispatch.json`, which the app writes lowercase on every platform.
 fn norm(p: &str) -> String {
-    p.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase()
+    axelstra_core::paths::norm(p).to_lowercase()
 }
 
 /// Files a worktree changed: committed since the default branch plus uncommitted.

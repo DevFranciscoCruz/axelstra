@@ -23,9 +23,10 @@ pub struct Project {
     pub parents: BTreeMap<String, String>,
 }
 
-/// The form of a worktree path used as a key: forward slashes, lowercase, no trailing slash.
+/// The form of a worktree path used as a key: the shared comparison key (forward slashes, no trailing slash, no
+/// verbatim `\\?\` prefix, lowercase only where the file system ignores case).
 pub fn norm_path(s: &str) -> String {
-    s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase()
+    axelstra_core::paths::norm(s)
 }
 
 pub fn store_path() -> PathBuf {
@@ -96,7 +97,11 @@ fn slug(s: &str) -> String {
 /// Folders that must never become a project: a filesystem root, the user's home or a system directory
 /// (a project is where agents work and where files are listed, written and deleted).
 pub fn forbidden_root(p: &Path) -> bool {
-    let norm = |p: &Path| p.to_string_lossy().replace('\\', "/").trim_start_matches("//?/").trim_end_matches('/').to_ascii_lowercase();
+    // `\?\` is dropped by `norm`; the same prefix with forward slashes (a path written that way) is dropped here
+    let norm = |p: &Path| {
+        let n = axelstra_core::paths::norm_path(p);
+        n.strip_prefix("//?/").map(String::from).unwrap_or(n)
+    };
     let n = norm(p);
     if p.parent().is_none() || n.is_empty() || (n.len() == 2 && n.ends_with(':')) {
         return true;
@@ -180,11 +185,10 @@ pub fn remove(store: &Path, id: &str) -> Result<()> {
 /// Only worktrees of registered projects may be inspected, never arbitrary paths.
 /// A project whose folder is gone (or whose git fails) is skipped, not an error for every other project.
 pub fn known_worktree(store: &Path, path: &str) -> Result<PathBuf> {
-    let want = path.replace('\\', "/").to_ascii_lowercase();
     for p in try_load(store)? {
         let Ok(list) = git::worktree_list(Path::new(&p.path)) else { continue };
         for w in list {
-            if w.path.replace('\\', "/").to_ascii_lowercase() == want {
+            if axelstra_core::paths::same(&w.path, path) {
                 return Ok(PathBuf::from(w.path));
             }
         }
@@ -199,20 +203,34 @@ pub fn find(store: &Path, id: &str) -> Result<Project> {
 /// New worktree on a new branch `ax/<name>` from the repo's current HEAD.
 /// Lives next to the repo in `.axelstra-wt/` so paths stay short.
 pub fn worktree_create(p: &Project, name: &str) -> Result<git::Worktree> {
-    Ok(create_at(p, name, "HEAD")?.0)
+    Ok(create_at(p, name, "HEAD", true)?.0)
 }
 
 /// Like `worktree_create`, plus what `.worktreeinclude` copied into the new worktree (and what it left out).
 pub fn worktree_create_report(p: &Project, name: &str) -> Result<(git::Worktree, crate::wtenv::Report)> {
-    create_at(p, name, "HEAD")
+    create_at(p, name, "HEAD", true)
 }
 
 /// Worktree on branch `ax/pr-<n>` holding the head of GitHub pull request `<n>`.
 pub fn worktree_from_pr(p: &Project, number: u64) -> Result<git::Worktree> {
+    Ok(worktree_from_pr_report(p, number)?.0)
+}
+
+/// Same, plus a warning when the project's `.worktreeinclude` would have copied git-ignored files (`.env`, keys):
+/// the code of a pull request is not trusted, so nothing is copied into its worktree and the user is told.
+pub fn worktree_from_pr_report(p: &Project, number: u64) -> Result<(git::Worktree, Option<String>)> {
     let repo = Path::new(&p.path);
     git::must(repo, &["fetch", "origin", &format!("pull/{number}/head")])
         .with_context(|| format!("could not fetch pull request {number} from origin"))?;
-    Ok(create_at(p, &format!("pr-{number}"), "FETCH_HEAD")?.0)
+    let wt = create_at(p, &format!("pr-{number}"), "FETCH_HEAD", false)?.0;
+    let warning = crate::wtenv::plan(repo).ok().filter(|pl| !pl.files.is_empty()).map(|pl| {
+        format!(
+            "{} ignored file(s) from .worktreeinclude ({}) were NOT copied into this pull request's worktree, because its code is not trusted; copy them by hand if you need them",
+            pl.files.len(),
+            pl.files.join(", ")
+        )
+    });
+    Ok((wt, warning))
 }
 
 /// Folder of the worktree `name` of project `p`.
@@ -221,7 +239,8 @@ fn wt_dir(p: &Project, name: &str) -> Result<PathBuf> {
     Ok(repo.parent().context("repo has no parent directory")?.join(".axelstra-wt").join(format!("{}-{}", slug(&p.name), name)))
 }
 
-fn create_at(p: &Project, name: &str, base: &str) -> Result<(git::Worktree, crate::wtenv::Report)> {
+/// `copy_env`: also copy the git-ignored files `.worktreeinclude` selects (never for code that is not the user's own).
+fn create_at(p: &Project, name: &str, base: &str, copy_env: bool) -> Result<(git::Worktree, crate::wtenv::Report)> {
     let n = slug(name);
     if n.is_empty() {
         bail!("worktree name is empty");
@@ -237,7 +256,7 @@ fn create_at(p: &Project, name: &str, base: &str) -> Result<(git::Worktree, crat
     std::fs::create_dir_all(dir.parent().unwrap())?;
     git::worktree_add(repo, &dir, &format!("ax/{n}"), base)?;
     // untracked config (.env...) the project asked for: a failure here never undoes the worktree
-    let report = crate::wtenv::copy_into(repo, &dir);
+    let report = if copy_env { crate::wtenv::copy_into(repo, &dir) } else { crate::wtenv::Report::default() };
     let wt = git::worktree_list(repo)?
         .into_iter()
         .find(|w| Path::new(&w.path).file_name() == dir.file_name())
@@ -253,8 +272,7 @@ pub fn worktree_rename(p: &Project, path: &str, name: &str, busy: bool) -> Resul
     if !axelstra_core::card::valid_slug(name) {
         bail!("nome inválido: usa só letras, números, ponto, _ e - (sem começar por ponto)");
     }
-    let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
-    let wt = git::worktree_list(repo)?.into_iter().find(|w| norm(&w.path) == norm(path)).context("not a worktree of this project")?;
+    let wt = git::worktree_list(repo)?.into_iter().find(|w| axelstra_core::paths::same(&w.path, path)).context("not a worktree of this project")?;
     if wt.is_main {
         bail!("cannot rename the main worktree");
     }
@@ -284,7 +302,7 @@ pub fn worktree_rename(p: &Project, path: &str, name: &str, busy: bool) -> Resul
 
 pub fn worktree_remove(p: &Project, path: &str) -> Result<()> {
     let repo = Path::new(&p.path);
-    let wt = git::worktree_list(repo)?.into_iter().find(|w| w.path.eq_ignore_ascii_case(path)).context("not a worktree of this project")?;
+    let wt = git::worktree_list(repo)?.into_iter().find(|w| axelstra_core::paths::same(&w.path, path)).context("not a worktree of this project")?;
     if wt.is_main {
         bail!("cannot remove the main worktree");
     }
@@ -505,7 +523,7 @@ mod store_tests {
         ];
         save(&store, &list).unwrap();
         let wt = known_worktree(&store, &real_s).unwrap();
-        let norm = |s: &str| s.to_ascii_lowercase().replace('\\', "/");
+        let norm = axelstra_core::paths::norm;
         assert_eq!(norm(&wt.to_string_lossy()), norm(&real_s));
         assert!(known_worktree(&store, "somewhere/else").is_err());
         let _ = std::fs::remove_dir_all(&r);
@@ -631,6 +649,27 @@ mod rename_tests {
         let (w, rep) = worktree_create_report(&p, "withenv").unwrap();
         assert_eq!(rep.copied, vec![".env"]);
         assert_eq!(std::fs::read_to_string(Path::new(&w.path).join(".env")).unwrap(), "KEY=1");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_pull_request_worktree_gets_no_ignored_files_and_a_warning() {
+        let (root, p) = setup("pr-env");
+        let repo = Path::new(&p.path);
+        std::fs::write(repo.join(".gitignore"), ".env
+").unwrap();
+        std::fs::write(repo.join(".env"), "SECRET=1").unwrap();
+        std::fs::write(repo.join(crate::wtenv::INCLUDE_FILE), ".env
+").unwrap();
+        git::must(repo, &["add", ".gitignore", ".worktreeinclude"]).unwrap();
+        git::must(repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "env"]).unwrap();
+        // the repository is its own "origin" and has a pull request ref
+        git::must(repo, &["update-ref", "refs/pull/7/head", "HEAD"]).unwrap();
+        git::must(repo, &["remote", "add", "origin", &p.path]).unwrap();
+        let (w, warning) = worktree_from_pr_report(&p, 7).unwrap();
+        assert!(!Path::new(&w.path).join(".env").exists(), "untrusted code must not see the .env");
+        let warning = warning.expect("the user is told");
+        assert!(warning.contains(".env") && warning.contains("NOT copied"), "{warning}");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
