@@ -51,6 +51,10 @@ pub fn merged_reason_in(repo: &Path, branch: &str, default: &str, others: &[Stri
             return Some(format!("already in {other}"));
         }
     }
+    // squash and rebase merges leave no ancestor: every commit has an equivalent in the default branch
+    if crate::cleanup::squash_merged(repo, branch, &upstream) || crate::cleanup::squash_merged(repo, branch, default) {
+        return Some(format!("its changes are already in {default}"));
+    }
     let o = output_within(
         Command::new("gh").current_dir(repo).env("GH_PROMPT_DISABLED", "1").args([
             "pr",
@@ -226,8 +230,15 @@ fn now_ms() -> u64 {
 /// Sweeps every project; `busy(path)` says whether a live session works in that worktree.
 pub fn sweep(store: &Path, busy: &dyn Fn(&str) -> bool, dry: bool) -> Vec<Value> {
     let mut out = vec![];
-    for p in projects::load(store) {
-        let _ = sweep_project(&p, busy, dry, &mut out);
+    let all = projects::load(store);
+    for p in &all {
+        let _ = sweep_project(p, busy, dry, &mut out);
+        crate::cleanup::stale_branches(p, dry, &mut out);
+        crate::cleanup::prune_entries(p, dry, &mut out);
+    }
+    crate::cleanup::orphan_dirs(&all, busy, dry, &mut out);
+    if let Some(dir) = store.parent() {
+        crate::cleanup::rotate(dir, dry, &mut out);
     }
     out
 }

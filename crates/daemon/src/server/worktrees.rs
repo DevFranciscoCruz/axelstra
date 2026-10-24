@@ -7,7 +7,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "worktree.overview" => Ok(tokio::task::block_in_place(|| crate::overview::cached(&reg.store, &|path| reg.worktree_busy(path)))),
         "worktree.sweep" => {
             let dry = p["dry_run"].as_bool().unwrap_or(false);
-            let done = tokio::task::block_in_place(|| crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path), dry));
+            let done = tokio::task::block_in_place(|| {
+                let mut v = crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path), dry);
+                v.extend(reg.clean_leftovers(dry));
+                v
+            });
+            if !dry {
+                reg.persist();
+                reg.projects_changed();
+            }
             reg.announce_events();
             Ok(json!({"swept": done}))
         }

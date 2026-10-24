@@ -171,6 +171,20 @@ impl Registry {
         let _ = write_json(&self.saved, &v);
     }
 
+    /// `sid/` and `scrollback/` files no saved or live session refers to (old enough not to be one being written).
+    fn clean_leftovers(&self, dry: bool) -> Vec<Value> {
+        let mut keys: Vec<String> = vec![];
+        let key_of = |r: &Value| r["meta"]["key"].as_str().map(String::from);
+        keys.extend(self.pending.lock_recover().iter().filter_map(key_of));
+        keys.extend(self.specs.lock_recover().values().filter_map(key_of));
+        keys.extend(self.metas.lock_recover().values().filter_map(|m| m["key"].as_str().map(String::from)));
+        let mut out = vec![];
+        if let Some(dir) = self.saved.parent() {
+            crate::cleanup::leftovers(dir, &keys, dry, &mut out);
+        }
+        out
+    }
+
     /// Deletes the files a saved session left behind: the `sid/<key>.json` the hook wrote (the conversation id used to
     /// resume it) and its saved terminal history.
     fn drop_sid_of(&self, rec: &Value) {
@@ -832,7 +846,7 @@ fn spawn_janitor(reg: Arc<Registry>) {
             }
             // a session waiting to be restored still needs its worktree
             let swept = crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path) || reg.worktree_pending(path), false);
-            for s in &swept {
+            for s in swept.iter().chain(reg.clean_leftovers(false).iter()) {
                 eprintln!("janitor: {s}");
                 // finished work that could not be integrated is also reported to the project's main agent
                 if s["code"].as_str().is_some_and(|c| c.starts_with("integrate.")) {

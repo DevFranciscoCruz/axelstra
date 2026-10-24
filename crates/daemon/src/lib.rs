@@ -5,6 +5,7 @@ pub mod backup;
 pub mod budget;
 pub mod changes;
 pub mod checks;
+pub mod cleanup;
 pub mod client;
 pub mod computer;
 pub mod docker;
