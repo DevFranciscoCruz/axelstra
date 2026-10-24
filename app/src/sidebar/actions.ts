@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "../Confirm";
-import { killSession, removeProject, removeSession, removeWorktree, worktreeSweep } from "../api";
+import { killSession, removeProject, removeSession, removeWorktree, worktreeRebase, worktreeSweep } from "../api";
+import { rebaseBlocker, rebaseOutcome } from "../rebase";
+import { toast } from "../toasts";
 import { needsTypedName, removeRisks } from "../removeRisk";
 import { P } from "../strings.panels";
 import { S } from "../strings";
@@ -125,7 +127,32 @@ export function createSidebarActions() {
     }
   };
 
-  return { run, copy, sleepWorktree, cleanFinished, dropProject, dropWorktree };
+  // worktrees being rebased: a second click while it runs is ignored
+  const rebasing = new Set<string>();
+  /** rebase on the default branch: the daemon refuses a busy or dirty worktree and undoes a conflicted rebase */
+  const rebaseWorktree = async (projectId: string, path: string, name: string, base: string, onDone: () => void) => {
+    if (rebasing.has(norm(path))) return;
+    const live = sessionsOf(path).filter((x) => x.running).length;
+    const blocked = rebaseBlocker(name, wtStatus()[norm(path)], live);
+    if (blocked) return void toast({ text: blocked, kind: "warn" });
+    if (!(await ask(T.rebase.ask(name, base), { title: T.rebase.title, kind: "warning", okLabel: T.rebase.ok, cancelLabel: T.cancel }))) return;
+    if (rebasing.has(norm(path))) return;
+    rebasing.add(norm(path));
+    showNotice(T.rebase.running(name, base));
+    try {
+      const out = rebaseOutcome(name, base, await worktreeRebase(projectId, path));
+      toast({ text: out.text, kind: out.kind, sticky: out.kind === "warn" });
+    } catch (e) {
+      setError(T.rebase.failed(name, String(e)));
+    } finally {
+      rebasing.delete(norm(path));
+    }
+    await refreshProjects();
+    await refreshSessions();
+    onDone();
+  };
+
+  return { run, copy, sleepWorktree, cleanFinished, dropProject, dropWorktree, rebaseWorktree };
 }
 
 export type SidebarActions = ReturnType<typeof createSidebarActions>;
