@@ -403,7 +403,11 @@ const rawWrite = (id: number, data: string) => invoke("session_write", { id, dat
 export const writeSession = (id: number, data: string) => (cancelNudge(id), rawWrite(id, data));
 
 export const listProjects = () => call<Project[]>("project.list");
-export const addProject = (path: string) => call<Project>("project.add", { path });
+/** A host command that opens a native dialog first: no timeout, since the user may browse for a long time. */
+const nativePick = <T>(method: string, cmd: string, title: string) => invoke<T>(cmd, { title }).catch((e) => Promise.reject(toAppError(method, e)));
+/** Native folder dialog on the Rust side, then `project.add` with the chosen folder; null when cancelled.
+ *  The webview never supplies the path (`project.add` is not in the host's allow-list). */
+export const pickAndAddProject = (title: string) => nativePick<Project | null>("project.add", "project_add_pick", title);
 export const projectLogo = (id: string) => call<{ data_url: string | null }>("project.logo", { id }).then((r) => r.data_url);
 export const setProjectSetup = (id: string, setup: string) => call("project.setup", { id, setup });
 export const detectPackageManagers = (id: string) => call<{ installed: string[]; suggested: string | null; package_json?: boolean }>("pm.detect", { id });
@@ -666,4 +670,9 @@ export const envTools = () => callOr<{ tools: EnvTool[] } | null>("env.tools", {
 /** Copies the daemon's state files (settings, projects, sessions, automations; never the token) into a new backup folder; null on a daemon without it. */
 export const backupExport = () => callOr<{ path: string } | null>("backup.export", {}, null);
 /** Restores the backup folder `path` written by backupExport; null on a daemon without it. */
-export const backupRestore = (path: string) => callOr<{ restored: string[] } | null>("backup.restore", { path }, null);
+/** Native folder dialog for the backup folder, then `backup.restore` on it. `undefined` = cancelled; null = the daemon is too old. */
+export const pickAndRestoreBackup = (title: string): Promise<{ restored: string[] } | null | undefined> =>
+  nativePick<{ restored: string[] } | null>("backup.restore", "backup_restore_pick", title).then(
+    (r) => (r === null ? undefined : r),
+    (e) => (isUnknownMethod(e) ? null : Promise.reject(e)),
+  );

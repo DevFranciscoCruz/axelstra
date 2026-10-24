@@ -16,22 +16,20 @@ const asDaemon = (answers: Record<string, unknown>) =>
   });
 
 describe("daemon method names the frontend and the daemon agree on", () => {
-  it("calls notices.take, backup.export, backup.restore, orch.trust_info and env.tools", async () => {
+  it("calls notices.take, backup.export, orch.trust_info and env.tools", async () => {
     const api = await import("./api");
     asDaemon({
       "notices.take": { notices: ["x"] },
       "backup.export": { path: "/b" },
-      "backup.restore": { restored: ["settings.json"] },
       "orch.trust_info": { pin: "p", cards: [] },
       "env.tools": { tools: [{ id: "git", found: true, path: "/g", version: "2.1.0" }] },
     });
     expect(await api.storeNotices()).toEqual(["x"]);
     expect(await api.backupExport()).toEqual({ path: "/b" });
-    expect(await api.backupRestore("/b")).toEqual({ restored: ["settings.json"] });
     expect((await api.orchTrustInfo("p"))?.pin).toBe("p");
     expect((await api.envTools())?.[0].version).toBe("2.1.0");
     const methods = invoke.mock.calls.map((c) => c[1]?.method);
-    expect(methods).toEqual(["notices.take", "backup.export", "backup.restore", "orch.trust_info", "env.tools"]);
+    expect(methods).toEqual(["notices.take", "backup.export", "orch.trust_info", "env.tools"]);
   });
 
   it("an older daemon without them degrades instead of failing", async () => {
