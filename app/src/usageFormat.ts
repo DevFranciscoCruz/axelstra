@@ -1,9 +1,10 @@
 import { L } from "./strings.logic";
+import { fmtFixed, fmtNumber } from "./i18n";
 
 /** tokens per worktree, summed over the Claude and Codex conversations that ran there */
 export type WtUsage = { worktree: string; input: number; output: number; cache_read: number; cache_write: number; claude_sessions: number; codex_sessions: number };
 
-export const fmtTokens = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
+export const fmtTokens = (n: number) => (n >= 1e6 ? `${fmtFixed(n / 1e6, 1)}M` : n >= 1e3 ? `${fmtFixed(n / 1e3, 1)}k` : fmtNumber(n));
 
 /** what was paid for: input, output and cache writes (cache reads are shown apart, they cost a fraction) */
 export const spentOf = (u: Pick<WtUsage, "input" | "output" | "cache_write">) => u.input + u.output + u.cache_write;

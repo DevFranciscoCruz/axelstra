@@ -9,6 +9,7 @@ import { enR } from "./strings.remote.en";
 import { ptS } from "./strings";
 import { ptL } from "./strings.logic";
 import { enL } from "./strings.logic.en";
+import { ptBRL } from "./strings.logic.ptbr";
 import { enS } from "./strings.en";
 import { ptW } from "./strings.welcome";
 import { enW } from "./strings.welcome.en";
@@ -98,4 +99,11 @@ describe("every locale has every key", () => {
       expect(copies).toEqual([]);
     });
   }
+});
+
+describe("pt-BR", () => {
+  it("overrides only keys that exist in pt-PT, with the same kind of value", () => {
+    const stray = leafPaths(ptBRL).filter((p) => typeof at(ptL, p) !== typeof at(ptBRL, p));
+    expect(stray).toEqual([]);
+  });
 });

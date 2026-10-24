@@ -67,6 +67,12 @@ const steps = [
     also: "--skip-format",
     cmd: [process.execPath, "scripts/check-format.mjs"],
   },
+  {
+    name: "i18n",
+    skip: "--skip-frontend",
+    also: "--skip-lint",
+    cmd: [process.execPath, "scripts/check-i18n-static.mjs"],
+  },
   { name: "vitest", skip: "--skip-frontend", also: "--skip-vitest", cmd: [npm, "test"], cwd: join(root, "app") },
 ];
 

@@ -13,6 +13,7 @@ import { Badge, Button } from "../ui";
 import { ago, imageUsers, isRunning, parseCreated, portChips, stateInfo } from "../dockerLogic";
 import { DIcon } from "./shared";
 import { P } from "../strings.panels";
+import { fmtFixed } from "../i18n";
 
 export function Empty(props: { text: string }) {
   return <div class="dk-empty auto-note">{props.text}</div>;
@@ -156,7 +157,7 @@ export function Row(props: {
         </For>
       </span>
       <span class="dk-num" title="CPU">
-        {run() && props.stat ? `${props.stat.cpu.toFixed(1)}%` : ""}
+        {run() && props.stat ? `${fmtFixed(props.stat.cpu, 1)}%` : ""}
       </span>
       <span class="dk-num dk-mem" title={P.docker.memory}>
         {run() && props.stat ? props.stat.mem.split(" / ")[0] : ""}

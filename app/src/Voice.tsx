@@ -9,6 +9,7 @@ import { askDiscard } from "./Confirm";
 import { downloadErrorText, micErrorText, transcribeErrorText } from "./voiceErrors";
 import { createPersistedFlag } from "./persist";
 import { P } from "./strings.panels";
+import { fmtFixed } from "./i18n";
 
 // Local dictation: the webview records 16 kHz mono audio, the Rust side transcribes it with Whisper
 // (sherpa-onnx, model downloaded on first use). Hands-free: recording stops by itself after a pause in
@@ -64,7 +65,7 @@ async function transcribe() {
   }
   try {
     const text = await invoke<string>("voice_transcribe", pcm.buffer, { headers: { "x-lang": lang() } });
-    if (!text) setVoiceError(P.voice.noSpeech((lastPeak * 100).toFixed(1)));
+    if (!text) setVoiceError(P.voice.noSpeech(fmtFixed(lastPeak * 100, 1)));
     else if (autoSend() && recTarget !== null) {
       await writeSession(recTarget, text + "\r");
       setDraft(null);

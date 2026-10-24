@@ -125,6 +125,9 @@ export const count = (n: number, one: string, other: string): string => `${fmtNu
 
 export const fmtNumber = (n: number, o?: Intl.NumberFormatOptions): string =>
   new Intl.NumberFormat(locale(), o).format(n);
+/** a number with exactly `digits` decimals, in the decimal mark of the language */
+export const fmtFixed = (n: number, digits: number): string =>
+  fmtNumber(n, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 export const fmtDate = (
   d: Date | number,
   o: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" },

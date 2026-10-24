@@ -14,3 +14,4 @@ One look, defined in `app/src/styles.css`. `uiRules.test.ts` and `a11yRules.test
 - **Other components** (`Select.tsx`, `Modal.tsx`, `Tab.tsx`, `Confirm.tsx`): use them instead of raw `<button>`,
   `<select>` and hand-made dialogs. A dialog has one `primary` button; destructive ones use `danger`.
 - **Feedback:** results and errors go to the toast (`showNotice`, `setError`), never to text inside a panel.
+- **Texts:** never a literal in a component or logic module: use the dictionaries (`S.`, `P.`, `U.`, `L.`...), pt-PT first, then `.en.ts`. See `AGENTS.md` (Languages).

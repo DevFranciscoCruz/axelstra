@@ -20,6 +20,7 @@ import { findWorktree, refreshSessions, selectedWorktree, sessions } from "../st
 import { FAST_MS, nameOf, shells, DTab, DTABS } from "./shared";
 import { Empty } from "./Lists";
 import { P } from "../strings.panels";
+import { fmtFixed } from "../i18n";
 
 // ---- detail pane ----
 export function Detail(props: {
@@ -155,7 +156,7 @@ export function InfoTab(props: { c: DockerContainer; stat?: DockerStat }) {
         <Show when={props.stat}>
           <dt>{P.docker.info.cpuMem}</dt>
           <dd>
-            {props.stat!.cpu.toFixed(1)}% · {props.stat!.mem}
+            {fmtFixed(props.stat!.cpu, 1)}% · {props.stat!.mem}
           </dd>
         </Show>
         <Show when={info()}>
