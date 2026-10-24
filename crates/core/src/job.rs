@@ -79,6 +79,21 @@ mod imp {
             unsafe { TerminateJobObject(self.0, 1) };
         }
 
+        /// True when process `pid` is inside this job (also through nested jobs). A process that cannot be opened is not.
+        pub fn contains(&self, pid: u32) -> bool {
+            use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+            unsafe {
+                let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+                if h.is_null() {
+                    return false;
+                }
+                let mut inside = 0;
+                let ok = IsProcessInJob(h, self.0, &mut inside);
+                CloseHandle(h);
+                ok != 0 && inside != 0
+            }
+        }
+
         /// Nothing to forget: a Job Object tracks its processes itself.
         pub fn forget(&self, _pid: u32) {}
 
@@ -245,6 +260,19 @@ mod imp {
                 libc::killpg(pid as i32, libc::SIGKILL);
             }
             self.forget(pid);
+        }
+
+        /// True when `pid` is in one of the tracked process groups or descends from one of their leaders.
+        pub fn contains(&self, pid: u32) -> bool {
+            let groups = self.0.lock_recover().clone();
+            if groups.is_empty() {
+                return false;
+            }
+            if groups.contains(&unsafe { libc::getpgid(pid as i32) }) {
+                return true;
+            }
+            let leaders: Vec<u32> = groups.iter().map(|g| *g as u32).collect();
+            procs::snapshot().descendants(&leaders).contains(&pid)
         }
 
         pub fn kill(&self) {

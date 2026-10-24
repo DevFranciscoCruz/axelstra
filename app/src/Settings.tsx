@@ -1,6 +1,6 @@
 import { For, JSX, Show, createResource, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { NotifyMode, SettingsPatch, ShellChoice, Terse, backupExport, backupRestore, copyDiagnostics, diagnostics, getSettings, resetShellCache, setSettings } from "./api";
+import { NotifyMode, SettingsPatch, ShellChoice, Terse, backupExport, pickAndRestoreBackup, copyDiagnostics, diagnostics, getSettings, resetShellCache, setSettings } from "./api";
 import { restartDaemonFlow } from "./daemonActions";
 import { HooksSection } from "./HooksSection";
 import { Modal } from "./Modal";
@@ -29,7 +29,7 @@ const T = {
   exported: "Cópia guardada em ",
   restored: "Cópia restaurada. Reinicia o Axelstra para aplicar.",
   noBackup: "Este daemon ainda não suporta cópias de segurança. Atualiza e reinicia o Axelstra.",
-  restorePath: "Caminho do ficheiro de cópia a restaurar",
+  restorePath: "Escolhe a pasta da cópia a restaurar",
   copyDiag: "Copiar diagnóstico",
   diagCopied: "Diagnóstico copiado para a área de transferência.",
 };
@@ -130,10 +130,9 @@ export function Settings() {
     }
   };
   const restoreBackup = async () => {
-    const path = window.prompt(T.restorePath)?.trim();
-    if (!path) return;
     try {
-      const r = await backupRestore(path);
+      const r = await pickAndRestoreBackup(T.restorePath);
+      if (r === undefined) return; // dialog cancelled
       showNotice(r ? T.restored : T.noBackup);
     } catch (e) {
       setError(errorText(e));

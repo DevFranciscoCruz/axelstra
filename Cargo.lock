@@ -305,12 +305,12 @@ dependencies = [
  "anyhow",
  "axelstra-core",
  "axelstra-daemon",
+ "base64 0.22.1",
  "clap",
- "png 0.17.16",
+ "libc",
  "serde",
  "serde_json",
  "tokio",
- "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -364,7 +364,9 @@ dependencies = [
  "chrono",
  "getrandom 0.2.17",
  "ignore",
+ "libc",
  "notify",
+ "png 0.17.16",
  "serde",
  "serde_json",
  "serde_norway",

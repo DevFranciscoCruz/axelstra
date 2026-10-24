@@ -96,3 +96,73 @@ fn agent_role_cannot_use_app_only_calls() {
     // the app role is unaffected
     assert_eq!(app.call("computer.enable", json!({"on": true})).unwrap()["enabled"], true);
 }
+
+/// Child half of `a_process_started_by_a_session_cannot_get_the_user_role`: runs inside the session, knows the master
+/// token (handed over in its env, the most a process reading the data dir could ever learn) and uses it with no
+/// agent credential at all, as a hostile agent would.
+#[test]
+fn session_probe_child() {
+    let Ok(out) = std::env::var("AXELSTRA_PROBE_OUT") else { return };
+    let (pipe, token) = (std::env::var("AXELSTRA_PROBE_PIPE").unwrap(), std::env::var("AXELSTRA_PROBE_TOKEN").unwrap());
+    let mut c = Client::connect(&pipe, &token).unwrap();
+    let mut report = vec![];
+    for (m, p) in
+        [("computer.enable", json!({"on": true})), ("project.add", json!({"path": std::env::temp_dir()})), ("hooks.install", json!({}))]
+    {
+        report.push(format!("{m}: {}", c.call(m, p).err().map(|e| e.to_string()).unwrap_or_else(|| "ALLOWED".into())));
+    }
+    std::fs::write(out, report.join("\n")).unwrap();
+}
+
+#[test]
+fn a_process_started_by_a_session_cannot_get_the_user_role() {
+    let (pipe, token) = start("origin");
+    let mut app = Client::connect(&pipe, &token).unwrap();
+    let out = std::env::temp_dir().join(format!("axelstra-probe-{}.txt", std::process::id()));
+    let _ = std::fs::remove_file(&out);
+    let exe = std::env::current_exe().unwrap();
+    let env = json!({
+        "AXELSTRA_PROBE_OUT": out.to_string_lossy(),
+        "AXELSTRA_PROBE_PIPE": pipe,
+        "AXELSTRA_PROBE_TOKEN": token,
+    });
+    app.call(
+        "session.spawn",
+        json!({"program": exe.to_string_lossy(), "args": ["session_probe_child", "--exact", "--nocapture", "--test-threads=1"], "env": env}),
+    )
+    .unwrap();
+    let t = Instant::now();
+    let report = loop {
+        if let Ok(r) = std::fs::read_to_string(&out) {
+            break r;
+        }
+        assert!(t.elapsed() < Duration::from_secs(30), "the probe never reported");
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    assert_eq!(report.lines().count(), 3, "{report}");
+    for l in report.lines() {
+        assert!(l.contains("not allowed to agents"), "a session's process got the user role: {l}");
+    }
+    // the same token from outside every session is the user's
+    assert_eq!(app.call("computer.enable", json!({"on": true})).unwrap()["enabled"], true);
+}
+
+#[test]
+fn computer_actions_are_refused_by_the_daemon_while_screen_control_is_off() {
+    let (pipe, token) = start("compgate");
+    // even the user's own connection and a hand-written client (no CLI in between) are refused
+    let mut c = Client::connect(&pipe, &token).unwrap();
+    for (m, p) in [
+        ("computer.windows", json!({})),
+        ("computer.screenshot", json!({})),
+        ("computer.click", json!({"x": 1, "y": 1})),
+        ("computer.type", json!({"text": "x"})),
+        ("computer.key", json!({"combo": "enter"})),
+        ("computer.scroll", json!({"dy": 1})),
+        ("computer.focus", json!({"window": 1})),
+    ] {
+        let e = c.call(m, p).unwrap_err().to_string();
+        assert!(e.contains("screen control is off"), "{m}: {e}");
+    }
+    assert_eq!(c.call("computer.status", json!({})).unwrap()["enabled"], false);
+}

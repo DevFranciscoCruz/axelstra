@@ -173,7 +173,6 @@ const ALLOWED_METHODS: &[&str] = &[
     "computer.status",
     "daemon.shutdown",
     "backup.export",
-    "backup.restore",
     "env.tools",
     "notices.take",
     "dispatch.meta",
@@ -237,7 +236,6 @@ const ALLOWED_METHODS: &[&str] = &[
     "ping",
     "pm.detect",
     "ports.list",
-    "project.add",
     "project.list",
     "project.logo",
     "project.remove",
@@ -401,6 +399,45 @@ async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, par
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_client(&st.bg, read_only(&method), |c| c.call(&method, params.clone())).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Asks for a folder in the native dialog. The path never passes through the webview: a compromised page could
+/// otherwise name any folder for `project.add` or `backup.restore`. `None` = cancelled.
+fn pick_folder(app: &tauri::AppHandle, title: &str, start: Option<std::path::PathBuf>) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut d = app.dialog().file().set_title(title);
+    if let Some(s) = start.filter(|s| s.is_dir()) {
+        d = d.set_directory(s);
+    }
+    match d.blocking_pick_folder() {
+        None => Ok(None),
+        Some(f) => f.into_path().map(|p| Some(p.to_string_lossy().into_owned())).map_err(|e| e.to_string()),
+    }
+}
+
+/// Native folder pick, then `project.add` with that path. Returns the daemon's project, or null when cancelled.
+#[tauri::command]
+async fn project_add_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = pick_folder(&app, &title, None)? else { return Ok(Value::Null) };
+        with_client(&st.control, false, |c| c.call("project.add", json!({"path": path}))).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Native pick of the backup folder (it opens on `<data dir>/backups`), then `backup.restore` with that path.
+/// Returns the daemon's answer, or null when cancelled.
+#[tauri::command]
+async fn backup_restore_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = pick_folder(&app, &title, Some(proto::data_dir().join("backups")))? else { return Ok(Value::Null) };
+        with_client(&st.control, false, |c| c.call("backup.restore", json!({"path": path}))).map_err(|e| format!("{e:#}"))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -847,6 +884,8 @@ fn main() {
             missing_tools,
             daemon_call,
             daemon_call_bg,
+            project_add_pick,
+            backup_restore_pick,
             session_write,
             lag_log,
             session_attach,
@@ -1006,6 +1045,18 @@ mod tests {
         assert!(check_call("fs.read", &json!({"path": "../x"})).is_ok());
         assert!(check_call("orch.start", &json!({"project": "p", "max": 3})).is_ok());
         assert!(check_call("orch.start", &json!({"project": "p", "agent": ["calc.exe"]})).is_err());
+    }
+
+    #[test]
+    fn path_taking_methods_only_through_the_native_pick() {
+        use super::check_call;
+        use serde_json::json;
+        assert!(!ALLOWED_METHODS.contains(&"project.add"));
+        assert!(!ALLOWED_METHODS.contains(&"backup.restore"));
+        assert!(check_call("project.add", &json!({"path": "/home/x/proj"})).is_err());
+        assert!(check_call("backup.restore", &json!({"path": "/tmp/evil"})).is_err());
+        assert!(check_call("project.list", &json!({})).is_ok());
+        assert!(check_call("backup.export", &json!({})).is_ok());
     }
 
     #[test]

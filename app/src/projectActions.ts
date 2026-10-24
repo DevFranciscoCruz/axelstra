@@ -1,13 +1,11 @@
-import { open } from "@tauri-apps/plugin-dialog";
-import { addProject } from "./api";
+import { pickAndAddProject } from "./api";
 import { projects, refreshProjects, refreshSessions, selectWorktree, setError } from "./store";
 
-/** Asks for a folder, adds it as a project and opens its main worktree. Shared by the sidebar and the empty states. */
+/** Asks for a folder (native dialog, on the Rust side), adds it as a project and opens its main worktree. Shared by the sidebar and the empty states. */
 export const pickProject = async () => {
   try {
-    const dir = await open({ directory: true, multiple: false, title: "Escolhe a pasta do projeto" });
-    if (typeof dir !== "string") return;
-    const added = await addProject(dir);
+    const added = await pickAndAddProject("Escolhe a pasta do projeto");
+    if (!added) return;
     await refreshProjects();
     const main = projects().find((p) => p.id === added.id)?.worktrees.find((w) => w.is_main);
     if (main) selectWorktree(main.path);
