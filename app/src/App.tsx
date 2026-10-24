@@ -179,7 +179,7 @@ export function App() {
   });
 
   const spawnShell = async (c: NonNullable<ReturnType<typeof current>>) => {
-    const [program, args] = await defaultShell();
+    const [program, args] = await defaultShell(c.wt.path);
     const { id } = await spawnSession(program, args, "shell", c.wt.path, { project: c.project.id, worktree: c.wt.path, kind: "shell" });
     await refreshSessions();
     return id;

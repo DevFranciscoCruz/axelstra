@@ -10,6 +10,7 @@ export * from "./store/ui";
 export * from "./store/sessions";
 export * from "./store/tabs";
 export * from "./store/git";
+export * from "./store/hosts";
 
 // `norm` lives in paths.ts (one for api and store); it stays importable from here
 export { norm, friendlyError, toast, toasts, dismissToast };
