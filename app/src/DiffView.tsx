@@ -1,3 +1,4 @@
+import { Loading } from "./Loading";
 import { For, Show, createEffect, createResource, createSignal } from "solid-js";
 import { Button, Textarea } from "./ui";
 import { Icon } from "./Icon";
@@ -95,7 +96,7 @@ export function DiffView() {
         </Button>
       </div>
       <div class="diff-body">
-        <Show when={!text.loading} fallback={<div class="placeholder">A carregar…</div>}>
+        <Show when={!text.loading} fallback={<Loading onRetry={() => void refetch()} />}>
           <Show when={rows().length > 0} fallback={<div class="placeholder">Sem diferenças de texto para mostrar</div>}>
             <table>
               <tbody>

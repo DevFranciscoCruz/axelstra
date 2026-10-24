@@ -1,3 +1,4 @@
+import { Loading } from "./Loading";
 import { For, Show, createResource } from "solid-js";
 import { gitShow } from "./api";
 import { parseDiff } from "./DiffView";
@@ -22,7 +23,7 @@ function splitFiles(patch: string): FileDiff[] {
 
 export function CommitView() {
   const key = () => ({ wt: selectedWorktree(), sha: openCommit()?.sha });
-  const [patch] = createResource(key, async (k) => (k.wt && k.sha ? gitShow(k.wt, k.sha) : ""));
+  const [patch, { refetch }] = createResource(key, async (k) => (k.wt && k.sha ? gitShow(k.wt, k.sha) : ""));
   const files = () => splitFiles(patch() ?? "");
 
   return (
@@ -32,7 +33,7 @@ export function CommitView() {
         <span>{openCommit()?.subject}</span>
       </div>
       <div class="diff-body">
-        <Show when={!patch.loading} fallback={<div class="placeholder">A carregar…</div>}>
+        <Show when={!patch.loading} fallback={<Loading onRetry={() => void refetch()} />}>
           <For each={files()} fallback={<div class="placeholder">Commit sem alterações de texto</div>}>
             {(f) => {
               const rows = parseDiff(f.text);

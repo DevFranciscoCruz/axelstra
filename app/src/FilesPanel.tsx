@@ -1,3 +1,4 @@
+import { Loading } from "./Loading";
 import { ask } from "./Confirm";
 import { Button, Input, Tabs, TabsList, TabsTrigger } from "./ui";
 import { Icon } from "./Icon";
@@ -161,7 +162,7 @@ function Dir(props: { wt: string; path: string; depth: number }) {
         <div class="empty">{err()}</div>
       </Show>
       <Show when={entries() === null && !err()}>
-        <div class="empty">A carregar…</div>
+        <Loading class="empty" />
       </Show>
       <Show when={newHere()}>{(e) => <NameInput initial="" depth={props.depth} dir={e().mode === "dir"} onSubmit={(n) => void submitNew(n)} />}</Show>
       <For each={page().shown}>{(e) => <Node wt={props.wt} dir={props.path} e={e} depth={props.depth} />}</For>
