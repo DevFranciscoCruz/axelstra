@@ -11,7 +11,7 @@ import { fmtTokens } from "./usageFormat";
 afterEach(() => setLocale("pt-PT"));
 
 const sources = import.meta.glob<string>(
-  ["./**/*.tsx", "./**/*.ts", "!./**/*.test.ts", "!./**/strings*.ts", "!./ui/Gallery.tsx"],
+  ["./**/*.tsx", "./**/*.ts", "!./**/*.test.ts", "!./**/strings*.ts", "!./msg/*.ts", "!./ui/Gallery.tsx"],
   { query: "?raw", import: "default", eager: true },
 );
 
@@ -89,10 +89,12 @@ describe("the language changes live", () => {
     expect(fmtTokens(1500)).toBe("1,5k");
     setLocale("en");
     expect(friendlyError("fatal: not a git repository")).toContain("not a git repository.");
-    expect(ago(300)).toBe("5 min ago");
+    expect(ago(300)).toBe("5 min. ago");
     expect(ago(5)).toBe("now");
     expect(fmtTokens(1500)).toBe("1.5k");
     expect(micErrorText(new Error("x"))).toContain("microphone");
+    setLocale("pt-BR");
+    expect(ago(300)).toBe("há 5 min.");
   });
   it("pt-BR keeps pt-PT for what it does not override", () => {
     setLocale("pt-BR");

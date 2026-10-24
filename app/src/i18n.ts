@@ -133,8 +133,11 @@ export const fmtDate = (
   o: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" },
 ): string => new Intl.DateTimeFormat(locale(), o).format(d);
 /** "há 5 minutos" / "5 minutes ago"; `unit` as Intl.RelativeTimeFormat wants it */
-export const fmtRelative = (value: number, unit: Intl.RelativeTimeFormatUnit): string =>
-  new Intl.RelativeTimeFormat(locale(), { numeric: "auto" }).format(value, unit);
+export const fmtRelative = (
+  value: number,
+  unit: Intl.RelativeTimeFormatUnit,
+  style: Intl.RelativeTimeFormatStyle = "long",
+): string => new Intl.RelativeTimeFormat(locale(), { numeric: "auto", style }).format(value, unit);
 
 // ---- tables whose texts must be read when used, not when the module loads ----
 

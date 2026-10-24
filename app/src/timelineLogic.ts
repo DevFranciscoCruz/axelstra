@@ -1,5 +1,6 @@
 import { fmtTokens } from "./usageFormat";
 import { P } from "./strings.panels";
+import { stampIso, stampLocal } from "./time";
 
 export type TimelineEvent = {
   at: number;
@@ -20,12 +21,8 @@ export type Timeline = {
 
 const T = P.timeline;
 
-const pad = (n: number) => String(n).padStart(2, "0");
-/** "2026-10-24 13:05" in local time: one wording for the panel and the export */
-export const stamp = (at: number): string => {
-  const d = new Date(at * 1000);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
+/** the panel writes dates in the UI language; the exported markdown keeps ISO (`stampIso`) so it reads the same everywhere */
+export const stamp = stampLocal;
 
 export const tokenLine = (t: TimelineTokens): string =>
   T.tokens(fmtTokens(t.input + t.output), fmtTokens(t.input), fmtTokens(t.output), fmtTokens(t.cache_read));
@@ -48,7 +45,7 @@ export function toMarkdown(t: Timeline, worktree: string): string {
   if (!t.events.length) out.push(`_${T.empty}_`);
   for (const e of [...t.events].reverse()) {
     out.push(
-      `- **${stamp(e.at)}** · ${T.kinds[e.kind] ?? e.kind}: ${md(e.title)}${e.detail ? ` — ${md(e.detail)}` : ""}`,
+      `- **${stampIso(e.at)}** · ${T.kinds[e.kind] ?? e.kind}: ${md(e.title)}${e.detail ? ` — ${md(e.detail)}` : ""}`,
     );
   }
   return out.join("\n") + "\n";

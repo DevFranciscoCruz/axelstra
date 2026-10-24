@@ -117,12 +117,6 @@ export const ptL = {
   },
 
   // ---- time and usage ----
-  ago: {
-    now: "agora",
-    min: (n: number) => `há ${n} min`,
-    hour: (n: number) => `há ${n} h`,
-    day: (n: number) => `há ${n} d`,
-  },
   usage: {
     none: "Nenhum agente usou tokens nestes worktrees",
     head: (spent: string, cache: string) =>

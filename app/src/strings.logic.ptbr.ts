@@ -29,10 +29,4 @@ export const ptBRL: DeepPartial<Widen<typeof ptL>> = {
     binary: "Arquivo binário: não pode ser aberto no editor.",
     tooLarge: "Arquivo grande demais para o editor.",
   },
-  ago: {
-    now: "agora",
-    min: (n: number) => `há ${n} min`,
-    hour: (n: number) => `há ${n} h`,
-    day: (n: number) => `há ${n} d`,
-  },
 };
