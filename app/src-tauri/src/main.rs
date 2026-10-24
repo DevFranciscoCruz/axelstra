@@ -285,6 +285,8 @@ fn check_params(method: &str, params: &Value) -> Result<(), String> {
             }
             Ok(())
         }
+        // the UI never overrides the agent command: a page that did could run any program unsupervised
+        "orch.start" if !params["agent"].is_null() => Err("override de agente não permitido".into()),
         "fs.write" => {
             let path = params["path"].as_str().unwrap_or_default();
             let p = std::path::Path::new(path);
@@ -439,6 +441,10 @@ fn input_sender(st: &Arc<State>) -> &'static std::sync::mpsc::Sender<(u32, Vec<u
 
 #[tauri::command]
 fn session_write(state: tauri::State<'_, Arc<State>>, id: u32, data: String) -> Result<(), String> {
+    // keystrokes only go to a session this window has open (attached), not to any id a page can guess
+    if !state.attachments.lock().unwrap().get(&id).is_some_and(|m| !m.is_empty()) {
+        return Err(format!("sessão {id} não está anexada"));
+    }
     input_sender(state.inner()).send((id, data.into_bytes())).map_err(|e| e.to_string())
 }
 
@@ -971,6 +977,8 @@ mod tests {
             assert!(check_call("fs.write", &json!({"path": bad})).is_err(), "{bad}");
         }
         assert!(check_call("fs.read", &json!({"path": "../x"})).is_ok());
+        assert!(check_call("orch.start", &json!({"project": "p", "max": 3})).is_ok());
+        assert!(check_call("orch.start", &json!({"project": "p", "agent": ["calc.exe"]})).is_err());
     }
 
     #[test]
