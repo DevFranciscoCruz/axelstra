@@ -421,7 +421,7 @@ end tell"#)?;
         buf.truncate(info.buffer_size());
         let rgba = match info.color_type {
             png::ColorType::Rgba => buf,
-            png::ColorType::Rgb => buf.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
+            png::ColorType::Rgb => buf.as_chunks::<3>().0.iter().flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
             _ => bail!("unexpected screenshot format"),
         };
         Ok((info.width as i32, info.height as i32, rgba))
