@@ -4,7 +4,8 @@ import { Automation, agentOptions, agentWarning, agentsList, deleteAutomation, l
 import { Select } from "./Select";
 import { Modal } from "./Modal";
 import { ask, askDiscard } from "./Confirm";
-import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations } from "./store";
+import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations, showNotice } from "./store";
+import { S } from "./strings";
 import { Button, Field, Input, Textarea } from "./ui";
 
 const DAYS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
@@ -87,10 +88,13 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
   const remove = async (a: Automation) => {
     const ok = await ask(`Apagar a automatização "${a.name}"?`, { title: "Apagar", kind: "warning", okLabel: "Apagar", cancelLabel: "Cancelar" });
     if (!ok) return;
-    await guard(async () => {
+    try {
       await deleteAutomation(a.id);
+      showNotice(S.automationDeleted(a.name));
       await refetch();
-    });
+    } catch (e) {
+      setError(S.deleteFailed(a.name, e));
+    }
   };
 
   return (
