@@ -1,12 +1,21 @@
 import { ask, askSave } from "./Confirm";
 import { pushNotification } from "./notifications";
 import { LEFT, RIGHT, fitPanel } from "./layout";
-import { createSignal } from "solid-js";
+import { createMemo, createRoot, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { Changes, Commit, DispatchMeta, FlowTask, GhItem, Project, SessionInfo, Terse, Worktree, WtStatus, call, callBg, flowTasks, ghListBg, gitChanges, listProjects, listSessions, worktreeStatus } from "./api";
+import { Changes, Commit, DispatchMeta, GhItem, Project, SessionInfo, Terse, Worktree, WtStatus, call, callBg, flowTasks, ghListBg, gitChanges, listProjects, listSessions, worktreeOverview, worktreeStatus } from "./api";
+import { apiContext } from "./apiContext";
+import { errorText } from "./appError";
+import { friendlyError } from "./friendly";
+import { norm } from "./paths";
+import { createPoller, type Poller } from "./poller";
+import { isRecord, isStringArray, readJson } from "./persist";
+import type { OverviewProject } from "./statusGroups";
+import { dismissKey, dismissPrefix, dismissToast, latestText, toast, toasts } from "./toasts";
 
-/** Paths come back with either slash style; compare them in one normal form. */
-export const norm = (p?: string | null) => (p ?? "").replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+// `norm` lives in paths.ts (one for api and store); it stays importable from here
+export { norm, friendlyError, toast, toasts, dismissToast };
+export type { ToastInput } from "./toasts";
 
 const load = (k: string): string | null => {
   try {
@@ -50,14 +59,20 @@ export const setDefaultAgent = (a: string) => {
 
 /** Settings that belong to one project, remembered in the browser storage next to the global ones. */
 export type ProjectPrefs = { agent?: string; terse?: Terse };
-const loadPrefs = (): Record<string, ProjectPrefs> => {
-  try {
-    const v = JSON.parse(load("axelstra.projectPrefs") ?? "{}");
-    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
-  } catch {
-    return {};
+/** the saved preferences, keeping only the entries that have the shape of ProjectPrefs */
+export const parsePrefs = (v: unknown): Record<string, ProjectPrefs> => {
+  const out: Record<string, ProjectPrefs> = {};
+  if (!isRecord(v)) return out;
+  for (const [id, p] of Object.entries(v)) {
+    if (!isRecord(p)) continue;
+    const e: ProjectPrefs = {};
+    if (typeof p.agent === "string") e.agent = p.agent;
+    if (p.terse === "off" || p.terse === "short" || p.terse === "tiny") e.terse = p.terse;
+    if (Object.keys(e).length) out[id] = e;
   }
+  return out;
 };
+const loadPrefs = (): Record<string, ProjectPrefs> => parsePrefs(readJson("axelstra.projectPrefs", isRecord, {}));
 const [projectPrefs, setProjectPrefsSig] = createSignal<Record<string, ProjectPrefs>>(loadPrefs());
 /** the agent a project opens by default: its own choice, else the global one */
 export const projectAgent = (id?: string | null) => {
@@ -165,42 +180,24 @@ export const [fsTick, setFsTick] = createSignal(0);
 
 export const [projects, setProjects] = createSignal<Project[]>([]);
 export const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
-const [error, setErrorSig] = createSignal("");
-export { error };
+/** The newest failure on screen ("" when none). Failures live in the toast list, one per key (see toasts.ts). */
+export const error = () => latestText("error");
 /** the app is reconnecting to the daemon (it was replaced or crashed): the UI says so until it is back */
 export const [daemonReconnecting, setDaemonReconnecting] = createSignal(false);
 /** a short informational message (not a failure): shown for a few seconds */
-export const [notice, setNoticeSig] = createSignal("");
-let noticeTimer: ReturnType<typeof setTimeout> | undefined;
-export const showNotice = (m: string) => {
-  setNoticeSig(m);
-  clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(() => setNoticeSig(""), 9000);
-};
+export const notice = () => latestText("info");
+export const showNotice = (m: string) => void toast({ text: m, kind: "info" });
 
-/** errors set by an action stay until dismissed; only the session poll clears its own */
-let errorFromPoll = false;
-export const setError = (m: string) => {
-  errorFromPoll = false;
-  setErrorSig(friendlyError(m));
+const ACTION_KEY = "action:";
+/** Shows a failure. Two different failures stack; the same one again replaces itself. `setError("")` closes the action failures.
+ *  `key` ties it to a poll, which clears only its own with `clearError(key)`. */
+export const setError = (m: string, key?: string) => {
+  if (!m) return dismissPrefix(ACTION_KEY);
+  const text = friendlyError(m);
+  toast({ text, kind: "error", key: key ?? `${ACTION_KEY}${text}`, record: !key });
 };
-
-/** the daemon and git speak English; the common failures get a sentence that says what to do */
-const FRIENDLY: [RegExp, string][] = [
-  [/os error 2|program not found|not recognized|cannot find the file/i, "Programa não encontrado. Confirma que está instalado e no PATH (git, claude, codex ou gh)."],
-  [/is already checked out|already exists/i, "Já existe um branch ou worktree com esse nome. Escolhe outro nome."],
-  [/not a git repository/i, "Esta pasta não é um repositório git."],
-  [/contains modified or untracked files|local changes would be overwritten/i, "Há alterações por guardar. Faz commit ou descarta-as primeiro."],
-  [/could not read from remote|authentication failed|permission denied \(publickey\)|could not resolve host/i, "Sem acesso ao remoto. Verifica a ligação à internet e o login no git/gh."],
-  [/non-fast-forward|failed to push|rejected/i, "O remoto recusou o push porque tem commits novos. Faz pull antes de enviar."],
-  [/worker limit reached/i, "Limite de agentes em simultâneo atingido. Espera que um termine ou aumenta com `axelstra limit`."],
-  [/connection (refused|reset)|pipe.*(closed|broken)|os error 232|os error 109/i, "Sem ligação ao daemon. Vai tentar de novo; se persistir, reinicia o Axelstra."],
-  [/unknown method/i, "O daemon em execução é antigo. Reinicia o Axelstra para o atualizar."],
-];
-export const friendlyError = (m: string) => {
-  const hit = FRIENDLY.find(([re]) => re.test(m));
-  return hit ? `${hit[1]}\n(${m.length > 160 ? m.slice(0, 160) + "…" : m})` : m;
-};
+/** a poll that works again takes down the failure it raised, and only that one */
+export const clearError = (key: string) => dismissKey(key);
 
 const [wt, setWt] = createSignal<string | null>(load("axelstra.worktree"));
 export const selectedWorktree = wt;
@@ -215,34 +212,64 @@ const doSelect = (path: string | null) => {
   setChanges(null);
 };
 
-/** right panel tab and the file open in the editor (relative to the worktree); null = terminal/diff */
+/** right panel tab */
 export const [rightTab, setRightTab] = createSignal<"files" | "changes" | "pulls">("files");
-/** the commit whose patch replaces the terminal area; null = none */
-export const [openCommit, setOpenCommit] = createSignal<Commit | null>(null);
-export const [openFile, setOpenFile] = createSignal<string | null>(null);
-/** line to put the cursor on when the open file was reached from a path link; null = top */
-export const [fileLine, setFileLine] = createSignal<number | null>(null);
 
+/** What fills the main area. One value, so two views can never be "open" at once. */
+export type View =
+  | { kind: "terminal" }
+  | { kind: "kanban" }
+  | { kind: "docker" }
+  /** the commit whose patch replaces the terminal area */
+  | { kind: "commit"; commit: Commit }
+  /** a file open in the editor (relative to the worktree); `line` is where to put the cursor when it was reached from a path link */
+  | { kind: "file"; path: string; line: number | null }
+  /** which file's diff is showing instead of a terminal */
+  | { kind: "diff"; path: string };
+const TERMINAL: View = { kind: "terminal" };
+export const [view, setView] = createSignal<View>(TERMINAL);
+
+// The readers and setters below are the old per-view signals, now views onto `view`: setting one replaces the whole view,
+// and "closing" a view (null / false) only does anything while that view is the one showing.
+const kindOf = <K extends View["kind"]>(k: K) => {
+  const v = view();
+  return v.kind === k ? (v as Extract<View, { kind: K }>) : null;
+};
+const closeIf = (k: View["kind"]) => setView((v) => (v.kind === k ? TERMINAL : v));
+export const openCommit = (): Commit | null => kindOf("commit")?.commit ?? null;
+export const setOpenCommit = (c: Commit | null) => (c ? setView({ kind: "commit", commit: c }) : closeIf("commit"));
+export const openFile = (): string | null => kindOf("file")?.path ?? null;
+export const setOpenFile = (p: string | null) => (p !== null ? setView({ kind: "file", path: p, line: null }) : closeIf("file"));
+export const openDiff = (): string | null => kindOf("diff")?.path ?? null;
+export const setOpenDiff = (p: string | null) => (p !== null ? setView({ kind: "diff", path: p }) : closeIf("diff"));
+/** line to put the cursor on when the open file was reached from a path link; null = top */
+export const fileLine = (): number | null => kindOf("file")?.line ?? null;
+export const setFileLine = (n: number | null) => setView((v) => (v.kind === "file" ? { ...v, line: n } : v));
 /** the project's kanban board replaces the terminal area when true */
-export const [showKanban, setShowKanban] = createSignal(false);
-/** the Docker screen replaces the terminal area when true; excludes the kanban */
-export const [showDocker, setShowDocker] = createSignal(false);
+export const showKanban = () => view().kind === "kanban";
+export const setShowKanban = (on: boolean) => (on ? setView({ kind: "kanban" }) : closeIf("kanban"));
+/** the Docker screen replaces the terminal area when true */
+export const showDocker = () => view().kind === "docker";
+export const setShowDocker = (on: boolean) => (on ? setView({ kind: "docker" }) : closeIf("docker"));
 
 /** One place that picks what fills the main area: no argument = the terminal; the views exclude each other. */
-export const showView = (v: { diff?: string; file?: string; commit?: Commit; kanban?: boolean } = {}) => {
-  setOpenDiff(v.diff ?? null);
-  setOpenFile(v.file ?? null);
-  setFileLine(null);
-  setOpenCommit(v.commit ?? null);
-  setShowKanban(v.kanban ?? false);
-  setShowDocker(false);
-};
+export const showView = (v: { diff?: string; file?: string; commit?: Commit; kanban?: boolean; docker?: boolean } = {}) =>
+  setView(
+    v.diff !== undefined
+      ? { kind: "diff", path: v.diff }
+      : v.file !== undefined
+        ? { kind: "file", path: v.file, line: null }
+        : v.commit
+          ? { kind: "commit", commit: v.commit }
+          : v.kanban
+            ? { kind: "kanban" }
+            : v.docker
+              ? { kind: "docker" }
+              : TERMINAL,
+  );
 /** opens a file (relative to the worktree) in the editor, at `line` when given; asks first if the editor has unsaved text */
 export const openFileAt = (path: string, line?: number) =>
-  guarded(() => {
-    showView({ file: path });
-    setFileLine(line && line > 0 ? line : null);
-  });
+  guarded(() => setView({ kind: "file", path, line: line && line > 0 ? line : null }));
 
 /** a second terminal shown beside the active one (split view); null = no split */
 export const [splitSession, setSplitSession] = createSignal<number | null>(null);
@@ -266,13 +293,7 @@ export const [showOrchestra, setShowOrchestra] = createSignal(false);
 export const [computerOn, setComputerOn] = createSignal(false);
 
 /** worktrees pinned to the top of their project (remembered in the browser storage) */
-const loadPins = (): string[] => {
-  try {
-    return JSON.parse(load("axelstra.pins") ?? "[]");
-  } catch {
-    return [];
-  }
-};
+const loadPins = (): string[] => readJson("axelstra.pins", isStringArray, []);
 const [pins, setPins] = createSignal<string[]>(loadPins());
 export const isPinned = (path: string) => pins().includes(norm(path));
 export const togglePin = (path: string) => {
@@ -381,16 +402,21 @@ const refreshFlows = async () => {
  *  pass one that leaves out fields that move on every poll. */
 export const keepSame = <T>(prev: T[], next: T[], key: (x: T) => string | number, sig: (x: T) => unknown = (x) => x): T[] => {
   const old = new Map(prev.map((x) => [key(x), x] as const));
-  return next.map((n) => {
+  const out = next.map((n) => {
     const o = old.get(key(n));
     return o !== undefined && JSON.stringify(sig(o)) === JSON.stringify(sig(n)) ? o : n;
   });
+  // nothing changed at all: the old array itself, so signals and memos downstream do not run for nothing
+  return out.length === prev.length && out.every((x, i) => x === prev[i]) ? prev : out;
 };
 
 /** A session as far as the UI can tell: idle_ms changes on every poll, but only its "working" side and the minute
  *  the labels show matter, so those stand in for it. */
 const sessionSig = (s: SessionInfo) => ({ ...s, idle_ms: s.idle_ms === undefined ? undefined : [s.idle_ms < WORKING_MS, Math.floor(s.idle_ms / 60000)] });
 
+const POLL_SESSIONS = "poll:sessions";
+const POLL_PROJECTS = "poll:projects";
+const POLL_CHANGES = "poll:changes";
 const pollSessions = async () => {
   void refreshFlows();
   try {
@@ -401,10 +427,9 @@ const pollSessions = async () => {
     const cur = selectedWorktree();
     if (cur && !document.hidden && attention().has(norm(cur))) setAttention((a) => { const n = new Set(a); n.delete(norm(cur)); return n; });
     setSessions((prev) => keepSame(prev, list, (s) => s.id, sessionSig));
-    if (errorFromPoll) setErrorSig("");
+    clearError(POLL_SESSIONS);
   } catch (e) {
-    setErrorSig(String(e));
-    errorFromPoll = true;
+    setError(errorText(e), POLL_SESSIONS);
   }
 };
 
@@ -424,13 +449,38 @@ export const refreshSessions = (): Promise<void> => {
 export const [dispatchTopics, setDispatchTopics] = createSignal<DispatchMeta>({});
 const pollDispatch = () => callBg<DispatchMeta>("dispatch.meta").then(setDispatchTopics, () => {});
 let dispUsers = 0;
-let dispTimer: ReturnType<typeof setInterval> | undefined;
+let dispPoll: Poller | undefined;
 /** call from a component that shows `dispatchTopics`; returns the function that stops watching (the poll ends with the last one) */
 export const watchDispatch = () => {
   void pollDispatch();
-  if (dispUsers++ === 0) dispTimer = setInterval(() => !document.hidden && void pollDispatch(), 4000);
+  if (dispUsers++ === 0) dispPoll = createPoller(pollDispatch, 4000);
   return () => {
-    if (--dispUsers === 0) clearInterval(dispTimer);
+    if (--dispUsers === 0) dispPoll?.stop();
+  };
+};
+
+/** counts per project for the status bar and the sidebar: one poll for both, instead of one each */
+export const [overview, setOverview] = createSignal<OverviewProject[]>([]);
+export const refreshOverview = () =>
+  worktreeOverview().then(
+    (o) => {
+      setOverview(o);
+    },
+    () => {
+      /* the badges are a nicety: an old daemon without it, or one that is busy, just shows the last counts */
+    },
+  );
+const OVERVIEW_MS = 15_000;
+let overviewUsers = 0;
+let overviewPoll: Poller | undefined;
+/** call from a component that shows `overview`; returns the function that stops watching (the poll ends with the last one) */
+export const watchOverview = () => {
+  if (overviewUsers++ === 0) {
+    void refreshOverview();
+    overviewPoll = createPoller(refreshOverview, OVERVIEW_MS);
+  }
+  return () => {
+    if (--overviewUsers === 0) overviewPoll?.stop();
   };
 };
 
@@ -446,7 +496,10 @@ export const renameTab = (id: number, name: string) => {
     else delete next[id];
     return next;
   });
-  void call("session.rename", { id, label: n }).then(() => refreshSessions()).catch(() => {});
+  // the local name already shows; if the daemon could not keep it, say so (it would be lost on restart)
+  void call("session.rename", { id, label: n })
+    .then(() => refreshSessions())
+    .catch((e) => setError(`Não foi possível guardar o nome do separador: ${errorText(e)}`));
 };
 /** the order the user dragged tabs into; ids not in it follow in their natural order */
 const [tabOrder, setTabOrder] = createSignal<number[]>([]);
@@ -528,13 +581,37 @@ export const refreshProjects = async () => {
     setProjects((prev) => keepSame(prev, list, (p) => p.id));
     void refreshWtStatus(list);
     void refreshPrs(list);
+    clearError(POLL_PROJECTS);
   } catch (e) {
-    setError(String(e));
+    setError(errorText(e), POLL_PROJECTS);
   }
 };
 
-export const sessionsOf = (path: string | null) =>
-  path ? sessions().filter((s) => norm(s.meta?.worktree) === norm(path)) : [];
+/** "Tentar agora": any call makes the host reconnect to the daemon if it is down, so ask for the lists again */
+export const retryDaemon = async () => {
+  await Promise.allSettled([refreshSessions(), refreshProjects()]);
+};
+
+/** worktree (normalized path) -> its sessions, built once per change of `sessions` instead of once per row and call */
+const sessionsByWorktree = createRoot(() =>
+  createMemo(() => {
+    const m = new Map<string, SessionInfo[]>();
+    for (const s of sessions()) {
+      const k = norm(s.meta?.worktree);
+      if (!k) continue;
+      const l = m.get(k);
+      if (l) l.push(s);
+      else m.set(k, [s]);
+    }
+    return m;
+  }),
+);
+const NO_SESSIONS: SessionInfo[] = [];
+export const sessionsOf = (path: string | null): SessionInfo[] => (path ? sessionsByWorktree().get(norm(path)) ?? NO_SESSIONS : NO_SESSIONS);
+
+// api.ts reads projects and reply styles through this, so it does not have to import the store
+apiContext.projects = projects;
+apiContext.terse = projectTerse;
 
 export const findWorktree = (path: string | null): { project: Project; wt: Worktree } | null => {
   if (!path) return null;
@@ -549,8 +626,6 @@ export const findWorktree = (path: string | null): { project: Project; wt: Workt
 export const [changes, setChanges] = createSignal<Changes | null>(null);
 /** "head": uncommitted work. "main": everything since the branch left the main worktree's branch. */
 export const [changesMode, setChangesMode] = createSignal<"head" | "main">("head");
-/** which file's diff is showing instead of a terminal; null = terminal */
-export const [openDiff, setOpenDiff] = createSignal<string | null>(null);
 
 export const baseRef = (): string | undefined => {
   if (changesMode() !== "main") return undefined;
@@ -565,6 +640,7 @@ export const refreshChanges = async () => {
   const w = selectedWorktree();
   if (!w || !findWorktree(w)) {
     setChanges(null);
+    clearError(POLL_CHANGES);
     return;
   }
   // a folder without git has no changes to list
@@ -574,10 +650,13 @@ export const refreshChanges = async () => {
   }
   try {
     const c = await gitChanges(w, baseRef());
-    if (req === changesReq) setChanges(c);
+    if (req === changesReq) {
+      setChanges(c);
+      clearError(POLL_CHANGES);
+    }
   } catch (e) {
     if (req !== changesReq) return;
     setChanges(null);
-    setError(String(e));
+    setError(errorText(e), POLL_CHANGES);
   }
 };

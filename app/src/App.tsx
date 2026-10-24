@@ -2,8 +2,12 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { Icon, hasIcon } from "./Icon";
 import { Select } from "./Select";
 import { Button, Field, Input, Tabs, TabsList, cn } from "./ui";
-import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
-import { SessionInfo, restoreSessions, listPorts, watchWorktree, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
+import { For, Match, Show, Switch, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
+import { SessionInfo, restoreSessions, listPorts, watchWorktree, stopWatch, storeNotices, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
+import { Section } from "./Boundary";
+import { errorText } from "./appError";
+import { createPoller } from "./poller";
+import { KEEP, pruneKept, touchKept } from "./keptTerms";
 import { ChangesPanel } from "./ChangesPanel";
 import { CommitView } from "./CommitView";
 import { Editor } from "./Editor";
@@ -88,19 +92,14 @@ import {
   setRemoveRequest,
   norm,
   findWorktree,
-  openDiff,
-  openCommit,
+  view,
   openFile,
+  setView,
   rightTab,
-  setOpenCommit,
-  setOpenFile,
-  setOpenDiff,
-  setShowDocker,
   setShowProjectSettings,
   showProjectSettings,
-  setShowKanban,
-  showDocker,
-  showKanban,
+  toast,
+  retryDaemon,
   refreshChanges,
   refreshProjects,
   refreshSessions,
@@ -125,6 +124,15 @@ import {
 
 export function App() {
   const [splitFrac, setSplitFrac] = createSignal(0.5);
+  // under 1000px the right panel is hidden by CSS, so its toggles would do nothing
+  const narrowQuery = typeof matchMedia === "function" ? matchMedia("(max-width: 1000px)") : null;
+  const [narrow, setNarrow] = createSignal(narrowQuery?.matches ?? false);
+  onMount(() => {
+    if (!narrowQuery) return;
+    const on = (e: MediaQueryListEvent) => setNarrow(e.matches);
+    narrowQuery.addEventListener("change", on);
+    onCleanup(() => narrowQuery.removeEventListener("change", on));
+  });
   // screen control for agents is a deliberate, per-run permission: asking first, and it ends when the daemon does
   const toggleComputer = async () => {
     try {
@@ -147,14 +155,22 @@ export function App() {
     // typing lag diagnosis: stalls of the webview's main thread go to lag.log (see lag_log in the host)
     try {
       new PerformanceObserver((list) => {
-        for (const e of list.getEntries()) if (e.duration >= 80) void tauriInvoke("lag_log", { what: "main thread stalled", ms: Math.round(e.duration) }).catch(() => 0);
+        for (const e of list.getEntries()) if (e.duration >= 80) void tauriInvoke("lag_log", { what: "main thread stalled", ms: Math.round(e.duration) }).catch((err) => console.debug("lag_log", err));
       }).observe({ entryTypes: ["longtask"] });
-    } catch {
-      /* longtask not supported */
+    } catch (e) {
+      console.debug("longtask observer not supported", e);
     }
   });
 
-  onMount(() => void computerStatus().then(setComputerOn).catch(() => 0));
+  onMount(() => void computerStatus().then(setComputerOn).catch((e) => console.debug("computer.status", e)));
+
+  // notes the daemon kept from its startup (a corrupt state file it recovered from, ...); an older daemon has none
+  onMount(
+    () =>
+      void storeNotices()
+        .then((ns) => ns.forEach((text) => toast({ text, kind: "warn", key: `store:${text}` })))
+        .catch((e) => console.debug("store.notices", e)),
+  );
 
   // a missing git, or no agent CLI at all, is explained once at startup instead of surfacing as a cryptic failure later
   onMount(() =>
@@ -174,7 +190,10 @@ export function App() {
     // sessions of a previous daemon run come back before the first list, so the sidebar never shows them missing
     const restore = (prefix: string) =>
       restoreSessions()
-        .catch(() => null)
+        .catch((e) => {
+          setError(`Não foi possível restaurar as sessões: ${errorText(e)}`);
+          return null;
+        })
         .then((r) => {
           void refreshSessions();
           if (!r) return;
@@ -199,17 +218,23 @@ export function App() {
       void listen("daemon-reconnecting", () => setDaemonReconnecting(true)).then((u) => unlistenLink.push(u));
       void listen<{ ok: boolean }>("daemon-reconnected", (e) => {
         setDaemonReconnecting(false);
-        if (!e.payload?.ok) setError("Não foi possível reconectar ao daemon. Reinicia o Axelstra se persistir.");
+        if (!e.payload?.ok)
+          toast({
+            text: "Não foi possível reconectar ao daemon. Reinicia o Axelstra se persistir.",
+            kind: "error",
+            key: "daemon-reconnect",
+            action: { label: "Tentar agora", run: () => void retryDaemon() },
+          });
       }).then((u) => unlistenLink.push(u));
     });
     // the daemon pushes `session.changed` (see watchWorktree below); this poll is only the safety net
-    const fast = setInterval(() => !document.hidden && void refreshSessions(), 10000);
+    const fast = createPoller(refreshSessions, 10000);
     // git is the costly part: the change list only matters for the selected worktree, and the project
     // list (worktrees, remote) changes rarely. Both also refresh when the window regains focus
     // and after every action the user takes in the sidebar.
     // safety net only: real changes arrive as daemon events (see watchWorktree below)
-    const mid = setInterval(() => !document.hidden && void refreshChanges(), 60000);
-    const slow = setInterval(() => !document.hidden && void refreshProjects(), 60000);
+    const mid = createPoller(refreshChanges, 60000);
+    const slow = createPoller(refreshProjects, 60000);
     const onFocus = () => {
       void refreshChanges();
       void refreshProjects();
@@ -290,9 +315,10 @@ export function App() {
     window.addEventListener("keydown", onKey, true);
     onCleanup(() => {
       window.removeEventListener("keydown", onKey, true);
-      clearInterval(fast);
-      clearInterval(mid);
-      clearInterval(slow);
+      fast.stop();
+      mid.stop();
+      slow.stop();
+      stopWatch();
       window.removeEventListener("focus", onFocus);
       unlistenClick?.();
       unlistenRestart?.();
@@ -321,13 +347,13 @@ export function App() {
     try {
       const p = (await listPorts(w)).map((x) => x.port);
       if (p.join() !== ports().join()) setPorts(p);
-    } catch {
-      /* transient */
+    } catch (e) {
+      console.debug("ports.list", e);
     }
   };
   onMount(() => {
-    const t = setInterval(() => void refreshPorts(), 8000);
-    onCleanup(() => clearInterval(t));
+    const t = createPoller(refreshPorts, 8000);
+    onCleanup(() => t.stop());
   });
   createEffect(on(selectedWorktree, () => {
     setPorts([]);
@@ -348,19 +374,18 @@ export function App() {
 
   // Terminals of the last few tabs stay mounted (hidden): switching back is instant, keeps the scroll position and
   // does not replay the history. Older ones are unmounted. Order is stable so nothing is moved in the DOM.
-  const KEEP = 5;
   const [kept, setKept] = createSignal<number[]>([]);
   const lastUsed = new Map<number, number>();
   createEffect(() => {
     const id = activeSession();
     if (id === null || id === undefined) return;
     lastUsed.set(id, Date.now());
-    setKept((k) => {
-      const next = k.includes(id) ? k : [...k, id];
-      if (next.length <= KEEP) return next;
-      const oldest = next.filter((x) => x !== id).sort((a, b) => (lastUsed.get(a) ?? 0) - (lastUsed.get(b) ?? 0))[0];
-      return next.filter((x) => x !== oldest);
-    });
+    setKept((k) => touchKept(k, id, lastUsed, KEEP));
+  });
+  // a closed session must not keep a slot (it would push a live terminal out) nor a lastUsed entry
+  createEffect(() => {
+    const alive = new Set(sessions().map((s) => s.id));
+    setKept((k) => pruneKept(k, alive, lastUsed));
   });
   const keptLive = () => kept().filter((id) => (id !== splitSession() || id === activeSession()) && sessions().some((s) => s.id === id));
   const current = () => findWorktree(selectedWorktree());
@@ -512,7 +537,7 @@ export function App() {
 
   // the one tab Kobalte treats as selected (it keeps the roving tabindex there); each Tab also states its own `selected`
   const stripValue = () =>
-    showKanban() ? "kanban" : showDocker() ? "docker" : openCommit() !== null ? "commit" : openFile() !== null ? "file" : openDiff() !== null ? "diff" : activeSession() !== null ? `tab-${activeSession()}` : "";
+    view().kind !== "terminal" ? view().kind : activeSession() !== null ? `tab-${activeSession()}` : "";
   // renaming ends with the new name (null = cancelled); focus goes back to the tab, not to the page
   const finishRename = (id: number, name: string | null, refocus = true) => {
     if (name !== null) renameTab(id, name);
@@ -520,6 +545,11 @@ export function App() {
     if (refocus) queueMicrotask(() => document.querySelector<HTMLElement>(`[data-tab="tab-${id}"]`)?.focus());
   };
 
+  // the commit / file / diff view is a tab of its own while it is the one showing
+  const shown = <K extends "commit" | "file" | "diff">(k: K) => {
+    const v = view();
+    return v.kind === k ? (v as Extract<typeof v, { kind: K }>) : null;
+  };
   const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
   return (
@@ -639,12 +669,15 @@ export function App() {
         <Automations />
       </Show>
       <ContextMenu />
-      <ErrorToast />
-      <UpdateToast />
+      <ErrorToast>
+        <UpdateToast />
+      </ErrorToast>
       <CloseConfirm />
       <ConfirmHost />
       <Show when={showSidebar()}>
-        <Sidebar />
+        <Section name="projetos">
+          <Sidebar />
+        </Section>
       </Show>
       <main class="main">
         <Show
@@ -669,11 +702,11 @@ export function App() {
             </Button>
             <Tabs value={stripValue()} onChange={() => {}} activationMode="manual" class="flex min-w-0">
             <TabsList aria-label="Separadores" class="min-w-0 overflow-x-auto [scrollbar-width:none]">
-            <Tab value="kanban" selected={showKanban()} onSelect={() => guarded(() => { setShowDocker(false); setShowKanban(true); })}>
+            <Tab value="kanban" selected={view().kind === "kanban"} onSelect={() => guarded(() => setView({ kind: "kanban" }))}>
               <span class="dtag"><Icon name="grid" size={11} /></span>
               <span>Kanban</span>
             </Tab>
-            <Tab value="docker" selected={showDocker()} onSelect={() => guarded(() => { setShowKanban(false); setShowDocker(true); })}>
+            <Tab value="docker" selected={view().kind === "docker"} onSelect={() => guarded(() => setView({ kind: "docker" }))}>
               <span class="dtag"><Icon name="box" size={11} /></span>
               <span>Docker</span>
             </Tab>
@@ -682,7 +715,7 @@ export function App() {
                 <Tab
                   id={`tab-${s.id}`}
                   value={`tab-${s.id}`}
-                  selected={!showKanban() && !showDocker() && openDiff() === null && openFile() === null && openCommit() === null && activeSession() === s.id}
+                  selected={view().kind === "terminal" && activeSession() === s.id}
                   onSelect={() => showTab(s)}
                   onClose={() => void close(s)}
                   onRename={() => setRenaming(s.id)}
@@ -743,27 +776,27 @@ export function App() {
                 </Tab>
               )}
             </For>
-            <Show when={openCommit()}>
+            <Show when={shown("commit")}>
               {(c) => (
-                <Tab value="commit" class="diff-tab" selected={!showKanban() && !showDocker()} title={c().subject} onSelect={() => { setShowKanban(false); setShowDocker(false); }} onClose={() => setOpenCommit(null)} closeLabel="Fechar commit">
+                <Tab value="commit" class="diff-tab" selected title={c().commit.subject} onSelect={() => setView(c())} onClose={() => showView()} closeLabel="Fechar commit">
                   <span class="dtag"><Icon name="branch" size={11} /></span>
-                  <span>{c().short}</span>
+                  <span>{c().commit.short}</span>
                 </Tab>
               )}
             </Show>
-            <Show when={openFile()}>
+            <Show when={shown("file")}>
               {(p) => (
-                <Tab value="file" class="diff-tab" selected={!showKanban() && !showDocker()} title={p()} onSelect={() => { setShowKanban(false); setShowDocker(false); }} onClose={() => guarded(() => setOpenFile(null))} closeLabel="Fechar ficheiro">
+                <Tab value="file" class="diff-tab" selected title={p().path} onSelect={() => setView(p())} onClose={() => guarded(() => showView())} closeLabel="Fechar ficheiro">
                   <span class="dtag"><Icon name="pencil" size={11} /></span>
-                  <span>{baseName(p())}</span>
+                  <span>{baseName(p().path)}</span>
                 </Tab>
               )}
             </Show>
-            <Show when={openDiff()}>
+            <Show when={shown("diff")}>
               {(p) => (
-                <Tab value="diff" class="diff-tab" selected={!showKanban() && !showDocker()} title={p()} onSelect={() => { setShowKanban(false); setShowDocker(false); }} onClose={() => setOpenDiff(null)} closeLabel="Fechar diff">
+                <Tab value="diff" class="diff-tab" selected title={p().path} onSelect={() => setView(p())} onClose={() => showView()} closeLabel="Fechar diff">
                   <span class="dtag">Δ</span>
-                  <span>{baseName(p())}</span>
+                  <span>{baseName(p().path)}</span>
                 </Tab>
               )}
             </Show>
@@ -799,7 +832,7 @@ export function App() {
                 <path d="M8 3.5v9M3.5 8h9" />
               </svg>
             </Button>
-            <Show when={!showRightPanel()}>
+            <Show when={!showRightPanel() && !narrow()}>
               <Button variant="icon" size="tool" class="ml-1 self-center" title={K("Mostrar painel direito (Ctrl+Shift+B)")} aria-label={K("Mostrar painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>
                 <PanelIcon side="right" on={false} />
               </Button>
@@ -807,21 +840,9 @@ export function App() {
           </div>
           <VoiceDraft target={activeSession()} />
           <div class="term-area">
-            <Show when={!showDocker()} fallback={<DockerView />}>
-            <Show when={!showKanban()} fallback={<Kanban project={current()!.project.id} />}>
-            <Show when={openCommit() === null} fallback={<CommitView />}>
-            <Show
-              when={openFile() === null}
+            <Section name="terminais">
+            <Switch
               fallback={
-                <Show when={openFile()} keyed>
-                  {(f) => <Editor wt={selectedWorktree()!} path={f} initialLine={fileLine() ?? undefined} />}
-                </Show>
-              }
-            >
-            <Show
-              when={openDiff() === null}
-              fallback={<DiffView />}
-            >
               <Show
                 when={activeSession() !== null}
                 fallback={
@@ -887,18 +908,34 @@ export function App() {
                   </div>
                 </Show>
               </Show>
-            </Show>
-            </Show>
-            </Show>
-            </Show>
-            </Show>
+              }
+            >
+              <Match when={view().kind === "docker"}>
+                <DockerView />
+              </Match>
+              <Match when={view().kind === "kanban"}>
+                <Kanban project={current()!.project.id} />
+              </Match>
+              <Match when={view().kind === "commit"}>
+                <CommitView />
+              </Match>
+              <Match when={openFile()} keyed>
+                {(f) => <Editor wt={selectedWorktree()!} path={f} initialLine={fileLine() ?? undefined} />}
+              </Match>
+              <Match when={view().kind === "diff"}>
+                <DiffView />
+              </Match>
+            </Switch>
+            </Section>
           </div>
         </Show>
       </main>
       <Show when={current() && showRightPanel()}>
-        <Show when={rightTab() === "files"} fallback={rightTab() === "pulls" ? <PullsPanel /> : <ChangesPanel />}>
-          <FilesPanel />
-        </Show>
+        <Section name="painel direito">
+          <Show when={rightTab() === "files"} fallback={rightTab() === "pulls" ? <PullsPanel /> : <ChangesPanel />}>
+            <FilesPanel />
+          </Show>
+        </Section>
       </Show>
       <StatusBar />
     </div>
