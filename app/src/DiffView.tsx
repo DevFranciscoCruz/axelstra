@@ -4,6 +4,7 @@ import { Button, Textarea } from "./ui";
 import { Icon } from "./Icon";
 import { PAGE, capList } from "./listing";
 import { gitDiff, writeSession } from "./api";
+import { P } from "./strings.panels";
 import { activeSession, baseRef, changes, openDiff, selectedWorktree, sessionsOf, setActiveSession, setOpenDiff } from "./store";
 
 type Row = { kind: "hunk" | "add" | "del" | "ctx" | "note"; old?: number; neu?: number; text: string };
@@ -29,7 +30,7 @@ export function parseDiff(diff: string): Row[] {
     else if (line.startsWith(" ")) rows.push({ kind: "ctx", old: o++, neu: n++, text: line.slice(1) });
     else if (line.startsWith("\\") || line.startsWith("…")) rows.push({ kind: "note", text: line });
     if (rows.length >= MAX_ROWS) {
-      rows.push({ kind: "note", text: `… a mostrar só as primeiras ${MAX_ROWS} linhas` });
+      rows.push({ kind: "note", text: P.diff.truncated(MAX_ROWS) });
       break;
     }
   }
@@ -63,12 +64,12 @@ export function DiffView() {
     const agents = sessionsOf(selectedWorktree()).filter((s) => s.running && s.meta?.kind === "agent");
     const target = agents.find((s) => s.id === activeSession()) ?? agents[0];
     if (!target) {
-      setSendMsg("Nenhum agente a correr neste worktree. Abre um agente primeiro.");
+      setSendMsg(P.diff.noAgent);
       return;
     }
     const line = r.neu ?? r.old;
     const code = r.text.trim().replace(/\s+/g, " ").slice(0, 200);
-    const msg = `Revisão de ${openDiff()} (linha ${line}), código: \`${code}\`. ${note().trim().replace(/\s+/g, " ")}`;
+    const msg = P.diff.review(openDiff() ?? "", line, code, note().trim().replace(/\s+/g, " "));
     try {
       await writeSession(target.id, msg + "\r");
       setCommenting(null);
@@ -91,13 +92,13 @@ export function DiffView() {
             </span>
           )}
         </Show>
-        <Button variant="icon" size="icon" title="Recarregar" aria-label="Recarregar" onClick={() => void refetch()}>
+        <Button variant="icon" size="icon" title={P.diff.reload} aria-label={P.diff.reload} onClick={() => void refetch()}>
           <Icon name="refresh" />
         </Button>
       </div>
       <div class="diff-body">
         <Show when={!text.loading} fallback={<Loading onRetry={() => void refetch()} />}>
-          <Show when={rows().length > 0} fallback={<div class="placeholder">Sem diferenças de texto para mostrar</div>}>
+          <Show when={rows().length > 0} fallback={<div class="placeholder">{P.diff.noText}</div>}>
             <table>
               <tbody>
                 <For each={page().shown}>
@@ -107,7 +108,7 @@ export function DiffView() {
                         <td class="ln">{r.old ?? ""}</td>
                         <td class="ln">
                           <Show when={r.kind !== "hunk" && r.kind !== "note"} fallback={r.neu ?? ""}>
-                            <Button variant="icon" size="bare" class="cbtn px-0.5 text-xs hover:bg-transparent" title="Comentar e enviar ao agente" aria-label="Comentar e enviar ao agente" onClick={() => { setNote(""); setCommenting(commenting() === i() ? null : i()); }}>
+                            <Button variant="icon" size="bare" class="cbtn px-0.5 text-xs hover:bg-transparent" title={P.diff.commentTip} aria-label={P.diff.commentTip} onClick={() => { setNote(""); setCommenting(commenting() === i() ? null : i()); }}>
                               ＋
                             </Button>
                             <span class="lnum">{r.neu ?? ""}</span>
@@ -122,16 +123,16 @@ export function DiffView() {
                         <tr class="cmt">
                           <td colspan="3">
                             <Textarea
-                              placeholder="O que o agente deve mudar aqui?"
+                              placeholder={P.diff.placeholder}
                               value={note()}
                               onInput={(e) => setNote(e.currentTarget.value)}
                               ref={(el) => queueMicrotask(() => el.focus())}
                             />
                             <div class="cmt-actions">
                               <Button variant="default" size="sm" disabled={!note().trim()} onClick={() => void sendFeedback(r)}>
-                                Enviar ao agente
+                                {P.diff.send}
                               </Button>
-                              <Button size="sm" onClick={() => setCommenting(null)}>Cancelar</Button>
+                              <Button size="sm" onClick={() => setCommenting(null)}>{P.diff.cancel}</Button>
                               <span class="cmt-msg" role="status" aria-live="polite">{sendMsg()}</span>
                             </div>
                           </td>
@@ -144,7 +145,7 @@ export function DiffView() {
             </table>
             <Show when={page().hidden > 0}>
               <Button variant="outline" size="sm" class="show-more" onClick={() => setLimit(limit() + PAGE)}>
-                Mostrar mais linhas ({page().hidden})
+                {P.diff.more(page().hidden)}
               </Button>
             </Show>
           </Show>
