@@ -689,6 +689,7 @@ export const pickAndRestoreBackup = (title: string): Promise<{ restored: string[
 export type JanitorEvent = { project: string; path: string; branch: string; into: string; why: string; at: number };
 /** Worktrees the automatic sweep removed since the last call (take semantics); an older daemon has none. */
 export const janitorEvents = () => callOr<{ events: JanitorEvent[] }>("janitor.events", {}, { events: [] }).then((r) => r.events ?? []);
+
 // ---- CI-fix trigger (daemon: triggers.*) ----
 export type TriggerFiring = { ts: number; worktree: string; sha: string; checks: string[]; kind: "fired" | "limited" | "failed"; detail: string };
 export type TriggerLimits = { cooldown_secs: number; max_per_hour: number; poll_secs: number; cooldown_range: [number, number]; max_per_hour_range: [number, number] };
