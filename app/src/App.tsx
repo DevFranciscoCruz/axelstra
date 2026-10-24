@@ -1,11 +1,8 @@
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { Icon, hasIcon } from "./Icon";
 import { Button, Field, Input, Select, Tabs, TabsList, cn } from "./ui";
 import { For, Match, Show, Switch, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
-import { SessionInfo, restoreSessions, listPorts, watchWorktree, stopWatch, storeNotices, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
+import { SessionInfo, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
 import { Section } from "./Boundary";
-import { errorText } from "./appError";
-import { createPoller } from "./poller";
 import { KEEP, pruneKept, touchKept } from "./keptTerms";
 import { ChangesPanel } from "./ChangesPanel";
 import { CommitView } from "./CommitView";
@@ -26,13 +23,13 @@ import { Shortcuts } from "./Shortcuts";
 import { Handler, paletteCommands } from "./commands";
 import { requestNotificationsOpen } from "./notifications";
 import { restartDaemonFlow } from "./daemonActions";
-import { S, count } from "./strings";
-import { onTauriEvent } from "./tauriEvents";
+import { S } from "./strings";
 import { startDrag } from "./dragResize";
 import { basename } from "./paths";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
 import { LEFT, RIGHT, resizeTo, splitTo } from "./layout";
 import { K } from "./keyboard";
+import { useBootstrap } from "./useBootstrap";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
@@ -42,7 +39,7 @@ import { ConfirmHost } from "./Confirm";
 import { AgentSearch } from "./AgentSearch";
 import { Orchestra } from "./Orchestra";
 import { UsageChip } from "./Usage";
-import { agentsList, computerEnable, computerStatus } from "./api";
+import { computerEnable } from "./api";
 import { ProjectSettings } from "./ProjectSettings";
 import { StatusBar } from "./StatusBar";
 import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
@@ -59,12 +56,9 @@ import {
   activeSession,
   AGENTS,
   agentKeys,
-  setInstalledAgents,
   agentPrompt,
   pickAgent,
-  defaultAgent,
   fileLine,
-  setDaemonReconnecting,
   projectTerse,
   setDefaultAgent,
   changesMode,
@@ -92,14 +86,11 @@ import {
   computerOn,
   setComputerOn,
   ports,
-  setPorts,
   splitSession,
   setSplitSession,
-  setFsTick,
   projects,
   setCreatingWorktree,
   setRemoveRequest,
-  norm,
   findWorktree,
   view,
   openFile,
@@ -108,13 +99,9 @@ import {
   setRightTab,
   setShowProjectSettings,
   showProjectSettings,
-  toast,
-  retryDaemon,
   refreshChanges,
-  refreshProjects,
   refreshSessions,
   sessions,
-  sessionState,
   showNotice,
   openSession,
   selectedWorktree,
@@ -157,140 +144,7 @@ export function App() {
       setError(String(e));
     }
   };
-  onMount(() => {
-    // typing lag diagnosis: stalls of the webview's main thread go to lag.log (see lag_log in the host)
-    try {
-      const obs = new PerformanceObserver((list) => {
-        for (const e of list.getEntries()) if (e.duration >= 80) void tauriInvoke("lag_log", { what: "main thread stalled", ms: Math.round(e.duration) }).catch((err) => console.debug("lag_log", err));
-      });
-      obs.observe({ entryTypes: ["longtask"] });
-      onCleanup(() => obs.disconnect());
-    } catch (e) {
-      console.debug("longtask observer not supported", e);
-    }
-  });
-
-  onMount(() => void computerStatus().then(setComputerOn).catch((e) => console.debug("computer.status", e)));
-
-  // notes the daemon kept from its startup (a corrupt state file it recovered from, ...); an older daemon has none
-  onMount(
-    () =>
-      void storeNotices()
-        .then((ns) => ns.forEach((text) => toast({ text, kind: "warn", key: `store:${text}` })))
-        .catch((e) => console.debug("store.notices", e)),
-  );
-
-  // a missing git, or no agent CLI at all, is explained once at startup instead of surfacing as a cryptic failure later
-  onMount(() =>
-    void tauriInvoke<string[]>("missing_tools")
-      .then((m) => {
-        void agentsList().then((l) => setInstalledAgents(l.filter((a) => a.installed).map((a) => a.id))).catch(() => setInstalledAgents(null));
-        const bits: string[] = [];
-        if (m.includes("git")) bits.push(S.app.noGit);
-        if (m.includes("claude") && m.includes("codex")) bits.push(S.app.noAgents);
-        if (bits.length) showNotice(S.app.missing(bits));
-      })
-      .catch(() => setInstalledAgents(null)),
-  );
-
-  onMount(() => {
-    void refreshProjects();
-    // sessions of a previous daemon run come back before the first list, so the sidebar never shows them missing
-    const restore = (prefix: string) =>
-      restoreSessions()
-        .catch((e) => {
-          setError(S.app.restoreFailed + errorText(e));
-          return null;
-        })
-        .then((r) => {
-          void refreshSessions();
-          if (!r) return;
-          const bits: string[] = [];
-          if (r.restored) bits.push(count(r.restored, "sessão restaurada", "sessões restauradas"));
-          if (r.skipped) bits.push(count(r.skipped, "conversa vazia ignorada", "conversas vazias ignoradas"));
-          if (r.failed.length) bits.push(S.app.restoreFailedList(r.failed));
-          if (bits.length) showNotice(`${prefix}: ${bits.join(" · ")}.`);
-        });
-    void restore(S.app.onReopen);
-    // the daemon crashed or was replaced while the app was open: its sessions are gone, bring them back
-    const unlisten = [
-      onTauriEvent("daemon-restarted", () => {
-        showNotice(S.app.daemonRestarted);
-        void restore(S.app.afterRestart);
-      }),
-      // the host reconnects to the daemon on its own: show it meanwhile, and say so when it did not work
-      onTauriEvent("daemon-reconnecting", () => setDaemonReconnecting(true)),
-      onTauriEvent<{ ok: boolean } | undefined>("daemon-reconnected", (p) => {
-        setDaemonReconnecting(false);
-        if (!p?.ok)
-          toast({
-            text: S.app.reconnectFailed,
-            kind: "error",
-            key: "daemon-reconnect",
-            action: { label: S.toast.retryNow, run: () => void retryDaemon() },
-          });
-      }),
-      // clicking a desktop notification lands on the session that raised it
-      onTauriEvent<{ worktree: string; session: number }>("notification-click", (p) => {
-        void refreshSessions().then(() => openSession(p.worktree, p.session));
-      }),
-    ];
-    // the daemon pushes `session.changed` (see watchWorktree below); this poll is only the safety net
-    const fast = createPoller(refreshSessions, 10000);
-    // git is the costly part: the change list only matters for the selected worktree, and the project
-    // list (worktrees, remote) changes rarely. Both also refresh when the window regains focus
-    // and after every action the user takes in the sidebar.
-    // safety net only: real changes arrive as daemon events (see watchWorktree below)
-    const mid = createPoller(refreshChanges, 60000);
-    const slow = createPoller(refreshProjects, 60000);
-    const onFocus = () => {
-      void refreshChanges();
-      void refreshProjects();
-    };
-    window.addEventListener("focus", onFocus);
-    onCleanup(() => {
-      fast.stop();
-      mid.stop();
-      slow.stop();
-      stopWatch();
-      window.removeEventListener("focus", onFocus);
-      unlisten.forEach((u) => u());
-    });
-  });
-
-  // the daemon watches the selected worktree and tells us when files or git state changed
-  createEffect(() => {
-    const w = selectedWorktree();
-    void watchWorktree(w, (changed) => {
-      if (norm(changed) === norm(selectedWorktree())) {
-        setFsTick((n) => n + 1);
-        void refreshChanges();
-      }
-    }, () => void refreshSessions(), () => void refreshProjects());
-  });
-
-  // dev servers started in this worktree's terminals; a process lookup, so only while something runs
-  const refreshPorts = async () => {
-    const w = selectedWorktree();
-    if (!w || document.hidden || !sessionsOf(w).some((s) => s.running)) {
-      if (ports().length) setPorts([]);
-      return;
-    }
-    try {
-      const p = (await listPorts(w)).map((x) => x.port);
-      if (p.join() !== ports().join()) setPorts(p);
-    } catch (e) {
-      console.debug("ports.list", e);
-    }
-  };
-  onMount(() => {
-    const t = createPoller(refreshPorts, 8000);
-    onCleanup(() => t.stop());
-  });
-  createEffect(on(selectedWorktree, () => {
-    setPorts([]);
-    void refreshPorts();
-  }));
+  useBootstrap();
 
   const tabs = () => sortedTabs(sessionsOf(selectedWorktree()));
   // making the session shown in the split pane the active one swaps the two, so the pane never ends up empty
