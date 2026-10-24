@@ -90,12 +90,18 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with: { fetch-depth: 0 } # the format check diffs against origin/main
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with: { node-version-file: .nvmrc }
       - run: npm ci
         working-directory: app
       - run: npx tsc --noEmit
         working-directory: app
+      # warnings are listed, errors fail (app/eslint.config.js)
+      - run: npm run lint
+        working-directory: app
+      # prettier on the files this branch added or changed only (scripts/check-format.mjs); the tree is not reformatted
+      - run: node scripts/check-format.mjs
       - run: npm test
         working-directory: app
   lint:
