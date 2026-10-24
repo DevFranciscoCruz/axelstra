@@ -47,7 +47,8 @@ fn env() -> &'static Env {
             use std::os::unix::process::CommandExt;
             let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_axelstra"));
             cmd.arg("daemon").env("AXELSTRA_IDLE_EXIT_SECS", "120").stdin(std::process::Stdio::null());
-            // SAFETY: only prctl between fork and exec; the daemon must not outlive the test run
+            // SAFETY: only prctl between fork and exec; the daemon must not outlive the test run. The parent-death
+            // signal is tied to the thread that forked, so a thread of its own does the fork and then stays parked.
             #[cfg(target_os = "linux")]
             unsafe {
                 cmd.pre_exec(|| {
@@ -55,7 +56,14 @@ fn env() -> &'static Env {
                     Ok(())
                 });
             }
-            let daemon = cmd.spawn().unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                tx.send(cmd.spawn().unwrap()).unwrap();
+                loop {
+                    std::thread::park();
+                }
+            });
+            let daemon = rx.recv().unwrap();
             let end = Instant::now() + Duration::from_secs(10);
             while std::os::unix::net::UnixStream::connect(proto::pipe_name()).is_err() && Instant::now() < end {
                 std::thread::sleep(Duration::from_millis(50));
