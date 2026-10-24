@@ -106,15 +106,80 @@ fn task_branch(run: &str, id: &str) -> String {
 /// Runs the cards. Cards that carry an `acceptance` command make this refuse:
 /// the command goes through the shell, so the caller must opt in with `run_trusted`.
 pub fn run(o: &Options) -> Result<Report> {
-    run_with(o, false)
+    run_guarded(o, Trust::None)
 }
 
 /// Like `run`, but the caller vouches for the cards' acceptance commands.
+/// Cards with a `bypass*` permission_mode are still refused: use `run_pinned`.
 pub fn run_trusted(o: &Options) -> Result<Report> {
-    run_with(o, true)
+    run_guarded(o, Trust::Acceptance)
 }
 
-fn run_with(o: &Options, trust_acceptance: bool) -> Result<Report> {
+/// Like `run_trusted`, and also allows `bypass*` cards, but only if the todo cards still hash to `pin`
+/// (from `trust_info`, i.e. what the user confirmed). A card edited after the confirmation is refused.
+pub fn run_pinned(o: &Options, pin: &str) -> Result<Report> {
+    run_guarded(o, Trust::Pinned(pin.to_string()))
+}
+
+#[derive(Clone)]
+enum Trust {
+    None,
+    Acceptance,
+    Pinned(String),
+}
+
+/// What the user must confirm before a run: the todo cards' agent, permission mode and acceptance command,
+/// plus the hash (`pin`) of that content to pass to `run_pinned`.
+#[derive(Debug, Clone, Serialize)]
+pub struct TrustInfo {
+    pub cards: Vec<TrustCard>,
+    pub pin: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TrustCard {
+    pub id: String,
+    pub agent: String,
+    pub permission_mode: String,
+    pub bypass: bool,
+    pub acceptance: Option<String>,
+}
+
+pub fn trust_info(repo: &Path) -> Result<TrustInfo> {
+    let repo = git::canon(repo)?;
+    let cards = todo_cards(&repo)?;
+    Ok(TrustInfo { pin: card::fingerprint(&cards), cards: trust_cards(&cards) })
+}
+
+fn trust_cards(cards: &[Card]) -> Vec<TrustCard> {
+    cards
+        .iter()
+        .map(|c| TrustCard {
+            id: c.meta.id.clone(),
+            agent: c.meta.agent.clone(),
+            permission_mode: c.meta.permission_mode.clone(),
+            bypass: card::is_bypass(&c.meta.permission_mode),
+            acceptance: c.meta.acceptance.clone(),
+        })
+        .collect()
+}
+
+fn todo_cards(repo: &Path) -> Result<Vec<Card>> {
+    Ok(card::load_dir(&repo.join(".kanban"))?.cards.into_iter().filter(|c| c.meta.status == "todo").collect())
+}
+
+/// A panic in the run (bad card value, git edge case) becomes an `Err` so the caller always records a final state.
+fn run_guarded(o: &Options, trust: Trust) -> Result<Report> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_with(o, &trust))) {
+        Ok(r) => r,
+        Err(p) => {
+            let msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
+            bail!("orchestrator panicked: {msg}")
+        }
+    }
+}
+
+fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
     if !card::valid_slug(&o.name) {
         bail!("invalid run name {:?}: use letters, digits, '.', '_' or '-'", o.name);
     }
@@ -124,12 +189,12 @@ fn run_with(o: &Options, trust_acceptance: bool) -> Result<Report> {
     std::fs::create_dir_all(run_dir.join("logs"))?;
     ensure_excluded(&common)?;
 
-    let cards: Vec<Card> = card::load_dir(&repo.join(".kanban"))?.cards.into_iter().filter(|c| c.meta.status == "todo").collect();
+    let cards: Vec<Card> = todo_cards(&repo)?;
     if cards.is_empty() {
         bail!("no cards with status: todo in {}", repo.join(".kanban").display());
     }
     // deps on cards outside `todo` (already done) are dropped, unknown ones are errors
-    check_trust(&cards, trust_acceptance)?;
+    check_trust(&cards, trust)?;
     let all = card::load_dir(&repo.join(".kanban"))?.cards;
     let todo_ids: Vec<String> = cards.iter().map(|c| c.meta.id.clone()).collect();
     let mut cards = cards;
@@ -183,7 +248,7 @@ fn run_with(o: &Options, trust_acceptance: bool) -> Result<Report> {
             let exited = live.handle.try_wait()?;
             // read after try_wait: an agent may write the result and exit between the two
             let sentinel = read_sentinel(&live.wt);
-            let timeout = Duration::from_secs_f64(t.card.meta.timeout_min * 60.0);
+            let timeout = timeout_of(t.card.meta.timeout_min);
             let outcome = if let Some(r) = sentinel {
                 Some(if r.status == "done" { Ok(r.summary) } else { Err(format!("agent reported {}: {}", r.status, r.summary)) })
             } else if let Some(s) = exited {
@@ -278,16 +343,46 @@ fn run_with(o: &Options, trust_acceptance: bool) -> Result<Report> {
     Ok(Report { merged: by(St::Merged), failed: failures, needs_review: reviews, blocked: by(St::Blocked), integ_branch, integ_wt })
 }
 
-fn check_trust(cards: &[Card], trusted: bool) -> Result<()> {
+/// Never panics, whatever the value: invalid or huge minutes clamp to the cap.
+fn timeout_of(min: f64) -> Duration {
+    let min = if min.is_finite() && min > 0.0 { min.min(card::MAX_TIMEOUT_MIN) } else { card::MAX_TIMEOUT_MIN };
+    Duration::try_from_secs_f64(min * 60.0).unwrap_or(Duration::from_secs(60 * 60 * 24 * 7))
+}
+
+fn check_trust(cards: &[Card], trust: &Trust) -> Result<()> {
+    let pin_ok = matches!(trust, Trust::Pinned(p) if *p == card::fingerprint(cards));
+    if let Trust::Pinned(_) = trust {
+        if !pin_ok {
+            bail!("the cards changed after they were confirmed; review them again");
+        }
+    }
+    let trusted = !matches!(trust, Trust::None);
+    let bypass: Vec<String> = cards
+        .iter()
+        .filter(|c| card::is_bypass(&c.meta.permission_mode))
+        .map(|c| format!("{}: permission_mode {}", c.meta.id, c.meta.permission_mode))
+        .collect();
+    if !pin_ok && !bypass.is_empty() {
+        bail!(
+            "cards with a bypass permission_mode run the agent with no permission checks and need an explicit, pinned confirmation:
+{}",
+            bypass.join("
+")
+        );
+    }
     let cmds: Vec<String> = cards.iter().filter_map(|c| c.meta.acceptance.as_ref().map(|a| format!("{}: {a}", c.meta.id))).collect();
     if !trusted && !cmds.is_empty() {
+        let modes: Vec<String> = cards.iter().map(|c| format!("{}: permission_mode {}", c.meta.id, c.meta.permission_mode)).collect();
         bail!(
             "acceptance commands run through the shell and were not trusted; confirm them first:
-{}",
-            cmds.join(
-                "
-"
-            )
+{}
+{}
+pin: {}",
+            cmds.join("
+"),
+            modes.join("
+"),
+            card::fingerprint(cards)
         );
     }
     Ok(())
@@ -440,7 +535,7 @@ pub fn retry_merge(repo: &Path, wt_root: &Path, name: &str, id: &str, trust_acce
     if card.meta.status != "needs-review" {
         bail!("card {id} is not waiting for review");
     }
-    check_trust(std::slice::from_ref(&card), trust_acceptance)?;
+    check_trust(std::slice::from_ref(&card), &if trust_acceptance { Trust::Acceptance } else { Trust::None })?;
     let wt = wt_root.join(format!("{name}-{id}"));
     let integ_wt = wt_root.join(format!("{name}-integ"));
     if !wt.exists() || !integ_wt.exists() {
@@ -544,5 +639,46 @@ mod tests {
         assert_eq!(agent_command("gemini", "auto", true).unwrap(), ["gemini", "--approval-mode", "auto_edit", "-i", p]);
         assert!(agent_command("rm", "auto", false).unwrap_err().to_string().contains("desconhecido"));
         assert!(agent_command("claude", "--evil", false).is_err());
+    }
+
+    #[test]
+    fn timeout_of_never_panics() {
+        for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 1e30, f64::MAX, 0.5, 45.0] {
+            let d = timeout_of(v);
+            assert!(d > Duration::ZERO && d <= Duration::from_secs(7 * 24 * 3600), "{v}");
+        }
+        assert_eq!(timeout_of(1.0), Duration::from_secs(60));
+    }
+
+    fn card_of(extra: &str) -> Card {
+        card::parse(&format!("---
+id: a
+{extra}---
+body
+"), Path::new("x")).unwrap()
+    }
+
+    #[test]
+    fn bypass_needs_a_matching_pin() {
+        let c = [card_of("permission_mode: bypassPermissions
+")];
+        assert!(check_trust(&c, &Trust::None).is_err());
+        assert!(check_trust(&c, &Trust::Acceptance).is_err());
+        let pin = card::fingerprint(&c);
+        assert!(check_trust(&c, &Trust::Pinned(pin.clone())).is_ok());
+        let edited = [card_of("permission_mode: bypassPermissions
+timeout_min: 9
+")];
+        assert!(check_trust(&edited, &Trust::Pinned(pin)).unwrap_err().to_string().contains("changed after"));
+    }
+
+    #[test]
+    fn trust_message_lists_permission_mode_and_pin() {
+        let c = [card_of("permission_mode: plan
+acceptance: make test
+")];
+        let e = check_trust(&c, &Trust::None).unwrap_err().to_string();
+        assert!(e.contains("a: permission_mode plan") && e.contains("make test") && e.contains(&card::fingerprint(&c)));
+        assert!(check_trust(&[card_of("")], &Trust::None).is_ok());
     }
 }
