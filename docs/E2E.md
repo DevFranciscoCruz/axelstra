@@ -16,7 +16,7 @@ socket, spawns and kills a session. It proves the engine boots on Ubuntu and Win
 ## Isolation (required for every scenario)
 
 - Point `LOCALAPPDATA` (Windows), `HOME` (macOS) or `XDG_DATA_HOME` (Linux) at a temp dir: `proto::data_dir()` reads them.
-- On Windows also set `USERNAME` to a unique value: the pipe name is `\.\pipe\axelstra-<USERNAME>`, so otherwise
+- On Windows also set `AXELSTRA_TEST_PIPE` to a unique value: the pipe name is `\.\pipe\axelstra-<SID>` plus `-t<value>`, so otherwise
   the test talks to the developer's own daemon. `tools/smoke.mjs` shows the pattern.
 - Use a fresh git repo in a temp dir as the project.
 

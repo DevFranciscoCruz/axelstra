@@ -43,6 +43,7 @@ const env = {
   XDG_DATA_HOME: join(home, "share"),
   USERNAME: user,
   USER: user,
+  AXELSTRA_TEST_PIPE: user, // the pipe is named by SID now, USERNAME no longer isolates it
   WEBVIEW2_USER_DATA_FOLDER: join(dir, "webview"),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
 };
