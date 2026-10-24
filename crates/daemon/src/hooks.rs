@@ -21,8 +21,21 @@ pub fn settings_path() -> Result<PathBuf> {
     Ok(home().context("no home directory")?.join(".claude").join("settings.json"))
 }
 
+/// The command Claude runs for `event`: this executable by absolute path, so the hook never depends on what sits first
+/// on PATH (it receives the agent's prompts). Falls back to the bare name only when the path is unknown.
 fn command(event: &str) -> String {
-    format!("axelstra hook claude {event}")
+    match std::env::current_exe() {
+        Ok(exe) => format!("\"{}\" hook claude {event}", exe.display()),
+        Err(_) => format!("axelstra hook claude {event}"),
+    }
+}
+
+/// True for a hook command that is ours for `event`, whether written by an earlier release (bare `axelstra`) or by this one.
+fn is_ours(cmd: &str, event: &str) -> bool {
+    let Some(prog) = cmd.trim().strip_suffix(&format!(" hook claude {event}")) else { return false };
+    let prog = prog.trim().trim_matches('"');
+    let name = prog.rsplit(['/', '\\']).next().unwrap_or(prog).to_ascii_lowercase();
+    name.starts_with("axelstra")
 }
 
 /// The file as JSON: a missing or blank file is an empty object, anything that is not an object is refused.
@@ -48,9 +61,7 @@ fn load(path: &Path) -> Result<(Value, Option<Vec<u8>>)> {
 
 /// True when some entry of `list` already runs the Axelstra hook command for `event`.
 fn entry_present(list: &[Value], event: &str) -> bool {
-    let want = command(event);
-    list.iter()
-        .any(|e| e["hooks"].as_array().is_some_and(|hs| hs.iter().any(|h| h["command"].as_str().map(str::trim) == Some(want.as_str()))))
+    list.iter().any(|e| e["hooks"].as_array().is_some_and(|hs| hs.iter().any(|h| h["command"].as_str().is_some_and(|c| is_ours(c, event)))))
 }
 
 fn has_event(root: &Value, event: &str) -> bool {
@@ -94,6 +105,14 @@ fn merge(root: &mut Value, path: &Path) -> Result<bool> {
     for event in EVENTS {
         let list = hooks.entry(event).or_insert_with(|| json!([]));
         let Some(list) = list.as_array_mut() else { bail!("\"hooks.{event}\" em {} não é uma lista; não lhe toquei.", path.display()) };
+        // an entry written by an earlier release names `axelstra` bare: it is pointed at this executable
+        let want = command(event);
+        for h in list.iter_mut().filter_map(|e| e["hooks"].as_array_mut()).flatten() {
+            if h["command"].as_str().is_some_and(|c| is_ours(c, event) && c != want) {
+                h["command"] = json!(want);
+                changed = true;
+            }
+        }
         if !entry_present(list, event) {
             list.push(json!({ "hooks": [{ "type": "command", "command": command(event) }] }));
             changed = true;
@@ -162,7 +181,7 @@ mod tests {
         assert_eq!(status_at(&f)["exists"], false);
         let r = install_at(&f).unwrap();
         assert_eq!((r["changed"].clone(), r["installed"].clone(), r["backup"].clone()), (json!(true), json!(true), Value::Null));
-        assert_eq!(read(&f)["hooks"]["Stop"][0]["hooks"][0]["command"], "axelstra hook claude Stop");
+        assert_eq!(read(&f)["hooks"]["Stop"][0]["hooks"][0]["command"], command("Stop"));
         assert_eq!(status_at(&f)["installed"], true);
         let _ = std::fs::remove_dir_all(f.parent().unwrap());
     }
@@ -201,7 +220,7 @@ mod tests {
         assert_eq!(hook_keys, ["Stop", "PreToolUse", "Notification", "UserPromptSubmit"]);
         // the other tool's Stop hook stays first, ours follows
         assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["command"], "notify-send done");
-        assert_eq!(v["hooks"]["Stop"][1]["hooks"][0]["command"], "axelstra hook claude Stop");
+        assert_eq!(v["hooks"]["Stop"][1]["hooks"][0]["command"], command("Stop"));
         assert_eq!(v["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "lint");
         let _ = std::fs::remove_dir_all(f.parent().unwrap());
     }
@@ -216,6 +235,22 @@ mod tests {
         assert_eq!((r["changed"].clone(), r["backup"].clone()), (json!(false), Value::Null));
         assert_eq!(std::fs::read_to_string(&f).unwrap(), once);
         assert_eq!(backups(&f).len(), 1);
+        let _ = std::fs::remove_dir_all(f.parent().unwrap());
+    }
+
+    #[test]
+    fn a_bare_axelstra_hook_is_pointed_at_this_executable() {
+        let f = tmp("legacy");
+        std::fs::write(&f, r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"axelstra hook claude Stop"}]}]}}"#).unwrap();
+        let r = install_at(&f).unwrap();
+        assert_eq!(r["changed"], true);
+        let v = read(&f);
+        assert_eq!(v["hooks"]["Stop"].as_array().unwrap().len(), 1);
+        assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["command"], command("Stop"));
+        assert!(command("Stop").starts_with('"'));
+        assert!(is_ours("axelstra hook claude Stop", "Stop"));
+        assert!(is_ours(&command("Stop"), "Stop"));
+        assert!(!is_ours("evil hook claude Stop", "Stop"));
         let _ = std::fs::remove_dir_all(f.parent().unwrap());
     }
 
