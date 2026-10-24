@@ -217,10 +217,21 @@ impl Client {
         Self::connect_as(pipe, token, Some("cli"))
     }
 
+    /// As an agent session does: presents the session's own credential (`AXELSTRA_AGENT_TOKEN`), which the daemon
+    /// answers with role=agent. The app-only calls are refused on such a connection.
+    pub fn connect_agent(pipe: &str, token: &str, agent_token: &str) -> Result<Client> {
+        Self::connect_with(pipe, token, Some("cli"), Some(agent_token.to_string()))
+    }
+
     fn connect_as(pipe: &str, token: &str, client: Option<&str>) -> Result<Client> {
+        let agent = if client == Some("cli") { std::env::var("AXELSTRA_AGENT_TOKEN").ok().filter(|t| !t.is_empty()) } else { None };
+        Self::connect_with(pipe, token, client, agent)
+    }
+
+    fn connect_with(pipe: &str, token: &str, client: Option<&str>, agent_token: Option<String>) -> Result<Client> {
         let f = open(pipe)?;
         let mut c = Client { rd: f.try_clone()?, wr: f, next: 0, proto: 0, instance: 0, timeout: None, broken: false };
-        let hello = c.call("hello", json!({"token": token, "client": client}))?;
+        let hello = c.call("hello", json!({"token": token, "client": client, "agent_token": agent_token}))?;
         c.proto = hello["proto"].as_u64().unwrap_or(1);
         c.instance = hello["instance"].as_u64().unwrap_or(0);
         Ok(c)

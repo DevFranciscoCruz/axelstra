@@ -246,3 +246,52 @@ fn retry_merge_integrates_a_resolved_conflict() {
     // a card that is no longer in review cannot be merged again
     assert!(orch::retry_merge(&e.repo, wt_root, "t", &loser, false).is_err());
 }
+
+#[test]
+fn invalid_timeout_cards_never_reach_the_orchestrator() {
+    let e = setup("timeout");
+    for (i, v) in ["-1", ".nan", ".inf", "1e30"].iter().enumerate() {
+        e.card(&format!("bad{i}"), &[], &format!("timeout_min: {v}\n"));
+    }
+    let l = card::load_dir(&e.repo.join(".kanban")).unwrap();
+    assert!(l.cards.is_empty());
+    assert_eq!(l.broken.len(), 4);
+    let err = e.try_run("t").err().expect("no runnable cards").to_string();
+    assert!(err.contains("no cards"), "{err}");
+    // the run left nothing "stuck": a corrected card starts right away
+    e.card("ok", &[], "timeout_min: 5\n");
+    assert_eq!(e.run("t").merged, ["ok"]);
+}
+
+fn run_opts(e: &Env, name: &str) -> Options {
+    Options {
+        repo: e.repo.clone(),
+        name: name.into(),
+        max_concurrency: 1,
+        wt_root: e.root.join("wt"),
+        agent_override: None,
+        poll_ms: 100,
+        runner: None,
+    }
+}
+
+#[test]
+fn bypass_cards_need_a_pinned_confirmation() {
+    let e = setup("bypass");
+    e.card("a", &[], "permission_mode: bypassPermissions\n");
+    let o = run_opts(&e, "t");
+    assert!(orch::run(&o).is_err());
+    let err = orch::run_trusted(&o).err().expect("bypass without pin").to_string();
+    assert!(err.contains("bypass") && err.contains("a: permission_mode bypassPermissions"), "{err}");
+    assert_eq!(e.status("a"), "todo");
+
+    let info = orch::trust_info(&e.repo).unwrap();
+    assert_eq!(info.cards.len(), 1);
+    assert!(info.cards[0].bypass && info.cards[0].permission_mode == "bypassPermissions");
+
+    // card edited after the confirmation: refused
+    e.card("a", &[], "permission_mode: bypassPermissions\nacceptance: \"exit 0\"\n");
+    let err = orch::run_pinned(&o, &info.pin).err().expect("stale pin").to_string();
+    assert!(err.contains("changed after"), "{err}");
+    assert_eq!(e.status("a"), "todo");
+}

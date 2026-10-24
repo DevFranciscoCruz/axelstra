@@ -259,13 +259,30 @@ pub fn file_of(root: &Path, project: &str, name: &str) -> Option<PathBuf> {
     inside_root(root, &p).then_some(p)
 }
 
+fn is_link(md: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if md.file_attributes() & 0x400 != 0 {
+            return true; // reparse point: symlink or junction
+        }
+    }
+    md.file_type().is_symlink()
+}
+
 /// Copies the task file into `worktree/.axelstra/`. Never replaces a file already there unless `overwrite`.
 /// The caller checked that `worktree` is a known worktree.
 pub fn export(note: &Path, worktree: &Path, overwrite: bool) -> Result<PathBuf> {
     let name = note.file_name().ok_or_else(|| anyhow::anyhow!("bad task file"))?;
     let dir = worktree.join(".axelstra");
+    if std::fs::symlink_metadata(&dir).is_ok_and(|m| is_link(&m)) {
+        bail!("{} is a link; refusing to export through it", dir.display());
+    }
     std::fs::create_dir_all(&dir)?;
     let target = dir.join(name);
+    if std::fs::symlink_metadata(&target).is_ok_and(|m| is_link(&m)) {
+        bail!("{} is a link; refusing to overwrite it", target.display());
+    }
     if target.exists() && !overwrite {
         bail!("{} already exists; export again with overwrite to replace it", target.display());
     }
@@ -398,6 +415,29 @@ mod tests {
         assert!(read(&out).unwrap().contains("novo"));
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&wt);
+    }
+
+    #[test]
+    fn export_refuses_a_linked_dot_axelstra() {
+        let root = dir("exlink");
+        let wt = dir("exlink-wt");
+        let outside = dir("exlink-out");
+        let mut m = agent_meta("p-exlink");
+        on_spawn(&root, Some("claude"), &mut m, None, false);
+        let note = PathBuf::from(m.unwrap()["note"].as_str().unwrap());
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&outside, wt.join(".axelstra")).is_ok();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_dir(&outside, wt.join(".axelstra")).is_ok();
+        if linked {
+            assert!(export(&note, &wt, true).is_err());
+            assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+        } else {
+            eprintln!("skipped: cannot create symlinks here");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&wt);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]
