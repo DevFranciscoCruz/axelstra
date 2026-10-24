@@ -15,7 +15,7 @@ const kfmt = (n: number) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.ro
 
 const svg = { width: 14, height: 14, viewBox: "0 0 16 16", fill: "currentColor" } as const;
 const ClaudeIcon = () => (
-  <svg {...svg} style={{ color: "#d97757" }}>
+  <svg {...svg} class="claude-ico">
     <path d="M8 1l1.2 4.3L13.5 3l-2.3 4.2L15 8l-3.8.8 2.3 4.2-4.3-2.3L8 15l-1.2-4.3L2.5 13l2.3-4.2L1 8l3.8-.8L2.5 3l4.3 2.3z" />
   </svg>
 );

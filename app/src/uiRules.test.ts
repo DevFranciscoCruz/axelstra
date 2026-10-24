@@ -25,6 +25,11 @@ describe("ui tokens", () => {
   it("no dead max-width:620px media query", () => {
     expect(hits(/max-width:\s*620px/)).toEqual([]);
   });
+  it("Usage and LimitsBar draw with tokens, no literal colours in their markup", () => {
+    const src = import.meta.glob<string>(["./Usage.tsx", "./LimitsBar.tsx"], { query: "?raw", import: "default", eager: true });
+    const bad = Object.entries(src).filter(([, t]) => /#[0-9a-fA-F]{3,6}|rgba?\(/.test(t)).map(([f]) => f);
+    expect(bad).toEqual([]);
+  });
   it("font sizes come from the --fs-* scale", () => {
     expect(hits(/font-size:\s*[0-9.]+px/)).toEqual([]);
   });

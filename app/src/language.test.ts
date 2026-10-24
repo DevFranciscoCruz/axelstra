@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 const sources = import.meta.glob<string>(["./*.tsx", "./strings.ts", "./store.ts", "./projectActions.ts", "./agentState.ts"], { query: "?raw", import: "default", eager: true });
-// files owned by other work areas are not held to this list here
-const OTHERS = /Kanban|Orchestra|Usage|StatusBar|LimitsBar/;
+// StatusBar is held to this list by its own work area
+const OTHERS = /StatusBar/;
 
 const scan = (re: RegExp) => {
   const hits: string[] = [];
