@@ -12,7 +12,18 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd !== "daemon_call" && cmd !== "daemon_call_bg") return undefined;
     switch (args?.method) {
       case "settings.get":
-        return { terse: "off", rules: null, pm: null, installed: [], auto_install: false, notify_sound: true, notify_mode: "all", shell: "auto", ui: {}, budgets: {} };
+        return {
+          terse: "off",
+          rules: null,
+          pm: null,
+          installed: [],
+          auto_install: false,
+          notify_sound: true,
+          notify_mode: "all",
+          shell: "auto",
+          ui: {},
+          budgets: {},
+        };
       case "agents.list":
         return [
           { id: "claude", name: "Claude Code", installed: true },
