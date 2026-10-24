@@ -1,5 +1,6 @@
 import { dict } from "./i18n";
 import { enR } from "./strings.remote.en";
+import { ptBRR } from "./strings.remote.ptbr";
 import { count } from "./i18n";
 import type { HostState } from "./api";
 import type { RemoteFailure, SpecProblem } from "./hostLogic";
@@ -13,8 +14,8 @@ export const ptR = {
     lost: "ligação perdida",
     auth: "falta autenticação",
   } as Record<HostState, string>,
-  stateOf: (name: string, s: HostState) => `Anfitrião ${name}: ${R.state[s]}`,
-  badgeTip: (name: string, spec: string, s: HostState) => `${name} (${spec}) · ${R.state[s]}`,
+  stateOf: (name: string, s: HostState): string => `Anfitrião ${name}: ${R.state[s]}`,
+  badgeTip: (name: string, spec: string, s: HostState): string => `${name} (${spec}) · ${R.state[s]}`,
   reconnect: "Voltar a ligar",
   reconnectTip: (name: string) => `Voltar a ligar ao anfitrião ${name}`,
   reconnecting: (name: string) => `A ligar ao anfitrião ${name}…`,
@@ -99,4 +100,4 @@ export const ptR = {
   detail: "Detalhe",
 };
 
-export const R = dict(ptR, enR);
+export const R = dict<typeof ptR>(ptR, enR, ptBRR);

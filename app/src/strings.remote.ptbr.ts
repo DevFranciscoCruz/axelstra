@@ -1,0 +1,99 @@
+import { type Widen, count } from "./i18n";
+import { type ptR, R } from "./strings.remote";
+import type { HostState } from "./api";
+import type { RemoteFailure, SpecProblem } from "./hostLogic";
+
+/** Brazilian Portuguese texts of the remote hosts (M7b): badge, Settings section and the "adicionar projeto remoto" flow. */
+export const ptBRR: Widen<typeof ptR> = {
+  state: {
+    idle: "desconectado",
+    connecting: "conectando…",
+    ok: "conectado",
+    lost: "conexão perdida",
+    auth: "falta autenticação",
+  } as Record<HostState, string>,
+  stateOf: (name: string, s: HostState) => `Host ${name}: ${R.state[s]}`,
+  badgeTip: (name: string, spec: string, s: HostState) => `${name} (${spec}) · ${R.state[s]}`,
+  reconnect: "Reconectar",
+  reconnectTip: (name: string) => `Reconectar ao host ${name}`,
+  reconnecting: (name: string) => `Conectando ao host ${name}…`,
+  reconnected: (name: string) => `Conectado a ${name}.`,
+  reconnectFailed: (name: string, why: string) => `Não foi possível conectar a ${name}: ${why}`,
+  remoteNoDocker: "Indisponível em projetos remotos",
+  openInRemote: "Abrir em… (indisponível em remotos)",
+  remoteNoOpen: "Abrir externamente não está disponível em projetos remotos",
+  remoteNoComputer: "O controle da tela não funciona em projetos remotos",
+  offline: (name: string) => `O host ${name} não está conectado.`,
+
+  // Settings
+  section: "Hosts remotos",
+  sectionNote:
+    "Máquinas onde roda outro daemon (uma distro WSL ou um servidor via SSH). Cada uma tem seus próprios projetos, worktrees e agentes.",
+  none: "Ainda não há hosts.",
+  remove: "Remover",
+  removeTip: (name: string) => `Remover o host ${name}`,
+  removeAsk: (name: string) =>
+    `Remover o host ${name}? Os projetos dele deixam de aparecer aqui; no host nada é excluído.`,
+  removed: (name: string) => `Host ${name} removido.`,
+  addTitle: "Adicionar host",
+  name: "Nome",
+  namePh: "ex.: servidor",
+  spec: "Especificação",
+  specPh: "ssh:usuario@servidor ou wsl:Ubuntu",
+  specHint: "wsl:<distro> ou ssh:[usuario@]servidor[:porta]. Só chave SSH ou agent: nunca pede senha.",
+  nameEmpty: "Dê um nome ao host.",
+  add: "Adicionar host",
+  adding: "Adicionando…",
+  added: (name: string) => `Host ${name} adicionado.`,
+  addFailed: (why: string) => `Não foi possível adicionar o host: ${why}`,
+  builds: (proto: number | undefined, build: string | undefined) =>
+    [proto != null ? `proto ${proto}` : "", build ?? ""].filter(Boolean).join(" · "),
+  spec_problem: {
+    empty: "Digite a especificação.",
+    space: "A especificação não pode ter espaços nem quebras de linha.",
+    dash: "Nenhuma parte da especificação pode começar com «-».",
+    scheme: "Comece com wsl: ou ssh:.",
+    distro: "Distro inválida: use letras, números, «.», «_» e «-».",
+    host: "Servidor inválido: use um nome, um IP ou um IPv6 entre colchetes.",
+    user: "Usuário inválido: use letras, números, «.», «_» e «-».",
+    port: "A porta deve estar entre 1 e 65535.",
+  } as Record<SpecProblem, string>,
+
+  // add remote project
+  addRemote: "Adicionar projeto remoto…",
+  addRemoteTitle: "Adicionar projeto remoto",
+  host: "Host",
+  hostNone: "Escolha um host",
+  newHost: "Adicionar novo host…",
+  path: "Pasta no host",
+  pathPh: "/home/usuario/projeto",
+  pathHint: "Caminho absoluto no host. Enter abre a pasta selecionada na lista.",
+  pathEmpty: "Digite o caminho da pasta.",
+  pathRelative: "O caminho deve ser absoluto (começa com «/» ou com uma unidade, como «C:»).",
+  browse: "Procurar",
+  browseLabel: "Pastas em",
+  crumbs: "Caminho atual",
+  up: "Pasta acima",
+  home: "Pasta pessoal",
+  folders: "Pastas",
+  emptyDir: "Sem subpastas.",
+  gitTip: "Repositório git",
+  truncated: "Lista cortada: digite o caminho completo.",
+  browsing: "Listando…",
+  browseCount: (n: number) => count(n, "pasta", "pastas"),
+  use: "Usar esta pasta",
+  confirm: "Adicionar projeto",
+  confirming: "Adicionando…",
+  projectAdded: (name: string, host: string) => `Projeto ${name} adicionado em ${host}.`,
+  cancelled: "Adição cancelada.",
+  waitingHost: (name: string) => `Conectando a ${name}…`,
+  failure: {
+    auth: "Falta autenticação. Use uma chave SSH ou o ssh-agent: o Axelstra nunca pede senha.",
+    "no-axelstra":
+      "O comando axelstra não existe no host (ou não está no PATH de uma sessão não interativa). Instale-o lá.",
+    "no-daemon": "O daemon não está rodando no host. Inicie-o lá com «axelstra daemon» e conecte novamente.",
+    unreachable: "Não foi possível alcançar o host (rede, nome ou tempo esgotado).",
+    other: "Falha na conexão com o host.",
+  } as Record<RemoteFailure, string>,
+  detail: "Detalhe",
+};

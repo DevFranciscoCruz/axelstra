@@ -173,4 +173,4 @@ export const ptL = {
   },
 } as const;
 
-export const L = dict(ptL, enL, ptBRL);
+export const L = dict<typeof ptL>(ptL, enL, ptBRL);
