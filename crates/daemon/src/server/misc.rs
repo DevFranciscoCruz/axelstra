@@ -53,6 +53,13 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "agents.list" => Ok(json!({"agents": tokio::task::block_in_place(axelstra_core::agents::list)})),
         "codex.limits" => Ok(json!({"limits": tokio::task::block_in_place(crate::agentlog::codex_limits)})),
+        // the gate lives here, not in the CLI: while screen control is off nothing below runs, whoever asks
+        m if m.starts_with("computer.") && !matches!(m, "computer.status" | "computer.enable") => {
+            if !reg.computer.load(Ordering::SeqCst) {
+                anyhow::bail!("screen control is off. The user turns it on in the Axelstra app (command palette: «Controlo do ecrã»); an agent cannot enable it");
+            }
+            tokio::task::block_in_place(|| crate::computer::call(m, p))
+        }
         "computer.status" => Ok(json!({"enabled": reg.computer.load(Ordering::SeqCst)})),
         "computer.enable" => {
             // agents run the CLI: only the app (a connection that did not say it is the CLI) may turn it on

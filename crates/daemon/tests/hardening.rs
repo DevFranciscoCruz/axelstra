@@ -106,7 +106,9 @@ fn session_probe_child() {
     let (pipe, token) = (std::env::var("AXELSTRA_PROBE_PIPE").unwrap(), std::env::var("AXELSTRA_PROBE_TOKEN").unwrap());
     let mut c = Client::connect(&pipe, &token).unwrap();
     let mut report = vec![];
-    for (m, p) in [("computer.enable", json!({"on": true})), ("project.add", json!({"path": std::env::temp_dir()})), ("hooks.install", json!({}))] {
+    for (m, p) in
+        [("computer.enable", json!({"on": true})), ("project.add", json!({"path": std::env::temp_dir()})), ("hooks.install", json!({}))]
+    {
         report.push(format!("{m}: {}", c.call(m, p).err().map(|e| e.to_string()).unwrap_or_else(|| "ALLOWED".into())));
     }
     std::fs::write(out, report.join("\n")).unwrap();
@@ -143,4 +145,24 @@ fn a_process_started_by_a_session_cannot_get_the_user_role() {
     }
     // the same token from outside every session is the user's
     assert_eq!(app.call("computer.enable", json!({"on": true})).unwrap()["enabled"], true);
+}
+
+#[test]
+fn computer_actions_are_refused_by_the_daemon_while_screen_control_is_off() {
+    let (pipe, token) = start("compgate");
+    // even the user's own connection and a hand-written client (no CLI in between) are refused
+    let mut c = Client::connect(&pipe, &token).unwrap();
+    for (m, p) in [
+        ("computer.windows", json!({})),
+        ("computer.screenshot", json!({})),
+        ("computer.click", json!({"x": 1, "y": 1})),
+        ("computer.type", json!({"text": "x"})),
+        ("computer.key", json!({"combo": "enter"})),
+        ("computer.scroll", json!({"dy": 1})),
+        ("computer.focus", json!({"window": 1})),
+    ] {
+        let e = c.call(m, p).unwrap_err().to_string();
+        assert!(e.contains("screen control is off"), "{m}: {e}");
+    }
+    assert_eq!(c.call("computer.status", json!({})).unwrap()["enabled"], false);
 }
