@@ -1,12 +1,12 @@
 import { For, JSX, Show, createResource, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { NotifyMode, SettingsPatch, ShellChoice, Terse, call, daemonShutdown, diagnostics, getSettings, resetShellCache, setSettings } from "./api";
+import { NotifyMode, SettingsPatch, ShellChoice, Terse, backupExport, backupRestore, call, copyDiagnostics, daemonShutdown, diagnostics, getSettings, resetShellCache, setSettings } from "./api";
 import { ask } from "./Confirm";
 import { HooksSection } from "./HooksSection";
 import { Modal } from "./Modal";
 import { S } from "./strings";
 import { classifySettingsError, diagnosticRows, errorText, waitUntil } from "./settingsLogic";
-import { setShowSettings, showNotice } from "./store";
+import { setError, setShowSettings, showNotice } from "./store";
 import { DEFAULT_FONT, MAX_FONT, MIN_FONT, TermTheme, setTermPrefs, termPrefs } from "./termprefs";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
 import "./termui.css";
@@ -16,6 +16,23 @@ const TERSE: Terse[] = ["off", "short", "tiny"];
 const NOTIFY: NotifyMode[] = ["all", "waiting", "off"];
 const SHELLS: ShellChoice[] = ["auto", "pwsh", "powershell", "bash", "wsl", "cmd"];
 const THEMES: TermTheme[] = ["dark", "light"];
+
+// texts of the backup / diagnostics / accessibility rows (kept here with the buttons that use them)
+const T = {
+  a11y: "Acessibilidade",
+  a11yNote: "Para leitores de ecrã. Desligado por omissão porque deixa os terminais mais lentos.",
+  screenReader: "Modo leitor de ecrã nos terminais",
+  backup: "Cópia de segurança",
+  backupNote: "Guarda ou repõe as definições, projetos e sessões do daemon.",
+  export: "Exportar…",
+  restore: "Restaurar…",
+  exported: "Cópia guardada em ",
+  restored: "Cópia restaurada. Reinicia o Axelstra para aplicar.",
+  noBackup: "Este daemon ainda não suporta cópias de segurança. Atualiza e reinicia o Axelstra.",
+  restorePath: "Caminho do ficheiro de cópia a restaurar",
+  copyDiag: "Copiar diagnóstico",
+  diagCopied: "Diagnóstico copiado para a área de transferência.",
+};
 
 /** A row of exclusive choices (a null value, "auto", is keyed by a sentinel: radio values are strings). */
 const NONE = "__none__";
@@ -44,8 +61,8 @@ const Section = (props: { title: string; note?: string; children: JSX.Element })
 /** Daemon version, data paths, lag log and missing tools. Every part is optional: an older build reports less. */
 function Diagnostics() {
   const [d, { refetch }] = createResource(async () => {
-    const info = await diagnostics().catch(() => null);
-    const missing = info?.missing_tools ?? (await invoke<string[]>("missing_tools").catch(() => null));
+    const info = await diagnostics().catch((e) => (console.debug("diagnostics", e), null));
+    const missing = info?.missing_tools ?? (await invoke<string[]>("missing_tools").catch((e) => (console.debug("missing_tools", e), null)));
     return { info, missing };
   });
   return (
@@ -73,8 +90,18 @@ function Diagnostics() {
           </>
         )}
       </Show>
-      <div>
+      <div class="m-actions" style={{ "justify-content": "flex-start" }}>
         <Button onClick={() => void refetch()}>{S.diagRun}</Button>
+        <Button
+          onClick={() =>
+            void copyDiagnostics().then(
+              () => showNotice(T.diagCopied),
+              (e) => setError(errorText(e)),
+            )
+          }
+        >
+          {T.copyDiag}
+        </Button>
       </div>
     </Section>
   );
@@ -90,7 +117,26 @@ export function Settings() {
       mutate((cur) => (cur ? { ...cur, ...patch } : cur));
       if (patch.shell !== undefined) resetShellCache();
     } catch (e) {
-      showNotice(String(e));
+      setError(errorText(e));
+    }
+  };
+  const exportBackup = async () => {
+    try {
+      const r = await backupExport();
+      if (r) showNotice(T.exported + r.path);
+      else showNotice(T.noBackup);
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+  const restoreBackup = async () => {
+    const path = window.prompt(T.restorePath)?.trim();
+    if (!path) return;
+    try {
+      const r = await backupRestore(path);
+      showNotice(r ? T.restored : T.noBackup);
+    } catch (e) {
+      setError(errorText(e));
     }
   };
   // The daemon is a separate process that outlives the app. Shutting it down is safe cross-platform: the next call starts
@@ -99,7 +145,7 @@ export function Settings() {
     if (!(await ask(S.restartConfirm, { title: S.restartTitle, kind: "warning", okLabel: S.restartDaemon }))) return;
     setRestarting(true);
     try {
-      await daemonShutdown().catch(() => 0); // the connection drops with the daemon
+      await daemonShutdown().catch((e) => console.debug("daemon.shutdown", e)); // the connection drops with the daemon
       if (!(await waitUntil(() => call("ping"), 20, 500))) throw new Error("o daemon não voltou a responder");
       await refetch();
     } catch (e) {
@@ -211,6 +257,19 @@ export function Settings() {
                       onChange={(e) => setTermPrefs({ fontSize: Number(e.currentTarget.value) })}
                     />
                   </Field>
+                </div>
+              </Section>
+
+              <Section title={T.a11y} note={T.a11yNote}>
+                <CheckboxField checked={termPrefs().screenReader} onChange={(v) => setTermPrefs({ screenReader: v })}>
+                  {T.screenReader}
+                </CheckboxField>
+              </Section>
+
+              <Section title={T.backup} note={T.backupNote}>
+                <div class="m-actions" style={{ "justify-content": "flex-start" }}>
+                  <Button onClick={() => void exportBackup()}>{T.export}</Button>
+                  <Button onClick={() => void restoreBackup()}>{T.restore}</Button>
                 </div>
               </Section>
 

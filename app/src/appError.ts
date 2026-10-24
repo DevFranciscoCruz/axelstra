@@ -6,6 +6,10 @@ export class AppError extends Error {
     this.name = "AppError";
     this.method = method;
   }
+  /** `String(e)` in the callers' catch blocks reads as the message, not as "AppError: ..." */
+  override toString() {
+    return this.message;
+  }
 }
 
 /** Readable text for whatever was thrown: never "[object Object]". */

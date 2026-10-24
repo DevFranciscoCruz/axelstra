@@ -1,18 +1,63 @@
-import { Show } from "solid-js";
+import { For, Show, type JSX } from "solid-js";
 import { Icon } from "./Icon";
-import { daemonReconnecting, error, notice, setError, setNoticeSig } from "./store";
+import { daemonReconnecting, dismissToast, retryDaemon, toasts } from "./store";
+import { latestText, pauseToast, resumeToast, type Toast } from "./toasts";
 import { Button } from "./ui";
 
 // .error-toast is position:fixed on its own; inside the stack the wrapper positions, the toasts flow
 const FLOW = { position: "static", transform: "none" } as const;
 
-/** Failures from any action stay until dismissed; plain notices go away by themselves. Both show at once, stacked (at most one of each). */
-export function ErrorToast() {
-  // the stack is a polite live region that is always on the page, so a notice that appears is announced; fixed, so the
-  // empty region is not a cell of the app grid (it pushed the sidebar one column over)
+function ToastCard(props: { t: Toast }) {
+  const t = () => props.t;
+  // a toast that closes by itself waits while the pointer or the keyboard focus is on it (WCAG 2.2.1)
   return (
-    <div aria-live="polite" aria-atomic="false" style={{ position: "fixed", left: 0, top: 0, width: 0, height: 0 }}>
-    <Show when={error() || notice() || daemonReconnecting()}>
+    <div
+      class="error-toast"
+      classList={{ notice: t().kind !== "error" }}
+      data-kind={t().kind}
+      style={FLOW}
+      onMouseEnter={() => pauseToast(t().id)}
+      onMouseLeave={() => resumeToast(t().id)}
+      onFocusIn={() => pauseToast(t().id)}
+      onFocusOut={() => resumeToast(t().id)}
+    >
+      <span class="et-msg">{t().text}</span>
+      <Show when={t().action}>
+        {(a) => (
+          <Button
+            size="sm"
+            class="flex-none"
+            onClick={() => {
+              dismissToast(t().id);
+              a().run();
+            }}
+          >
+            {a().label}
+          </Button>
+        )}
+      </Show>
+      <Button variant="icon" size="icon" class="size-6 flex-none" title="Fechar" aria-label="Fechar" onClick={() => dismissToast(t().id)}>
+        <Icon name="x" />
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * The one place toasts appear, stacked above the status bar: failures (kept until closed), notices (closing by
+ * themselves), the reconnection banner, and whatever else is passed as children (the update card), so none of
+ * them lands on top of another. Screen readers get two small always-present live regions (status and alert)
+ * whose text changes; the visible cards are not live regions themselves, which announced unreliably.
+ */
+export function ErrorToast(props: { children?: JSX.Element }) {
+  return (
+    <>
+      <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {daemonReconnecting() ? "A reconectar ao daemon…" : latestText("info") || latestText("warn")}
+      </div>
+      <div class="sr-only" role="alert" aria-atomic="true">
+        {latestText("error")}
+      </div>
       <div
         style={{
           position: "fixed",
@@ -25,31 +70,23 @@ export function ErrorToast() {
           gap: "8px",
           "align-items": "stretch",
           "max-width": "min(560px, 92vw)",
+          // the empty stack must not catch clicks meant for the app below it
+          "pointer-events": "none",
         }}
       >
-        <Show when={daemonReconnecting()}>
-          <div class="error-toast notice" role="status" style={FLOW}>
-            <span class="et-msg">A reconectar ao daemon…</span>
-          </div>
-        </Show>
-        <Show when={notice()}>
-          <div class="error-toast notice" role="status" style={FLOW}>
-            <span class="et-msg">{notice()}</span>
-            <Button variant="icon" size="icon" class="size-6 flex-none" title="Fechar" aria-label="Fechar" onClick={() => setNoticeSig("")}>
-              <Icon name="x" />
-            </Button>
-          </div>
-        </Show>
-        <Show when={error()}>
-          <div class="error-toast" role="alert" style={FLOW}>
-            <span class="et-msg">{error()}</span>
-            <Button variant="icon" size="icon" class="size-6 flex-none" title="Fechar" aria-label="Fechar" onClick={() => setError("")}>
-              <Icon name="x" />
-            </Button>
-          </div>
-        </Show>
+        <div style={{ display: "contents", "pointer-events": "auto" }}>
+          <Show when={daemonReconnecting()}>
+            <div class="error-toast notice" style={FLOW}>
+              <span class="et-msg">A reconectar ao daemon…</span>
+              <Button size="sm" class="flex-none" onClick={() => void retryDaemon()}>
+                Tentar agora
+              </Button>
+            </div>
+          </Show>
+          <For each={toasts()}>{(t) => <ToastCard t={t} />}</For>
+          {props.children}
+        </div>
       </div>
-    </Show>
-    </div>
+    </>
   );
 }

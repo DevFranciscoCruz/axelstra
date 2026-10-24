@@ -2,6 +2,27 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Button } from "./ui";
+import { createPoller } from "./poller";
+import { errorText } from "./appError";
+
+/** the version the user said "later" to: remembered, so a restart does not bring the same card back */
+const DISMISSED_KEY = "axelstra.updateDismissed";
+const loadDismissed = () => {
+  try {
+    return localStorage.getItem(DISMISSED_KEY);
+  } catch {
+    return null;
+  }
+};
+const saveDismissed = (v: string) => {
+  try {
+    localStorage.setItem(DISMISSED_KEY, v);
+  } catch {
+    /* storage unavailable: it just comes back next start */
+  }
+};
+// the card lives inside the shared toast stack (ErrorToast), so it flows there instead of floating on its own
+const FLOW = { position: "static", width: "auto", animation: "none" } as const;
 
 type Info = { version: string; notes: string | null };
 
@@ -18,7 +39,7 @@ const FOCUS_THROTTLE_MS = 5 * 60 * 1000;
 export function UpdateToast() {
   const [info, setInfo] = createSignal<Info | null>(null);
   const [ready, setReady] = createSignal<string | null>(null);
-  const [dismissed, setDismissed] = createSignal<string | null>(null);
+  const [dismissed, setDismissed] = createSignal<string | null>(loadDismissed());
   const [busy, setBusy] = createSignal(false);
   const [err, setErr] = createSignal("");
   let lastCheck = 0;
@@ -31,15 +52,16 @@ export function UpdateToast() {
         await invoke("update_download", { expected: found.version });
         setReady(found.version);
       }
-    } catch {
-      /* offline or no release published yet: stay quiet, retry later */
+    } catch (e) {
+      // offline or no release published yet: stay quiet, retry later
+      console.debug("update_check", e);
     }
     lastCheck = Date.now();
   };
 
   onMount(() => {
     const first = setTimeout(() => void check(), 5000);
-    const again = setInterval(() => void check(), CHECK_INTERVAL_MS);
+    const again = createPoller(check, CHECK_INTERVAL_MS, { visibleOnly: false });
     let unlisten: (() => void) | undefined;
     let gone = false;
     void getCurrentWindow()
@@ -47,11 +69,11 @@ export function UpdateToast() {
         if (focused && Date.now() - lastCheck > FOCUS_THROTTLE_MS) void check();
       })
       .then((fn) => (gone ? fn() : (unlisten = fn)))
-      .catch(() => {});
+      .catch((e) => console.debug("onFocusChanged", e));
     onCleanup(() => {
       gone = true;
       clearTimeout(first);
-      clearInterval(again);
+      again.stop();
       unlisten?.();
     });
   });
@@ -62,7 +84,7 @@ export function UpdateToast() {
     try {
       await invoke("update_apply");
     } catch (e) {
-      setErr(String(e));
+      setErr(errorText(e));
       setBusy(false);
     }
   };
@@ -75,7 +97,7 @@ export function UpdateToast() {
   return (
     <Show when={shown()}>
       {(i) => (
-        <div class="update-toast" role="status" aria-label="Atualização disponível">
+        <div class="update-toast" role="status" aria-label="Atualização disponível" style={FLOW}>
           <div class="ut-head">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M8 2.5v8M4.8 7.6 8 10.8l3.2-3.2M3 13h10" />
@@ -86,13 +108,27 @@ export function UpdateToast() {
             </div>
           </div>
           <div class="ut-actions">
-            <Button disabled={busy()} onClick={() => setDismissed(i().version)}>
+            <Button
+              disabled={busy()}
+              onClick={() => {
+                saveDismissed(i().version);
+                setDismissed(i().version);
+              }}
+            >
               Mais tarde
             </Button>
             <Button variant="default" disabled={busy()} onClick={() => void install()}>
               {busy() ? "A reiniciar…" : "Reiniciar agora"}
             </Button>
           </div>
+          <Show when={i().notes}>
+            {(n) => (
+              <details class="mt-2 text-[length:var(--fs-md)]">
+                <summary class="cursor-pointer text-muted-foreground">Novidades desta versão</summary>
+                <p class="mt-1 max-h-32 overflow-auto whitespace-pre-line">{n()}</p>
+              </details>
+            )}
+          </Show>
           <Show when={err()}>
             <div class="error">{err()}</div>
           </Show>
