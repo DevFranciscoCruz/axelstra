@@ -880,27 +880,37 @@ mod tests {
 
     #[test]
     fn worktree_totals_add_up_both_agents_and_match_paths_loosely() {
+        // backslashes separate paths only on Windows
+        let w = |s: &str| -> String {
+            if cfg!(windows) {
+                s.to_string()
+            } else {
+                s.replace('\\', "/")
+            }
+        };
         let mut out = vec![
-            WorktreeUsage { worktree: r"C:\wt\a".into(), ..Default::default() },
-            WorktreeUsage { worktree: r"C:\wt\a\nested".into(), ..Default::default() },
-            WorktreeUsage { worktree: r"C:\wt\b".into(), ..Default::default() },
+            WorktreeUsage { worktree: w(r"C:\wt\a"), ..Default::default() },
+            WorktreeUsage { worktree: w(r"C:\wt\a\nested"), ..Default::default() },
+            WorktreeUsage { worktree: w(r"C:\wt\b"), ..Default::default() },
         ];
         let claude = Usage { input: 5, output: 6, cache_read: 7, cache_write: 8, messages: 2, context: 0 };
         out[0].add(&claude, "claude");
         let codex = Usage { input: 1, output: 2, cache_read: 3, cache_write: 0, messages: 1, context: 0 };
+        // the verbatim prefix and the letter case only matter where paths compare that way
+        let loose = if cfg!(any(windows, target_os = "macos")) { r"\\?\c:\WT\a/" } else { r"\\?\C:/wt/a/" };
         add_codex(
             &mut out,
             &[
-                (if cfg!(any(windows, target_os = "macos")) { r"\\?\c:\WT\a/" } else { r"\\?\C:\wt\a/" }.into(), codex.clone()),
-                (r"C:\wt\a\nested\sub".into(), codex.clone()),
-                (r"C:\wt\ab".into(), codex.clone()),
-                (r"D:\elsewhere".into(), codex),
+                (loose.into(), codex.clone()),
+                (w(r"C:\wt\a\nested\sub"), codex.clone()),
+                (w(r"C:\wt\ab"), codex.clone()),
+                (w(r"D:\elsewhere"), codex),
             ],
         );
         assert_eq!(
             out[0],
             WorktreeUsage {
-                worktree: r"C:\wt\a".into(),
+                worktree: w(r"C:\wt\a"),
                 input: 6,
                 output: 8,
                 cache_read: 10,
