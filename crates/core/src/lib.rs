@@ -10,4 +10,5 @@ pub mod pty;
 pub mod runner;
 pub mod screen;
 pub mod sync;
+pub mod termseq;
 pub mod waiting;
