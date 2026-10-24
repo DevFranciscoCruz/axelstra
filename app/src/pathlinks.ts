@@ -28,9 +28,21 @@ const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase
 /** where a clicked path points relative to the selected worktree: inside it (`rel`) or somewhere else (`outside`) */
 export const resolvePathLink = (path: string, worktree: string): { rel: string } | { outside: string } => {
   const slashed = path.replace(/\\/g, "/");
+  // a relative path that climbs out of the worktree is outside too
+  if (!/^[A-Za-z]:\//.test(slashed) && slashed.split("/").includes("..")) return { outside: path };
   if (/^[A-Za-z]:\//.test(slashed)) {
     if (!norm(slashed).startsWith(norm(worktree) + "/")) return { outside: path };
     return { rel: slashed.slice(worktree.replace(/\\/g, "/").replace(/\/$/, "").length + 1) };
   }
   return { rel: slashed.replace(/^\.\//, "") };
+};
+
+/** the URL when it is safe to open from terminal output (http/https only), otherwise null: mailto:, tel:, file: and friends are refused */
+export const safeLinkUrl = (raw: string): string | null => {
+  try {
+    const u = new URL(raw.trim());
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+  } catch {
+    return null;
+  }
 };

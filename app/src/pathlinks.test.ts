@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findPathLinks, parsePathLink, resolvePathLink } from "./pathlinks";
+import { findPathLinks, parsePathLink, resolvePathLink, safeLinkUrl } from "./pathlinks";
 
 describe("parsePathLink", () => {
   it("splits line and column", () => {
@@ -42,5 +42,20 @@ describe("resolvePathLink", () => {
   });
   it("does not treat a sibling folder with the same prefix as inside", () => {
     expect(resolvePathLink("C:/w/proj2/x.ts", "C:/w/proj")).toEqual({ outside: "C:/w/proj2/x.ts" });
+  });
+});
+
+describe("resolvePathLink escapes", () => {
+  it("treats a relative path that climbs out as outside", () => {
+    expect(resolvePathLink("../secret.txt", "C:/w/proj")).toEqual({ outside: "../secret.txt" });
+    expect(resolvePathLink("src/../../x.ts", "C:/w/proj")).toEqual({ outside: "src/../../x.ts" });
+  });
+});
+
+describe("safeLinkUrl", () => {
+  it("allows only http and https", () => {
+    expect(safeLinkUrl("https://example.com/a")).toBe("https://example.com/a");
+    expect(safeLinkUrl("http://localhost:3000")).toBe("http://localhost:3000/");
+    for (const bad of ["mailto:a@b.c", "tel:123", "file:///C:/x", "javascript:alert(1)", "ssh://h", "not a url", ""]) expect(safeLinkUrl(bad)).toBeNull();
   });
 });

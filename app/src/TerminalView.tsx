@@ -7,11 +7,12 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Icon } from "./Icon";
 import { fsStat, rememberTermSize, resizeSession, writeSession } from "./api";
-import { findPathLinks, resolvePathLink, type PathLink } from "./pathlinks";
+import { findPathLinks, resolvePathLink, safeLinkUrl, type PathLink } from "./pathlinks";
+import { ask } from "./Confirm";
 import { S } from "./strings";
 import { attachWithRetry, createSizeSync, createWriteBatcher } from "./termsize";
 import { THEMES, setTermPrefs, termPrefs, zoomFont } from "./termprefs";
@@ -22,12 +23,22 @@ import "./termui.css";
 const SCROLLBACK = 5000;
 const SCROLLBACK_HIDDEN = 2000;
 
-/** opens a clicked path: inside the selected worktree in the editor (at its line when the link has one), elsewhere in the file manager */
+/** opens a link from terminal output: http(s) only; `confirmFirst` (OSC 8, where the visible text can hide the target) shows the real URL before leaving */
+async function openTermUrl(raw: string, confirmFirst: boolean) {
+  const url = safeLinkUrl(raw);
+  if (!url) return void showNotice(`Ligação não aberta: só são permitidos endereços http e https (${raw.slice(0, 80)}).`);
+  if (confirmFirst && !(await ask(`Abrir este endereço no browser?
+
+${url}`, { title: "Abrir ligação", kind: "warning", okLabel: "Abrir", cancelLabel: "Cancelar" }))) return;
+  void openUrl(url).catch(() => 0);
+}
+
+/** opens a clicked path: only inside the selected worktree (in the editor, at its line when the link has one); paths elsewhere are not revealed */
 async function openPathLink(link: PathLink) {
   const wt = selectedWorktree();
   if (!wt) return;
   const r = resolvePathLink(link.path, wt);
-  if ("outside" in r) return void revealItemInDir(r.outside).catch(() => showNotice(S.fileMissing(r.outside)));
+  if ("outside" in r) return void showNotice(`O caminho ${r.outside} está fora desta worktree e não é aberto a partir do terminal.`);
   try {
     await fsStat(wt, r.rel); // throws when the file does not exist
   } catch {
@@ -55,6 +66,7 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       scrollback: isActive() ? SCROLLBACK : SCROLLBACK_HIDDEN,
       cursorBlink: true,
       allowProposedApi: true,
+      linkHandler: { activate: (_e, uri) => void openTermUrl(uri, true), allowNonHttpProtocols: false },
       theme: THEMES[prefs.theme],
     });
     const fit = new FitAddon();
@@ -65,7 +77,7 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
     term.unicode.activeVersion = "11";
     const search = new SearchAddon();
     term.loadAddon(search);
-    term.loadAddon(new WebLinksAddon((_e, url) => void openUrl(url)));
+    term.loadAddon(new WebLinksAddon((_e, url) => void openTermUrl(url, false)));
     term.registerLinkProvider({
       provideLinks(y, cb) {
         const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
