@@ -108,6 +108,7 @@ html, body, #root {
   height: 100%;
   margin: 0;
 }
+html { background: var(--bg); }
 body {
   overflow: hidden;
   background: var(--bg);
@@ -783,7 +784,13 @@ button.sb-item:hover { background: rgba(var(--fg-rgb), .06); color: var(--text);
 .orch-row .grow { flex: 1; }
 .orch-row button { padding: 3px 9px; font-size: var(--fs-md); }
 .computer-on { align-self: center; font-size: var(--fs-sm); color: var(--err); padding: 0 8px; white-space: nowrap; cursor: default; }
-.limits { margin-left: auto; display: flex; align-items: center; gap: 10px; padding-right: 8px; }
+.limits { margin-left: auto; display: flex; align-items: center; gap: 10px; padding-right: 8px; min-width: 0; overflow: hidden; }
+.statusbar { overflow: hidden; }
+.statusbar > * { flex-shrink: 0; }
+.statusbar > .limits { flex-shrink: 1; }
+/* a narrow window: the status bar drops the least useful parts first (shortcut hint, reset times, then the bars) */
+@media (max-width: 1100px) { .statusbar .hint-keys, .limits .lim-dim { display: none; } }
+@media (max-width: 900px) { .limits .lim-bar { display: none; } .limits { gap: 6px; } }
 .lim { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .lim-dim { color: var(--muted); }
 .lim-bar { width: 44px; height: 5px; border-radius: var(--r-sm); background: rgba(var(--fg-rgb), .12); overflow: hidden; }

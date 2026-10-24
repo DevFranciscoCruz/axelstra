@@ -45,6 +45,7 @@ const env = {
   USERNAME: user,
   USER: user,
   AXELSTRA_TEST_PIPE: user, // the pipe is named by SID now, USERNAME no longer isolates it
+  AXELSTRA_TEST_HIDDEN: process.env.AXELSTRA_TEST_HIDDEN ?? "1", // the host shows its window transparent, click-through, unfocusable
   WEBVIEW2_USER_DATA_FOLDER: join(dir, "webview"),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
 };
@@ -55,6 +56,21 @@ const kill = (pid, tree = false) =>
   spawnSync("taskkill", ["/PID", String(pid), ...(tree ? ["/T"] : []), "/F"], {
     stdio: "ignore",
   });
+
+/** The foreground window of the desktop (0 when unknown); a test must never change it. */
+const foreground = () => {
+  const r = spawnSync(
+    "powershell",
+    [
+      "-NoProfile",
+      "-Command",
+      "Add-Type 'using System;using System.Runtime.InteropServices;public class FG{[DllImport(\"user32.dll\")]public static extern IntPtr GetForegroundWindow();}'; [FG]::GetForegroundWindow().ToInt64()",
+    ],
+    { encoding: "utf8", timeout: 20000 },
+  );
+  return r.stdout.trim();
+};
+const fgBefore = foreground();
 
 let app;
 const problems = [];
@@ -250,6 +266,19 @@ ${dataDirReport()}`);
   await selectWorktree(page);
   await until("the terminal after relaunch", () => page.evaluate("!!document.querySelector('.xterm')"), 40000);
   console.log("ok  restore: relaunched app shows the session again");
+  // the user's foreground window must not have changed because of the test
+  const fgAfter = foreground();
+  if (fgBefore && fgAfter !== fgBefore)
+    throw new Error(`the test changed the foreground window (${fgBefore} -> ${fgAfter}): it stole the focus`);
+  console.log("ok  the foreground window did not change");
+  // no white band: #root fills the viewport and the corners paint the theme, not the default white
+  const fill = await page.evaluate(
+    "(() => { const r = document.getElementById('root').getBoundingClientRect(); return [r.left, r.top, r.width - innerWidth, r.height - innerHeight].map(Math.round); })()",
+  );
+  if (fill.some((v) => Math.abs(v) > 1)) throw new Error(`#root does not fill the window: ${fill}`);
+  const bg = await page.evaluate("getComputedStyle(document.documentElement).backgroundColor");
+  if (/^rgb\(255, 255, 255\)|^rgba\(0, 0, 0, 0\)/.test(bg)) throw new Error(`html background is ${bg}`);
+  console.log("ok  #root fills the window, html background is the theme");
 
   await sleep(1000);
   if (problems.length) throw new Error(`browser problems:\n  ${[...new Set(problems)].join("\n  ")}`);
