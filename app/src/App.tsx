@@ -17,6 +17,7 @@ import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
 import { WorktreeReports } from "./WorktreeReports";
 import { Palette } from "./Palette";
+import { Welcome } from "./Welcome";
 import { ContextMenu } from "./ContextMenu";
 import { Automations } from "./Automations";
 import { Dispatcher } from "./Dispatcher";
@@ -117,6 +118,7 @@ import {
   showNotice,
   openSession,
   selectedWorktree,
+  selectWorktree,
   sessionsOf,
   setActiveSession,
   setError,
@@ -620,17 +622,27 @@ export function App() {
         <Show
           when={current()}
           fallback={
-            <div class="placeholder">
+            <>
               <Show when={!showSidebar()}>
-                <Button variant="icon" size="tool" title={K(S.app.showProjects)} aria-label={K(S.app.showProjects)} onClick={toggleSidebar}>
+                <Button variant="icon" size="tool" class="m-1" title={K(S.app.showProjects)} aria-label={K(S.app.showProjects)} onClick={toggleSidebar}>
                   <PanelIcon side="left" on={false} />
                 </Button>
               </Show>
-              <div>{S.app.addProjectHint}</div>
-              <Show when={projects().length === 0}>
-                <Button variant="default" onClick={() => void pickProject()}>{S.app.addProject}</Button>
+              <Show when={projects()[0]} fallback={<Welcome onAddProject={() => void pickProject()} />}>
+                {(p) => (
+                  <Welcome
+                    onAddProject={() => void pickProject()}
+                    projectName={p().name}
+                    worktrees={p().worktrees}
+                    onPick={selectWorktree}
+                    onNewWorktree={() => {
+                      showSidebarNow();
+                      setCreatingWorktree(p().id);
+                    }}
+                  />
+                )}
               </Show>
-            </div>
+            </>
           }
         >
           <div class="tabbar">
