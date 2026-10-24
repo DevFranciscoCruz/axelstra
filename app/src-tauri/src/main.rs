@@ -484,7 +484,7 @@ fn pick_folder(app: &tauri::AppHandle, title: &str, start: Option<std::path::Pat
 async fn project_add_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, CallError> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(path) = pick_folder(&app, &title, None).map_err(CallError::from)? else { return Ok(Value::Null) };
+        let Some(path) = pick_folder(&app, &title, None)? else { return Ok(Value::Null) };
         with_client(&st.control, false, |c| c.call("project.add", json!({"path": path}))).map_err(|e| CallError::from(&e))
     })
     .await
@@ -497,7 +497,7 @@ async fn project_add_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<Sta
 async fn backup_restore_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, CallError> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(path) = pick_folder(&app, &title, Some(proto::data_dir().join("backups"))).map_err(CallError::from)? else {
+        let Some(path) = pick_folder(&app, &title, Some(proto::data_dir().join("backups")))? else {
             return Ok(Value::Null);
         };
         with_client(&st.control, false, |c| c.call("backup.restore", json!({"path": path}))).map_err(|e| CallError::from(&e))
