@@ -10,13 +10,14 @@ import { say, nameOf, shells, DTab } from "./docker/shared";
 import { Empty, Unavailable, ComposeBar, Row, VolumesList, ImagesList, NetworksList } from "./docker/Lists";
 import { FAST_MS } from "./docker/shared";
 import { Detail } from "./docker/Detail";
+import { P } from "./strings.panels";
 import "./docker.css";
 
 /** The Docker view fills the centre area like the Kanban; whoever mounts it owns this signal. */
 export { showDocker, setShowDocker };
 
 type Nav = "containers" | "volumes" | "images" | "networks";
-const NAV: [Nav, string][] = [["containers", "Contentores"], ["volumes", "Volumes"], ["images", "Imagens"], ["networks", "Redes"]];
+const NAV: [Nav, string][] = (["containers", "volumes", "images", "networks"] as Nav[]).map((n) => [n, P.docker.nav[n]]);
 const SLOW_MS = 10000;
 
 
@@ -118,28 +119,28 @@ export function DockerView() {
 
   const confirmRemove = async (c: DockerContainer, mode: "plain" | "force" | "volumes") => {
     const what = {
-      plain: `Remover o contentor "${c.name}"? Os ficheiros que só existem dentro dele perdem-se. Os volumes ficam.`,
-      force: `Remover à força "${c.name}"? O contentor é morto sem aviso (SIGKILL) e apagado. Os ficheiros que só existem dentro dele perdem-se.`,
-      volumes: `Remover "${c.name}" e os seus volumes anónimos? Os dados guardados nesses volumes perdem-se. Volumes com nome ficam.`,
+      plain: P.docker.removeAsk.plain(c.name),
+      force: P.docker.removeAsk.force(c.name),
+      volumes: P.docker.removeAsk.volumes(c.name),
     }[mode];
-    if (!(await ask(what, { title: mode === "force" ? "Remover à força" : "Remover contentor", kind: "danger", okLabel: mode === "force" ? "Remover à força" : "Remover", cancelLabel: "Cancelar" }))) return;
+    if (!(await ask(what, { title: mode === "force" ? P.docker.forceTitle : P.docker.removeTitle, kind: "danger", okLabel: mode === "force" ? P.docker.forceTitle : P.docker.remove, cancelLabel: P.docker.cancel }))) return;
     if (selId() === c.id) setSelId(null);
-    await doAction("container.remove", c, "Removido", { force: mode === "force", volumes: mode === "volumes" });
+    await doAction("container.remove", c, P.docker.done.removed, { force: mode === "force", volumes: mode === "volumes" });
   };
   const confirmKill = async (c: DockerContainer) => {
-    if (await ask(`Matar "${c.name}" sem aviso (SIGKILL)? Não tem oportunidade de guardar nada.`, { title: "Matar contentor", kind: "danger", okLabel: "Matar", cancelLabel: "Cancelar" })) await doAction("container.kill", c, "Morto");
+    if (await ask(P.docker.killAsk(c.name), { title: P.docker.killTitle, kind: "danger", okLabel: P.docker.kill, cancelLabel: P.docker.cancel })) await doAction("container.kill", c, P.docker.done.killed);
   };
 
   const bulk = async (group: string, items: DockerContainer[], kind: "up" | "stop" | "rm") => {
-    const label = group || "sem projeto";
+    const label = group || P.docker.noProjectLower;
     let todo = items;
     if (kind === "up") todo = items.filter((c) => !isRunning(c));
     if (kind === "stop") todo = items.filter(isRunning);
-    if (!todo.length) return say(kind === "up" ? `"${label}" já está a correr.` : `"${label}" não tem nada a correr.`);
-    if (kind === "stop" && !(await ask(`Parar ${todo.length} contentor(es) de "${label}"?\n${todo.map((c) => c.name).join("\n")}`, { title: "Parar grupo", kind: "warning", okLabel: "Parar", cancelLabel: "Cancelar" }))) return;
-    if (kind === "rm" && !(await ask(`Apagar ${todo.length} contentor(es) de "${label}", mesmo os que estão a correr?\n${todo.map((c) => c.name).join("\n")}\n\nOs ficheiros que só existem dentro deles perdem-se. Os volumes ficam.`, { title: "Apagar grupo", kind: "danger", okLabel: "Apagar", cancelLabel: "Cancelar" }))) return;
+    if (!todo.length) return say(kind === "up" ? P.docker.alreadyRunning(label) : P.docker.nothingRunning(label));
+    if (kind === "stop" && !(await ask(P.docker.stopGroupAsk(todo.length, label, todo.map((c) => c.name).join("\n")), { title: P.docker.stopGroupTitle, kind: "warning", okLabel: P.docker.stop, cancelLabel: P.docker.cancel }))) return;
+    if (kind === "rm" && !(await ask(P.docker.deleteGroupAsk(todo.length, label, todo.map((c) => c.name).join("\n")), { title: P.docker.deleteGroupTitle, kind: "danger", okLabel: P.docker.delete, cancelLabel: P.docker.cancel }))) return;
     const action: DockerAction = kind === "up" ? "container.start" : kind === "stop" ? "container.stop" : "container.remove";
-    await act(`${kind === "up" ? "Iniciados" : kind === "stop" ? "Parados" : "Apagados"} ${todo.length} em "${label}"`, async () => {
+    await act(P.docker.groupDone(kind, todo.length, label), async () => {
       const failed: string[] = [];
       for (const c of todo) {
         try {
@@ -155,20 +156,20 @@ export function DockerView() {
   const composeDo = async (kind: "up" | "down") => {
     const wt = selectedWorktree();
     if (!wt) return;
-    if (kind === "down" && !(await ask(`Parar e remover os contentores e redes do compose deste worktree (${compose()?.project})? Os volumes ficam.`, { title: "Compose down", kind: "warning", okLabel: "Parar e remover", cancelLabel: "Cancelar" }))) return;
-    await act(kind === "up" ? "Compose iniciado" : "Compose parado", () => dockerAction(kind === "up" ? "compose.up" : "compose.down", { worktree: wt }));
+    if (kind === "down" && !(await ask(P.docker.composeDownAsk(compose()?.project), { title: P.docker.composeDownTitle, kind: "warning", okLabel: P.docker.composeDownOk, cancelLabel: P.docker.cancel }))) return;
+    await act(kind === "up" ? P.docker.composeUp : P.docker.composeDown, () => dockerAction(kind === "up" ? "compose.up" : "compose.down", { worktree: wt }));
   };
 
   const prune = (kind: "containers" | "images" | "volumes") => {
     const n = kind === "containers" ? containers().filter((c) => !isRunning(c)).length : kind === "images" ? images().filter((i) => i.dangling).length : volumes().filter((v) => !v.used_by.length).length;
     const text = {
-      containers: `Remover todos os contentores parados${nav() === "containers" ? ` (${n} agora)` : ""}? Os ficheiros que só existem dentro deles perdem-se. Os volumes ficam.`,
-      images: "Remover as imagens sem nome nem etiqueta (dangling), que nenhum contentor usa? Imagens com nome ficam.",
-      volumes: "Remover os volumes anónimos que nenhum contentor usa? Os dados guardados neles perdem-se. Volumes com nome ficam.",
+      containers: P.docker.pruneAsk.containers(nav() === "containers" ? n : null),
+      images: P.docker.pruneAsk.images,
+      volumes: P.docker.pruneAsk.volumes,
     }[kind];
-    return ask(text, { title: "Limpar", kind: "danger", okLabel: "Limpar", cancelLabel: "Cancelar" }).then((ok) => {
+    return ask(text, { title: P.docker.pruneTitle, kind: "danger", okLabel: P.docker.pruneTitle, cancelLabel: P.docker.cancel }).then((ok) => {
       if (!ok) return;
-      void act("Limpeza feita.", async () => {
+      void act(P.docker.pruneDone, async () => {
         const out = await dockerAction(`prune.${kind}` as DockerAction);
         const last = out.split("\n").filter(Boolean).pop();
         if (last) say(last);
@@ -179,16 +180,16 @@ export function DockerView() {
   const pruneMenu = (e: MouseEvent) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     showMenuAt(r.left, r.top - 100, [
-      { label: "Remover contentores parados…", icon: "trash", run: () => prune("containers") },
-      { label: "Remover imagens sem nome…", icon: "trash", run: () => prune("images") },
-      { label: "Remover volumes anónimos sem uso…", icon: "trash", run: () => prune("volumes") },
+      { label: P.docker.pruneMenu.containers, icon: "trash", run: () => prune("containers") },
+      { label: P.docker.pruneMenu.images, icon: "trash", run: () => prune("images") },
+      { label: P.docker.pruneMenu.volumes, icon: "trash", run: () => prune("volumes") },
     ]);
   };
 
   // ---- terminal tabs of the worktree ----
   const openAsTab = async (kind: "logs" | "shell", c: DockerContainer) => {
     const wt = selectedWorktree();
-    if (!wt) return say("Escolhe um worktree para abrir o separador.", true);
+    if (!wt) return say(P.docker.pickWorktreeTab, true);
     try {
       const project = findWorktree(wt)?.project.id;
       const id = await (kind === "logs" ? dockerOpenLogs(wt, c.name, project) : dockerOpenShell(wt, c.name, project));
@@ -209,21 +210,21 @@ export function DockerView() {
   const menuFor = (c: DockerContainer): MenuItem[] => [
     ...(isRunning(c)
       ? [
-          { label: "Parar", icon: "stop", run: () => doAction("container.stop", c, "Parado") },
-          { label: "Reiniciar", icon: "refresh", run: () => doAction("container.restart", c, "Reiniciado") },
-          { label: "Pausar", icon: "pause", run: () => doAction("container.pause", c, "Em pausa") },
+          { label: P.docker.menu.stop, icon: "stop", run: () => doAction("container.stop", c, P.docker.done.stopped) },
+          { label: P.docker.menu.restart, icon: "refresh", run: () => doAction("container.restart", c, P.docker.done.restarted) },
+          { label: P.docker.menu.pause, icon: "pause", run: () => doAction("container.pause", c, P.docker.done.paused) },
         ]
-      : [{ label: c.state === "paused" ? "Retomar" : "Iniciar", icon: "play", run: () => (c.state === "paused" ? doAction("container.unpause", c, "Retomado") : doAction("container.start", c, "Iniciado")) }]),
+      : [{ label: c.state === "paused" ? P.docker.menu.resume : P.docker.menu.start, icon: "play", run: () => (c.state === "paused" ? doAction("container.unpause", c, P.docker.done.resumed) : doAction("container.start", c, P.docker.done.started)) }]),
     { separator: true },
-    { label: "Logs", icon: "logs", run: () => showPane(c, "logs") },
-    { label: "Shell", icon: "terminal", disabled: !isRunning(c), run: () => showPane(c, "terminal") },
-    { label: "Abrir logs num separador", icon: "external", run: () => openAsTab("logs", c) },
-    { label: "Abrir shell num separador", icon: "external", disabled: !isRunning(c), run: () => openAsTab("shell", c) },
+    { label: P.docker.menu.logs, icon: "logs", run: () => showPane(c, "logs") },
+    { label: P.docker.menu.shell, icon: "terminal", disabled: !isRunning(c), run: () => showPane(c, "terminal") },
+    { label: P.docker.menu.logsTab, icon: "external", run: () => openAsTab("logs", c) },
+    { label: P.docker.menu.shellTab, icon: "external", disabled: !isRunning(c), run: () => openAsTab("shell", c) },
     { separator: true },
-    { label: "Matar…", icon: "x", danger: true, disabled: !isRunning(c), run: () => confirmKill(c) },
-    { label: "Remover…", icon: "trash", danger: true, run: () => confirmRemove(c, "plain") },
-    { label: "Remover com volumes anónimos…", icon: "trash", danger: true, run: () => confirmRemove(c, "volumes") },
-    { label: "Remover à força…", icon: "trash", danger: true, run: () => confirmRemove(c, "force") },
+    { label: P.docker.menu.kill, icon: "x", danger: true, disabled: !isRunning(c), run: () => confirmKill(c) },
+    { label: P.docker.menu.remove, icon: "trash", danger: true, run: () => confirmRemove(c, "plain") },
+    { label: P.docker.menu.removeVolumes, icon: "trash", danger: true, run: () => confirmRemove(c, "volumes") },
+    { label: P.docker.menu.removeForce, icon: "trash", danger: true, run: () => confirmRemove(c, "force") },
   ];
 
   // ---- keyboard ----
@@ -272,8 +273,8 @@ export function DockerView() {
   };
 
   return (
-    <div class="dk" role="region" aria-label="Docker" onKeyDown={onRootKey}>
-      <nav class="dk-nav" aria-label="Docker">
+    <div class="dk" role="region" aria-label={P.docker.region} onKeyDown={onRootKey}>
+      <nav class="dk-nav" aria-label={P.docker.region}>
         <For each={NAV}>
           {([id, label]) => (
             <Button variant="ghost" class={cn("dk-nav-item h-auto justify-between px-2.5 py-1.5 font-normal text-muted-foreground", nav() === id && "on bg-secondary text-foreground")} aria-current={nav() === id ? "page" : undefined} onClick={() => { setNav(id); setQ(""); }}>
@@ -285,13 +286,13 @@ export function DockerView() {
         <span class="grow" />
         <Show when={status()?.running}>
           <Button variant="ghost" class="dk-nav-item h-auto justify-between px-2.5 py-1.5 font-normal text-muted-foreground" onClick={pruneMenu} aria-haspopup="menu">
-            <span>Limpar…</span>
+            <span>{P.docker.prune}</span>
           </Button>
           <div class="auto-note dk-ver">Docker {status()?.version}</div>
         </Show>
       </nav>
 
-      <section class="dk-main" aria-label="Lista">
+      <section class="dk-main" aria-label={P.docker.list}>
         <Show
           when={status()?.running}
           fallback={<Unavailable status={status()} err={loadErr()} loaded={loaded()} retry={retry} />}
@@ -301,14 +302,14 @@ export function DockerView() {
               ref={search}
               class="dk-search min-w-0 flex-1"
               type="search"
-              placeholder="Pesquisar (/)"
-              aria-label="Pesquisar"
+              placeholder={P.docker.searchPlaceholder}
+              aria-label={P.docker.search}
               value={q()}
               onInput={(e) => setQ(e.currentTarget.value)}
             />
             <Show when={nav() === "containers"}>
-              <div class="seg dk-seg" role="group" aria-label="Filtrar por estado">
-                <For each={[["all", "Todos"], ["running", "A correr"], ["stopped", "Parados"]] as [Filter, string][]}>
+              <div class="seg dk-seg" role="group" aria-label={P.docker.filterBy}>
+                <For each={(["all", "running", "stopped"] as Filter[]).map((f) => [f, P.docker.filters[f]] as [Filter, string])}>
                   {([f, label]) => (
                     <Button size="sm" class={cn(filter() === f && "on border-primary bg-popover ring-1 ring-primary")} aria-pressed={filter() === f} onClick={() => setFilter(f)}>
                       {label}
@@ -317,7 +318,7 @@ export function DockerView() {
                 </For>
               </div>
             </Show>
-            <Button variant="icon" size="icon" aria-label="Atualizar" title="Atualizar" onClick={retry}>
+            <Button variant="icon" size="icon" aria-label={P.docker.refresh} title={P.docker.refresh} onClick={retry}>
               <Icon name="refresh" size={14} />
             </Button>
           </div>
@@ -328,8 +329,8 @@ export function DockerView() {
           <div class="dk-body">
             <Show when={nav() === "containers"}>
               <ComposeBar compose={compose()} wt={selectedWorktree()} busy={busy()} run={composeDo} />
-              <Show when={shown().length} fallback={<Empty text={containers().length ? "Nenhum contentor corresponde à pesquisa ou ao filtro." : "Ainda não há contentores. Crie um com docker run ou docker compose up e aparece aqui."} />}>
-                <div class="dk-list" role="listbox" aria-label="Contentores" tabindex="0" onKeyDown={onListKey}>
+              <Show when={shown().length} fallback={<Empty text={containers().length ? P.docker.empty.noMatch : P.docker.empty.none} />}>
+                <div class="dk-list" role="listbox" aria-label={P.docker.nav.containers} tabindex="0" onKeyDown={onListKey}>
                   <For each={groupNames()}>
                     {(g) => {
                       const items = createMemo(() => itemsOf(g));
@@ -341,13 +342,13 @@ export function DockerView() {
                           <div class="dk-ghead">
                             <Button variant="ghost" class="dk-gtoggle h-auto px-0 py-0.5 font-normal hover:bg-transparent" aria-expanded={!collapsed()} onClick={toggle}>
                               <span class="dk-chev" classList={{ shut: collapsed() }}><Icon name="chevDown" size={12} /></span>
-                              <strong>{g || "Sem projeto"}</strong>
-                              <span class="auto-note">{running()}/{items().length} a correr</span>
+                              <strong>{g || P.docker.noProject}</strong>
+                              <span class="auto-note">{P.docker.runningOf(running(), items().length)}</span>
                             </Button>
                             <span class="grow" />
-                            <Button variant="ghost" size="sm" class="dk-gbtn text-muted-foreground" disabled={busy()} onClick={() => bulk(g, items(), "up")}>Iniciar</Button>
-                            <Button variant="ghost" size="sm" class="dk-gbtn text-muted-foreground" disabled={busy()} onClick={() => bulk(g, items(), "stop")}>Parar</Button>
-                            <Button variant="ghost" size="sm" class="dk-gbtn danger text-muted-foreground hover:text-destructive" disabled={busy()} onClick={() => bulk(g, items(), "rm")}>Apagar</Button>
+                            <Button variant="ghost" size="sm" class="dk-gbtn text-muted-foreground" disabled={busy()} onClick={() => bulk(g, items(), "up")}>{P.docker.start}</Button>
+                            <Button variant="ghost" size="sm" class="dk-gbtn text-muted-foreground" disabled={busy()} onClick={() => bulk(g, items(), "stop")}>{P.docker.stop}</Button>
+                            <Button variant="ghost" size="sm" class="dk-gbtn danger text-muted-foreground hover:text-destructive" disabled={busy()} onClick={() => bulk(g, items(), "rm")}>{P.docker.delete}</Button>
                           </div>
                           <Show when={!collapsed()}>
                             <For each={items()}>
@@ -360,9 +361,9 @@ export function DockerView() {
                                   busy={busy()}
                                   onPick={() => showPane(c, detailTab())}
                                   onMenu={(e) => { setCurId(c.id); showMenu(e, menuFor(c)); }}
-                                  onStart={() => doAction("container.start", c, "Iniciado")}
-                                  onStop={() => doAction("container.stop", c, "Parado")}
-                                  onRestart={() => doAction("container.restart", c, "Reiniciado")}
+                                  onStart={() => doAction("container.start", c, P.docker.done.started)}
+                                  onStop={() => doAction("container.stop", c, P.docker.done.stopped)}
+                                  onRestart={() => doAction("container.restart", c, P.docker.done.restarted)}
                                   onLogs={() => showPane(c, "logs")}
                                   onShell={() => showPane(c, "terminal")}
                                   onRemove={() => confirmRemove(c, "plain")}
@@ -380,14 +381,14 @@ export function DockerView() {
 
             <Show when={nav() === "volumes"}>
               <VolumesList list={volumes()} q={q()} busy={busy()} onRemove={async (v) => {
-                if (await ask(`Remover o volume "${v.name}"? Os dados guardados nele perdem-se.`, { title: "Remover volume", kind: "danger", okLabel: "Remover", cancelLabel: "Cancelar" }))
-                  await act(`Volume removido: ${v.name}`, () => dockerAction("volume.remove", { id: v.name }));
+                if (await ask(P.docker.removeVolumeAsk(v.name), { title: P.docker.removeVolumeTitle, kind: "danger", okLabel: P.docker.remove, cancelLabel: P.docker.cancel }))
+                  await act(P.docker.volumeRemoved(v.name), () => dockerAction("volume.remove", { id: v.name }));
               }} />
             </Show>
             <Show when={nav() === "images"}>
               <ImagesList list={images()} containers={containers()} q={q()} busy={busy()} onRemove={async (i) => {
-                if (await ask(`Remover a imagem ${i.tags[0] ?? i.id}? Pode ser descarregada ou construída de novo.`, { title: "Remover imagem", kind: "danger", okLabel: "Remover", cancelLabel: "Cancelar" }))
-                  await act(`Imagem removida: ${i.tags[0] ?? i.id}`, () => dockerAction("image.remove", { id: i.id }));
+                if (await ask(P.docker.removeImageAsk(i.tags[0] ?? i.id), { title: P.docker.removeImageTitle, kind: "danger", okLabel: P.docker.remove, cancelLabel: P.docker.cancel }))
+                  await act(P.docker.imageRemoved(i.tags[0] ?? i.id), () => dockerAction("image.remove", { id: i.id }));
               }} />
             </Show>
             <Show when={nav() === "networks"}>
