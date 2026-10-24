@@ -4,8 +4,21 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # the release workflow runs the whole of CI before it builds anything
+  workflow_call:
 permissions: { contents: read }
 jobs:
+  # the three version fields (Cargo.toml workspace, package.json, tauri.conf.json) must agree, and the
+  # stamp script that the release relies on must pass its own tests
+  versions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with: { node-version: 22 }
+      - run: node scripts/stamp-version.mjs --self-test
+      - run: node scripts/stamp-version.mjs --check
   test:
     strategy:
       fail-fast: false

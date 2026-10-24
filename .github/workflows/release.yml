@@ -18,8 +18,64 @@ on:
         default: true
 permissions: { contents: write }
 jobs:
+  # a tag only releases what is on main: refuse a tag whose commit is not an ancestor of origin/main
+  gate:
+    name: tag is on main
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with: { fetch-depth: 0 }
+      - name: Tag commit is an ancestor of origin/main
+        if: github.ref_type == 'tag'
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tag $GITHUB_REF_NAME ($GITHUB_SHA) is not an ancestor of origin/main"
+            exit 1
+          fi
+  # the full CI (fmt, clippy, audit, host, frontend, version fields) must be green for this commit
+  ci:
+    needs: gate
+    uses: ./.github/workflows/ci.yml
+  # one job creates the draft release, so the matrix jobs only ever upload into it
+  draft:
+    name: draft release
+    needs: [gate, ci]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with: { fetch-depth: 0 }
+      - name: Changelog
+        run: |
+          # the commit subjects since the previous release tag
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          {
+            echo "## What's changed"
+            echo
+            if [[ -n "$PREV" ]]; then git log --no-merges --pretty='- %s' "$PREV..HEAD"; else git log --no-merges -n 20 --pretty='- %s'; fi
+            if [[ -n "$PREV" ]]; then echo; echo "**Full changelog**: https://github.com/${{ github.repository }}/compare/$PREV...${GITHUB_REF_NAME}"; fi
+          } > notes.md
+          cat notes.md
+      - name: Create the draft
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          # a re-run reuses its own draft; an already published release is an error
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            [[ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" == "true" ]] || { echo "::error::$GITHUB_REF_NAME is already published"; exit 1; }
+            gh release edit "$GITHUB_REF_NAME" --title "Axelstra $V" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Axelstra $V" --notes-file notes.md
+          fi
   release:
     name: release (${{ matrix.os }})
+    needs: [gate, ci, draft]
+    # draft is skipped on a dry run, which is fine
+    if: ${{ !cancelled() && needs.gate.result == 'success' && needs.ci.result == 'success' && (needs.draft.result == 'success' || needs.draft.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +91,10 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with: { node-version: 22 }
+      - name: Stamp the version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then node scripts/stamp-version.mjs --tag "$GITHUB_REF_NAME"; else node scripts/stamp-version.mjs --check; fi
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo test --no-fail-fast -p axelstra-core -p axelstra-daemon -p axelstra
@@ -52,18 +112,6 @@ jobs:
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0"; fi
           if [[ "$GITHUB_REF_TYPE" == "tag" && ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "bad tag $GITHUB_REF_NAME"; exit 1; fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
-      - name: Changelog
-        shell: bash
-        run: |
-          # the commit subjects since the previous release tag
-          PREV=$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME:-HEAD}^" 2>/dev/null || true)
-          {
-            echo "## What's changed"
-            echo
-            if [[ -n "$PREV" ]]; then git log --no-merges --pretty='- %s' "$PREV..HEAD"; else git log --no-merges -n 20 --pretty='- %s'; fi
-            if [[ -n "$PREV" ]]; then echo; echo "**Full changelog**: https://github.com/${{ github.repository }}/compare/$PREV...${GITHUB_REF_NAME:-HEAD}"; fi
-          } > "$RUNNER_TEMP/notes.md"
-          cat "$RUNNER_TEMP/notes.md"
       - name: Daemon sidecar (Windows)
         if: runner.os == 'Windows'
         run: powershell -NoProfile -File scripts/prepare-sidecar.ps1
@@ -126,9 +174,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          V="${{ steps.v.outputs.version }}"
-          # both matrix jobs get here: whoever is first creates the release, the other uploads into it
-          gh release create "$GITHUB_REF_NAME" --title "Axelstra $V" --notes-file "$RUNNER_TEMP/notes.md" 2>/dev/null || true
+          # the draft job created the release; errors here are real
           gh release upload "$GITHUB_REF_NAME" out/* --clobber
       - name: Keep the dry-run installer on the run
         if: env.DRY_RUN == 'true'
@@ -144,7 +190,8 @@ jobs:
   linux:
     name: release (linux, experimental)
     # after the main jobs, which create the release and write its notes
-    needs: release
+    needs: [release, draft]
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 60
@@ -155,6 +202,10 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with: { node-version: 22 }
+      - name: Stamp the version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then node scripts/stamp-version.mjs --tag "$GITHUB_REF_NAME"; else node scripts/stamp-version.mjs --check; fi
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Desktop toolkit
@@ -201,19 +252,21 @@ jobs:
           path: out/
           retention-days: 7
 
-  # latest.json goes last: clients only see a version once every installer is already there
+  # latest.json goes last: clients only see a version once every installer is already there.
+  # On a dry run it merges the fragments kept on the run, so the merge is tested without a release.
   manifest:
     name: latest.json
     needs: release
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with: { node-version: 22 }
       - name: Merge the platform entries
+        if: env.DRY_RUN != 'true'
         run: |
           V="${GITHUB_REF_NAME#v}"
           mkdir frag
@@ -223,3 +276,38 @@ jobs:
           cat latest.json
           gh release upload "$GITHUB_REF_NAME" latest.json --clobber
           for f in frag/platform-*.json; do gh release delete-asset "$GITHUB_REF_NAME" "$(basename "$f")" --yes; done
+      - name: Fetch the dry-run fragments
+        if: env.DRY_RUN == 'true'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: axelstra-dry-run-*
+          path: dry
+          merge-multiple: true
+      - name: Merge the platform entries (dry run)
+        if: env.DRY_RUN == 'true'
+        run: |
+          mkdir frag
+          cp dry/platform-*.json frag/
+          echo "dry run" > notes.md
+          node scripts/write-latest-json.mjs --version 0.0.0 --notes-file notes.md --out latest.json frag/platform-*.json
+          cat latest.json
+      - name: Keep the dry-run manifest on the run
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: axelstra-dry-run-manifest
+          path: latest.json
+          retention-days: 7
+
+  # the release stays a draft until every installer and latest.json are on it
+  publish:
+    name: publish release
+    needs: [manifest, linux]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: gh release edit "$GITHUB_REF_NAME" --draft=false
