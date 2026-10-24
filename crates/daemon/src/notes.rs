@@ -50,7 +50,14 @@ pub const LEAD_NAME: &str = "main";
 /// project's main checkout, if any. A lead is the agent the client says is one (a restored lead), or the first fresh
 /// agent of a worktree that has none (a task started with `worker` never is). A restored agent that was named
 /// ("Tarefa 3") is never promoted: sessions saved before leads existed come back as they were.
-pub fn pick_role(meta: &Value, label: Option<&str>, worker: bool, agents: &[(u32, bool)], project_main: Option<u32>, parent: Option<u32>) -> (bool, Option<u32>) {
+pub fn pick_role(
+    meta: &Value,
+    label: Option<&str>,
+    worker: bool,
+    agents: &[(u32, bool)],
+    project_main: Option<u32>,
+    parent: Option<u32>,
+) -> (bool, Option<u32>) {
     if meta["kind"] != "agent" || meta["main"] == true {
         return (false, parent);
     }
@@ -378,8 +385,10 @@ mod tests {
         assert_eq!(on_spawn(&root, None, &mut b, None, false).as_deref(), Some("main"));
         let (fa, fb) = (a.unwrap()["note"].as_str().unwrap().to_string(), b.unwrap()["note"].as_str().unwrap().to_string());
         assert!(fa.ends_with("main - wt-a.md") && fb.ends_with("main - wt-b.md"), "{fa} {fb}");
-        assert!(std::fs::read_to_string(&fa).unwrap().starts_with("# main
-"));
+        assert!(std::fs::read_to_string(&fa).unwrap().starts_with(
+            "# main
+"
+        ));
         // the first task is still Tarefa 1
         let mut t = agent_meta("p-lead");
         assert_eq!(on_spawn(&root, Some("claude"), &mut t, None, false).as_deref(), Some("Tarefa 1"));

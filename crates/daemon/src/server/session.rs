@@ -32,13 +32,18 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 if p["reap"]["lead"].as_bool() == Some(true) && m.is_object() {
                     m["lead"] = json!(true);
                 }
-                let (project, wt) = (m["project"].as_str().unwrap_or_default().to_string(), axelstra_core::paths::norm(m["worktree"].as_str().unwrap_or_default()));
+                let (project, wt) = (
+                    m["project"].as_str().unwrap_or_default().to_string(),
+                    axelstra_core::paths::norm(m["worktree"].as_str().unwrap_or_default()),
+                );
                 let sessions = reg.sessions.lock_recover();
                 let metas = reg.metas.lock_recover();
                 let live = |id: &u32| sessions.get(id).is_some_and(|s| s.try_wait().is_none());
                 let mut here = Vec::new();
                 let mut project_main = None;
-                for (id, o) in metas.iter().filter(|(id, o)| o["kind"] == "agent" && o["project"].as_str() == Some(project.as_str()) && live(id)) {
+                for (id, o) in
+                    metas.iter().filter(|(id, o)| o["kind"] == "agent" && o["project"].as_str() == Some(project.as_str()) && live(id))
+                {
                     if o["main"] == true {
                         project_main = project_main.or(Some(*id));
                     } else if axelstra_core::paths::norm(o["worktree"].as_str().unwrap_or_default()) == wt {
@@ -53,7 +58,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             }
             parent = parent_default;
             // a dispatched lead is ephemeral like a worker but owns its worktree: it does not count against the worker limit
-            let is_worker = !lead && ((p["reap"].is_object() && p["reap"]["lead"].as_bool() != Some(true)) || p["worker"].as_bool() == Some(true));
+            let is_worker =
+                !lead && ((p["reap"].is_object() && p["reap"]["lead"].as_bool() != Some(true)) || p["worker"].as_bool() == Some(true));
             if is_worker {
                 let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
                 let (live, max) = (reg.bus.live_workers(alive), reg.bus.limit());
