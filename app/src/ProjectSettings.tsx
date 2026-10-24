@@ -1,6 +1,7 @@
 import { For, Show, createResource, createSignal } from "solid-js";
 import { projectEnvPreview, setProjectSetup } from "./api";
 import { Modal } from "./Modal";
+import { TriggerSettings } from "./TriggerSettings";
 import { projects, refreshProjects, setError } from "./store";
 import { Button, Field, Textarea } from "./ui";
 import { P } from "./strings.panels";
@@ -54,6 +55,8 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
       <div class="auto-note">
         {P.projectSettings.setupNote}
       </div>
+
+      <TriggerSettings projectId={props.projectId} />
 
       <div class="text-xs text-muted-foreground">{P.projectSettings.copied}</div>
       <div class="auto-note">
