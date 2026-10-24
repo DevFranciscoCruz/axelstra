@@ -223,12 +223,28 @@ fn is_link(md: &std::fs::Metadata) -> bool {
     md.file_type().is_symlink()
 }
 
+/// Removes the link itself, never what it points to. On Windows a link to a folder (symlink or junction) is a
+/// directory entry and goes with `remove_dir`; `remove_file` fails on it.
+fn unlink(p: &Path, md: &std::fs::Metadata) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+        if md.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0 {
+            return std::fs::remove_dir(p);
+        }
+    }
+    let _ = md;
+    std::fs::remove_file(p)
+}
+
 /// Resolves a mutation target: normalized, no symlink/reparse directory on the way, and the real parent
-/// directory is not inside `.git`. The last component itself may be a link (it is replaced or unlinked, never followed).
+/// directory is not inside `.git`. Only the parent is resolved: the last component itself may be a link, even one
+/// that points outside the worktree (it is replaced or unlinked, never followed), so it can still be deleted or renamed.
 fn mutable(wt: &Path, rel: &str) -> Result<PathBuf> {
     let n = norm_rel(rel)?;
-    let full = resolve(wt, &n)?;
     let root = axelstra_core::git::canon(wt)?;
+    let full = root.join(&n);
     let parts: Vec<&str> = n.split('/').collect();
     let mut cur = root.clone();
     for part in &parts[..parts.len() - 1] {
@@ -240,11 +256,12 @@ fn mutable(wt: &Path, rel: &str) -> Result<PathBuf> {
         }
     }
     let parent = full.parent().context("no parent")?;
-    if let Ok(real) = axelstra_core::git::canon(parent) {
-        let inner = real.strip_prefix(&root).context("path escapes the worktree")?.to_string_lossy().into_owned();
-        if !inner.is_empty() {
-            not_git(&inner)?;
-        }
+    // a parent that does not exist yet (`create` makes it) is checked from its nearest existing ancestor
+    let probe = parent.ancestors().find(|a| a.exists()).unwrap_or(&root);
+    let real = axelstra_core::git::canon(probe)?;
+    let inner = real.strip_prefix(&root).context("path escapes the worktree")?.to_string_lossy().into_owned();
+    if !inner.is_empty() {
+        not_git(&inner)?;
     }
     Ok(full)
 }
@@ -252,7 +269,8 @@ fn mutable(wt: &Path, rel: &str) -> Result<PathBuf> {
 /// New empty file or folder; refuses to overwrite.
 pub fn create(wt: &Path, rel: &str, dir: bool) -> Result<()> {
     let p = mutable(wt, rel)?;
-    if p.exists() {
+    // a dangling link is "there" too: creating through it would write wherever it points
+    if std::fs::symlink_metadata(&p).is_ok() {
         bail!("already exists");
     }
     if dir {
@@ -283,7 +301,9 @@ pub fn rename(wt: &Path, from: &str, to: &str) -> Result<()> {
 pub fn delete(wt: &Path, rel: &str) -> Result<()> {
     let p = mutable(wt, rel)?;
     let md = std::fs::symlink_metadata(&p).context("not found")?;
-    if md.is_dir() && !is_link(&md) {
+    if is_link(&md) {
+        unlink(&p, &md)?;
+    } else if md.is_dir() {
         std::fs::remove_dir_all(&p)?;
     } else {
         std::fs::remove_file(&p)?;
@@ -482,7 +502,11 @@ mod tests {
         write(&d, "f.txt", "b", "lf", false, None).unwrap();
         assert_eq!(std::fs::read_to_string(d.join("f.txt")).unwrap(), "b");
         assert_eq!(std::fs::read_to_string(d.join("f.txt.axl-tmp")).unwrap(), "planted");
-        let left = std::fs::read_dir(&d).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with('.') && e.file_name().to_string_lossy().ends_with(".axl-tmp")).count();
+        let left = std::fs::read_dir(&d)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with('.') && e.file_name().to_string_lossy().ends_with(".axl-tmp"))
+            .count();
         assert_eq!(left, 0);
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -548,6 +572,58 @@ mod tests {
         // a link into .git is not a way around the check
         std::os::unix::fs::symlink(".git", d.join("g")).unwrap();
         assert!(write(&d, "g/config", "x", "lf", false, None).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A link to a folder that lives outside `wt`; a junction on Windows (no privilege needed), else a symlink.
+    fn outside_link(wt: &Path, name: &str) -> Option<PathBuf> {
+        let out = std::env::temp_dir().join(format!("axl-fsops-out-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(out.join("precious.txt"), "keep").unwrap();
+        let link = wt.join("lnk");
+        #[cfg(windows)]
+        let made =
+            std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&link).arg(&out).output().is_ok_and(|o| o.status.success());
+        #[cfg(not(windows))]
+        let made = dir_link(&out, &link).is_some();
+        made.then_some(out)
+    }
+
+    #[test]
+    fn a_link_pointing_outside_can_be_deleted_and_renamed_without_touching_its_target() {
+        let d = tmpdir("outlink");
+        let Some(out) = outside_link(&d, "del") else {
+            eprintln!("skipped: cannot create links here");
+            let _ = std::fs::remove_dir_all(&d);
+            return;
+        };
+        rename(&d, "lnk", "moved").unwrap();
+        assert!(std::fs::symlink_metadata(d.join("moved")).is_ok() && std::fs::symlink_metadata(d.join("lnk")).is_err());
+        // reading or writing through it stays refused
+        assert!(read(&d, "moved/precious.txt").is_err());
+        assert!(write(&d, "moved/precious.txt", "x", "lf", false, None).is_err());
+        assert!(create(&d, "moved/new.txt", false).is_err());
+        delete(&d, "moved").unwrap();
+        assert!(std::fs::symlink_metadata(d.join("moved")).is_err());
+        assert_eq!(std::fs::read_to_string(out.join("precious.txt")).unwrap(), "keep");
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn create_refuses_a_dangling_link_instead_of_writing_through_it() {
+        let d = tmpdir("dangling");
+        let ghost = std::env::temp_dir().join(format!("axl-fsops-ghost-{}", std::process::id()));
+        let _ = std::fs::remove_file(&ghost);
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&ghost, d.join("l")).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&ghost, d.join("l")).is_ok();
+        if made {
+            assert!(create(&d, "l", false).is_err());
+            assert!(!ghost.exists());
+        }
         let _ = std::fs::remove_dir_all(&d);
     }
 }

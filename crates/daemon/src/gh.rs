@@ -1,7 +1,6 @@
 //! Pull requests and issues of a project through the GitHub CLI. Read-only; nothing here writes to GitHub.
 
 use anyhow::{bail, Context, Result};
-use axelstra_core::git;
 use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
@@ -80,16 +79,17 @@ pub fn list(repo: &Path, kind: &str) -> Result<Vec<Item>> {
         "issue" => ("issue", "number,title,author,url,state"),
         _ => bail!("unknown kind {kind}"),
     };
-    let o = git::quiet(&mut Command::new("gh"))
-        .current_dir(repo)
-        .env("GH_PROMPT_DISABLED", "1")
-        .args([sub, "list", "--state", "open", "--limit", "40", "--json", fields])
-        .output()
+    let mut cmd = Command::new("gh");
+    cmd.current_dir(repo).env("GH_PROMPT_DISABLED", "1").args([sub, "list", "--state", "open", "--limit", "40", "--json", fields]);
+    let o = axelstra_core::exec::run_capped(&mut cmd, std::time::Duration::from_secs(30), 4 << 20)
         .context("could not start gh. Install the GitHub CLI and run `gh auth login`.")?;
-    if !o.status.success() {
-        bail!("gh {sub} list failed: {}", String::from_utf8_lossy(&o.stderr).trim());
+    if o.timed_out {
+        bail!("gh {sub} list took longer than 30s");
     }
-    parse(&String::from_utf8_lossy(&o.stdout))
+    if !o.success() {
+        bail!("gh {sub} list failed: {}", o.stderr_lossy().trim());
+    }
+    parse(&o.stdout_lossy())
 }
 
 #[cfg(test)]

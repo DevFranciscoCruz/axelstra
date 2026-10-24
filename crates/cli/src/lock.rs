@@ -54,7 +54,22 @@ pub fn run(name: &str, slots: usize, timeout: u64, command: &[String]) -> Result
         bail!("no command given");
     }
     let (_held, _slot) = acquire(name, clamp_slots(slots), Duration::from_secs(timeout))?;
-    let status = Command::new(&command[0]).args(&command[1..]).status()?;
+    let mut cmd = Command::new(&command[0]);
+    cmd.args(&command[1..]);
+    // If this process dies (killed, its terminal closed), the OS releases the slot at once; the command must not keep
+    // running unserialized behind it. On Windows it lives in a kill-on-close Job Object, so it dies with us. On Unix
+    // it stays in our process group, which a terminal's Ctrl-C and hang-up reach together with this process.
+    #[cfg(windows)]
+    let (job, mut child) = {
+        let job = axelstra_core::job::Job::new()?;
+        let child = job.spawn(&mut cmd)?;
+        (job, child)
+    };
+    #[cfg(not(windows))]
+    let mut child = cmd.spawn()?;
+    let status = child.wait()?;
+    #[cfg(windows)]
+    job.kill();
     Ok(status.code().unwrap_or(1))
 }
 

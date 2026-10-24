@@ -5,6 +5,20 @@
 ; launch uses them. The installer's "is running" check looks for the original name, so it stays quiet.
 ; The new app reconnects to the old daemon, and replaces it only if its protocol is too old
 ; (see `connect` in app/src-tauri/src/main.rs).
+; The processes whose exe lives in $INSTDIR are found and ended by PID. `taskkill /IM` goes by image name, so it would
+; also end another user's copy or an unrelated program called the same. ($$ is a literal $ for PowerShell.)
+!macro AXELSTRA_CLOSE_WINDOWS
+  nsExec::Exec `powershell -NoProfile -NonInteractive -Command "$$d='$INSTDIR'; Get-Process | Where-Object { $$_.Path -and $$_.Path.StartsWith($$d, 'OrdinalIgnoreCase') -and $$_.ProcessName -like 'axelstra-app*' } | ForEach-Object { [void]$$_.CloseMainWindow() }"`
+!macroend
+
+!macro AXELSTRA_KILL_WINDOWS
+  nsExec::Exec `powershell -NoProfile -NonInteractive -Command "$$d='$INSTDIR'; Get-Process | Where-Object { $$_.Path -and $$_.Path.StartsWith($$d, 'OrdinalIgnoreCase') -and $$_.ProcessName -like 'axelstra-app*' } | ForEach-Object { Stop-Process -Id $$_.Id -Force }"`
+!macroend
+
+!macro AXELSTRA_KILL_ALL
+  nsExec::Exec `powershell -NoProfile -NonInteractive -Command "$$d='$INSTDIR'; Get-Process | Where-Object { $$_.Path -and $$_.Path.StartsWith($$d, 'OrdinalIgnoreCase') -and $$_.ProcessName -like 'axelstra*' } | ForEach-Object { Stop-Process -Id $$_.Id -Force }"`
+!macroend
+
 !macro AXELSTRA_MOVE_ASIDE name
   ${If} ${FileExists} "$INSTDIR\${name}.exe"
     System::Call 'kernel32::GetTickCount()i.r0'
@@ -18,11 +32,9 @@
   ; close the old window (the daemon keeps the terminals) so two windows never coexist. The window asks
   ; for confirmation before it closes, so the polite request is followed by a forced one: only the UI
   ; process dies, the daemon (axelstra.exe) and the terminals it owns are not touched.
-  nsExec::Exec 'taskkill /IM axelstra-app.exe'
-  nsExec::Exec 'taskkill /IM axelstra-app.old.*.exe'
+  !insertmacro AXELSTRA_CLOSE_WINDOWS
   Sleep 1500
-  nsExec::Exec 'taskkill /F /IM axelstra-app.exe'
-  nsExec::Exec 'taskkill /F /IM axelstra-app.old.*.exe'
+  !insertmacro AXELSTRA_KILL_WINDOWS
   Sleep 500
   ; leftovers of earlier updates; the ones still running cannot be deleted and stay
   Delete "$INSTDIR\axelstra.old.*.exe"
@@ -33,9 +45,8 @@
 
 ; Uninstalling ends every copy, the renamed ones included.
 !macro NSIS_HOOK_PREUNINSTALL
-  nsExec::Exec 'taskkill /F /IM axelstra.exe'
-  nsExec::Exec 'taskkill /F /IM axelstra.old.*.exe'
-  nsExec::Exec 'taskkill /F /IM axelstra-app.old.*.exe'
+  ; the daemon (axelstra, axelstra.old.*) and every window (axelstra-app*) of this install, by PID
+  !insertmacro AXELSTRA_KILL_ALL
   Sleep 500
   Delete "$INSTDIR\axelstra.old.*.exe"
   Delete "$INSTDIR\axelstra-app.old.*.exe"

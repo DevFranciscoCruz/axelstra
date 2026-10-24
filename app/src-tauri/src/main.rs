@@ -42,11 +42,12 @@ fn connect() -> Result<Client> {
     let token = proto::load_or_create_token()?;
     let pipe = proto::pipe_name();
     if let Ok(mut c) = Client::connect(&pipe, &token) {
-        if c.proto >= proto::PROTO {
+        if c.proto >= proto::PROTO && c.security >= proto::SECURITY_MIN {
             return Ok(c);
         }
         // A daemon from before an update keeps running (so terminals and agents survive it). One that
-        // is too old for this app is replaced; its terminals come back through session restore.
+        // is too old for this app, or older than the oldest one with the current security fixes (it reports
+        // no `security` at all before they existed), is replaced; its terminals come back through session restore.
         let _ = c.call("daemon.shutdown", json!({}));
         drop(c);
         for _ in 0..40 {
@@ -70,7 +71,8 @@ fn connect() -> Result<Client> {
 fn start_daemon() -> Result<()> {
     let name = if cfg!(windows) { "axelstra.exe" } else { "axelstra" };
     let beside = std::env::current_exe()?.with_file_name(name);
-    let exe = if beside.exists() { beside } else { "axelstra".into() };
+    // never `axelstra` from PATH in a release: whatever sits first on PATH would run as the daemon, holding the token
+    let exe = if beside.exists() || !cfg!(debug_assertions) { beside } else { "axelstra".into() };
     let mut cmd = Command::new(exe);
     cmd.arg("daemon").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     #[cfg(windows)]
@@ -120,7 +122,8 @@ fn setting(key: &str) -> Value {
     std::fs::read_to_string(proto::data_dir().join("settings.json"))
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .map(|v| v[key].clone())
+        // the file is the envelope {"v":N,"data":{..}}; a file from an older daemon is the bare object
+        .map(|v| if v["v"].is_u64() && v["data"].is_object() { v["data"][key].clone() } else { v[key].clone() })
         .unwrap_or(Value::Null)
 }
 
