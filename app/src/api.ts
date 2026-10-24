@@ -67,8 +67,10 @@ export type Settings = {
   notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice;
   /** UI choices the webview keeps (pins, folded groups, notifications...): `axelstra.*` key -> saved string */
   ui?: Record<string, string>;
+  /** token limits per day / week; absent on a daemon from before budgets */
+  budgets?: Budgets;
 };
-export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice };
+export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice; budgets?: Budgets };
 /** `terse` asks for the rules of that level (a project's own choice) instead of the saved one */
 export const getSettings = (terse?: Terse) => call<Settings>("settings.get", terse ? { terse } : {});
 /** `ui`: UI state to store (`null` removes a key), sent by uiState.ts only, so it is not part of what the Settings screen merges */
@@ -681,6 +683,22 @@ export const pickAndRestoreBackup = (title: string): Promise<{ restored: string[
     (r) => (r === null ? undefined : r),
     (e) => (isUnknownMethod(e) ? null : Promise.reject(e)),
   );
+
+/** A token limit; a missing `daily` / `weekly` means no limit. `auto_pause` stays off unless the user turns it on. */
+export type BudgetLimit = { daily?: number; weekly?: number; auto_pause?: boolean };
+/** `default` applies to every worktree without an entry of its own in `worktrees` (keyed by path). */
+export type Budgets = { default?: BudgetLimit; worktrees?: Record<string, BudgetLimit> };
+export type BudgetLevel = "ok" | "warn" | "over";
+export type BudgetRow = { worktree: string; period: "daily" | "weekly"; used: number; limit: number; pct: number; level: BudgetLevel; auto_pause: boolean };
+export type BudgetEvent = { worktree: string; period: "daily" | "weekly"; level: "warn" | "over"; used: number; limit: number; pct: number; paused: number[]; at: number };
+/** Spending against the limits for the given worktrees (one row per worktree and period that has a limit); empty on an older daemon. */
+export const budgetStatus = (worktrees: string[]) => callBg<{ budgets: BudgetRow[] }>("budget.status", { worktrees })
+  .catch((e) => (isUnknownMethod(e) ? { budgets: [] as BudgetRow[] } : Promise.reject(e)))
+  .then((r) => r.budgets ?? []);
+/** Evaluates the limits now (the daemon also does it every two minutes); the rows after the check. */
+export const budgetCheck = () => callOr<{ budgets: BudgetRow[] }>("budget.check", {}, { budgets: [] }).then((r) => r.budgets ?? []);
+/** Level crossings since the last call (take semantics); an older daemon has none. */
+export const budgetEvents = () => callOr<{ events: BudgetEvent[] }>("budget.events", {}, { events: [] }).then((r) => r.events ?? []);
 
 export type JanitorEvent = { project: string; path: string; branch: string; into: string; why: string; at: number };
 /** Worktrees the automatic sweep removed since the last call (take semantics); an older daemon has none. */
