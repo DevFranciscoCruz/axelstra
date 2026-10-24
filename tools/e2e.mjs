@@ -144,7 +144,11 @@ async function selectWorktree(page) {
     try {
       return await until("the worktree row", () => page.evaluate(click), 12000);
     } catch (e) {
-      if (attempt >= 3) throw e;
+      if (attempt >= 3) {
+        const seen = await page.evaluate("document.body.innerText.slice(0, 600)").catch((x) => String(x));
+        console.error(`sidebar at the failure: ${JSON.stringify(seen)}`);
+        throw e;
+      }
       await page.send("Page.reload");
     }
   }
@@ -169,7 +173,11 @@ try {
   const ap = cli("add-project", repo);
   if (ap.status !== 0) throw new Error(`add-project failed: ${ap.stderr || ap.stdout}`);
   const sp = cli("terminal", repo, "--title", "e2e-term", "--cmd", "echo axelstra-e2e-marker");
-  if (sp.status !== 0) throw new Error(`terminal failed: ${sp.stderr || sp.stdout}`);
+  if (sp.status !== 0) {
+    const seen = cli("projects");
+    throw new Error(`terminal failed: ${sp.stderr || sp.stdout}
+projects: ${seen.stdout || seen.stderr}`);
+  }
   console.log("ok  session: project added and terminal started through the CLI");
   // the UI learns about CLI-made changes on its next refresh; a reload is the deterministic way to get one
   await page.send("Page.reload");

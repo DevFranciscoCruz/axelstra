@@ -52,8 +52,12 @@ pub fn run_timeout(cwd: &Path, args: &[&str], limit: Duration) -> Result<Out> {
         // read-only queries must not rewrite .git/index: the watcher would see it and loop
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GCM_INTERACTIVE", "never")
-        .args(args);
+        .env("GCM_INTERACTIVE", "never");
+    // deep node_modules / target trees pass 260 characters: let git on Windows open them
+    if cfg!(windows) {
+        cmd.args(["-c", "core.longpaths=true"]);
+    }
+    cmd.args(args);
     let o = crate::exec::run_capped(&mut cmd, limit, RUN_MAX_BYTES).map_err(|e| {
         coded!("git.spawn", "could not start git {cmd}: {detail}", cmd = args.first().unwrap_or(&""), detail = format!("{e:#}"))
     })?;
@@ -210,6 +214,11 @@ pub fn worktree_remove(repo: &Path, path: &Path) -> Result<()> {
         }
         sleep(Duration::from_millis(ms));
     }
+    // "Filename too long": git cannot walk a deep tree on Windows, remove_tree can
+    if path.exists() && remove_tree(path).is_ok() {
+        must(repo, &["worktree", "prune"])?;
+        return Ok(());
+    }
     if path.exists() {
         let trash = path.with_file_name(format!(".axelstra-trash-{}", path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()));
         std::fs::rename(path, &trash)
@@ -233,8 +242,55 @@ pub fn purge_trash(dir: &Path) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         if e.file_name().to_string_lossy().starts_with(".axelstra-trash-") {
-            let _ = std::fs::remove_dir_all(e.path());
+            let _ = remove_tree(&e.path());
         }
+    }
+}
+
+/// `path` in the verbatim form (`\\?\C:\...`) on Windows, which lifts the 260-character limit that deep `node_modules`
+/// and `target` trees run into ("Filename too long"). Elsewhere, or when the path cannot be made absolute, unchanged.
+pub fn verbatim(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = path.to_string_lossy();
+        if !s.starts_with(r"\\?\") {
+            if let Ok(abs) = std::path::absolute(path) {
+                let a = abs.to_string_lossy().replace('/', r"\");
+                return PathBuf::from(match a.strip_prefix(r"\\") {
+                    Some(unc) => format!(r"\\?\UNC\{unc}"),
+                    None => format!(r"\\?\{a}"),
+                });
+            }
+        }
+    }
+    path.to_path_buf()
+}
+
+/// Deletes a folder tree however deep its paths are. Tries the verbatim path first; on Windows, if that fails, empties
+/// the tree by mirroring an empty folder over it with `robocopy /MIR` (which ignores path length) and removes the husk.
+pub fn remove_tree(path: &Path) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(verbatim(path)).is_err() {
+        return Ok(());
+    }
+    let first = std::fs::remove_dir_all(verbatim(path));
+    if first.is_ok() || !cfg!(windows) {
+        return first;
+    }
+    let empty = path.with_file_name(format!(".axelstra-empty-{}", std::process::id()));
+    std::fs::create_dir_all(&empty)?;
+    // exit codes 0-7 are some kind of success, 8 and up are failures
+    let _ = Command::new("robocopy")
+        .arg(&empty)
+        .arg(path)
+        .args(["/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NP", "/R:0", "/W:0"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    let _ = std::fs::remove_dir(&empty);
+    match std::fs::remove_dir_all(verbatim(path)) {
+        Ok(()) => Ok(()),
+        Err(_) if std::fs::symlink_metadata(verbatim(path)).is_err() => Ok(()),
+        Err(e) => Err(e),
     }
 }
 
@@ -507,5 +563,52 @@ mod failure_tests {
         assert_eq!(c.code, "git.not_repo");
         assert_eq!(c.params["cmd"], "push origin");
         assert_eq!(crate::msg::find(&failure(&["x"], "weird")).unwrap().code, "git.failed");
+    }
+}
+
+#[cfg(test)]
+mod long_path_tests {
+    use super::*;
+
+    /// A tree whose deepest path is far past 260 characters (what `node_modules` and `target` produce).
+    fn deep(root: &Path) -> PathBuf {
+        let mut d = verbatim(root);
+        for i in 0..12 {
+            d.push(format!("level-{i:02}-{}", "x".repeat(40)));
+        }
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("leaf.txt"), "x").unwrap();
+        d
+    }
+
+    #[test]
+    fn remove_tree_deletes_paths_past_the_windows_limit() {
+        let root = std::env::temp_dir().join(format!("axl-long-{}", std::process::id()));
+        let leaf = deep(&root);
+        assert!(leaf.to_string_lossy().len() > 260 + 4);
+        remove_tree(&root).unwrap();
+        assert!(!root.exists());
+        remove_tree(&root).unwrap(); // already gone is fine
+    }
+
+    #[test]
+    fn a_worktree_with_a_deep_tree_is_removed() {
+        let root = std::env::temp_dir().join(format!("axl-longwt-{}", std::process::id()));
+        let _ = remove_tree(&root);
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        must(&repo, &["init", "-q", "-b", "main"]).unwrap();
+        must(&repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"]).unwrap();
+        let wt = root.join("wt");
+        worktree_add(&repo, &wt, "ax/deep", "HEAD").unwrap();
+        deep(&wt.join("node_modules"));
+        worktree_remove(&repo, &wt).unwrap();
+        assert!(!wt.exists());
+        // the parked folder is emptied by the background purge, also when it is deep
+        purge_trash(&root);
+        let left = std::fs::read_dir(&root).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(".axelstra-trash-")).count();
+        assert_eq!(left, 0);
+        assert!(!worktree_list(&repo).unwrap().iter().any(|w| w.branch.as_deref() == Some("ax/deep")));
+        let _ = remove_tree(&root);
     }
 }

@@ -255,6 +255,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A merged worktree whose ignored `node_modules` is deeper than the Windows path limit is still swept.
+    #[test]
+    fn sweep_removes_a_merged_worktree_with_a_deep_ignored_tree() {
+        let (root, store, p) = repo_with_store("sweep-deep");
+        let repo = root.join("proj");
+        let g = |dir: &Path, args: &[&str]| assert!(git::run(dir, args).unwrap().ok, "git {args:?}");
+        let done = projects::worktree_create(&p, "deep").unwrap();
+        let wt = Path::new(&done.path);
+        std::fs::write(wt.join(".gitignore"), "node_modules/
+").unwrap();
+        g(wt, &["add", ".gitignore"]);
+        g(wt, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "ignore"]);
+        g(&repo, &["merge", "-q", "--ff-only", "ax/deep"]);
+        let mut d = git::verbatim(&wt.join("node_modules"));
+        for i in 0..12 {
+            d.push(format!("level-{i:02}-{}", "x".repeat(40)));
+        }
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("leaf.js"), "x").unwrap();
+        let real = sweep(&store, &|_| false, false);
+        assert_eq!(real.len(), 1, "{real:?}");
+        assert_eq!(real[0]["removed"], true, "{real:?}");
+        assert!(!wt.exists());
+        git::purge_trash(wt.parent().unwrap());
+        let _ = git::remove_tree(&root);
+    }
+
     fn repo_with_store(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, Project) {
         let root = std::env::temp_dir().join(format!("axl-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
