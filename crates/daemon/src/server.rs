@@ -1896,7 +1896,12 @@ fn dispatch(
         "worktree.from_pr" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let n = p["number"].as_u64().ok_or_else(|| anyhow::anyhow!("missing number"))?;
-            Ok(serde_json::to_value(tokio::task::block_in_place(|| crate::projects::worktree_from_pr(&pr, n))?)?)
+            let (wt, warning) = tokio::task::block_in_place(|| crate::projects::worktree_from_pr_report(&pr, n))?;
+            let mut v = serde_json::to_value(wt)?;
+            if let (Some(w), Some(o)) = (warning, v.as_object_mut()) {
+                o.insert("warning".into(), json!(w));
+            }
+            Ok(v)
         }
         "worktree.remove" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
