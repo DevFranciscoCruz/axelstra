@@ -243,8 +243,18 @@ fn new_agent_token() -> Option<String> {
 fn agent_forbidden(method: &str, p: &Value) -> bool {
     match method {
         "computer.enable" => p["on"].as_bool() == Some(true),
-        "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" | "notices.take" | "audit.list"
-        | "backup.export" | "backup.restore" => true,
+        "project.add"
+        | "project.setup"
+        | "hooks.install"
+        | "automation.save"
+        | "orch.start"
+        | "notices.take"
+        | "audit.list"
+        | "backup.export"
+        | "backup.restore"
+        | "workspace.export"
+        | "workspace.import_preview"
+        | "workspace.import" => true,
         _ => false,
     }
 }
@@ -255,8 +265,8 @@ fn within(path: &str, root: &str) -> bool {
     std::path::Path::new(path).starts_with(root)
 }
 
-const SHELLS: [&str; 6] = ["auto", "pwsh", "powershell", "bash", "wsl", "cmd"];
-const NOTIFY_MODES: [&str; 3] = ["all", "waiting", "off"];
+pub(crate) const SHELLS: [&str; 6] = ["auto", "pwsh", "powershell", "bash", "wsl", "cmd"];
+pub(crate) const NOTIFY_MODES: [&str; 3] = ["all", "waiting", "off"];
 
 /// `shell`, `notify_sound` and `notify_mode` as saved, each falling back to its default (auto, true, all) when missing or invalid.
 /// The app itself reads the same keys from settings.json.
@@ -267,7 +277,7 @@ fn ui_settings(saved: &Value) -> (&str, bool, &str) {
 }
 
 /// Copies the keys of a `settings.set` patch that are present into `saved`, rejecting invalid values.
-fn apply_ui_settings(saved: &mut Value, p: &Value) -> Result<()> {
+pub(crate) fn apply_ui_settings(saved: &mut Value, p: &Value) -> Result<()> {
     if let Some(s) = p["shell"].as_str() {
         if !SHELLS.contains(&s) {
             return Err(anyhow::anyhow!("shell must be auto, pwsh, powershell, bash, wsl or cmd"));
@@ -1067,7 +1077,7 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
         "orch" | "kanban" | "automation" => orchestration::call(c),
         "msg" | "notes" => messaging::call(c),
         "agent" | "agents" | "codex" | "computer" | "settings" | "flow" | "app" | "hooks" | "ping" | "audit" | "notices" | "daemon"
-        | "hello" | "backup" | "env" => misc::call(c),
+        | "hello" | "backup" | "env" | "workspace" => misc::call(c),
         _ => anyhow::bail!("unknown method {}", req.method),
     }
 }

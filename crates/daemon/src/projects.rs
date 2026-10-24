@@ -49,15 +49,15 @@ pub fn load(store: &Path) -> Vec<Project> {
 }
 
 /// Serializes read-modify-write of the projects file: two UI calls adding projects at once must not drop one.
-static STORE_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static STORE_LOCK: Mutex<()> = Mutex::new(());
 
 /// The list to modify and save back. Unlike `load`, a file that exists but cannot be read is an error, so an
 /// empty list is never saved over projects we merely failed to read (a corrupt file was moved to `.bad` by then).
-fn load_for_update(store: &Path) -> Result<Vec<Project>> {
+pub(crate) fn load_for_update(store: &Path) -> Result<Vec<Project>> {
     try_load(store)
 }
 
-fn save(store: &Path, v: &[Project]) -> Result<()> {
+pub(crate) fn save(store: &Path, v: &[Project]) -> Result<()> {
     // versioned envelope, fsynced temp file + rename, rotating backups: a crash never leaves a half-written list
     write_json(store, v)?;
     Ok(())
@@ -116,7 +116,9 @@ pub fn forbidden_root(p: &Path) -> bool {
     !top.contains('/') && (unix_sys.contains(&top) || win_sys.contains(&top))
 }
 
-pub fn add(store: &Path, path: &str) -> Result<Project> {
+/// The folder a project at `path` would have: its repository root, or the folder itself outside a repository.
+/// Refuses filesystem roots, the home folder and system folders.
+pub fn resolve_root(path: &str) -> Result<PathBuf> {
     // a folder outside any repository is accepted as it is: the project can start from prompts and `git init` later
     let root = match git::repo_root(Path::new(path)) {
         Ok(r) => r,
@@ -126,6 +128,11 @@ pub fn add(store: &Path, path: &str) -> Result<Project> {
     if forbidden_root(&root) {
         anyhow::bail!("{} cannot be a project: it is a filesystem root, the home folder or a system folder", root.display());
     }
+    Ok(root)
+}
+
+pub fn add(store: &Path, path: &str) -> Result<Project> {
+    let root = resolve_root(path)?;
     let root_s = root.to_string_lossy().to_string();
     let _g = STORE_LOCK.lock_recover();
     let mut v = load_for_update(store)?;
