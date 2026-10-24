@@ -3,6 +3,7 @@ import { createEffect, on, onCleanup, onMount } from "solid-js";
 import {
   agentsList,
   computerStatus,
+  budgetEvents,
   janitorEvents,
   listPorts,
   restoreSessions,
@@ -11,8 +12,10 @@ import {
   watchWorktree,
 } from "./api";
 import { errorText } from "./appError";
+import { handleBudgetEvents } from "./budgetEvents";
 import { handleJanitorEvents } from "./janitorEvents";
 import { createPoller } from "./poller";
+import { wtName } from "./Usage";
 import { S, count } from "./strings";
 import { onTauriEvent } from "./tauriEvents";
 import {
@@ -143,6 +146,11 @@ export function useBootstrap() {
           .catch((e) => console.debug("janitor.events", e)),
       15000,
     );
+    // token budgets the daemon saw cross 80% or 100%: one toast and one bell entry each
+    const budget = createPoller(
+      () => budgetEvents().then((ev) => handleBudgetEvents(ev, wtName)).catch((e) => console.debug("budget.events", e)),
+      20000,
+    );
     const onFocus = () => {
       void refreshChanges();
       void refreshProjects();
@@ -153,6 +161,7 @@ export function useBootstrap() {
       mid.stop();
       slow.stop();
       janitor.stop();
+      budget.stop();
       stopWatch();
       window.removeEventListener("focus", onFocus);
       unlisten.forEach((u) => u());
