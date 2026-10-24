@@ -9,6 +9,7 @@ import { push, shipEvents } from "./notifications";
 import { CHECK_LABEL, CI_LABEL, REVIEW_LABEL, SHIP_POLL_MS, autoMergeQuestion, canAutoMerge, mergeLabel, mergeQuestion, problemText, shouldPoll } from "./shipLogic";
 import { findWorktree, selectedWorktree } from "./store";
 import "./ship.css";
+import { createPoller } from "./poller";
 
 /** last state read per worktree, so a change is noticed even after looking at another worktree in between */
 const lastSeen = new Map<string, ShipStatus>();
@@ -63,7 +64,7 @@ export function ShipPanel() {
 
   onMount(() => {
     const tick = () => shouldPoll(document.hidden, focused) && void load();
-    const timer = setInterval(tick, SHIP_POLL_MS);
+    const poller = createPoller(() => shouldPoll(document.hidden, focused) && load(), SHIP_POLL_MS);
     const onFocus = () => {
       focused = true;
       tick();
@@ -73,7 +74,7 @@ export function ShipPanel() {
     window.addEventListener("blur", onBlur);
     document.addEventListener("visibilitychange", tick);
     onCleanup(() => {
-      clearInterval(timer);
+      poller.stop();
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", tick);

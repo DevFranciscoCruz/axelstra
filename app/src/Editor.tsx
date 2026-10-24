@@ -12,6 +12,7 @@ import { Opened, fsRead, fsStat, fsWrite } from "./api";
 import { isLight } from "./theme";
 import { fsTick, guarded, setEditorDirty, setEditorSaver, setOpenFile } from "./store";
 import { clampLine, describeReadError, docDiffers, isLarge, sizeLabel } from "./editorLogic";
+import { createPoller, type Poller } from "./poller";
 
 /** Language packs load on demand so the editor itself stays small. */
 async function languageFor(path: string): Promise<Extension> {
@@ -131,9 +132,9 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
     }
   };
 
-  let timer: ReturnType<typeof setInterval> | undefined;
+  let poller: Poller | undefined;
   // cleanup is registered synchronously (before any await), otherwise it would never run
-  onCleanup(() => clearInterval(timer));
+  onCleanup(() => poller?.stop());
   onMount(() => {
     view = new EditorView({
       parent: host,
@@ -185,7 +186,7 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
       }
     };
     checkNow = () => void check();
-    timer = setInterval(check, 30000);
+    poller = createPoller(check, 30000);
   });
   // same file, new line (clicking another link to it)
   createEffect(on(() => props.initialLine, () => meta && gotoLine(), { defer: true }));
