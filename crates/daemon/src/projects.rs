@@ -818,7 +818,7 @@ mod parent_tests {
         let b = worktree_create(&p, "b").unwrap();
         set_parent(&store, "p", &b.path, Some(&a.path)).unwrap();
         rename_parent(&store, "p", &a.path, "C:/x/proj-z").unwrap();
-        assert_eq!(reload(&store).parents.get(&norm_path(&b.path)), Some(&"c:/x/proj-z".to_string()));
+        assert_eq!(reload(&store).parents.get(&norm_path(&b.path)), Some(&norm_path("C:/x/proj-z")));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -839,10 +839,13 @@ mod root_tests {
 
     #[test]
     fn roots_and_system_folders_are_refused() {
-        for bad in ["/", "/etc", "/usr/", "C:/", "C:/Windows", "c:/program files", "D:/Users", "//?/C:/Windows"] {
+        // drive-letter paths are only paths on Windows; elsewhere they are just odd relative names
+        let win_bad = ["C:/", "C:/Windows", "c:/program files", "D:/Users", "//?/C:/Windows"];
+        for bad in ["/", "/etc", "/usr/"].into_iter().chain(win_bad.into_iter().filter(|_| cfg!(windows))) {
             assert!(forbidden_root(Path::new(bad)), "{bad}");
         }
-        for ok in ["/home/a/proj", "/usr/local/src/proj", "C:/Users/a/proj", "D:/dev/app"] {
+        let win_ok = ["C:/Users/a/proj", "D:/dev/app"];
+        for ok in ["/home/a/proj", "/usr/local/src/proj"].into_iter().chain(win_ok.into_iter().filter(|_| cfg!(windows))) {
             assert!(!forbidden_root(Path::new(ok)), "{ok}");
         }
     }

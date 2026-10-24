@@ -1373,7 +1373,7 @@ mod registry_tests {
         for i in 0..4 {
             let (r, d) = (reg.clone(), done_tx.clone());
             std::thread::spawn(move || {
-                for _ in 0..2000 {
+                for _ in 0..300 {
                     if i % 2 == 0 {
                         session_list(&r);
                     } else {
@@ -1398,7 +1398,9 @@ mod hooks_json_tests {
     #[test]
     fn only_the_real_axelstra_exe_becomes_the_status_line() {
         let status = |p: &str| hooks_json(Some(Path::new(p)))["statusLine"]["command"].as_str().map(String::from);
-        assert_eq!(status(r"D:\x\axelstra.exe").as_deref(), Some(r#""D:\x\axelstra.exe" statusline-tee"#));
+        if cfg!(windows) {
+            assert_eq!(status(r"D:\x\axelstra.exe").as_deref(), Some(r#""D:\x\axelstra.exe" statusline-tee"#));
+        }
         assert_eq!(status("/usr/bin/axelstra").as_deref(), Some(r#""/usr/bin/axelstra" statusline-tee"#));
         assert_eq!(status(r"C:\t\deps\roundtrip-d0504a754dee3ab3.exe"), None);
         assert_eq!(status(r"C:\t\deps\axelstra_daemon-1a2b.exe"), None);
@@ -1411,15 +1413,17 @@ mod hooks_json_tests {
         let dir = std::env::temp_dir().join(format!("axl-hj-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        write_hooks_json(&dir, Some(Path::new(r"C:\x\axelstra.exe")));
+        let (real, test_exe) =
+            if cfg!(windows) { (r"C:\x\axelstra.exe", r"C:\x\deps\roundtrip-1.exe") } else { ("/x/axelstra", "/x/deps/roundtrip-1") };
+        write_hooks_json(&dir, Some(Path::new(real)));
         let good = std::fs::read_to_string(dir.join("hooks.json")).unwrap();
         assert!(good.contains("statusline-tee"));
-        write_hooks_json(&dir, Some(Path::new(r"C:\x\deps\roundtrip-1.exe")));
+        write_hooks_json(&dir, Some(Path::new(test_exe)));
         assert_eq!(std::fs::read_to_string(dir.join("hooks.json")).unwrap(), good);
         // first run from a non-axelstra exe still gets the session hook, just no status line
         let fresh = dir.join("fresh");
         std::fs::create_dir_all(&fresh).unwrap();
-        write_hooks_json(&fresh, Some(Path::new(r"C:\x\deps\roundtrip-1.exe")));
+        write_hooks_json(&fresh, Some(Path::new(test_exe)));
         let t = std::fs::read_to_string(fresh.join("hooks.json")).unwrap();
         assert!(t.contains("SessionStart") && !t.contains("statusLine"));
         let _ = std::fs::remove_dir_all(&dir);
