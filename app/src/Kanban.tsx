@@ -5,7 +5,8 @@ import { ask } from "./Confirm";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { AgentInfo, Board, KCard, agentOptions, agentWarning, agentsList, OrchRun, gitPr, gitPush, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchRetry, orchStart, orchStatus } from "./api";
 import { Modal } from "./Modal";
-import { refreshProjects, selectWorktree, setShowKanban } from "./store";
+import { refreshProjects, selectWorktree, setError, setShowKanban, showNotice } from "./store";
+import { S } from "./strings";
 import { press } from "./a11y";
 
 /** only cards are accepted by the columns: a terminal tab or a file dragged over is ignored */
@@ -134,9 +135,10 @@ export function Kanban(props: { project: string }) {
     try {
       await kanbanDelete(props.project, d.id);
       setDraft(null);
+      showNotice(S.cardDeleted(d.title));
       await reload();
     } catch (e) {
-      setErr(String(e));
+      setError(S.deleteFailed(d.title, e));
     }
   };
 
