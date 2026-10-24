@@ -5,6 +5,8 @@ import { Icon } from "./Icon";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { writeSession } from "./api";
+import { askDiscard } from "./Confirm";
+import { downloadErrorText, micErrorText, transcribeErrorText } from "./voiceErrors";
 
 // Local dictation: the webview records 16 kHz mono audio, the Rust side transcribes it with Whisper
 // (sherpa-onnx, model downloaded on first use). Hands-free: recording stops by itself after a pause in
@@ -82,7 +84,8 @@ async function transcribe() {
       setDraft(null);
     } else setDraft((d) => (d && d.trim() ? d.trimEnd() + " " : "") + text);
   } catch (e) {
-    setVoiceError(String(e));
+    console.debug("voice_transcribe", e);
+    setVoiceError(transcribeErrorText(e));
   }
 }
 
@@ -110,7 +113,8 @@ export async function downloadModel() {
     await invoke("voice_download");
     setNeedModel(false);
   } catch (e) {
-    setVoiceError(`Falha a descarregar o modelo: ${e}`);
+    console.debug("voice_download", e);
+    setVoiceError(downloadErrorText(e));
   } finally {
     un();
     setDlProgress(null);
@@ -174,7 +178,8 @@ export async function toggleVoice() {
     setVoiceState("recording");
   } catch (e) {
     release();
-    setVoiceError(`Microfone indisponível: ${e}`);
+    console.debug("getUserMedia", e);
+    setVoiceError(micErrorText(e));
   }
 }
 
@@ -211,6 +216,11 @@ export const VoiceDraft = (props: { target: number | null }) => {
     setDraft(null);
     setVoiceError("");
   };
+  // a dictated text that was not sent yet is not thrown away without asking
+  const closeKeepingText = async () => {
+    if (draft()?.trim() && !(await askDiscard("O texto ditado ainda não foi enviado."))) return;
+    close();
+  };
   const send = async (enter: boolean) => {
     const text = draft()?.trim();
     if (!text || props.target === null) return;
@@ -236,7 +246,7 @@ export const VoiceDraft = (props: { target: number | null }) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 void send(true);
-              } else if (e.key === "Escape") close();
+              } else if (e.key === "Escape") void closeKeepingText();
             }}
           />
           <Button size="sm" onClick={() => void toggleVoice()} disabled={voiceState() === "transcribing"} title={K("Ditado (Ctrl+Shift+M)")}>
@@ -261,7 +271,7 @@ export const VoiceDraft = (props: { target: number | null }) => {
         <Show when={voiceError()}>
           <span class="voice-err">{voiceError()}</span>
         </Show>
-        <Button variant="icon" size="icon" title="Fechar (Esc)" aria-label="Fechar (Esc)" onClick={close}>
+        <Button variant="icon" size="icon" title="Fechar (Esc)" aria-label="Fechar (Esc)" onClick={() => void closeKeepingText()}>
           <Icon name="x" />
         </Button>
       </div>
