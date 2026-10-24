@@ -61,7 +61,9 @@ impl ChildShared {
             // let the stderr reader take the last bytes
             std::thread::sleep(Duration::from_millis(50));
         }
-        let said = String::from_utf8_lossy(&recover(&self.stderr)).trim().to_string();
+        // wsl.exe writes its own messages as UTF-16LE: dropping the NULs leaves the ASCII part readable
+        let raw: Vec<u8> = recover(&self.stderr).iter().copied().filter(|b| *b != 0).collect();
+        let said = String::from_utf8_lossy(&raw).trim().to_string();
         match (status, said.is_empty()) {
             (Some(st), true) => Some(format!("{} ended ({st})", self.label)),
             (Some(st), false) => Some(format!("{} ended ({st}) and said: {said}", self.label)),
