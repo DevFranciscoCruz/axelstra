@@ -36,8 +36,19 @@ Notes for coding agents and new contributors.
 `PROTO` in `crates/daemon/src/proto.rs` is the app <-> daemon contract version. A daemon outlives
 app updates, and the app only restarts a daemon older than `PROTO`. Bump it (and add the new method
 to the doc comment above it) whenever the app starts calling a daemon method an old daemon lacks.
-Do not bump it for changes an old daemon already tolerates. Current: 15 (notices.take, audit.list, backup.export,
-backup.restore, orch.trust_info, env.tools).
+Do not bump it for changes an old daemon already tolerates. Current: 16 (notices.take, audit.list, backup.export,
+backup.restore, orch.trust_info, env.tools, janitor.events).
+
+## Worktree and agent lifecycle
+
+- A lead started by `axelstra dispatch new/send` is ephemeral: when it calls `axelstra done` its session closes (a
+  reaper in mode `exit` with `lead: true`, so it does not count against the worker limit) and the report goes to main
+  and to the task file. Main only reads the report.
+- The janitor (`crates/daemon/src/janitor.rs`) sweeps every 10 minutes and a few seconds after each `done` or
+  `git.merge` (`sweep_soon` in `server.rs`). A worktree goes when its `ax/*` branch tip is inside the default branch or
+  inside another live `ax/*` branch (or its PR was merged), it has no changes, and no session works in it. A session
+  that reported with `done` and is quiet for 10 s is not busy. Removals are queued as events (`janitor.events`) that
+  the app shows as a toast and a notification-center entry.
 
 Every method the frontend calls must also be in `ALLOWED_METHODS` in `app/src-tauri/src/main.rs`; a unit test reads
 `app/src` (`call`, `callBg`, `callOr` with a string literal) and fails when the list and the sources drift apart.
