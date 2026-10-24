@@ -1,7 +1,6 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { Icon, hasIcon } from "./Icon";
-import { Select } from "./Select";
-import { Button, Field, Input, Tabs, TabsList, cn } from "./ui";
+import { Button, Field, Input, Select, Tabs, TabsList, cn } from "./ui";
 import { For, Match, Show, Switch, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { SessionInfo, restoreSessions, listPorts, watchWorktree, stopWatch, storeNotices, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
 import { Section } from "./Boundary";
