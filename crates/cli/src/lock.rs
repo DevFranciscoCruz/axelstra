@@ -71,8 +71,6 @@ pub fn run(name: &str, slots: usize, timeout: u64, command: &[String]) -> Result
     let status = child.wait()?;
     #[cfg(windows)]
     job.kill();
-    #[cfg(unix)]
-    unix::kill_group(child.id());
     drop(held);
     Ok(status.code().unwrap_or(1))
 }
@@ -83,23 +81,12 @@ mod unix {
     use std::os::unix::io::AsRawFd;
     use std::os::unix::process::CommandExt;
     use std::process::Child;
-    use std::sync::atomic::{AtomicI32, Ordering};
 
-    /// Process group of the running command, for the signal forwarder.
-    static GROUP: AtomicI32 = AtomicI32::new(0);
-
-    extern "C" fn forward(sig: libc::c_int) {
-        let g = GROUP.load(Ordering::Relaxed);
-        if g > 0 {
-            unsafe { libc::killpg(g, sig) };
-        }
-    }
-
-    /// Spawns the command in its own process group, holding the lock file open (not close-on-exec).
+    /// Spawns the command holding the lock file open (not close-on-exec). It stays in our process group and keeps the
+    /// terminal: a group of its own would stop on SIGTTIN when it reads stdin.
     pub fn spawn(cmd: &mut Command, held: &File) -> Result<Child> {
         let fd = held.as_raw_fd();
         let parent = unsafe { libc::getpid() };
-        cmd.process_group(0);
         // SAFETY: only async-signal-safe calls (fcntl, prctl, getppid) between fork and exec.
         unsafe {
             cmd.pre_exec(move || {
@@ -122,19 +109,7 @@ mod unix {
                 Ok(())
             });
         }
-        let child = cmd.spawn()?;
-        // The child is a group leader now (process_group(0)), so its pid is the group id. Its own group no longer gets
-        // the terminal's Ctrl-C or hang-up, so pass those on.
-        GROUP.store(child.id() as i32, Ordering::Relaxed);
-        for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
-            unsafe { libc::signal(sig, forward as extern "C" fn(libc::c_int) as libc::sighandler_t) };
-        }
-        Ok(child)
-    }
-
-    /// After the command ended: nothing it started may outlive the slot.
-    pub fn kill_group(pid: u32) {
-        unsafe { libc::killpg(pid as i32, libc::SIGKILL) };
+        Ok(cmd.spawn()?)
     }
 }
 
