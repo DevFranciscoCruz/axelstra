@@ -3,6 +3,7 @@
 //! lets a UI attach late and replay what it missed.
 
 use crate::job::Job;
+use crate::sync::LockRecover;
 use anyhow::{Context, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::collections::VecDeque;
@@ -10,24 +11,13 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 
 const RING_BYTES: usize = 1 << 20;
 /// Chunks (up to 16 KiB each) a subscriber may have waiting before new output is dropped for it.
 const SUB_QUEUE: usize = 4096;
 /// Input writes waiting for the session's writer thread.
 const INPUT_QUEUE: usize = 1024;
-
-/// `lock()` that survives a poisoned mutex: a panic in one handler must not make every later caller panic too.
-trait LockRecover<T> {
-    fn lock_recover(&self) -> MutexGuard<'_, T>;
-}
-
-impl<T> LockRecover<T> for Mutex<T> {
-    fn lock_recover(&self) -> MutexGuard<'_, T> {
-        self.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct Spawn {

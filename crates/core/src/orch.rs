@@ -366,8 +366,10 @@ fn check_trust(cards: &[Card], trust: &Trust) -> Result<()> {
         bail!(
             "cards with a bypass permission_mode run the agent with no permission checks and need an explicit, pinned confirmation:
 {}",
-            bypass.join("
-")
+            bypass.join(
+                "
+"
+            )
         );
     }
     let cmds: Vec<String> = cards.iter().filter_map(|c| c.meta.acceptance.as_ref().map(|a| format!("{}: {a}", c.meta.id))).collect();
@@ -378,10 +380,14 @@ fn check_trust(cards: &[Card], trust: &Trust) -> Result<()> {
 {}
 {}
 pin: {}",
-            cmds.join("
-"),
-            modes.join("
-"),
+            cmds.join(
+                "
+"
+            ),
+            modes.join(
+                "
+"
+            ),
             card::fingerprint(cards)
         );
     }
@@ -651,32 +657,44 @@ mod tests {
     }
 
     fn card_of(extra: &str) -> Card {
-        card::parse(&format!("---
+        card::parse(
+            &format!(
+                "---
 id: a
 {extra}---
 body
-"), Path::new("x")).unwrap()
+"
+            ),
+            Path::new("x"),
+        )
+        .unwrap()
     }
 
     #[test]
     fn bypass_needs_a_matching_pin() {
-        let c = [card_of("permission_mode: bypassPermissions
-")];
+        let c = [card_of(
+            "permission_mode: bypassPermissions
+",
+        )];
         assert!(check_trust(&c, &Trust::None).is_err());
         assert!(check_trust(&c, &Trust::Acceptance).is_err());
         let pin = card::fingerprint(&c);
         assert!(check_trust(&c, &Trust::Pinned(pin.clone())).is_ok());
-        let edited = [card_of("permission_mode: bypassPermissions
+        let edited = [card_of(
+            "permission_mode: bypassPermissions
 timeout_min: 9
-")];
+",
+        )];
         assert!(check_trust(&edited, &Trust::Pinned(pin)).unwrap_err().to_string().contains("changed after"));
     }
 
     #[test]
     fn trust_message_lists_permission_mode_and_pin() {
-        let c = [card_of("permission_mode: plan
+        let c = [card_of(
+            "permission_mode: plan
 acceptance: make test
-")];
+",
+        )];
         let e = check_trust(&c, &Trust::None).unwrap_err().to_string();
         assert!(e.contains("a: permission_mode plan") && e.contains("make test") && e.contains(&card::fingerprint(&c)));
         assert!(check_trust(&[card_of("")], &Trust::None).is_ok());
