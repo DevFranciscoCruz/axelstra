@@ -131,7 +131,7 @@ export function Kanban(props: { project: string }) {
   const remove = async () => {
     const d = draft();
     if (!d?.id) return;
-    if (!(await ask(`Apagar o cartão "${d.title}"? O ficheiro é removido.`, { title: "Apagar", kind: "warning" }))) return;
+    if (!(await ask(`Apagar o cartão "${d.title}"? O ficheiro é removido.`, { title: "Apagar", kind: "danger" }))) return;
     try {
       await kanbanDelete(props.project, d.id);
       setDraft(null);

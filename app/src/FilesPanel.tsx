@@ -201,7 +201,7 @@ function fileMenu(wt: string, path: string, dir: boolean): MenuItem[] {
       run: async () => {
         const ok = await ask(`Apagar "${baseOf(path)}"?\n\n${dir ? "A pasta e tudo o que tem dentro são apagados" : "O ficheiro é apagado"} do disco e não vão para o lixo.`, {
           title: "Apagar",
-          kind: "warning",
+          kind: "danger",
           okLabel: "Apagar",
           cancelLabel: "Cancelar",
         });
