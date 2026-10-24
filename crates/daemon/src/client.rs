@@ -106,9 +106,8 @@ impl std::error::Error for CallTimeout {}
 fn default_timeout(method: &str) -> Duration {
     match method {
         "git.push" | "git.pr" | "git.suggest" | "git.commit" | "worktree.create" | "worktree.from_pr" | "worktree.sweep"
-        | "project.add" | "automation.run" | "orch.start" | "gh.list" | "agent.search" | "git.merge" | "git.checks" => {
-            Duration::from_secs(600)
-        }
+        | "project.add" | "automation.run" | "orch.start" | "gh.list" | "gh.comments" | "gh.send_comment" | "git.suggest_pr"
+        | "agent.search" | "git.merge" | "git.checks" => Duration::from_secs(600),
         _ => Duration::from_secs(60),
     }
 }

@@ -82,6 +82,11 @@ impl Audit {
         }
     }
 
+    /// Records something the daemon did on its own, not on a client's request (session 0): trigger firings.
+    pub fn record_system(&self, method: &str, params: &Value, outcome: &Result<(), String>) {
+        self.record(0, method, params, outcome)
+    }
+
     /// The newest `limit` entries (oldest first), optionally only those of one session.
     pub fn list(&self, limit: usize, session: Option<u32>) -> Vec<Value> {
         let ring = self.ring.lock_recover();

@@ -429,6 +429,14 @@ export const projectEnvPreview = (project: string) => call<EnvPreview>("project.
 export type GhItem = { number: number; title: string; author: string; url: string; state: string; draft: boolean; branch: string; checks: string; review: string };
 export const ghList = (project: string, kind: "pr" | "issue") => call<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
 export const ghListBg = (project: string, kind: "pr" | "issue") => callBg<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
+/** An inline review comment of a PR. Every text field was written by a reviewer: untrusted. */
+export type ReviewComment = { id: number; path: string; line: number; body: string; author: string; diff_hunk: string; created: string; url: string; in_reply_to: number; outdated: boolean; pr: number };
+/** A review as a whole (verdict plus its text); reviews without text are left out by the daemon. */
+export type ReviewSummary = { id: number; author: string; body: string; state: "approved" | "changes" | "commented" | "dismissed" | "pending"; created: string; url: string };
+export const ghComments = (project: string, number: number) => call<{ comments: ReviewComment[]; reviews: ReviewSummary[] }>("gh.comments", { project, number });
+/** `dryRun` only builds the text that would be sent (from GitHub's current version of the comment); nothing is delivered. */
+export const ghSendComment = (worktree: string, project: string, number: number, commentId: number, dryRun: boolean) =>
+  call<{ text: string; sent: boolean; session?: number }>("gh.send_comment", { worktree, project, number, comment_id: commentId, dry_run: dryRun });
 export const worktreeFromPr = (project: string, number: number) => call<Worktree>("worktree.from_pr", { project, number });
 export const listPorts = (worktree: string) => call<{ ports: { port: number; pid: number }[] }>("ports.list", { worktree }).then((r) => r.ports);
 export type Schedule =
@@ -480,6 +488,8 @@ export const fsWrite = (worktree: string, path: string, text: string, eol: strin
 export const gitCommit = (worktree: string, message: string) => call<{ sha: string }>("git.commit", { worktree, message });
 /** Commit message the user's `claude` CLI proposes for the pending changes (nothing is staged or committed). */
 export const gitSuggest = (worktree: string) => call<{ message: string }>("git.suggest", { worktree }).then((r) => r.message);
+/** Title and markdown description the user's `claude` CLI proposes for a PR of this worktree's branch against `base` (default branch when omitted). */
+export const gitSuggestPr = (worktree: string, base?: string) => call<{ title: string; body: string }>("git.suggest_pr", { worktree, base });
 export const gitPush = (worktree: string) => call<{ output: string }>("git.push", { worktree });
 export const gitPr = (worktree: string, title: string, body: string, base?: string) =>
   call<{ url: string }>("git.pr", { worktree, title, body, base }).then((r) => r.url);
@@ -679,3 +689,40 @@ export const pickAndRestoreBackup = (title: string): Promise<{ restored: string[
 export type JanitorEvent = { project: string; path: string; branch: string; into: string; why: string; at: number };
 /** Worktrees the automatic sweep removed since the last call (take semantics); an older daemon has none. */
 export const janitorEvents = () => callOr<{ events: JanitorEvent[] }>("janitor.events", {}, { events: [] }).then((r) => r.events ?? []);
+
+// ---- CI-fix trigger (daemon: triggers.*) ----
+export type TriggerFiring = { ts: number; worktree: string; sha: string; checks: string[]; kind: "fired" | "limited" | "failed"; detail: string };
+export type TriggerLimits = { cooldown_secs: number; max_per_hour: number; poll_secs: number; cooldown_range: [number, number]; max_per_hour_range: [number, number] };
+export type TriggerState = {
+  project: string;
+  ci_fix: boolean;
+  /** epoch seconds of the user's first confirmation; null until then */
+  confirmed_at: number | null;
+  limits: TriggerLimits;
+  history: TriggerFiring[];
+  agent: string;
+  confirm_word: string;
+  template: string;
+  example: string;
+};
+export type TriggerPreview = {
+  project: string;
+  prompt: string;
+  template: string;
+  limits: TriggerLimits;
+  agent: string;
+  confirm_word: string;
+  never_main: boolean;
+  never_pr_worktrees: boolean;
+  audit_method: string;
+};
+export type TriggerEvent = { kind: "ci_fix" | "ci_fix_limited" | "ci_fix_failed"; project: string; worktree: string; branch: string; sha?: string; detail?: string };
+/** State, limits and prompt template of a project's CI-fix trigger; null on a daemon without `triggers.*`. */
+export const triggersGet = (project: string) => callOr<TriggerState | null>("triggers.get", { project }, null);
+/** What enabling would do (the prompt with an example failure, the limits); null on an older daemon. */
+export const triggersPreview = (project: string) => callOr<TriggerPreview | null>("triggers.preview", { project }, null);
+/** Turns the trigger on/off and/or changes its limits. The first enabling needs `confirm` = the state's `confirm_word`. */
+export const triggersSet = (project: string, patch: { ci_fix?: boolean; confirm?: string; cooldown_secs?: number; max_per_hour?: number }) =>
+  call<TriggerState>("triggers.set", { project, ...patch });
+/** What the trigger did since the last call (take semantics); an older daemon has none. */
+export const triggersEvents = () => callOr<{ events: TriggerEvent[] }>("triggers.events", {}, { events: [] }).then((r) => r.events ?? []);

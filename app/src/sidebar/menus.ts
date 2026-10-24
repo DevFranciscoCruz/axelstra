@@ -22,13 +22,15 @@ import type { SidebarActions } from "./actions";
 const T = P.sidebar.menu;
 
 type Wt = { path: string; branch: string | null; is_main: boolean; parent?: string | null };
-type Proj = { id: string; name: string; worktrees?: Wt[] };
+type Proj = { id: string; name: string; setup?: string | null; worktrees?: Wt[] };
 
 export type MenuDeps = Pick<SidebarActions, "run" | "copy" | "sleepWorktree" | "dropWorktree" | "dropProject"> & {
   /** asks for the worktree-rename dialog */
   rename: (path: string, current: string, label: string) => void;
   newWorktree: (projectId: string) => void;
   editSetup: (projectId: string, setup: string) => void;
+  /** types the project setup commands into a new visible terminal of this worktree */
+  runSetup: (projectId: string, path: string, setup: string | null | undefined) => void;
   refresh: () => Promise<void>;
 };
 
@@ -76,6 +78,7 @@ export const worktreeMenu = (d: MenuDeps, p: Proj, w: Wt, label: string, below: 
     ],
   },
   { label: T.copyPath, icon: "copy", run: () => d.copy(w.path) },
+  { label: T.runSetup, icon: "play", disabled: !p.setup?.trim(), run: () => d.runSetup(p.id, w.path, p.setup) },
   { label: T.rename, icon: "pencil", disabled: w.is_main, run: () => d.rename(w.path, w.branch ?? label, label) },
   { label: T.copyName, icon: "copy", run: () => d.copy(w.branch ?? label) },
   {

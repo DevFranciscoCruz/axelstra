@@ -62,3 +62,36 @@ export const mergeQuestion = (s: Pick<ShipStatus, "number" | "title">, branch: s
 
 export const autoMergeQuestion = (s: Pick<ShipStatus, "number" | "title">) =>
   P.ship.autoAsk(s.number, s.title);
+
+/** The "Gerar título e descrição" button: idle -> loading -> done | error. `seq` numbers the requests so that the answer of
+ *  an older one (the user switched worktree, or asked again) is dropped. */
+export type GenState = { phase: "idle" | "loading" | "done" | "error"; seq: number };
+export type GenEvent = { kind: "start" } | { kind: "ok"; seq: number } | { kind: "fail"; seq: number } | { kind: "reset" };
+
+export const genInitial: GenState = { phase: "idle", seq: 0 };
+
+export const genReduce = (s: GenState, e: GenEvent): GenState => {
+  switch (e.kind) {
+    case "start":
+      // a second click while one is running does nothing
+      return s.phase === "loading" ? s : { phase: "loading", seq: s.seq + 1 };
+    case "ok":
+      return s.phase === "loading" && e.seq === s.seq ? { ...s, phase: "done" } : s;
+    case "fail":
+      return s.phase === "loading" && e.seq === s.seq ? { ...s, phase: "error" } : s;
+    case "reset":
+      // keeps counting, so a late answer of the request that was running cannot match a later one
+      return { phase: "idle", seq: s.seq };
+  }
+};
+
+export const canGenerate = (s: GenState, hasWorktree: boolean): boolean => hasWorktree && s.phase !== "loading";
+
+export const generateLabel = (s: GenState): string =>
+  s.phase === "loading" ? P.ship.newPr.generating : s.phase === "done" ? P.ship.newPr.regenerate : P.ship.newPr.generate;
+
+/** The answer replaces the fields only when it has a title. */
+export const applySuggestion = (cur: { title: string; body: string }, sug: { title: string; body: string }): { title: string; body: string } =>
+  sug.title.trim() ? { title: sug.title.trim(), body: sug.body.trim() } : cur;
+
+export const canCreatePr = (title: string, busy: boolean): boolean => !busy && title.trim().length > 0;
