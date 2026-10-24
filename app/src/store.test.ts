@@ -122,7 +122,7 @@ describe("attention flag and notifications", () => {
     await tick(store, agent({ idle_ms: 100 }));
     await tick(store, agent({ idle_ms: 9000 }));
     await settle();
-    expect(invoke.mock.calls.find((c) => c[0] === "notify_session")).toBeUndefined();
+    expect(invoke.mock.calls.find((c) => c[0] === "notify_session" && (c[1] as { waiting: boolean }).waiting)).toBeUndefined();
   });
 
   it("clears the flag when the agent starts working again", async () => {
@@ -144,25 +144,32 @@ describe("attention flag and notifications", () => {
     expect(store.attention().size).toBe(0);
   });
 
-  it("says the agent needs an answer when it stops on a question", async () => {
+  it("says what the agent asked when it sends a wait event", async () => {
     const store = await load();
     store.selectWorktree(OTHER);
     await tick(store, agent({ idle_ms: 100 }));
-    await tick(store, agent({ idle_ms: 9000, waiting: true }));
+    await tick(store, agent({ idle_ms: 9000, waiting: true, wait: { kind: "question", text: "Postgres ou SQLite?" } }));
     await settle();
     const call = invoke.mock.calls.find((c) => c[0] === "notify_session");
-    expect(String((call?.[1] as { body: string } | undefined)?.body)).toContain(
-      "precisa da tua resposta para continuar",
-    );
+    expect(String((call?.[1] as { body: string } | undefined)?.body)).toContain("Postgres ou SQLite?");
   });
 
   it("tells the host when the agent is waiting on the user", async () => {
     const store = await load();
     store.selectWorktree(OTHER);
     await tick(store, agent({ idle_ms: 100 }));
-    await tick(store, agent({ idle_ms: 9000, waiting: true }));
+    await tick(store, agent({ idle_ms: 9000, waiting: true, wait: { kind: "question", text: "Postgres ou SQLite?" } }));
     await settle();
     expect((invoke.mock.calls.find((c) => c[0] === "notify_session")?.[1] as { waiting: boolean }).waiting).toBe(true);
+  });
+
+  it("a waiting flag without an event is not announced as waiting", async () => {
+    const store = await load();
+    store.selectWorktree(OTHER);
+    await tick(store, agent({ idle_ms: 100 }));
+    await tick(store, agent({ idle_ms: 9000, waiting: true }));
+    await settle();
+    expect(invoke.mock.calls.find((c) => c[0] === "notify_session" && (c[1] as { waiting: boolean }).waiting)).toBeUndefined();
   });
 
   it("does not claim waiting for an agent that just stopped", async () => {

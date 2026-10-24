@@ -263,6 +263,33 @@ impl Registry {
     }
 
     /// True while a live session works in this worktree (any terminal or agent with it as worktree or cwd).
+    /// What the session said it waits for: an unanswered `ask`/`escalate`, or (unless it reported with `done`) its
+    /// agent's own hook event. Never the screen text.
+    fn wait_of(&self, id: u32, since_input_ms: u64, idle_ms: u64) -> Option<axelstra_core::waiting::Wait> {
+        if let Some(text) = self.bus.pending_of(id) {
+            return Some(axelstra_core::waiting::Wait { kind: axelstra_core::waiting::WaitKind::Question, text });
+        }
+        if self.bus.finished(id).is_some() {
+            return None;
+        }
+        self.hints.waiting(id, since_input_ms, idle_ms)
+    }
+
+    /// Tells the session's parent (once per wait) that it waits for an answer, with the agent's own text.
+    fn tell_parent_waiting(&self, id: u32) {
+        let Some(wait) = self.hints.take_untold(id) else { return };
+        let Some(pid) = self.metas.lock_recover().get(&id).and_then(|m| m["parent"].as_u64()).map(|p| p as u32) else { return };
+        let Some(ps) = self.get(pid) else { return };
+        let label = self.labels.lock_recover().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
+        let what = if wait.kind == axelstra_core::waiting::WaitKind::Permission { "pede uma permissão" } else { "tem uma pergunta" };
+        let text = format!("{what} ao utilizador e está parado à espera: {}", wait.text);
+        let m = self.bus.send(Some(id), pid, "message", &text, None, None);
+        let agent = self.metas.lock_recover().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
+        if agent {
+            self.deliver_untrusted(pid, ps, &crate::msgbus::notice(&m, &format!("{label} (sessão {id})")));
+        }
+    }
+
     fn worktree_busy(&self, path: &str) -> bool {
         let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
         let want = norm(path);
@@ -609,19 +636,9 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
                 break;
             }
             if idle_mode && worked && idle >= idle_secs * 1000 {
-                let screen = s.screen_lines(12);
-                if axelstra_core::waiting::needs_input(&s.tail(4096)) || axelstra_core::waiting::asks_question(&screen) {
-                    // it is waiting for an answer, not finished: keep it and tell the parent once (until it works again)
-                    if let Some((pid, ps)) = parent.and_then(|p| reg.get(p).map(|s| (p, s))) {
-                        let label = reg.labels.lock_recover().get(&id).cloned().unwrap_or_else(|| format!("sessão {id}"));
-                        let shown = axelstra_core::screen::last_reply(&s.screen_lines(200)).unwrap_or_else(|| screen.join("\n"));
-                        let text = format!("parou à espera de uma resposta. Última mensagem:\n{shown}");
-                        let m = reg.bus.send(Some(id), pid, "escalate", &text, None, None);
-                        let agent = reg.metas.lock_recover().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
-                        if agent {
-                            reg.deliver_untrusted(pid, ps, &crate::msgbus::notice(&m, &format!("{label} (sessão {id})")));
-                        }
-                    }
+                // it said it waits for an answer (hook event, ask, escalate): not finished, keep it. The parent was told
+                // when the event came in.
+                if reg.wait_of(id, s.since_input_ms(), idle).is_some() {
                     worked = false;
                 } else if !nudged && reg.metas.lock_recover().get(&id).map(|m| m["kind"] == "agent").unwrap_or(false) {
                     // first quiet spell: ask the worker to report through the bus instead of scraping its screen
@@ -1507,17 +1524,9 @@ fn session_list(reg: &Registry) -> Vec<Value> {
         .map(|(id, s, view, label, meta)| {
             let running = s.try_wait().is_none();
             let idle = view.idle_ms();
-            // quiet for a moment and the screen ends in a question: the agent waits for the user
-            let agent = meta.as_ref().map(|m| m["kind"] == "agent").unwrap_or(false);
-            // an agent that called `axelstra done` has nothing pending: only an escalation keeps it red
-            let reported = reg.bus.finished(id).is_some();
-            let waiting = running
-                && (reg.bus.is_escalated(id)
-                    || (!reported
-                        && idle >= 1500
-                        && (axelstra_core::waiting::needs_input(&view.tail(4096))
-                            || (agent && axelstra_core::waiting::asks_question(&view.screen_tail(12)))))
-                    || (!reported && reg.hints.waiting(id, view.since_input_ms(), idle)));
+            // waiting is what the agent said (ask, escalate, a hook event), never read off its screen
+            let wait = if running { reg.wait_of(id, view.since_input_ms(), idle) } else { None };
+            let waiting = wait.is_some();
             let facts = stall_facts(reg, id, running, idle, view.since_input_ms(), meta.as_ref(), &busy);
             let stalled = crate::stall::is_stalled(&facts, stall_ms);
             let stall = stalled.then(|| {
@@ -1530,7 +1539,7 @@ fn session_list(reg: &Registry) -> Vec<Value> {
                 );
                 json!({"minutes": stall_min, "code": c.code, "params": c.params_json(), "text": c.to_string()})
             });
-            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "stalled": stalled, "stall": stall, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
+            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "wait": wait.map(|w| json!({"kind": w.kind.as_str(), "text": w.text})), "stalled": stalled, "stall": stall, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
         })
         .collect();
     v.sort_by_key(|x| x["id"].as_u64());

@@ -11,6 +11,7 @@ import { pruneTabState } from "./tabs";
 import { guarded, keepSame, setSplitSession, showView } from "./ui";
 import { setChanges } from "./git";
 import { L } from "../strings.logic";
+import { decideWait } from "../waitNotice";
 
 export const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
 
@@ -26,6 +27,8 @@ export const [attention, setAttention] = createSignal<ReadonlySet<string>>(new S
 const lastState = new Map<number, string>();
 /** sessions the daemon already flagged as stalled, so each stall is announced once */
 const stalledSeen = new Set<number>();
+/** session -> the wait episode already announced (see decideWait) */
+const waitSeen = new Map<number, string>();
 
 /** opens a session from a clicked notification */
 export const openSession = (path: string, id: number) =>
@@ -71,6 +74,7 @@ const trackAgents = (list: SessionInfo[]) => {
   for (const id of lastState.keys()) if (!alive.has(id)) lastState.delete(id);
   for (const id of workingSince.keys()) if (!alive.has(id)) workingSince.delete(id);
   for (const id of stalledSeen) if (!alive.has(id)) stalledSeen.delete(id);
+  for (const id of waitSeen.keys()) if (!alive.has(id)) waitSeen.delete(id);
   for (const s of list) {
     const state = sessionState(s);
     const prev = lastState.get(s.id);
@@ -89,6 +93,22 @@ const trackAgents = (list: SessionInfo[]) => {
           void notify(L.notify.stalledHead(who, wtPath.split(/[\\/]/).pop() ?? wtPath), text, wtPath, s.id, true);
       }
     } else stalledSeen.delete(s.id);
+    // the agent asked for the user (permission or question): one bell entry and one system notification per wait
+    {
+      const viewing = !document.hidden && norm(selectedWorktree()) === norm(wtPath);
+      const name = wtPath.split(/[\\/]/).pop() ?? wtPath;
+      const d = decideWait(waitSeen.get(s.id), s.wait, s.label ?? L.defaultAgent, name, {
+        grace: Date.now() - appStart < NOTIFY_GRACE_MS,
+        watching: viewing && document.hasFocus(),
+      });
+      if (d.seen === undefined) waitSeen.delete(s.id);
+      else waitSeen.set(s.id, d.seen);
+      if (d.text) {
+        if (!viewing) setAttention((cur) => new Set(cur).add(norm(wtPath)));
+        pushNotification({ kind: "waiting", worktree: wtPath, session: s.id, text: d.text });
+        if (d.os) void notify(L.notify.waiting.head(s.label ?? L.defaultAgent, name), d.text, wtPath, s.id, true);
+      }
+    }
     // back to work: the earlier "needs a look" flag is stale
     if (state === "working") {
       if (attention().has(norm(wtPath)))
@@ -105,17 +125,17 @@ const trackAgents = (list: SessionInfo[]) => {
     const viewing = !document.hidden && norm(selectedWorktree()) === norm(wtPath);
     const watching = viewing && document.hasFocus();
     if (!viewing) setAttention((cur) => new Set(cur).add(norm(wtPath)));
+    // "waiting" is announced above, from the agent's event, not from here
     if (watching) continue;
     const since = workingSince.get(s.id);
     if (Date.now() - appStart < NOTIFY_GRACE_MS || !since || Date.now() - since < NOTIFY_MIN_WORK_MS) continue;
     const name = wtPath.split(/[\\/]/).pop() ?? wtPath;
     const who = s.label ?? L.defaultAgent;
-    const T = state === "done" ? L.notify.done : state === "waiting" ? L.notify.waiting : L.notify.stopped;
+    const T = state === "done" ? L.notify.done : L.notify.stopped;
     const [head, body] = [T.head(who, name), T.body(who, name)];
-    void notify(head, body, wtPath, s.id, state === "waiting");
+    void notify(head, body, wtPath, s.id, false);
     // a session that merely went quiet is not worth a line in the centre (it is the common case, and not an error)
-    if (state === "done" || state === "waiting")
-      pushNotification({ kind: state, worktree: wtPath, session: s.id, text: body });
+    if (state === "done") pushNotification({ kind: "done", worktree: wtPath, session: s.id, text: body });
   }
 };
 

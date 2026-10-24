@@ -144,6 +144,12 @@ export const enL: Widen<typeof ptL> = {
       body: (who: string, wt: string) =>
         `${who} asked a question in worktree "${wt}" and needs your answer to continue.`,
     },
+    wait: {
+      permission: (who: string, wt: string, text: string) => `${who} asks permission in ${wt}: ${text}`,
+      question: (who: string, wt: string, text: string) => `${who} has a question in ${wt}: ${text}`,
+      permissionGeneric: (who: string, wt: string) => `${who} asks permission in ${wt} and waits for your answer.`,
+      questionGeneric: (who: string, wt: string) => `${who} has a question in ${wt} and waits for your answer.`,
+    },
     stalledHead: (who: string, wt: string) => `${who} stalled, not reporting · ${wt}`,
     stopped: {
       head: (who: string, wt: string) => `${who} stopped · ${wt}`,

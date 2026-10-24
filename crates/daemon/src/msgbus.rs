@@ -35,6 +35,8 @@ pub struct Bus {
     finished: Mutex<HashMap<u32, Value>>,
     /// sessions that asked their parent for help and have not been answered yet
     escalated: Mutex<HashSet<u32>>,
+    /// sessions that asked (`ask` or `escalate`) and wait for the answer, with the question: this is what makes them "waiting"
+    pending: Mutex<HashMap<u32, String>>,
     /// sessions counted against the worker limit
     workers: Mutex<HashSet<u32>>,
     /// workers with a reaper thread: it delivers their final report itself
@@ -158,6 +160,10 @@ impl Bus {
     pub fn is_escalated(&self, id: u32) -> bool {
         self.escalated.lock_recover().contains(&id)
     }
+    /// The question a session asked and has not had answered yet.
+    pub fn pending_of(&self, id: u32) -> Option<String> {
+        self.pending.lock_recover().get(&id).cloned()
+    }
 
     /// Stores a message and applies its side effects. The caller checked that `to` exists.
     pub fn send(&self, from: Option<u32>, to: u32, kind: &str, text: &str, reply_to: Option<u64>, thread: Option<String>) -> Msg {
@@ -169,13 +175,22 @@ impl Bus {
         match (kind, from) {
             ("escalate", Some(f)) => {
                 self.escalated.lock_recover().insert(f);
+                self.pending.lock_recover().insert(f, text.to_string());
+            }
+            ("ask", Some(f)) => {
+                self.pending.lock_recover().insert(f, text.to_string());
             }
             ("done", Some(f)) => {
                 self.finished.lock_recover().insert(f, json!({"text": text, "id": id}));
+                self.pending.lock_recover().remove(&f);
             }
             // any answer from the parent unblocks an escalated worker
             ("reply" | "message", _) => {
-                self.escalated.lock_recover().remove(&to);
+                let was_escalated = self.escalated.lock_recover().remove(&to);
+                // an `ask` is answered by a reply only: a status message from a child must not clear it
+                if kind == "reply" || was_escalated {
+                    self.pending.lock_recover().remove(&to);
+                }
                 // new work after a report: it is busy again until it reports again
                 self.finished.lock_recover().remove(&to);
             }
@@ -286,6 +301,25 @@ mod tests {
         assert!(b.is_escalated(3));
         b.send(Some(1), 3, "message", "try X", None, None);
         assert!(!b.is_escalated(3));
+    }
+
+    #[test]
+    fn an_ask_or_escalation_is_pending_with_its_text_until_answered() {
+        let b = Bus::new();
+        b.send(Some(3), 1, "ask", "A or B?", None, None);
+        assert_eq!(b.pending_of(3).as_deref(), Some("A or B?"));
+        // not an answer
+        b.send(Some(9), 3, "message", "fyi", None, None);
+        assert_eq!(b.pending_of(3).as_deref(), Some("A or B?"));
+        b.send(Some(1), 3, "reply", "A", Some(1), None);
+        assert!(b.pending_of(3).is_none());
+        b.send(Some(3), 1, "escalate", "stuck", None, None);
+        assert_eq!(b.pending_of(3).as_deref(), Some("stuck"));
+        b.send(Some(1), 3, "message", "try X", None, None);
+        assert!(b.pending_of(3).is_none());
+        b.send(Some(3), 1, "ask", "q", None, None);
+        b.send(Some(3), 1, "done", "ok", None, None);
+        assert!(b.pending_of(3).is_none());
     }
 
     #[test]
