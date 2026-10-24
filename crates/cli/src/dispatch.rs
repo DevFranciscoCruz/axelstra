@@ -11,7 +11,17 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const FOOTER: &str = "\n\nYou own this worktree and its topic. Later requests for the same topic are sent to you. When the work splits into independent parts, run `axelstra skills get axelstration` and delegate to workers; their sessions appear inside this worktree's box in the app.";
+const FOOTER: &str = "\n\nYou own this worktree and its topic. Later requests for the same topic are sent to you. When the work splits into independent parts, run `axelstra skills get axelstration` and delegate to workers; their sessions appear inside this worktree's box in the app. When the whole request is finished, run `axelstra done \"<report: what changed, commands run, what was not run>\"`: that report goes to whoever dispatched you and your session closes by itself (the worktree is cleaned up once its branch is integrated).";
+
+/// A lead started by `dispatch` is ephemeral like a `--report-to` worker: it closes itself when it calls `axelstra done`
+/// (mode `exit`: never because it went quiet while waiting on its workers). The report goes to the dispatching session.
+fn lead_reap() -> Value {
+    let mut r = json!({"mode": "exit", "lead": true});
+    if let Some(p) = std::env::var("AXELSTRA_SESSION").ok().and_then(|s| s.trim().parse::<u32>().ok()) {
+        r["parent"] = json!(p);
+    }
+    r
+}
 
 fn meta_path(c: &mut Client) -> Result<PathBuf> {
     let dir = c.call("app.dir", json!({}))?["dir"].as_str().unwrap_or_default().to_string();
@@ -252,7 +262,7 @@ pub fn run(cmd: DispCmd, mut c: Client) -> Result<()> {
                 paste(&mut c, id as u32, &request)?;
                 println!("sent to session {id} in {branch}");
             } else {
-                let id = spawn_agent(&mut c, Path::new(&path), &agent, Some(&format!("{request}{FOOTER}")), None, false)?;
+                let id = spawn_agent(&mut c, Path::new(&path), &agent, Some(&format!("{request}{FOOTER}")), Some(lead_reap()), false)?;
                 println!("no agent was running in {branch}: started session {id}");
             }
             remember(&mut meta, &path, None, &request);
@@ -265,7 +275,7 @@ pub fn run(cmd: DispCmd, mut c: Client) -> Result<()> {
                 .with_context(|| format!("no registered project matches {project:?}"))?;
             let w = c.call("worktree.create", json!({"project": pid, "name": name}))?;
             let path = w["path"].as_str().unwrap_or_default().to_string();
-            let id = spawn_agent(&mut c, Path::new(&path), &agent, Some(&format!("{request}{FOOTER}")), None, false)?;
+            let id = spawn_agent(&mut c, Path::new(&path), &agent, Some(&format!("{request}{FOOTER}")), Some(lead_reap()), false)?;
             remember(&mut meta, &path, title.as_deref(), &request);
             save(&mp, &meta)?;
             println!("worktree {path}\nsession {id}");
