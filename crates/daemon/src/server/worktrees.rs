@@ -51,6 +51,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     return Ok(v.clone());
                 }
             }
+            // the app asks for the list when something changed in the repositories: the moment to notice a worktree deleted behind our back
+            reap_orphans(reg);
             let gen = reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst);
             let ps = crate::projects::load(&reg.store);
             let v: Vec<Value> = ps

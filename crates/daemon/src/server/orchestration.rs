@@ -78,6 +78,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     Err(e) => run_error(&n2, &e),
                 };
                 reg2.runs.lock_recover().insert(pid, v);
+                // the run removes worktrees with git directly: their sessions go, the app hears of it, the janitor looks
+                reap_orphans(&reg2);
+                reg2.projects_changed();
+                reg2.janitor.bump();
             });
             Ok(started)
         }
@@ -155,6 +159,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 }
             }
             crate::automations::save_all(&path, &list)?;
+            // the scheduler sleeps until the next due run: it works that out again with this one
+            reg.auto_wake.notify_one();
             Ok(serde_json::to_value(a)?)
         }
         "automation.delete" => {
@@ -163,11 +169,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let mut list = crate::automations::load(&path);
             list.retain(|x| x.id != p["id"].as_str().unwrap_or_default());
             crate::automations::save_all(&path, &list)?;
+            reg.auto_wake.notify_one();
             Ok(json!({}))
         }
         "automation.run" => {
             let path = crate::automations::store_path(&reg.store);
-            tokio::task::block_in_place(|| run_automation(reg, &path, p["id"].as_str().unwrap_or_default()))
+            let res = tokio::task::block_in_place(|| run_automation(reg, &path, p["id"].as_str().unwrap_or_default()));
+            // its last run moved: so does its next one
+            reg.auto_wake.notify_one();
+            res
         }
         m => anyhow::bail!("unknown method {m}"),
     }

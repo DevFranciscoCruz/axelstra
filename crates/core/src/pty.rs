@@ -19,6 +19,11 @@ const RING_BYTES: usize = 1 << 20;
 const SUB_QUEUE: usize = 4096;
 /// Input writes waiting for the session's writer thread.
 const INPUT_QUEUE: usize = 1024;
+/// Silence after which a session counts as quiet (the daemon's "idle" and "went quiet" use the same threshold).
+pub const QUIET_MS: u64 = 1500;
+
+/// Runs on the output thread when a quiet session prints again (see `Session::on_wake`).
+pub type WakeHook = Arc<dyn Fn() + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub struct Spawn {
@@ -101,6 +106,7 @@ struct Shared {
     /// bumped whenever the ring content changes: a rendered screen is valid while this has not moved
     generation: AtomicU64,
     screens: Mutex<Vec<ScreenCache>>,
+    wake: Mutex<Option<WakeHook>>,
 }
 
 impl Shared {
@@ -112,6 +118,7 @@ impl Shared {
             last_in: AtomicU64::new(0),
             generation: AtomicU64::new(0),
             screens: Mutex::new(Vec::new()),
+            wake: Mutex::new(None),
         }
     }
 
@@ -229,6 +236,34 @@ pub struct Session {
     /// keystrokes wait here for a writer thread of their own, so a session that stops reading its input
     /// (a hung process, a huge paste) never blocks typing into the others
     input: SyncSender<Vec<u8>>,
+    /// signalled by the OS when the program exits (see `wait_exit`)
+    #[cfg(windows)]
+    exit: Option<ExitHandle>,
+}
+
+/// A process handle opened only to wait on: the OS signals it when the process ends.
+#[cfg(windows)]
+struct ExitHandle(windows_sys::Win32::Foundation::HANDLE);
+// a process handle can be waited on from any thread
+#[cfg(windows)]
+unsafe impl Send for ExitHandle {}
+#[cfg(windows)]
+unsafe impl Sync for ExitHandle {}
+
+#[cfg(windows)]
+impl ExitHandle {
+    fn open(pid: u32) -> Option<ExitHandle> {
+        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+        let h = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        (!h.is_null()).then_some(ExitHandle(h))
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ExitHandle {
+    fn drop(&mut self) {
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+    }
 }
 
 impl Session {
@@ -246,6 +281,9 @@ impl Session {
             crate::coded!("session.spawn_failed", "spawn {program}: {detail}", program = s.program, detail = format!("{e:#}"))
         })?;
         drop(pair.slave);
+        // opened while portable-pty still holds the child, so the pid cannot have been reused
+        #[cfg(windows)]
+        let exit = child.process_id().and_then(ExitHandle::open);
 
         // the child already runs: if the rest of the setup fails, it must not be left behind with nobody owning it
         let setup = Job::new().and_then(|job| {
@@ -277,7 +315,14 @@ impl Session {
             let note_output = |sh: &Shared| {
                 // typing echoes back as output: that is the user, not the program working
                 if now_ms().saturating_sub(sh.last_in.load(Ordering::Relaxed)) > 700 {
-                    sh.last_out.store(now_ms(), Ordering::Relaxed);
+                    let before = sh.last_out.swap(now_ms(), Ordering::Relaxed);
+                    // quiet until now: whoever tracks "went quiet / working again" hears it without polling
+                    if now_ms().saturating_sub(before) >= QUIET_MS {
+                        let hook = sh.wake.lock_recover().clone();
+                        if let Some(f) = hook {
+                            f();
+                        }
+                    }
                 }
             };
             loop {
@@ -326,6 +371,8 @@ impl Session {
             job,
             shared,
             size: Arc::new(Mutex::new((s.cols, s.rows))),
+            #[cfg(windows)]
+            exit,
         })
     }
 
@@ -361,6 +408,42 @@ impl Session {
     /// Milliseconds since the program last produced output of its own.
     pub fn idle_ms(&self) -> u64 {
         self.shared.idle_ms()
+    }
+
+    /// `f` runs (on the output thread) each time the program prints after `QUIET_MS` of silence.
+    pub fn on_wake(&self, f: WakeHook) {
+        *self.shared.wake.lock_recover() = Some(f);
+    }
+
+    /// Blocks until the program has exited. No polling: the OS signals the exit (a process handle on Windows,
+    /// `waitid` with WNOWAIT on Unix, which leaves the process for `try_wait` to reap). Only when neither is
+    /// available does it fall back to checking once a second.
+    pub fn wait_exit(&self) {
+        #[cfg(windows)]
+        if let Some(h) = &self.exit {
+            use windows_sys::Win32::System::Threading::{WaitForSingleObject, INFINITE};
+            unsafe { WaitForSingleObject(h.0, INFINITE) };
+            return;
+        }
+        #[cfg(unix)]
+        if let Some(pid) = self.pid() {
+            loop {
+                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+                let r = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, libc::WEXITED | libc::WNOWAIT) };
+                if r == 0 {
+                    return;
+                }
+                match std::io::Error::last_os_error().raw_os_error() {
+                    Some(libc::EINTR) => continue,
+                    // reaped already (by `try_wait`): it has exited
+                    Some(libc::ECHILD) => return,
+                    _ => break,
+                }
+            }
+        }
+        while self.try_wait().is_none() {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
     }
 
     /// Milliseconds since the user last typed into this session (u64::MAX if never).
@@ -655,6 +738,38 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         assert!(s.try_wait().is_some(), "process survived kill");
+    }
+
+    #[test]
+    fn wait_exit_returns_when_the_program_ends() {
+        let s = Arc::new(spawn_cmd(if cfg!(windows) { "ping -n 2 127.0.0.1 >nul" } else { "sleep 1" }));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let s2 = s.clone();
+        std::thread::spawn(move || {
+            s2.wait_exit();
+            let _ = tx.send(());
+        });
+        rx.recv_timeout(Duration::from_secs(15)).expect("exit never signalled");
+        assert!(s.try_wait().is_some(), "wait_exit returned while the program still ran");
+    }
+
+    #[test]
+    fn on_wake_fires_when_a_quiet_session_prints_again() {
+        let s = spawn_shell();
+        let hits = Arc::new(AtomicU64::new(0));
+        let h = hits.clone();
+        s.on_wake(Arc::new(move || {
+            h.fetch_add(1, Ordering::SeqCst);
+        }));
+        std::thread::sleep(Duration::from_millis(QUIET_MS + 300));
+        let line: &[u8] = if cfg!(windows) { b"echo wake-1\r\n" } else { b"echo wake-1\n" };
+        s.write_system(line).unwrap();
+        let end = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < end && hits.load(Ordering::SeqCst) == 0 {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(hits.load(Ordering::SeqCst) >= 1, "no wake after a quiet spell");
+        s.kill();
     }
 
     #[test]
