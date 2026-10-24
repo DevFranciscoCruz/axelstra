@@ -504,9 +504,15 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
       <For
         each={projects()}
         fallback={
-          <div class="empty">
-            <div>Nenhum projeto</div>
-            <Button variant="default" onClick={() => void pickProject()}>Adicionar o primeiro projeto</Button>
+          <div class="empty first-run" role="region" aria-label="Primeiros passos">
+            <div class="fr-title">Bem-vindo ao Axelstra</div>
+            <ol class="fr-steps">
+              <li>Adiciona uma pasta com um repositório git.</li>
+              <li>Cria um worktree: cada tarefa tem o seu branch e a sua pasta.</li>
+              <li>Abre um agente (Claude, Codex…) nesse worktree e trabalha em paralelo.</li>
+            </ol>
+            <div class="auto-note">Precisas de <code>git</code> e de pelo menos um agente instalado (por exemplo <code>claude</code>); o <code>gh</code> só é preciso para pull requests.</div>
+            <Button variant="default" class="primary" onClick={() => void pickProject()}>Adicionar o primeiro projeto</Button>
           </div>
         }
       >
