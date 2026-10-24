@@ -4,6 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Axelstra</title>
+    <!-- CSP without 'unsafe-inline' for styles (SECURITY.md, "Content Security Policy"). Tauri gives every <style> in this file a per-load
+         nonce and adds it to style-src; the script below hands that nonce to the <style> elements that libraries
+         (xterm's DOM renderer, CodeMirror) create at runtime. Tauri also hashes this inline script into script-src. -->
+    <style>/* nonce carrier: keep one <style> here so Tauri injects the nonce */</style>
+    <script>
+      (() => {
+        const nonce = document.querySelector("style[nonce]")?.nonce;
+        if (!nonce) return; // dev server: devCsp still allows inline styles
+        const create = document.createElement;
+        document.createElement = function (tag, options) {
+          const el = create.call(this, tag, options);
+          if (String(tag).toLowerCase() === "style") el.nonce = nonce;
+          return el;
+        };
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
