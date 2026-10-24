@@ -11,7 +11,14 @@
 // Scenarios: boot (window renders, no CSP violation, no uncaught error), session (a session spawned through the CLI
 // shows up in the UI with a live terminal), restore (the app is closed and relaunched: the daemon kept the session).
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,7 +28,11 @@ if (process.platform !== "win32") {
   process.exit(0);
 }
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const exe = resolve(process.argv[2] ?? process.env.AXELSTRA_APP ?? join(root, "target", "debug", "axelstra-app.exe"));
+const exe = resolve(
+  process.argv[2] ??
+    process.env.AXELSTRA_APP ??
+    join(root, "target", "debug", "axelstra-app.exe"),
+);
 const cliBin = join(dirname(exe), "axelstra.exe");
 for (const f of [exe, cliBin]) {
   if (!existsSync(f)) {
@@ -48,16 +59,22 @@ const env = {
   WEBVIEW2_USER_DATA_FOLDER: join(dir, "webview"),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
 };
-const cli = (...a) => spawnSync(cliBin, a, { env, encoding: "utf8", timeout: 20000 });
+const cli = (...a) =>
+  spawnSync(cliBin, a, { env, encoding: "utf8", timeout: 20000 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // without /T the daemon (a child of the app) survives, as it does when the user closes the window
 const kill = (pid, tree = false) =>
-  spawnSync("taskkill", ["/PID", String(pid), ...(tree ? ["/T"] : []), "/F"], { stdio: "ignore" });
+  spawnSync("taskkill", ["/PID", String(pid), ...(tree ? ["/T"] : []), "/F"], {
+    stdio: "ignore",
+  });
 
 let app;
 const problems = [];
 const launch = () => {
-  app = spawn(exe, [], { env, stdio: process.env.E2E_VERBOSE ? "inherit" : "ignore" });
+  app = spawn(exe, [], {
+    env,
+    stdio: process.env.E2E_VERBOSE ? "inherit" : "ignore",
+  });
   app.on("exit", (c) => (app.gone = c ?? "signal"));
 };
 
@@ -65,17 +82,26 @@ const launch = () => {
 async function connect() {
   let target;
   for (let i = 0; i < 80 && !target; i++) {
-    if (app.gone !== undefined) throw new Error(`app exited early (${app.gone})`);
+    if (app.gone !== undefined)
+      throw new Error(`app exited early (${app.gone})`);
     try {
-      const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+      const list = await (
+        await fetch(`http://127.0.0.1:${port}/json/list`)
+      ).json();
       // the page target exists at about:blank before the app navigates; reloading that would leave the window blank
-      target = list.find((t) => t.type === "page" && t.webSocketDebuggerUrl && t.url !== "about:blank");
+      target = list.find(
+        (t) =>
+          t.type === "page" &&
+          t.webSocketDebuggerUrl &&
+          t.url !== "about:blank",
+      );
     } catch {
       /* not listening yet */
     }
     if (!target) await sleep(500);
   }
-  if (!target) throw new Error(`no WebView2 page target within 40s (port ${port})`);
+  if (!target)
+    throw new Error(`no WebView2 page target within 40s (port ${port})`);
   const ws = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((ok, no) => {
     ws.onopen = ok;
@@ -91,7 +117,8 @@ async function connect() {
       msg.error ? no(new Error(msg.error.message)) : ok(msg.result);
     } else if (msg.method === "Log.entryAdded") {
       const e = msg.params.entry;
-      if (e.level === "error") problems.push(`console error: ${e.text} ${e.url ?? ""}`);
+      if (e.level === "error")
+        problems.push(`console error: ${e.text} ${e.url ?? ""}`);
     } else if (msg.method === "Runtime.exceptionThrown") {
       problems.push(
         `uncaught: ${msg.params.exceptionDetails.exception?.description ?? msg.params.exceptionDetails.text}`,
@@ -99,7 +126,9 @@ async function connect() {
     } else if (msg.method === "Audits.issueAdded") {
       const i = msg.params.issue;
       if (i.code === "ContentSecurityPolicyIssue")
-        problems.push(`CSP issue: ${JSON.stringify(i.details.contentSecurityPolicyIssueDetails)}`);
+        problems.push(
+          `CSP issue: ${JSON.stringify(i.details.contentSecurityPolicyIssueDetails)}`,
+        );
     }
   };
   const send = (method, params = {}) =>
@@ -108,10 +137,18 @@ async function connect() {
       pending.set(id, { ok, no });
       ws.send(JSON.stringify({ id, method, params }));
     });
-  for (const d of ["Runtime", "Log", "Audits", "Page"]) await send(`${d}.enable`);
+  for (const d of ["Runtime", "Log", "Audits", "Page"])
+    await send(`${d}.enable`);
   const evaluate = async (expression) => {
-    const r = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? "evaluate failed");
+    const r = await send("Runtime.evaluate", {
+      expression,
+      returnByValue: true,
+      awaitPromise: true,
+    });
+    if (r.exceptionDetails)
+      throw new Error(
+        r.exceptionDetails.exception?.description ?? "evaluate failed",
+      );
     return r.result.value;
   };
   // the CSP issues that fired before Audits.enable are replayed by a reload
@@ -131,7 +168,9 @@ async function until(label, fn, ms = 30000) {
     }
     await sleep(400);
   }
-  throw new Error(`timeout waiting for ${label}${last instanceof Error ? `: ${last.message}` : ""}`);
+  throw new Error(
+    `timeout waiting for ${label}${last instanceof Error ? `: ${last.message}` : ""}`,
+  );
 }
 
 /**
@@ -146,7 +185,9 @@ async function selectWorktree(page) {
       return await until("the worktree row", () => page.evaluate(click), 12000);
     } catch (e) {
       if (attempt >= 3) {
-        const seen = await page.evaluate("document.body.innerText.slice(0, 600)").catch((x) => String(x));
+        const seen = await page
+          .evaluate("document.body.innerText.slice(0, 600)")
+          .catch((x) => String(x));
         console.error(`sidebar at the failure: ${JSON.stringify(seen)}`);
         throw e;
       }
@@ -181,17 +222,22 @@ let failed = null;
 try {
   launch();
   let page = await connect();
-  await until("the UI to render", () => page.evaluate("document.getElementById('root')?.children.length > 0")).catch(
-    async (e) => {
-      const st = await page
-        .evaluate("JSON.stringify({url: location.href, ready: document.readyState, html: document.body?.innerHTML.slice(0, 300)})")
-        .catch((x) => String(x));
-      throw new Error(`${e.message}\npage: ${st}\nproblems: ${[...new Set(problems)].join(" | ")}\n${dataDirReport()}`);
-    },
-  );
+  await until("the UI to render", () =>
+    page.evaluate("document.getElementById('root')?.children.length > 0"),
+  ).catch(async (e) => {
+    const st = await page
+      .evaluate(
+        "JSON.stringify({url: location.href, ready: document.readyState, html: document.body?.innerHTML.slice(0, 300)})",
+      )
+      .catch((x) => String(x));
+    throw new Error(
+      `${e.message}\npage: ${st}\nproblems: ${[...new Set(problems)].join(" | ")}\n${dataDirReport()}`,
+    );
+  });
   console.log("ok  boot: the frontend rendered");
   const title = await page.evaluate("document.title");
-  if (title !== "Axelstra") throw new Error(`unexpected document title ${JSON.stringify(title)}`);
+  if (title !== "Axelstra")
+    throw new Error(`unexpected document title ${JSON.stringify(title)}`);
   console.log("ok  boot: window title");
   // a project with one terminal session, registered through the CLI, must show up in the UI with a live terminal
   await until("the daemon", () => cli("ls").status === 0);
@@ -199,31 +245,63 @@ try {
   mkdirSync(repo);
   const git = (...a) => spawnSync("git", a, { cwd: repo, encoding: "utf8" });
   git("init", "-q", "-b", "main");
-  git("-c", "user.name=e2e", "-c", "user.email=e2e@example.invalid", "commit", "-q", "--allow-empty", "-m", "init");
+  git(
+    "-c",
+    "user.name=e2e",
+    "-c",
+    "user.email=e2e@example.invalid",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "init",
+  );
   const ap = cli("add-project", repo);
-  if (ap.status !== 0) throw new Error(`add-project failed: ${ap.stderr || ap.stdout}`);
-  const sp = cli("terminal", repo, "--title", "e2e-term", "--cmd", "echo axelstra-e2e-marker");
+  if (ap.status !== 0)
+    throw new Error(`add-project failed: ${ap.stderr || ap.stdout}`);
+  const sp = cli(
+    "terminal",
+    repo,
+    "--title",
+    "e2e-term",
+    "--cmd",
+    "echo axelstra-e2e-marker",
+  );
   if (sp.status !== 0) {
     const seen = cli("projects");
     throw new Error(`terminal failed: ${sp.stderr || sp.stdout}
 projects: ${seen.stdout || seen.stderr}
 ${dataDirReport()}`);
   }
-  console.log("ok  session: project added and terminal started through the CLI");
+  console.log(
+    "ok  session: project added and terminal started through the CLI",
+  );
   // the UI learns about CLI-made changes on its next refresh; a reload is the deterministic way to get one
   await page.send("Page.reload");
-  await until("the project in the sidebar", () => page.evaluate("document.body.innerText.includes('repo')"));
+  await until("the project in the sidebar", () =>
+    page.evaluate("document.body.innerText.includes('repo')"),
+  );
   console.log("ok  session: the project is listed");
   await selectWorktree(page);
-  await until("the terminal to mount", () => page.evaluate("!!document.querySelector('.xterm')"), 40000);
+  await until(
+    "the terminal to mount",
+    () => page.evaluate("!!document.querySelector('.xterm')"),
+    40000,
+  );
   console.log("ok  session: an xterm terminal is mounted");
   const id = /\d+/.exec(sp.stdout)?.[0];
-  await until("the marker in the session output", () => cli("read", id).stdout.includes("axelstra-e2e-marker"));
+  await until("the marker in the session output", () =>
+    cli("read", id).stdout.includes("axelstra-e2e-marker"),
+  );
   console.log("ok  session: the shell ran the command (axelstra read)");
   await until("the terminal canvas", () =>
-    page.evaluate("[...document.querySelectorAll('.xterm canvas')].some((c) => c.width > 0 && c.height > 0)"),
+    page.evaluate(
+      "[...document.querySelectorAll('.xterm canvas')].some((c) => c.width > 0 && c.height > 0)",
+    ),
   );
-  console.log("ok  session: the terminal has a sized canvas (the WebGL renderer drew)");
+  console.log(
+    "ok  session: the terminal has a sized canvas (the WebGL renderer drew)",
+  );
   problems.length = 0; // the page reload above tears xterm down mid-layout; only what happens from here on counts
 
   // restore: close the window, the daemon keeps the session, a relaunch shows it again
@@ -232,28 +310,43 @@ ${dataDirReport()}`);
   await sleep(1500);
   const ls = cli("ls", "--json");
   if (ls.status !== 0 || JSON.parse(ls.stdout).length < 1)
-    throw new Error(`daemon lost the session after the app closed: ${ls.stdout}${ls.stderr}`);
+    throw new Error(
+      `daemon lost the session after the app closed: ${ls.stdout}${ls.stderr}`,
+    );
   console.log("ok  restore: the daemon kept the session after the app closed");
   launch();
   page = await connect();
   await selectWorktree(page);
-  await until("the terminal after relaunch", () => page.evaluate("!!document.querySelector('.xterm')"), 40000);
+  await until(
+    "the terminal after relaunch",
+    () => page.evaluate("!!document.querySelector('.xterm')"),
+    40000,
+  );
   console.log("ok  restore: relaunched app shows the session again");
 
   await sleep(1000);
-  if (problems.length) throw new Error(`browser problems:\n  ${[...new Set(problems)].join("\n  ")}`);
+  if (problems.length)
+    throw new Error(
+      `browser problems:\n  ${[...new Set(problems)].join("\n  ")}`,
+    );
   console.log("ok  no CSP violation, console error or uncaught exception");
   // the policy must really be enforced: a <style> that did not get the page's nonce has to be refused
   const blocked = await page.evaluate(
     "(() => { document.head.insertAdjacentHTML('beforeend', '<style>body{outline:3px solid red}</style>'); return getComputedStyle(document.body).outlineStyle === 'none'; })()",
   );
-  if (!blocked) throw new Error("CSP is not enforcing: an un-nonced <style> was applied");
-  console.log("ok  CSP enforced: an injected <style> without the nonce is refused");
+  if (!blocked)
+    throw new Error("CSP is not enforcing: an un-nonced <style> was applied");
+  console.log(
+    "ok  CSP enforced: an injected <style> without the nonce is refused",
+  );
   page.close();
 } catch (e) {
   failed = e;
   console.error(`FAIL e2e: ${e.stack ?? e}`);
-  if (problems.length) console.error(`browser problems so far:\n  ${[...new Set(problems)].join("\n  ")}`);
+  if (problems.length)
+    console.error(
+      `browser problems so far:\n  ${[...new Set(problems)].join("\n  ")}`,
+    );
 } finally {
   if (app) kill(app.pid, true);
   // the daemon is detached from the app: stop the ones started from this build tree only (never the developer's own)
