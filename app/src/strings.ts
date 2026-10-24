@@ -171,8 +171,6 @@ export const S = {
     open: "Abrir",
     showProjects: "Mostrar projetos (Ctrl+B)",
     projects: "Projetos (Ctrl+B)",
-    addProjectHint: "Adiciona um projeto e escolhe um worktree.",
-    addProject: "Adicionar projeto",
     tabs: "Separadores",
     tabName: "Nome do separador",
     closeCommit: "Fechar commit",
