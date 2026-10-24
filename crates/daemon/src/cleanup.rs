@@ -31,6 +31,10 @@ fn warn(p: Option<&Project>, path: &str, kind: &str, why: String, dry: bool) -> 
 /// True when every commit of `branch` has an equivalent in `upstream` (`git cherry` marks them all `-`), or merging
 /// the branch into it would change nothing: the signature of a squash or rebase merge, which leaves no ancestor.
 pub fn squash_merged(repo: &Path, branch: &str, upstream: &str) -> bool {
+    // a branch that changes nothing (only empty commits) has no work to compare: it is not "merged", just empty
+    if git::run(repo, &["diff", "--quiet", &format!("{upstream}...{branch}")]).map(|o| o.ok).unwrap_or(true) {
+        return false;
+    }
     if let Ok(o) = git::run(repo, &["cherry", upstream, branch]) {
         if o.ok {
             let lines: Vec<&str> = o.stdout.lines().filter(|l| !l.trim().is_empty()).collect();
