@@ -220,14 +220,20 @@ pub fn search(query: &str, max: usize) -> Vec<Hit> {
 }
 
 // ---- Gemini CLI ----
-// Layout (from the Gemini CLI docs and source; NOT verified against an install, none on this machine):
-//   ~/.gemini/tmp/PROJECT_HASH/chats/session-TIMESTAMP-ID8.json   one session per file
-//   PROJECT_HASH = lowercase hex SHA-256 of the project root path
-//   { "sessionId", "projectHash", "startTime", "lastUpdated",
-//     "messages": [ { "id", "timestamp", "type": "user" | "gemini" | "info" | "error",
-//                     "content": string or [ { "text" } ], "model"?, "tokens"?: { input, output, cached, thoughts, tool, total } } ] }
-// Newer builds may write the same records as JSON lines (.jsonl): both are read. `logs.json` next to `chats` only
-// holds the user prompts, so it is not read. `gemini --resume` takes `latest`, an index or a session id.
+// Layout, verified against gemini-cli 0.65.0 (a real install writing to a throwaway HOME; fixtures in the tests):
+//   ~/.gemini/tmp/PROJECT_DIR/chats/session-TIMESTAMP-ID8.jsonl   one session per file
+//   PROJECT_DIR is a short slug of the folder name ("proj", "proj-1" on a clash) that `~/.gemini/projects.json` maps
+//   from the root path (lower-cased on Windows); older installs named the folder after the SHA-256 of the root path.
+//   Lines, in order: a header { sessionId, projectHash (SHA-256 of the root path as Gemini saw it), startTime,
+//   lastUpdated, kind }, then message records { id, timestamp, type: "user" | "gemini" | "info" | "warning" | "error",
+//   content: string or [ { text } | { functionResponse } ], model?, tokens?: { input, output, cached, thoughts, tool,
+//   total }, toolCalls? }, interleaved with { $set: { lastUpdated, summary.. } }, { $patch } and { $rewindTo: id }.
+//   A message is written again under the SAME id when its tool calls are filled in: the last record of an id wins
+//   (counting every line would charge those tokens twice). `input` includes `cached`. The first user message is the
+//   injected `<session_context>` block (date, OS, directory tree), which is not something the user typed.
+// Older builds wrote one `.json` object { sessionId, projectHash, startTime, lastUpdated, messages: [..] }: still read.
+// `logs.json` next to `chats` only holds the user prompts, so it is not read. `gemini --resume` takes `latest`, an
+// index or a session id, and only sees the conversations of the project it runs in.
 
 /// Gemini files larger than this are skipped, so one runaway log cannot stall a search.
 const GEMINI_MAX_BYTES: u64 = 16 * 1024 * 1024;
@@ -235,6 +241,35 @@ const GEMINI_MAX_BYTES: u64 = 16 * 1024 * 1024;
 fn gemini_files_of(project: &Path) -> Vec<PathBuf> {
     let Ok(chats) = std::fs::read_dir(project.join("chats")) else { return vec![] };
     chats.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json" || x == "jsonl")).collect()
+}
+
+/// Chat folders of the project rooted at `path`: the slug folder the registry (`~/.gemini/projects.json`, next to
+/// `tmp`) maps it to, plus the SHA-256 named folders of older installs. A folder that does not exist yields no files.
+fn gemini_project_dirs(root: &Path, registry: &[(String, String)], path: &str) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = registry.iter().filter(|(p, _)| same_root(p, path)).map(|(_, slug)| root.join(slug)).collect();
+    v.extend(gemini_hashes(path).into_iter().map(|h| root.join(h)));
+    v.dedup();
+    v
+}
+
+/// The registry as (root path, folder) pairs; empty when the file is missing or not the expected shape.
+fn gemini_registry(root: &Path) -> Vec<(String, String)> {
+    let Some(text) = root.parent().and_then(|g| std::fs::read_to_string(g.join("projects.json")).ok()) else { return vec![] };
+    let Ok(v) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) else { return vec![] };
+    v["projects"].as_object().map(|m| m.iter().filter_map(|(k, s)| Some((k.clone(), s.as_str()?.to_string()))).collect()).unwrap_or_default()
+}
+
+/// Same folder spelled two ways: Gemini lower-cases a Windows root before it registers it, and slashes vary.
+fn same_root(a: &str, b: &str) -> bool {
+    let norm = |p: &str| {
+        let p = p.trim_start_matches(r"\\?\").trim_end_matches(['/', '\\']).replace('\\', "/");
+        if p.as_bytes().get(1) == Some(&b':') {
+            p.to_ascii_lowercase()
+        } else {
+            p
+        }
+    };
+    norm(a) == norm(b)
 }
 
 fn gemini_files(root: &Path) -> Vec<PathBuf> {
@@ -329,6 +364,10 @@ fn gemini_text(c: &Value) -> String {
 }
 
 fn absorb_header(v: &Value, s: &mut GeminiSession) {
+    // `{"$set":{"lastUpdated":..}}` lines update the header in place
+    if v["$set"].is_object() {
+        return absorb_header(&v["$set"], s);
+    }
     if let Some(id) = v["sessionId"].as_str() {
         s.session = id.to_string();
     }
@@ -351,8 +390,31 @@ pub fn parse_gemini(text: &str, jsonl: bool) -> Option<GeminiSession> {
     if jsonl {
         for line in text.lines() {
             let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-            if v["type"].is_string() && v.get("content").is_some() {
-                msgs.push(v);
+            let id_of = |m: &Value| m["id"].as_str().map(String::from);
+            if let Some(to) = v["$rewindTo"].as_str() {
+                // the conversation was rewound to before this message: it and everything after it are gone
+                match msgs.iter().position(|m| m["id"].as_str() == Some(to)) {
+                    Some(i) => msgs.truncate(i),
+                    None => msgs.clear(),
+                }
+            } else if v["$patch"].is_object() {
+                let p = &v["$patch"];
+                for u in std::iter::once(p).chain(p["updates"].as_array().into_iter().flatten()) {
+                    if let (Some(id), Some(c)) = (u["id"].as_str(), u.get("content")) {
+                        if let Some(m) = msgs.iter_mut().find(|m| m["id"].as_str() == Some(id)) {
+                            m["content"] = c.clone();
+                        }
+                    }
+                }
+                for rid in p["removeIds"].as_array().into_iter().flatten().filter_map(|x| x.as_str()) {
+                    msgs.retain(|m| m["id"].as_str() != Some(rid));
+                }
+            } else if v["type"].is_string() && v.get("content").is_some() {
+                // the same id written again replaces the earlier record (its tool calls were filled in)
+                match id_of(&v).and_then(|id| msgs.iter().position(|m| m["id"].as_str() == Some(id.as_str()))) {
+                    Some(i) => msgs[i] = v,
+                    None => msgs.push(v),
+                }
             } else {
                 absorb_header(&v, &mut sess);
             }
@@ -370,6 +432,8 @@ pub fn parse_gemini(text: &str, jsonl: bool) -> Option<GeminiSession> {
             _ => continue,
         };
         let body = gemini_text(&m["content"]);
+        // context Gemini injects as a user turn (session setup, hook output): not typed by the user
+        let injected = role == "user" && (body.starts_with("<session_context>") || body.starts_with("<hook_context>"));
         if let Some(ts) = iso_secs(&m["timestamp"]) {
             sess.started = if sess.started == 0 { ts } else { sess.started.min(ts) };
             sess.updated = sess.updated.max(ts);
@@ -383,6 +447,9 @@ pub fn parse_gemini(text: &str, jsonl: bool) -> Option<GeminiSession> {
             totals.output += n("output") + n("thoughts");
             totals.cache_read += cached;
             totals.messages += 1;
+        }
+        if injected {
+            continue;
         }
         if sess.title.is_empty() && role == "user" && !body.trim().is_empty() {
             sess.title = body.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(120).collect();
@@ -781,9 +848,10 @@ pub fn worktree_usage(worktrees: &[String]) -> Vec<WorktreeUsage> {
         add_codex(&mut out, &sessions);
     }
     if let Some(root) = gemini_root() {
+        let registry = gemini_registry(&root);
         for w in &mut out {
-            for h in gemini_hashes(&w.worktree) {
-                for f in gemini_files_of(&root.join(&h)) {
+            for dir in gemini_project_dirs(&root, &registry, &w.worktree) {
+                for f in gemini_files_of(&dir) {
                     if let Some(u) = read_gemini(&f).map(|s| s.usage).filter(|u| u.messages > 0) {
                         w.add(&u, "gemini");
                     }
@@ -969,6 +1037,58 @@ mod tests {
         assert!(parse_gemini("[]", false).is_none());
         assert!(parse_gemini("", true).is_none());
         assert!(parse_gemini(r#"{"messages":[{"type":"user","content":null},{"type":"gemini"},7]}"#, false).is_none());
+    }
+
+    /// A conversation recorded by gemini-cli 0.65.0 (a shell tool call, then `--resume latest`), paths anonymised.
+    const GEMINI_REAL: &str = include_str!("../tests/fixtures/gemini-0.65.0/session-tool-call.jsonl");
+
+    #[test]
+    fn a_real_gemini_0_65_log_counts_each_message_once_and_skips_the_injected_context() {
+        let s = parse_gemini(GEMINI_REAL, true).unwrap();
+        assert_eq!(s.session, "8831b7c4-c371-4ac4-8710-9d19aaa3ff82");
+        assert_eq!(s.project_hash, "a963c4182a8f90c0628a7e01edfd4a4b662ab50e93ae4ebd872814ec444a9083");
+        // the setup block is not the title, and its directory tree is not searchable
+        assert_eq!(s.title, "RUNTOOL please");
+        assert_eq!(s.messages, vec![("user", "RUNTOOL please".to_string()), ("gemini", "stub answer ok".to_string())]);
+        // the tool-call message is in the file twice under one id: 200+5 once, plus 120 (30 cached) + 7 + 3 thoughts
+        assert_eq!(s.usage, Usage { input: 200 + 90, output: 5 + 7 + 3, cache_read: 30, cache_write: 0, messages: 2, context: 0 });
+        assert_eq!(s.updated, iso_secs(&serde_json::json!("2026-10-24T15:08:15.463Z")).unwrap());
+    }
+
+    #[test]
+    fn gemini_rewind_and_removed_messages_leave_the_conversation() {
+        let rec = |id: &str, t: &str, c: &str| format!("{{\"id\":\"{id}\",\"timestamp\":\"2026-10-20T10:00:00Z\",\"type\":\"{t}\",\"content\":\"{c}\"}}\n");
+        let head = "{\"sessionId\":\"s\",\"projectHash\":\"h\",\"startTime\":\"2026-10-20T10:00:00Z\"}\n";
+        let base = format!("{head}{}{}{}{}", rec("1", "user", "um"), rec("2", "gemini", "dois"), rec("3", "user", "três"), rec("4", "gemini", "quatro"));
+        let rewound = format!("{base}{{\"$rewindTo\":\"3\"}}\n");
+        assert_eq!(parse_gemini(&rewound, true).unwrap().messages.len(), 2);
+        let removed = format!("{base}{{\"$patch\":{{\"removeIds\":[\"2\",\"4\"]}}}}\n");
+        assert_eq!(parse_gemini(&removed, true).unwrap().messages.iter().map(|m| m.1.as_str()).collect::<Vec<_>>(), ["um", "três"]);
+        let edited = format!("{base}{{\"$patch\":{{\"id\":\"1\",\"content\":\"editado\"}}}}\n");
+        assert_eq!(parse_gemini(&edited, true).unwrap().messages[0].1, "editado");
+    }
+
+    #[test]
+    fn gemini_project_folders_come_from_the_registry_or_the_old_hash_name() {
+        let root = std::env::temp_dir().join(format!("axl-gemreg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let tmp = root.join(".gemini").join("tmp");
+        let chats = tmp.join("gem").join("chats");
+        std::fs::create_dir_all(&chats).unwrap();
+        std::fs::write(chats.join("session-2026-10-24T15-07-8831b7c4.jsonl"), GEMINI_REAL).unwrap();
+        // Gemini lower-cases a Windows root in the registry
+        std::fs::write(root.join(".gemini").join("projects.json"), r#"{"projects":{"c:\\wt\\gem":"gem","c:\\wt\\other":"other"}}"#).unwrap();
+        let reg = gemini_registry(&tmp);
+        assert_eq!(reg.len(), 2);
+        let dirs = gemini_project_dirs(&tmp, &reg, r"C:\wt\gem\");
+        assert_eq!(dirs[0], tmp.join("gem"));
+        assert!(dirs.contains(&tmp.join(sha256_hex(br"C:\wt\gem"))), "the pre-slug folder name is still tried");
+        let used: u64 = dirs.iter().flat_map(|d| gemini_files_of(d)).filter_map(|f| read_gemini(&f)).map(|s| s.usage.messages).sum();
+        assert_eq!(used, 2);
+        assert!(gemini_project_dirs(&tmp, &reg, r"C:\wt\nope").iter().all(|d| gemini_files_of(d).is_empty()));
+        assert!(same_root("/home/Me/x", "/home/Me/x/") && !same_root("/home/Me/x", "/home/me/x"));
+        assert!(gemini_registry(&root).is_empty(), "no projects.json next to a tmp folder that is not ~/.gemini/tmp");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
