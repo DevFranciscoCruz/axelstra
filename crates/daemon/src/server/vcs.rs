@@ -41,14 +41,18 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "git.checks" | "git.merge" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
-            tokio::task::block_in_place(|| -> Result<Value> {
+            let out = tokio::task::block_in_place(|| -> Result<Value> {
                 use crate::checks;
                 Ok(if req.method == "git.checks" {
                     serde_json::to_value(checks::status(&wt))?
                 } else {
                     json!({"output": checks::merge(&wt, p["auto"].as_bool().unwrap_or(false), p["delete_branch"].as_bool().unwrap_or(false))?})
                 })
-            })
+            });
+            if req.method == "git.merge" && out.is_ok() {
+                sweep_soon(reg);
+            }
+            out
         }
         "gh.list" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;

@@ -669,10 +669,13 @@ export type EnvTool = { id: string; found: boolean; path: string | null; version
 export const envTools = () => callOr<{ tools: EnvTool[] } | null>("env.tools", {}, null).then((r) => r?.tools ?? null);
 /** Copies the daemon's state files (settings, projects, sessions, automations; never the token) into a new backup folder; null on a daemon without it. */
 export const backupExport = () => callOr<{ path: string } | null>("backup.export", {}, null);
-/** Restores the backup folder `path` written by backupExport; null on a daemon without it. */
 /** Native folder dialog for the backup folder, then `backup.restore` on it. `undefined` = cancelled; null = the daemon is too old. */
 export const pickAndRestoreBackup = (title: string): Promise<{ restored: string[] } | null | undefined> =>
   nativePick<{ restored: string[] } | null>("backup.restore", "backup_restore_pick", title).then(
     (r) => (r === null ? undefined : r),
     (e) => (isUnknownMethod(e) ? null : Promise.reject(e)),
   );
+
+export type JanitorEvent = { project: string; path: string; branch: string; into: string; why: string; at: number };
+/** Worktrees the automatic sweep removed since the last call (take semantics); an older daemon has none. */
+export const janitorEvents = () => callOr<{ events: JanitorEvent[] }>("janitor.events", {}, { events: [] }).then((r) => r.events ?? []);
