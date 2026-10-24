@@ -801,7 +801,7 @@ export type TriggerPreview = {
   never_pr_worktrees: boolean;
   audit_method: string;
 };
-export type TriggerEvent = { kind: "ci_fix" | "ci_fix_limited" | "ci_fix_failed"; project: string; worktree: string; branch: string; sha?: string; detail?: string };
+export type TriggerEvent = { kind: "ci_fix" | "ci_fix_limited" | "ci_fix_failed"; project: string; worktree: string; branch: string; sha?: string; detail?: string; detail_code?: string; detail_params?: Record<string, unknown> };
 /** State, limits and prompt template of a project's CI-fix trigger; null on a daemon without `triggers.*`. */
 export const triggersGet = (project: string) => callOr<TriggerState | null>("triggers.get", { project }, null);
 /** What enabling would do (the prompt with an example failure, the limits); null on an older daemon. */
@@ -814,7 +814,7 @@ export const triggersEvents = () => callOr<{ events: TriggerEvent[] }>("triggers
 
 // ---- remote hosts (M7b): the registry lives in the Tauri host, not in the daemon ----
 export type HostState = "idle" | "connecting" | "ok" | "lost" | "auth";
-export type HostInfo = { id: string; name: string; spec: string; slot: number; state: HostState; error?: string; proto?: number; build?: string };
+export type HostInfo = { id: string; name: string; spec: string; slot: number; state: HostState; error?: string; /** message code of `error` when it is a single coded message */ error_code?: string; error_params?: Record<string, unknown>; proto?: number; build?: string };
 export type HostInfoReport = { os: string; home: string; user: string; hostname: string; shell: string; sep: string; proto: number; build: string };
 export type BrowseEntry = { name: string; git: boolean };
 export type BrowseResult = { path: string; parent: string | null; home: string; entries: BrowseEntry[]; truncated?: boolean };

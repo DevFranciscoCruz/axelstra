@@ -55,12 +55,26 @@ export function specProblem(raw: string): SpecProblem | null {
 /** apply a `host-state` event to the list; an unknown id (a host added elsewhere) leaves it as it was */
 export function applyHostState(
   list: HostInfo[],
-  ev: { id: string; state: HostState; error?: string | null },
+  ev: {
+    id: string;
+    state: HostState;
+    error?: string | null;
+    error_code?: string;
+    error_params?: Record<string, unknown>;
+  },
 ): HostInfo[] {
   if (!list.some((h) => h.id === ev.id)) return list;
-  return list.map((h) =>
-    h.id === ev.id ? { ...h, state: ev.state, error: ev.state === "ok" ? undefined : (ev.error ?? undefined) } : h,
-  );
+  return list.map((h) => {
+    if (h.id !== ev.id) return h;
+    const failed = ev.state !== "ok";
+    return {
+      ...h,
+      state: ev.state,
+      error: failed ? (ev.error ?? undefined) : undefined,
+      error_code: failed ? ev.error_code : undefined,
+      error_params: failed ? ev.error_params : undefined,
+    };
+  });
 }
 
 /** states from which "Voltar a ligar" makes sense */
