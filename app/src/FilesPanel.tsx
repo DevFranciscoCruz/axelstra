@@ -11,7 +11,7 @@ import { FsEntry, GrepHit, fsCreate, fsDelete, fsGrep, fsList, fsRename, fsSearc
 import { MenuItem, menuKey, showMenu } from "./ContextMenu";
 import { RightTabs } from "./RightTabs";
 import { changes, findWorktree, fsTick, guarded, openFile, selectedWorktree, setError, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban, rightTab, showNotice } from "./store";
-import { S } from "./strings";
+import { S, count } from "./strings";
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf("/")));
@@ -247,7 +247,7 @@ function Delta(props: { t: Tally | undefined; folder?: boolean; binary?: boolean
       {(t) => (
         <span class="nums">
           <Show when={props.folder}>
-            <span class="fcount" title={`${t().files} ficheiro(s) alterado(s)`}>{t().files}</span>
+            <span class="fcount" title={count(t().files ?? 0, "ficheiro alterado", "ficheiros alterados")}>{t().files}</span>
           </Show>
           <Show when={props.binary}>
             <span class="fbin">bin</span>

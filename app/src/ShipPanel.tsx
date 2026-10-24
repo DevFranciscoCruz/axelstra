@@ -112,8 +112,8 @@ export function ShipPanel() {
 
   return (
     <Show when={cur() && !cur()!.wt.is_main}>
-      <section class="ship" aria-label="Estado do pull request">
-        <Show when={st()} fallback={<div class="ship-line muted">A ver o pull request…</div>}>
+      <section class="ship" aria-label="Estado do PR">
+        <Show when={st()} fallback={<div class="ship-line muted">A ver o PR…</div>}>
           {(s) => (
             <Show
               when={!s().problem}

@@ -47,9 +47,9 @@ export const problemText = (s: Pick<ShipStatus, "problem" | "detail">): { text: 
     case "auth":
       return { text: "O gh não tem sessão iniciada no GitHub.", fix: "Corre `gh auth login` num terminal e depois atualiza." };
     case "nopr":
-      return { text: "Ainda não há pull request para este branch.", fix: "Faz push e cria o PR com “Criar PR” acima." };
+      return { text: "Ainda não há PR para este branch.", fix: "Faz push e cria o PR com “Criar PR” acima." };
     default:
-      return { text: s.detail || "Não foi possível ler o estado do pull request.", fix: "Atualiza daqui a pouco; se persistir, confirma que `gh pr view` funciona neste worktree." };
+      return { text: s.detail || "Não foi possível ler o estado do PR.", fix: "Atualiza daqui a pouco; se persistir, confirma que `gh pr view` funciona neste worktree." };
   }
 };
 
@@ -57,7 +57,7 @@ export const problemText = (s: Pick<ShipStatus, "problem" | "detail">): { text: 
 export const shouldPoll = (hidden: boolean, focused: boolean) => !hidden && focused;
 
 export const mergeQuestion = (s: Pick<ShipStatus, "number" | "title">, branch: string, deleteBranch: boolean) =>
-  `Fazer merge (squash) do pull request #${s.number}?\n\n${s.title}\n\nO branch "${branch}" entra no branch principal.${deleteBranch ? " O branch remoto será apagado." : ""} Isto não se desfaz.`;
+  `Fazer merge (squash) do PR #${s.number}?\n\n${s.title}\n\nO branch "${branch}" entra no branch principal.${deleteBranch ? " O branch remoto será apagado." : ""} Isto não se desfaz.`;
 
 export const autoMergeQuestion = (s: Pick<ShipStatus, "number" | "title">) =>
-  `Ativar o auto-merge (squash) do pull request #${s.number}?\n\n${s.title}\n\nO GitHub faz o merge sozinho quando os checks passarem e as revisões estiverem cumpridas.`;
+  `Ativar o auto-merge (squash) do PR #${s.number}?\n\n${s.title}\n\nO GitHub faz o merge sozinho quando os checks passarem e as revisões estiverem cumpridas.`;
