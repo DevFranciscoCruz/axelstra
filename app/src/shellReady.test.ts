@@ -5,7 +5,7 @@ const noSleep = () => Promise.resolve();
 
 describe("waitShellReady", () => {
   it("is ready once the prompt is on screen and stable", async () => {
-    const screens = [[""], ["PS C:\w>"], ["PS C:\w> "], ["PS C:\w>"]];
+    const screens = [[""], ["PS C:\\w>"], ["PS C:\\w> "], ["PS C:\\w>"]];
     let i = 0;
     expect(await waitShellReady(async () => screens[Math.min(i++, screens.length - 1)], { sleep: noSleep })).toBe(true);
     expect(i).toBe(3);

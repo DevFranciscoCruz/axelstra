@@ -3,7 +3,7 @@ import { Icon } from "./Icon";
 import { Automation, agentOptions, agentWarning, agentsList, deleteAutomation, listAutomations, runAutomation, saveAutomation } from "./api";
 import { Modal } from "./Modal";
 import { ask, askDiscard } from "./Confirm";
-import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations, showNotice, toast } from "./store";
+import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations, toast } from "./store";
 import { S } from "./strings";
 import { P } from "./strings.panels";
 import { Button, Field, Input, Select, Textarea } from "./ui";

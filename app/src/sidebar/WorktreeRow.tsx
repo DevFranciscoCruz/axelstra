@@ -4,7 +4,6 @@ import { Badge, Button } from "../ui";
 import { StateDot } from "../StateDot";
 import { MenuItem, isMenuKey, showMenu, showMenuAt } from "../ContextMenu";
 import { dotOfWorktree } from "../agentState";
-import { overlapTitle } from "../agentRow";
 import { P } from "../strings.panels";
 import {
   attention,

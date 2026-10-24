@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- loose test doubles for the arguments of the mocked invoke */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls: { method: string; params: Record<string, any> }[] = [];

@@ -1,4 +1,4 @@
-import { For, JSX, Show, on } from "solid-js";
+import { For, Show } from "solid-js";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   DockerCompose,
@@ -9,10 +9,8 @@ import {
   DockerStatus,
   DockerVolume,
 } from "../api";
-import { Icon } from "../Icon";
 import { Badge, Button } from "../ui";
 import { ago, imageUsers, isRunning, parseCreated, portChips, stateInfo } from "../dockerLogic";
-import { sessions, setError, showNotice } from "../store";
 import { DIcon } from "./shared";
 import { P } from "../strings.panels";
 

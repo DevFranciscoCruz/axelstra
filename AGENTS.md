@@ -5,8 +5,15 @@ Notes for coding agents and new contributors.
 ## Layout
 
 - `crates/core`, `crates/daemon`, `crates/cli`: engine (daemon, orchestrator, `axelstra` CLI).
-- `app/src-tauri`: Tauri host (Rust). `app/src`: frontend (TypeScript, built with `npm`).
-- `scripts/`: release and sidecar helpers. `.github/workflows/`: `ci.yml` and `release.yml`.
+- `crates/daemon/src/server.rs` holds the connection loop, the registry and `dispatch`, which routes a method by its
+  prefix to `crates/daemon/src/server/{session,worktrees,files,vcs,containers,orchestration,messaging,misc}.rs`.
+  A new method goes into the file of its domain; a new prefix also needs a line in the `dispatch` match.
+- `app/src-tauri`: Tauri host (Rust). `app/src`: frontend (TypeScript, built with `npm`). Its state is split into
+  `app/src/store/{ui,layout,sessions,notify,tabs,git,overlay}.ts` (re-exported by `app/src/store.ts`); `api.ts` is the only
+  place that calls the daemon.
+- `scripts/`: release and sidecar helpers and the check scripts below. `tools/`: smoke and E2E drivers, `fake-agent`.
+  `docs/`: `TOOLS.md` (scripts and tools), `E2E.md`, `RELEASING.md`, `DISTRIBUTION.md`, `s3-app-secret.md`.
+- `.github/workflows/`: `ci.yml` and `release.yml`.
 
 ## Build and test
 
@@ -16,6 +23,12 @@ Notes for coding agents and new contributors.
 - Frontend: `cd app && npm ci && npx tsc --noEmit && npm test`
 - Lint: `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings`
 - Release helpers: `node scripts/stamp-version.mjs --self-test` and `--check`.
+- Everything at once: `node scripts/check.mjs` (fmt, clippy, tests, tsc, vitest; `--engine` skips the desktop toolkit).
+- Check scripts: `scripts/check-tauri-config.mjs` (CSP and capabilities must stay as `SECURITY.md` says; no
+  `style-src-attr 'unsafe-inline'`, so no static `style="..."`: use a class, or a CSS variable set from code),
+  `scripts/check-format.mjs` (prettier on new or already formatted files; `prettier --write` them), `tools/check-deny-expiry.mjs`,
+  `cd app && npm run lint` (eslint).
+- E2E against the real app: `tools/e2e.mjs`, see `docs/E2E.md`. Smoke of the CLI and daemon: `tools/smoke.mjs`.
 - Heavy cargo/npm runs inside an Axelstra worktree go through `axelstra lock verify -- <cmd>`.
 
 ## Bumping PROTO
@@ -23,14 +36,29 @@ Notes for coding agents and new contributors.
 `PROTO` in `crates/daemon/src/proto.rs` is the app <-> daemon contract version. A daemon outlives
 app updates, and the app only restarts a daemon older than `PROTO`. Bump it (and add the new method
 to the doc comment above it) whenever the app starts calling a daemon method an old daemon lacks.
-Do not bump it for changes an old daemon already tolerates.
+Do not bump it for changes an old daemon already tolerates. Current: 15 (notices.take, audit.list, backup.export,
+backup.restore, orch.trust_info, env.tools).
+
+Every method the frontend calls must also be in `ALLOWED_METHODS` in `app/src-tauri/src/main.rs`; a unit test reads
+`app/src` (`call`, `callBg`, `callOr` with a string literal) and fails when the list and the sources drift apart.
+
+## SECURITY_MIN
+
+`SECURITY_MIN` in `proto.rs` is the oldest daemon the app accepts for security reasons, whatever its `PROTO`. `hello` and
+`ping` report it (with `BUILD_ID`); the app restarts a daemon that reports less or nothing. Bump it when a release fixes
+something in the daemon that must not keep running after an update (sessions are restored on restart). Agents get a
+per-session token (`AXELSTRA_AGENT_TOKEN`) and the `role=agent` connection is refused the app-only methods listed in
+`agent_forbidden` (server.rs): add new privileged methods there. `docs/s3-app-secret.md` explains what is still open.
 
 ## data_dir
 
 `proto::data_dir()` is the per-user state directory: `%LOCALAPPDATA%\axelstra` on Windows,
 `~/Library/Application Support/axelstra` on macOS, `$XDG_DATA_HOME/axelstra` (or
 `~/.local/share/axelstra`) on Linux. It holds the daemon token, `locks/`, `flows/`, `crash.log` and
-`lag.log`. Tests must not write to the real one; point `LOCALAPPDATA`/`HOME`/`XDG_DATA_HOME` at a
+`lag.log`, and the state files `sessions.json`, `projects.json`, `settings.json` (also the UI choices kept for the webview
+under `ui`), `automations.json`, each saved as a versioned envelope `{"v":N,"data":...}` with rotating `.1`..`.3` copies
+(`store.rs`; a file that does not parse is moved to `.bad.<ts>`, never overwritten). `backup.export` copies the state
+files into `backups/`, never the token. Cards use `serde_norway` (YAML). Tests must not write to the real one; point `LOCALAPPDATA`/`HOME`/`XDG_DATA_HOME` at a
 temp dir.
 
 ## Versions and releases

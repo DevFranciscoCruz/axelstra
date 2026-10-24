@@ -1,6 +1,6 @@
 import { JSX, Show } from "solid-js";
 import { Icon } from "../Icon";
-import { sessions, setError, showNotice } from "../store";
+import { setError, showNotice } from "../store";
 import { P } from "../strings.panels";
 
 export type DTab = "info" | "logs" | "terminal" | "files";
