@@ -18,7 +18,7 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 anyhow = "1"
 arboard = "3"
-png = "0.17"
+png = "0.18"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 sherpa-rs = { version = "0.6.8", default-features = false, features = ["download-binaries", "static"] }
