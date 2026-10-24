@@ -311,7 +311,6 @@ export function App() {
       <Show when={showSidebar()}>
         <div
           class="resizer"
-          style={{ left: "var(--left-w)" }}
           role="separator"
           aria-orientation="vertical"
           aria-label={S.app.leftWidth}
@@ -326,7 +325,6 @@ export function App() {
       <Show when={current() && showRightPanel()}>
         <div
           class="resizer right-edge"
-          style={{ right: "var(--right-w)" }}
           role="separator"
           aria-orientation="vertical"
           aria-label={S.app.rightWidth}

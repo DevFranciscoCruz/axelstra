@@ -296,7 +296,7 @@ export function Kanban(props: { project: string }) {
                         </div>
                       </Show>
                       <div
-                        role="group" style={{ position: "relative" }}
+                        class="relative" role="group"
                         onClick={(e) => e.stopPropagation()}
                         onFocusOut={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && menu() === c.meta.id && setMenu(null)}
                         onKeyDown={(e) => {
@@ -311,7 +311,7 @@ export function Kanban(props: { project: string }) {
                           {P.kanban.moveTo}
                         </Button>
                         <Show when={menu() === c.meta.id}>
-                          <div role="menu" style={{ display: "flex", "flex-direction": "column", gap: "2px", "margin-top": "4px" }}>
+                          <div role="menu" class="flex flex-col gap-0.5 mt-1">
                             <For each={COLS.filter((x) => x.id !== col.id)}>
                               {(x, i) => (
                                 <Button size="sm" class="justify-start" role="menuitem" ref={(el) => queueMicrotask(() => i() === 0 && el.focus())} onClick={() => void moveTo(c.meta.id, x.id)}>

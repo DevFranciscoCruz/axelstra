@@ -68,7 +68,7 @@ function WorktreeUsageList() {
   });
   return (
     <Show when={rows().length}>
-      <span class="wt-usage" style={{ "align-self": "center" }}>
+      <span class="wt-usage self-center">
         <Button ref={btn} variant="link" size="bare" class="cursor-default self-center px-2 text-xs hover:text-muted-foreground" title={wtUsageTip(list())} aria-label={P.usage.perWtTotal(fmt(spentOf(total())))} aria-haspopup="dialog" aria-expanded={open()} onClick={() => setOpen(!open())}>
           Σ {fmt(spentOf(total()))}
         </Button>

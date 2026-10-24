@@ -33,12 +33,14 @@ test("production CSP is locked down", () => {
   assert.ok(!d["script-src"].includes("'unsafe-inline'") && !d["script-src"].includes("'unsafe-eval'"));
 });
 
-test("styles: elements need the nonce, only style attributes may be inline", () => {
+test("styles: elements need the nonce, style attributes are not inline", () => {
   const d = directives(conf.app.security.csp);
   // style elements (xterm's DOM renderer, CodeMirror) get their nonce from app/index.html; see SECURITY.md
   assert.deepEqual(d["style-src"], ["'self'"]);
   assert.ok(!("style-src-elem" in d), "style-src-elem would bypass the nonce Tauri adds to style-src");
-  assert.deepEqual(d["style-src-attr"], ["'unsafe-inline'"]);
+  // no static style="" attribute is left in app/src (they are classes); runtime styles go through CSSOM, which CSP allows
+  assert.ok(!("style-src-attr" in d), "style-src-attr 'unsafe-inline' must stay removed; see SECURITY.md");
+  assert.ok(!conf.app.security.csp.includes("'unsafe-inline'"), "production CSP has no unsafe-inline");
   const html = readFileSync(new URL("../app/index.html", import.meta.url), "utf8");
   assert.match(html, /<style>[^<]*<\/style>/, "index.html needs a <style> so Tauri injects the nonce");
   assert.match(html, /\.nonce/, "index.html needs the script that hands the nonce to runtime <style> elements");

@@ -30,11 +30,13 @@ The production policy lives in `app/src-tauri/tauri.conf.json` (`app.security.cs
   option. `app/index.html` carries one `<style>` so Tauri injects a random nonce into that tag and into `style-src`
   on every page load, and an inline script wraps `document.createElement` so each `<style>` element the page creates
   gets that nonce. A `<style>` injected as markup (no nonce) is refused; `tools/e2e.mjs` checks that on the real app.
-- **Style attributes: `style-src-attr 'unsafe-inline'` remains.** Solid compiles static `style={{...}}` objects in JSX
-  into `style="..."` attributes inside its template HTML, and nonces and hashes cannot cover attributes (only
-  `'unsafe-hashes'` per exact value). About 40 static style objects in `app/src` would have to become classes or
-  dynamic expressions before this can go. Attribute styles cannot define rules or `@import`, so the remaining
-  exposure is small; removing it is tracked in the roadmap, not blocked by the platform.
+- **Style attributes: no `unsafe-inline` either** (no `style-src-attr`, so it falls back to `style-src 'self'`). Solid compiles a
+  fully static `style={{...}}` into a `style="..."` attribute inside its template HTML, which CSP blocks. So `app/src` has no
+  static style objects: they are CSS classes (`styles.css`, Tailwind utilities). Styles with a runtime value (`style={{ width: x }}`,
+  `style={FLOW}`, `style={{ "--left-w": ... }}`) compile to `el.style.setProperty` calls, which are CSSOM and not governed by
+  `style-src-attr`; those stay. Rule: a `style={{}}` must hold at least one runtime value, and a literal-only property in it is
+  moved to a class (a mixed object puts its literal parts in the template, so split them out too). Third-party templates with a
+  literal `style=` (Kobalte's `HiddenSelect` and popper arrow) are not rendered by this app. `tools/e2e.mjs` fails on a CSP violation.
 - **Images:** `img-src 'self' data: https://github.com https://avatars.githubusercontent.com`. The project icon is
   `https://github.com/<owner>.png`, which redirects to `avatars.githubusercontent.com`; both hosts are needed.
   `blob:` was dropped: nothing in the app creates blob images.

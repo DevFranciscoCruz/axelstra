@@ -13,7 +13,7 @@ export function Fallback(props: { name: string; error: unknown; reset: () => voi
       <div>
         {props.whole ? "O Axelstra encontrou um erro." : `Esta parte (${props.name}) encontrou um erro.`} Os terminais continuam a correr.
       </div>
-      <div class="hints" style={{ "max-width": "480px", "word-break": "break-word" }}>
+      <div class="hints boundary-msg">
         {errorText(props.error)}
       </div>
       <div class="empty-actions">

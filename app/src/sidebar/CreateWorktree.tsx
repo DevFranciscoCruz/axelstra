@@ -15,7 +15,7 @@ export function CreateWorktree(props: {
 }) {
   return (
     <Modal label="Novo worktree" dirty={!!props.newName.trim()} onClose={props.onClose}>
-      <div class="m-title" style={{ "font-weight": "600" }}>Novo worktree</div>
+      <div class="m-title font-semibold">Novo worktree</div>
       <Field label="Projeto" full><Input value={props.name} disabled /></Field>
       <Field label="Nome" full><Input
           placeholder="nome do worktree (também o nome do branch)"
@@ -31,7 +31,7 @@ export function CreateWorktree(props: {
           options={[{ value: "none", label: "Nenhum (só o worktree)" }, ...agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))]}
           onChange={props.setNewAgent}
         /></Field>
-      <div class="m-actions" style={{ "justify-content": "flex-end" }}>
+      <div class="m-actions">
         <Button onClick={props.onClose}>Cancelar</Button>
         <Button variant="default" disabled={!props.newName.trim()} onClick={props.onSubmit}>
           Criar worktree

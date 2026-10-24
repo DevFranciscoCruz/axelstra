@@ -59,7 +59,7 @@ const FileGlyph = () => (
   </svg>
 );
 const Chevron = (props: { open: boolean }) => (
-  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style={{ transform: props.open ? "rotate(90deg)" : "none", transition: "transform .1s" }}>
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" class="transition-transform duration-100" style={{ transform: props.open ? "rotate(90deg)" : "none" }}>
     <path d="M4.5 3l3 3-3 3" />
   </svg>
 );
@@ -463,7 +463,7 @@ export function FilesPanel() {
                   <Delta t={changeIndex().byDir.get("")} folder />
                 </div>
                 <Show when={isOpen("")}>
-                  <div class="kids" style={{ "--gx": "14px" }}>
+                  <div class="kids kids-root">
                     <Dir wt={w} path="" depth={1} />
                   </div>
                 </Show>

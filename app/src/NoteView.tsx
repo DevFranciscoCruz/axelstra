@@ -53,7 +53,7 @@ function Body(props: { target: Target }) {
 
   return (
     <Modal label={P.note.label(name)} onClose={close} class="modal note-view">
-      <div class="m-title" style={{ "font-weight": "600" }}>{P.note.heading(name)}</div>
+      <div class="m-title font-semibold">{P.note.heading(name)}</div>
       <Switch>
         <Match when={note.error}>
           <div class="note-err" role="alert">{String(note.error)}</div>
@@ -87,7 +87,7 @@ function Body(props: { target: Target }) {
       <Show when={status()}>
         {(s) => <div class="note-status" classList={{ bad: !s().ok }} role={s().ok ? "status" : "alert"}>{s().text}</div>}
       </Show>
-      <div class="m-actions" style={{ "justify-content": "flex-end" }}>
+      <div class="m-actions">
         <Button size="sm" onClick={close}>{P.note.close}</Button>
         <Button variant="default" size="sm" hidden={session === null} disabled={busy() || !note()} onClick={() => void exportIt(false)}>
           {P.note.exportBtn}
