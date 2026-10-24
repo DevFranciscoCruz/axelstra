@@ -1,5 +1,6 @@
 import { createSignal } from "solid-js";
 import { hasIcon } from "./Icon";
+import { agentLabel } from "./agentLabel";
 import { Modal } from "./Modal";
 import { agentKeys, projectAgent, setDefaultAgent } from "./store";
 import { S } from "./strings";
@@ -20,8 +21,7 @@ export function AgentPickerModal(props: { project: string | undefined; done: (ag
           <Select
             value={choice()}
             label={S.app.agent}
-            iconOnly
-            options={agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))}
+            options={agentKeys().map((a) => ({ value: a, label: agentLabel(a), icon: hasIcon(a) ? a : undefined }))}
             onChange={setChoice}
           />
         </Field>

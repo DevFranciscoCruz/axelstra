@@ -1,6 +1,7 @@
 import { Modal } from "../Modal";
 import { Select, Button, Field, Input } from "../ui";
 import { hasIcon } from "../Icon";
+import { agentLabel } from "../agentLabel";
 import { agentKeys } from "../store";
 
 /** The "Novo worktree" dialog: the name (also the branch) and the agent started in it. */
@@ -24,7 +25,12 @@ export function CreateWorktree(props: {
           placeholder="nome do worktree (também o nome do branch)"
           value={props.newName}
           onInput={(e) => props.setNewName(e.currentTarget.value)}
-          onKeyDown={(e) => e.key === "Enter" && props.newName.trim() && props.onSubmit()}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return;
+            // the dialog closes (and gives focus back to the "+" button) inside this handler: without this the Enter would then click that button and reopen the dialog empty
+            e.preventDefault();
+            if (props.newName.trim()) props.onSubmit();
+          }}
           ref={(el) => queueMicrotask(() => el.focus())}
         />
       </Field>
@@ -32,10 +38,9 @@ export function CreateWorktree(props: {
         <Select
           value={props.newAgent}
           label="Agente"
-          iconOnly
           options={[
             { value: "none", label: "Nenhum (só o worktree)" },
-            ...agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined })),
+            ...agentKeys().map((a) => ({ value: a, label: agentLabel(a), icon: hasIcon(a) ? a : undefined })),
           ]}
           onChange={props.setNewAgent}
         />

@@ -41,6 +41,23 @@ describe("CreateWorktree dialog", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
+  it("Enter is consumed (no click on the button that gets the focus back) and submits only with a name", () => {
+    const { onSubmit } = mount("feat-x");
+    const input = document.querySelector<HTMLInputElement>("input[placeholder^='nome do worktree']")!;
+    const ev = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    input.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("the agent selector shows logo and name, never only the logo", () => {
+    mount("x");
+    const trigger = document.querySelector<HTMLElement>("[aria-label^='Agente:']")!;
+    expect(trigger.textContent).toContain("Claude Code");
+    expect(trigger.className).not.toContain("sr-only");
+    expect(trigger.querySelector(".sr-only")).toBeNull();
+  });
+
   it("Enter submits only with a name; Cancel closes", () => {
     const { onSubmit, onClose } = mount("");
     const input = document.querySelector<HTMLInputElement>("input[placeholder^='nome do worktree']")!;
