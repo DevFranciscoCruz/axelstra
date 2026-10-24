@@ -1,5 +1,6 @@
 //! A daemon that stops answering must give the caller an error, not a frozen thread.
 
+mod common;
 use axelstra_daemon::client::{CallTimeout, Client};
 use axelstra_daemon::proto::{encode, JSON};
 use serde_json::{json, Value};
@@ -48,7 +49,7 @@ fn serve_hung(pipe: String) {
 
 #[test]
 fn a_hung_daemon_times_out_with_a_clear_error() {
-    let pipe = format!("{}-hung-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-hung-{}", common::base_pipe(), std::process::id());
     serve_hung(pipe.clone());
     std::thread::sleep(Duration::from_millis(300));
     // a stuck test must not hang the suite

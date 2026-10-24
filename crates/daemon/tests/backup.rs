@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::json;
@@ -15,7 +16,7 @@ fn start(root: &Path, tag: &str) -> Client {
         eprintln!("watchdog: test stuck");
         std::process::exit(1);
     });
-    let pipe = format!("{}-bk-{tag}-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-bk-{tag}-{}", common::base_pipe(), std::process::id());
     let token = "b".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {

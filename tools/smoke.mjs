@@ -29,6 +29,7 @@ const env = {
   HOME: home,
   USERPROFILE: home,
   LOCALAPPDATA: home,
+  AXELSTRA_DATA_DIR: join(home, "axelstra"), // explicit: the real data dir is never used (docs/TESTING.md)
   XDG_DATA_HOME: join(home, "share"),
   USERNAME: `axsmoke${process.pid}`,
   USER: `axsmoke${process.pid}`,

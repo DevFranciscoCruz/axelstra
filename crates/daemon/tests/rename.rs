@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::json;
@@ -13,7 +14,7 @@ fn rename_persists_with_the_session() {
     let root = std::env::temp_dir().join(format!("axelstra-rename-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
-    let pipe = format!("{}-rename-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-rename-{}", common::base_pipe(), std::process::id());
     let token = "r".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {

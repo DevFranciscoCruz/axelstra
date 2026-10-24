@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::json;
@@ -29,7 +30,7 @@ fn projects_worktrees_and_session_meta() {
     sh(&repo, &["commit", "-qm", "init"]);
     sh(&repo, &["remote", "add", "origin", "https://ghp_secret@github.com/Acme/widgets.git"]);
 
-    let pipe = format!("{}-proj-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-proj-{}", common::base_pipe(), std::process::id());
     let token = "p".repeat(32);
     let store = root.join("projects.json");
     let (p, t, s) = (pipe.clone(), token.clone(), store.clone());
@@ -136,7 +137,7 @@ fn worktree_from_pull_request_head() {
     sh(&repo, &["checkout", "-q", "main"]);
     sh(&repo, &["branch", "-D", "feature"]);
 
-    let pipe = format!("{}-prwt-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-prwt-{}", common::base_pipe(), std::process::id());
     let token = "p".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {

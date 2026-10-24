@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::json;
@@ -7,7 +8,7 @@ use std::time::{Duration, Instant};
 fn start(tag: &str) -> (String, String) {
     let root = std::env::temp_dir().join(format!("axelstra-hard-{tag}-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
-    let pipe = format!("{}-hard-{tag}-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-hard-{tag}-{}", common::base_pipe(), std::process::id());
     let token = "d".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {
