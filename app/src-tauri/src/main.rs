@@ -1200,23 +1200,25 @@ fn update_apply(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>) -> R
 }
 
 /// The window is created hidden (`visible: false` in tauri.conf.json) and shown here. Under `AXELSTRA_TEST_HIDDEN=1`
-/// (visual/e2e drivers) it is shown far off-screen, out of the taskbar and unfocusable: WebView2 still renders, so
+/// (visual/e2e drivers) it is shown fully transparent, click-through, out of the taskbar and never activated: WebView2 still renders, so
 /// the DevTools screenshots work, but nothing appears on the user's screen or steals the focus.
 fn show_main_window(app: &tauri::AppHandle) {
     use tauri::Manager;
     let Some(w) = app.get_webview_window("main") else { return };
     if std::env::var_os("AXELSTRA_TEST_HIDDEN").is_some_and(|v| v == "1") {
-        let _ = w.set_focusable(false);
         let _ = w.set_skip_taskbar(true);
-        let _ = w.set_position(tauri::PhysicalPosition::new(-32000, -32000));
         #[cfg(windows)]
         if let Ok(h) = w.hwnd() {
             // shown without activating: the foreground window of the user stays where it is
+            use windows_sys::Win32::UI::WindowsAndMessaging as wm;
             unsafe {
-                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
-                    h.0 as _,
-                    windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNOACTIVATE,
-                );
+                // fully transparent, click-through and tool-window: WebView2 counts it as visible (an off-screen
+                // or minimised window is occluded and never renders), the user sees and touches nothing
+                let ex = wm::GetWindowLongPtrW(h.0 as _, wm::GWL_EXSTYLE);
+                let add = (wm::WS_EX_LAYERED | wm::WS_EX_TRANSPARENT | wm::WS_EX_TOOLWINDOW | wm::WS_EX_NOACTIVATE) as isize;
+                wm::SetWindowLongPtrW(h.0 as _, wm::GWL_EXSTYLE, ex | add);
+                wm::SetLayeredWindowAttributes(h.0 as _, 0, 0, wm::LWA_ALPHA);
+                wm::ShowWindow(h.0 as _, wm::SW_SHOWNOACTIVATE);
             }
             return;
         }

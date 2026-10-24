@@ -45,7 +45,7 @@ const env = {
   USERNAME: user,
   USER: user,
   AXELSTRA_TEST_PIPE: user, // the pipe is named by SID now, USERNAME no longer isolates it
-  AXELSTRA_TEST_HIDDEN: "1", // the host shows its window off-screen, unfocusable, out of the taskbar
+  AXELSTRA_TEST_HIDDEN: process.env.AXELSTRA_TEST_HIDDEN ?? "1", // the host shows its window transparent, click-through, unfocusable
   WEBVIEW2_USER_DATA_FOLDER: join(dir, "webview"),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
 };
@@ -266,10 +266,6 @@ ${dataDirReport()}`);
   await selectWorktree(page);
   await until("the terminal after relaunch", () => page.evaluate("!!document.querySelector('.xterm')"), 40000);
   console.log("ok  restore: relaunched app shows the session again");
-  // the test window must stay off the user's screen (AXELSTRA_TEST_HIDDEN)
-  const win = await page.send("Browser.getWindowForTarget");
-  if (win.bounds.left > -10000) throw new Error(`the test window is on screen (left=${win.bounds.left})`);
-  console.log("ok  the test window is off-screen");
   // the user's foreground window must not have changed because of the test
   const fgAfter = foreground();
   if (fgBefore && fgAfter !== fgBefore)
