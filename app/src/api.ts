@@ -1,4 +1,5 @@
 import type { WtUsage } from "./usageFormat";
+import type { OverlapFiles, RebaseResult } from "./rebase";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AppError, toAppError } from "./appError";
@@ -397,6 +398,7 @@ export const dispatchOverlaps = () => callBg<Record<string, string[]>>("dispatch
 /** the name of a worktree folder/branch as the daemon renames it */
 export const worktreeRename = (path: string, name: string) => call<{ path?: string }>("worktree.rename", { path, name });
 
+export const dispatchOverlapFiles = () => callBg<OverlapFiles>("dispatch.overlap_files");
 export const killSession = (id: number) => (cancelNudge(id), call("session.kill", { id }));
 export const removeSession = (id: number) => (cancelNudge(id), call("session.remove", { id }));
 export const resizeSession = (id: number, cols: number, rows: number) =>
@@ -447,6 +449,7 @@ export const openInEditor = (worktree: string, app: "code") => call("open.editor
 export const removeWorktree = (project: string, path: string) => call("worktree.remove", { project, path });
 
 export type FileChange = {
+export const worktreeRebase = (project: string, path: string) => call<RebaseResult>("worktree.rebase", { project, path });
   path: string;
   status: string;
   untracked: boolean;

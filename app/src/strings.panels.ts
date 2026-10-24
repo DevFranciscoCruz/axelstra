@@ -104,6 +104,24 @@ export const P = {
     removeLost: (risks: string[]) =>
       risks.length ? `\n\nVais perder: ${risks.join("; ")}.` : "\n\nNão há alterações nem commits por enviar.",
     removeTitle: "Remover worktree",
+    rebase: {
+      menu: (base: string) => `Rebase sobre ${base}…`,
+      title: "Rebase",
+      ok: "Fazer rebase",
+      ask: (name: string, base: string) =>
+        `Fazer rebase de "${name}" sobre ${base}?\n\nOs commits do worktree são reescritos por cima de ${base}. Se houver conflitos, o rebase é cancelado e o branch fica como estava.`,
+      busy: (name: string) => `"${name}" tem um agente ou terminal a trabalhar: espera que fique inativo.`,
+      dirty: (name: string) => `"${name}" tem alterações por guardar: faz commit antes do rebase.`,
+      running: (name: string, base: string) => `A fazer rebase de "${name}" sobre ${base}…`,
+      done: (name: string, base: string) => `"${name}" está agora por cima de ${base}.`,
+      upToDate: (name: string, base: string) => `"${name}" já estava por cima de ${base}.`,
+      conflict: (name: string, files: string[], restored: boolean) =>
+        `Conflitos no rebase de "${name}" (${files.join(", ")}). ${restored ? "O branch ficou como estava." : "Verifica o estado do branch: não foi possível repô-lo."}`,
+      failed: (name: string, e: string) => `Não foi possível fazer rebase de "${name}": ${e}`,
+      overlapWith: (name: string, files: string[], more: number) =>
+        `${name}: ${files.join(", ")}${more > 0 ? ` e mais ${more}` : ""}`,
+      overlapTip: (lines: string[]) => `Edita os mesmos ficheiros que:\n${lines.join("\n")}`,
+    },
     // menus
     menu: {
       refresh: "Atualizar",

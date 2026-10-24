@@ -38,6 +38,8 @@ export function WorktreeRow(props: {
   topic: Topic;
   /** titles of the "same files" badge, null when nothing overlaps */
   overlap: string | null;
+  /** distinct files other worktrees also edit */
+  overlapCount: number;
   agentsHidden: boolean;
   menu: (label: string) => MenuItem[];
   onOpen: () => void;
@@ -146,6 +148,7 @@ export function WorktreeRow(props: {
             {(t) => (
               <Badge variant="overlap" role="img" title={t()} aria-label={t()}>
                 <Icon name="warning" size={11} />
+                {props.overlapCount}
               </Badge>
             )}
           </Show>
