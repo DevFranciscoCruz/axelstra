@@ -260,7 +260,7 @@ export function App() {
     try {
       const id =
         m?.kind === "agent" && m.agent
-          ? await launchDefaultAgent(target.project.id, target.wt.path, t.label ?? m.agent, m.agent, { key: m.key, resume: m.resume }, undefined, projectTerse(target.project.id))
+          ? await launchDefaultAgent(target.project.id, target.wt.path, t.label ?? m.agent, m.agent, { key: m.key, resume: m.resume, lead: m.lead }, undefined, projectTerse(target.project.id))
           : await spawnShell(target);
       await refreshSessions();
       openSession(target.wt.path, id);

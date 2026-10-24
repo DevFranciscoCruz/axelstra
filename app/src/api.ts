@@ -7,7 +7,7 @@ import { norm } from "./paths";
 
 /** Mirrors the Rust `meta` of a session (crates/daemon). `blank`, `interrupted` and `lost_workers` are set on entries of `session.pending`. */
 export type SessionMeta = {
-  project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; note?: string; parent?: number; worker?: boolean; main?: boolean;
+  project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; note?: string; parent?: number; worker?: boolean; main?: boolean; /** first agent of a worktree: named "main", parent of its tasks */ lead?: boolean;
   /** a cleared / never used conversation: nothing to bring back */
   blank?: boolean;
   /** the agent was mid-task when the daemon stopped */
@@ -149,7 +149,7 @@ export const launchDefaultAgent = async (
   worktree: string,
   agent: string,
   cli: string,
-  restore?: { key?: string; resume?: string; note?: string },
+  restore?: { key?: string; resume?: string; note?: string; lead?: boolean },
   pre?: { rules: string | null },
   terse?: Terse,
 ) => {
@@ -167,7 +167,7 @@ export const launchDefaultAgent = async (
   const line = agentLine(cli, resume, !!restore, ps, `${dir}/hooks.json`, rules);
   const run = ps ? [...args, "-NoExit", "-Command", line] : [...args, "-c", `${line}; exec ${shQuote(program, false)} -l`];
   const env = key ? { AXELSTRA_KEY: key, AXELSTRA_DIR: dir } : undefined;
-  const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent", agent: cli, resume, key, note: restore?.note, main }, env);
+  const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent", agent: cli, resume, key, note: restore?.note, main, lead: restore?.lead || undefined }, env);
   // only claude takes the rules as a system prompt: type them into the others once they have booted
   if (rules && cli !== "claude" && !restore) void nudge(id, rules).catch((e) => console.debug("nudge", e));
   return id;
@@ -254,7 +254,7 @@ const restoreOnce = async (): Promise<RestoreResult> => {
         } else {
           const terse = apiContext.terse(m.project);
           const rules = await rulesFor(terse);
-          const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume, note: m.note }, { rules }, terse);
+          const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume, note: m.note, lead: m.lead }, { rules }, terse);
           const note = restartNote(!!m.interrupted, m.lost_workers ?? []);
           if (note) void nudge(id, note).catch((e) => console.debug("nudge", e));
           restored++;

@@ -4,6 +4,7 @@ import { Badge, Button } from "../ui";
 import { StateDot } from "../StateDot";
 import { MenuItem, isMenuKey, showMenu, showMenuAt } from "../ContextMenu";
 import { dotOfWorktree } from "../agentState";
+import { worktreeSignals } from "../leadRole";
 import { P } from "../strings.panels";
 import {
   attention,
@@ -42,14 +43,17 @@ export function WorktreeRow(props: {
   onOpen: () => void;
   onToggleFold: () => void;
   onToggleAgents: () => void;
+  onStartLead: () => void;
   onDrop: (label: string) => void;
 }) {
   const w = () => props.wt;
   const label = () => w().branch ?? P.sidebar.detached;
   const mainBranch = () => props.project.default_branch ?? "main";
-  const live = () => sessionsOf(w().path).filter((s) => s.running).length;
-  const working = () => sessionsOf(w().path).some((s) => sessionState(s) === "working");
-  const waiting = () => sessionsOf(w().path).some((s) => sessionState(s) === "waiting");
+  // the lead speaks for the worktree; a task only adds "waiting"
+  const signals = () => worktreeSignals(sessionsOf(w().path), sessionState);
+  const live = () => signals().live;
+  const working = () => signals().working;
+  const waiting = () => signals().waiting;
   const needs = () => attention().has(norm(w().path));
   const queued = () => live() === 0 && flowState()[norm(w().path)] === "queued";
   const st = () => wtStatus()[norm(w().path)];
@@ -232,7 +236,14 @@ export function WorktreeRow(props: {
           </Button>
         </Show>
       </div>
-      <AgentList path={w().path} depth={props.depth} hidden={props.agentsHidden} onToggle={props.onToggleAgents} />
+      <AgentList
+        path={w().path}
+        depth={props.depth}
+        hidden={props.agentsHidden}
+        onToggle={props.onToggleAgents}
+        isMain={w().is_main}
+        onStartLead={props.onStartLead}
+      />
     </>
   );
 }
