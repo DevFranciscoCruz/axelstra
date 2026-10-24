@@ -5,7 +5,7 @@ use axelstra_core::pty::{Session, Spawn};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -59,6 +59,8 @@ struct Registry {
     computer: AtomicBool,
     /// what agents' own hooks said they are doing (`session.hint`)
     hints: axelstra_core::waiting::Hints,
+    /// bumped when a request changed projects or worktrees; watchers hear it as `projects.changed`
+    wt_gen: AtomicU64,
 }
 
 impl Registry {
@@ -100,6 +102,7 @@ impl Registry {
             clients: Default::default(),
             computer: AtomicBool::new(false),
             hints: Default::default(),
+            wt_gen: AtomicU64::new(0),
         }
     }
 
@@ -701,8 +704,17 @@ fn ensure_session_notifier(reg: &Arc<Registry>, tx: &Tx, subs: &mut HashMap<u32,
         };
         // the client lists sessions itself when it connects: only changes after that are news
         let mut last = sig();
+        let mut last_gen = reg.wt_gen.load(Ordering::SeqCst);
         while !stop.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(1000));
+            // worktrees or projects changed through any client (the CLI included): the sidebar must list them again
+            let g = reg.wt_gen.load(Ordering::SeqCst);
+            if g != last_gen {
+                last_gen = g;
+                if tx.blocking_send(encode(EVENT, json!({"event": "projects.changed"}).to_string().as_bytes())).is_err() {
+                    return;
+                }
+            }
             let now = sig();
             if now != last {
                 last = now;
@@ -778,6 +790,7 @@ fn dispatch(
     {
         *reg.plist.lock_recover() = None;
         crate::overview::invalidate();
+        reg.wt_gen.fetch_add(1, Ordering::SeqCst);
     }
     if *agent && agent_forbidden(&req.method, p) {
         anyhow::bail!("{} is not allowed to agents: it is done by the user in the app", req.method);
