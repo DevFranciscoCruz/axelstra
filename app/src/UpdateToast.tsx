@@ -12,7 +12,6 @@ const DISMISSED_KEY = "axelstra.updateDismissed";
 const loadDismissed = () => readString(DISMISSED_KEY);
 const saveDismissed = (v: string) => writeString(DISMISSED_KEY, v); // storage unavailable: it just comes back next start
 // the card lives inside the shared toast stack (ErrorToast), so it flows there instead of floating on its own
-const FLOW = { position: "static", width: "auto", animation: "none" } as const;
 
 type Info = { version: string; notes: string | null };
 
@@ -55,6 +54,7 @@ export function UpdateToast() {
     let unlisten: (() => void) | undefined;
     let gone = false;
     void getCurrentWindow()
+      // eslint-disable-next-line solid/reactivity -- focus event handler
       .onFocusChanged(({ payload: focused }) => {
         if (focused && Date.now() - lastCheck > FOCUS_THROTTLE_MS) void check();
       })
@@ -87,7 +87,7 @@ export function UpdateToast() {
   return (
     <Show when={shown()}>
       {(i) => (
-        <div class="update-toast" role="status" aria-label={S.update.available} style={FLOW}>
+        <div class="update-toast flow" role="status" aria-label={S.update.available}>
           <div class="ut-head">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M8 2.5v8M4.8 7.6 8 10.8l3.2-3.2M3 13h10" />

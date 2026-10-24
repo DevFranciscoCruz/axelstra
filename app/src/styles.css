@@ -235,6 +235,7 @@ button.primary {
   margin: auto;
 }
 .term-slot {
+  display: flex;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -955,3 +956,10 @@ button.icon, button.x, button.cbtn { display: inline-flex; align-items: center; 
 .bud-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .bud-sub { margin: 6px 0 0; font-size: var(--fs-base); }
 .bud-warn { color: var(--warn); }
+
+/* state modifiers that used to be inline styles (the CSP forbids static style attributes) */
+.placeholder.whole { height: 100vh; }
+.term-slot.off, .editor-host.off { display: none; }
+.error-toast.flow, .error-toast.notice.flow { position: static; transform: none; }
+.update-toast.flow { position: static; width: auto; animation: none; }
+.mono-list { margin: 0; padding-left: 18px; font-family: monospace; font-size: var(--fs-md); line-height: 1.5; }

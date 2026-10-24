@@ -58,6 +58,7 @@ export function Automations() {
   };
 
   const save = () =>
+    // eslint-disable-next-line solid/reactivity -- guard() runs this from an event handler
     guard(async () => {
       await saveAutomation(draft()!);
       setDraft(null);

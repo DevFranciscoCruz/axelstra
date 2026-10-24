@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createResource, createSignal } from "solid-js";
+import { For, Match, Show, Switch, createResource, createSignal, untrack } from "solid-js";
 import { Button } from "./ui";
 import { Modal } from "./Modal";
 import { ask } from "./Confirm";
@@ -24,9 +24,10 @@ export function NoteView(props: { files?: boolean }) {
 }
 
 function Body(props: { target: Target }) {
-  const name = props.target.name;
+  // the body is rebuilt for each target, so both are read once
+  const name = untrack(() => props.target.name);
   // only a live session can export: the daemon finds the worktree through the session
-  const session = "session" in props.target ? props.target.session : null;
+  const session = untrack(() => ("session" in props.target ? props.target.session : null));
   const [note] = createResource(
     () => props.target,
     (t) => ("session" in t ? notesRead(t.session) : notesReadFile(t.project, t.name)),

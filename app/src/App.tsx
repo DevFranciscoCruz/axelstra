@@ -466,7 +466,7 @@ export function App() {
               >
                 <For each={keptLive()}>
                   {(id) => (
-                    <div class="term-slot" style={{ display: id === activeSession() ? "flex" : "none" }}>
+                    <div class="term-slot" classList={{ off: id !== activeSession() }}>
                       <TerminalView id={id} active={() => id === activeSession()} onExit={() => void refreshSessions()} />
                     </div>
                   )}

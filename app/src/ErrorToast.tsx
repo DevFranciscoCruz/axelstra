@@ -6,17 +6,14 @@ import { Button } from "./ui";
 import { S } from "./strings";
 
 // .error-toast is position:fixed on its own; inside the stack the wrapper positions, the toasts flow
-const FLOW = { position: "static", transform: "none" } as const;
-
 function ToastCard(props: { t: Toast }) {
   const t = () => props.t;
   // a toast that closes by itself waits while the pointer or the keyboard focus is on it (WCAG 2.2.1)
   return (
     <div
-      class="error-toast"
+      class="error-toast flow"
       classList={{ notice: t().kind !== "error" }}
       data-kind={t().kind}
-      style={FLOW}
       onMouseEnter={() => pauseToast(t().id)}
       onMouseLeave={() => resumeToast(t().id)}
       onFocusIn={() => pauseToast(t().id)}
@@ -62,7 +59,7 @@ export function ErrorToast(props: { children?: JSX.Element }) {
       <div class="toast-stack">
         <div class="toast-stack-in">
           <Show when={daemonReconnecting()}>
-            <div class="error-toast notice" style={FLOW}>
+            <div class="error-toast notice flow">
               <span class="et-msg">{S.toast.reconnecting}</span>
               <Button size="sm" class="flex-none" onClick={() => void retryDaemon()}>
                 {S.toast.retryNow}

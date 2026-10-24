@@ -1,5 +1,5 @@
 // Small ruleset: typescript-eslint's recommended rules (type-unaware, fast) plus the Solid reactivity checks.
-// Run `npm run lint`. Findings in existing code are warnings so the gate only blocks real errors.
+// Run `npm run lint`. Reactivity findings are errors (F22); the rest stay warnings so the gate only blocks real errors.
 import js from "@eslint/js";
 import globals from "globals";
 import solid from "eslint-plugin-solid/configs/typescript";
@@ -13,6 +13,15 @@ export default tseslint.config(
     files: ["src/**/*.{ts,tsx}"],
     ...solid,
     languageOptions: { ...solid.languageOptions, globals: globals.browser },
+  },
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: { "solid/reactivity": "error" },
+  },
+  {
+    // tests build components by hand (createComponent in an array), outside a render scope
+    files: ["src/**/*.test.ts"],
+    rules: { "solid/reactivity": "off" },
   },
   {
     rules: {

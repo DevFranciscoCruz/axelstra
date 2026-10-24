@@ -170,6 +170,7 @@ export function Sidebar() {
 
   const [pendingWt, setPendingWt] = createSignal<{ project: string; name: string } | null>(null);
   const submitWorktree = (projectId: string) =>
+    // eslint-disable-next-line solid/reactivity -- run() is only called from event handlers
     run(async () => {
       const name = newName().trim();
       setCreating(null);
@@ -217,6 +218,7 @@ export function Sidebar() {
     setEditSetup(null);
   };
   const saveSetup = (projectId: string) =>
+    // eslint-disable-next-line solid/reactivity -- run() is only called from event handlers
     run(async () => {
       await setProjectSetup(projectId, setupText());
       setEditSetup(null);

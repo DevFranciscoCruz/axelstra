@@ -6,8 +6,6 @@ import { projects, refreshProjects, setError } from "./store";
 import { Button, Field, Textarea } from "./ui";
 import { P } from "./strings.panels";
 
-const LIST = { margin: "0", "padding-left": "18px", "font-family": "monospace", "font-size": "12px", "line-height": "1.5" };
-
 /** Per-project settings: the setup command of new worktrees, and a preview of the files `.worktreeinclude` copies. */
 export function ProjectSettings(props: { projectId: string; onClose: () => void }) {
   const project = () => projects().find((p) => p.id === props.projectId);
@@ -68,13 +66,13 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
           fallback={<div class="auto-note">{P.projectSettings.noFilePre}<code>.worktreeinclude</code>{P.projectSettings.noFilePost}</div>}
         >
           <Show when={preview()!.files.length} fallback={<div class="auto-note">{P.projectSettings.noMatch}</div>}>
-            <ul style={LIST} aria-label={P.projectSettings.willCopy}>
+            <ul class="mono-list" aria-label={P.projectSettings.willCopy}>
               <For each={preview()!.files}>{(f) => <li>{f}</li>}</For>
             </ul>
           </Show>
           <Show when={preview()!.skipped.length}>
             <div class="auto-note">{P.projectSettings.skippedHead}</div>
-            <ul style={LIST} aria-label={P.projectSettings.skippedLabel}>
+            <ul class="mono-list" aria-label={P.projectSettings.skippedLabel}>
               <For each={preview()!.skipped}>
                 {(s) => (
                   <li>

@@ -1,4 +1,4 @@
-import { Accessor, createSignal } from "solid-js";
+import { Accessor, createSignal, untrack } from "solid-js";
 
 /**
  * Where a saved value is also sent (the daemon's settings.json, see uiState.ts), so it outlives the WebView profile.
@@ -80,7 +80,7 @@ export function createPersisted<T>(
   return [
     get,
     (v) => {
-      const next = set(() => (typeof v === "function" ? (v as (prev: T) => T)(get()) : v));
+      const next = set(() => (typeof v === "function" ? (v as (prev: T) => T)(untrack(get)) : v));
       writeJson(key, next);
       return next;
     },

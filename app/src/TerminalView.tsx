@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { Button, Input } from "./ui";
-import { Show, createEffect, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, onCleanup, onMount, untrack } from "solid-js";
 import { Icon } from "./Icon";
 import { rememberTermSize, resizeSession, writeSession } from "./api";
 import { S } from "./strings";
@@ -117,7 +117,7 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       term.focus();
     });
 
-    term.onData((d) => void writeSession(props.id, d));
+    term.onData((d) => void writeSession(untrack(() => props.id), d));
     term.onResize(sizeSync.resized);
     refit();
     const ro = new ResizeObserver(refit);

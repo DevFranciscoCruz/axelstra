@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 import { createPoller } from "./poller";
 import { ClaudeStatus, CodexLimits, CodexWindow, agentStatus, codexLimits } from "./api";
 import { activeSession, sessions } from "./store";
@@ -63,8 +63,7 @@ export function LimitsBar() {
     const s = sessions().find((x) => x.id === activeSession());
     return s?.meta?.agent === "claude" ? s.meta.key : undefined;
   });
-  createEffect(() => {
-    const key = claudeKey();
+  createEffect(on(claudeKey, (key) => {
     let alive = true;
     const load = () => {
       setNow(Date.now() / 1000);
@@ -76,7 +75,7 @@ export function LimitsBar() {
       alive = false;
       t.stop();
     });
-  });
+  }));
   createEffect(() => {
     const load = () => codexLimits().then((v) => v && setCodex(v)).catch(() => 0);
     void load();

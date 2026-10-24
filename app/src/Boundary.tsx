@@ -1,4 +1,4 @@
-import { ErrorBoundary, Show, type JSX } from "solid-js";
+import { ErrorBoundary, Show, untrack, type JSX } from "solid-js";
 import { copyDiagnostics, logFrontendError } from "./api";
 import { errorText } from "./appError";
 import { formatError } from "./errorHooks";
@@ -7,11 +7,13 @@ import { Button } from "./ui";
 /** What a section shows instead of itself when it threw while rendering: the rest of the app (terminals included) keeps running. */
 export function Fallback(props: { name: string; error: unknown; reset: () => void; whole?: boolean }) {
   // the log gets the real error with its stack; the screen gets a sentence
-  void logFrontendError(formatError("boundary", props.error, props.name)).catch((e) =>
-    console.debug("logFrontendError", e),
-  );
+  untrack(() => {
+    void logFrontendError(formatError("boundary", props.error, props.name)).catch((e) =>
+      console.debug("logFrontendError", e),
+    );
+  });
   return (
-    <div class="placeholder" role="alert" style={props.whole ? { height: "100vh" } : undefined}>
+    <div class="placeholder" classList={{ whole: props.whole }} role="alert">
       <div>
         {props.whole ? "O Axelstra encontrou um erro." : `Esta parte (${props.name}) encontrou um erro.`} Os terminais
         continuam a correr.

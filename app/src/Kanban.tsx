@@ -182,12 +182,14 @@ export function Kanban(props: { project: string }) {
     void selectWorktree(wt);
   };
   const retry = (c: KCard) =>
+    // eslint-disable-next-line solid/reactivity -- act() is only called from click handlers
     act(async () => {
       const acc = c.meta.acceptance;
       if (acc && !(await ask(P.kanban.retryAsk(c.meta.title || c.meta.id, acc), { title: P.kanban.retryTitle, kind: "warning" }))) return;
       await orchRetry(props.project, c.meta.id, !!acc);
     });
   const openPr = (c: KCard) =>
+    // eslint-disable-next-line solid/reactivity -- act() is only called from click handlers
     act(async () => {
       const wt = taskWt(c.meta.id);
       if (!wt) throw new Error(P.kanban.unknownWtShort);
