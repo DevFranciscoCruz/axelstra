@@ -76,8 +76,10 @@ function selfTest() {
       mkdirSync(dirname(join(dir, file)), { recursive: true });
       writeFileSync(join(dir, file), text);
     };
-    const cargo = (v) => `[workspace]\nmembers = []\n\n[workspace.package]\nedition = "2021"\nversion = "${v}"\n\n[dependencies]\nfoo = { version = "9.9.9" }\n`;
-    const json = (v) => `{\n  "name": "x",\n  "version": "${v}",\n  "dependencies": { "a": { "version": "9.9.9" } }\n}\n`;
+    const cargo = (v) =>
+      `[workspace]\nmembers = []\n\n[workspace.package]\nedition = "2021"\nversion = "${v}"\n\n[dependencies]\nfoo = { version = "9.9.9" }\n`;
+    const json = (v) =>
+      `{\n  "name": "x",\n  "version": "${v}",\n  "dependencies": { "a": { "version": "9.9.9" } }\n}\n`;
     const seed = (c, p, t) => {
       put("Cargo.toml", cargo(c));
       put("app/package.json", json(p));
@@ -93,11 +95,18 @@ function selfTest() {
     seed("0.1.0", "0.1.0", "0.1.0");
     assert(stamp(dir, "v1.2.3") === "1.2.3", "stamp returns the version");
     assert(check(dir) === "1.2.3", "all three stamped");
-    assert(readFileSync(join(dir, "Cargo.toml"), "utf8") === cargo("1.2.3"), "cargo: only the workspace version changed");
-    assert(readFileSync(join(dir, "app/package.json"), "utf8") === json("1.2.3"), "json: only the top-level version changed");
+    assert(
+      readFileSync(join(dir, "Cargo.toml"), "utf8") === cargo("1.2.3"),
+      "cargo: only the workspace version changed",
+    );
+    assert(
+      readFileSync(join(dir, "app/package.json"), "utf8") === json("1.2.3"),
+      "json: only the top-level version changed",
+    );
 
     seed("0.1.0", "0.1.0", "0.1.0");
-    for (const bad of ["1.2.3", "v1.2", "v1.2.3-rc1", "vx", ""]) throws(() => stamp(dir, bad), /bad tag/, `bad tag "${bad}"`);
+    for (const bad of ["1.2.3", "v1.2", "v1.2.3-rc1", "vx", ""])
+      throws(() => stamp(dir, bad), /bad tag/, `bad tag "${bad}"`);
     assert(check(dir) === "0.1.0", "a bad tag leaves the files untouched");
 
     put("Cargo.toml", "[workspace]\n");

@@ -51,7 +51,13 @@ try {
   if (!up) throw new Error("daemon did not answer `ls` within 30s");
   console.log("ok  daemon up, `ls` answers");
 
-  const sp = cli("spawn", "--", process.execPath, "-e", "console.log('axelstra-smoke-marker'); setTimeout(()=>{}, 60000)");
+  const sp = cli(
+    "spawn",
+    "--",
+    process.execPath,
+    "-e",
+    "console.log('axelstra-smoke-marker'); setTimeout(()=>{}, 60000)",
+  );
   if (sp.status !== 0) throw new Error(`spawn failed: ${sp.stderr || sp.stdout}`);
   const id = /\d+/.exec(sp.stdout)?.[0];
   if (!id) throw new Error(`spawn printed no session id: ${sp.stdout}`);
@@ -59,7 +65,8 @@ try {
 
   const ls = cli("ls", "--json");
   if (ls.status !== 0) throw new Error(`ls --json failed: ${ls.stderr}`);
-  if (!JSON.parse(ls.stdout).some((s) => String(s.id) === id)) throw new Error(`session ${id} missing from ls --json: ${ls.stdout}`);
+  if (!JSON.parse(ls.stdout).some((s) => String(s.id) === id))
+    throw new Error(`session ${id} missing from ls --json: ${ls.stdout}`);
   console.log("ok  session listed");
 
   const k = cli("kill", id);
