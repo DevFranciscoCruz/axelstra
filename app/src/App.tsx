@@ -31,6 +31,7 @@ import { useBootstrap } from "./useBootstrap";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
+import { VersionSkew } from "./VersionSkew";
 import { PanelIcon } from "./PanelIcon";
 import { CloseConfirm } from "./CloseConfirm";
 import { ConfirmHost } from "./Confirm";
@@ -46,6 +47,7 @@ import { TabBar } from "./TabBar";
 import { pickProject } from "./projectActions";
 import { ask } from "./Confirm";
 import { PullsPanel } from "./PullsPanel";
+import { TimelinePanel } from "./TimelinePanel";
 import { TerminalView } from "./TerminalView";
 import {
   activeSession,
@@ -492,7 +494,7 @@ export function App() {
       </main>
       <Show when={current() && showRightPanel()}>
         <Section name={S.app.sectionRight}>
-          <Show when={rightTab() === "files"} fallback={rightTab() === "pulls" ? <PullsPanel /> : <ChangesPanel />}>
+          <Show when={rightTab() === "files"} fallback={rightTab() === "pulls" ? <PullsPanel /> : rightTab() === "timeline" ? <TimelinePanel /> : <ChangesPanel />}>
             <FilesPanel />
           </Show>
         </Section>
@@ -503,6 +505,7 @@ export function App() {
     <ContextMenu />
     <ErrorToast>
       <UpdateToast />
+      <VersionSkew />
     </ErrorToast>
     </>
   );

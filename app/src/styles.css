@@ -950,3 +950,8 @@ button.icon, button.x, button.cbtn { display: inline-flex; align-items: center; 
 .boundary-msg { max-width: 480px; word-break: break-word; }
 .kids-root { --gx: 14px; }
 .m-actions.start { justify-content: flex-start; }
+.wup-bud { display: flex; gap: 12px; justify-content: flex-end; margin-bottom: 4px; }
+.bud-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-lg); }
+.bud-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bud-sub { margin: 6px 0 0; font-size: var(--fs-base); }
+.bud-warn { color: var(--warn); }

@@ -244,8 +244,11 @@ fn new_agent_token() -> Option<String> {
 fn agent_forbidden(method: &str, p: &Value) -> bool {
     match method {
         "computer.enable" => p["on"].as_bool() == Some(true),
+        // an agent must not raise its own limit or switch the auto-pause off; the events are the user's to take
+        "budget.check" | "budget.events" => true,
+        "settings.set" => p.get("budgets").is_some(),
         "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" | "notices.take" | "audit.list"
-        | "backup.export" | "backup.restore" | "gh.send_comment" | "triggers.set" | "triggers.events" => true,
+        | "backup.export" | "backup.restore" | "gh.send_comment" | "triggers.set" | "triggers.events" | "worktree.rebase" => true,
         _ => false,
     }
 }
@@ -479,6 +482,10 @@ fn spawn_scheduler(reg: Arc<Registry>) {
                     }
                 })
                 .await;
+            }
+            if n.is_multiple_of(4) {
+                let r = reg.clone();
+                let _ = tokio::task::spawn_blocking(move || misc::budget_check(&r)).await;
             }
             let r = reg.clone();
             let _ = tokio::task::spawn_blocking(move || {
@@ -1089,7 +1096,7 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
         "orch" | "kanban" | "automation" => orchestration::call(c),
         "msg" | "notes" => messaging::call(c),
         "agent" | "agents" | "codex" | "computer" | "settings" | "flow" | "app" | "hooks" | "ping" | "audit" | "notices" | "daemon"
-        | "hello" | "backup" | "env" => misc::call(c),
+        | "hello" | "backup" | "env" | "budget" => misc::call(c),
         _ => anyhow::bail!("unknown method {}", req.method),
     }
 }

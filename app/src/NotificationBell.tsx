@@ -16,6 +16,7 @@ const KIND: Record<NotifKind, [string, string]> = {
   "ci-pass": ["✓", S.notif.ciPass],
   merged: ["⇄", S.notif.merged],
   error: ["!", S.notif.error],
+  budget: ["Σ", S.notif.budget],
 };
 
 const FOCUSABLE = "button:not(:disabled)";

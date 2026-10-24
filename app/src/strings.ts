@@ -128,6 +128,12 @@ export const S = {
     ciPass: "CI a passar",
     merged: "Integrado",
     error: "Erro",
+    budget: "Orçamento",
+  },
+
+  versionSkew: {
+    text: "O daemon é mais antigo que a app: reiniciar (os terminais restauram).",
+    restart: "Reiniciar daemon",
   },
 
   toast: {

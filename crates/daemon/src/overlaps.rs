@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 const TTL: Duration = Duration::from_secs(10);
 
-static CACHE: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
+type Snapshot = Vec<(String, BTreeSet<String>)>;
+static CACHE: Mutex<Option<(Instant, Snapshot)>> = Mutex::new(None);
 
 /// Key of `dispatch.json`, which the app writes lowercase on every platform.
 fn norm(p: &str) -> String {
@@ -52,7 +53,27 @@ pub fn invert(files: &[(String, BTreeSet<String>)]) -> BTreeMap<String, Vec<Stri
     out
 }
 
-fn compute(store: &Path, dispatch_json: &Path) -> Value {
+/// For every worktree, the files it shares with each other one: `{path: [{"with": other path, "files": [...]}]}`.
+/// Worktrees without a shared file are absent.
+pub fn shared_files(files: &[(String, BTreeSet<String>)]) -> BTreeMap<String, Vec<(String, Vec<String>)>> {
+    let mut out: BTreeMap<String, Vec<(String, Vec<String>)>> = BTreeMap::new();
+    for (path, mine) in files {
+        let list: Vec<(String, Vec<String>)> = files
+            .iter()
+            .filter(|(o, _)| o != path)
+            .filter_map(|(o, theirs)| {
+                let common: Vec<String> = theirs.intersection(mine).cloned().collect();
+                (!common.is_empty()).then(|| (o.clone(), common))
+            })
+            .collect();
+        if !list.is_empty() {
+            out.insert(path.clone(), list);
+        }
+    }
+    out
+}
+
+fn compute(store: &Path, dispatch_json: &Path) -> Vec<(String, BTreeSet<String>)> {
     let meta: Value = std::fs::read_to_string(dispatch_json).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| json!({}));
     let mut files: Vec<(String, BTreeSet<String>)> = Vec::new();
     for p in crate::projects::load(store) {
@@ -68,15 +89,11 @@ fn compute(store: &Path, dispatch_json: &Path) -> Value {
             files.push((w.path, set));
         }
     }
-    let mut m = Map::new();
-    for (path, others) in invert(&files) {
-        m.insert(path, json!(others));
-    }
-    Value::Object(m)
+    files
 }
 
-/// `{worktree path: [other worktree paths touching the same files]}`; worktrees without overlaps are absent.
-pub fn overlaps(store: &Path, dispatch_json: &Path) -> Value {
+/// The changed files of every open worktree, cached for `TTL`: both overlap methods read the same snapshot.
+fn snapshot(store: &Path, dispatch_json: &Path) -> Vec<(String, BTreeSet<String>)> {
     if let Some((at, v)) = CACHE.lock_recover().as_ref() {
         if at.elapsed() < TTL {
             return v.clone();
@@ -85,6 +102,29 @@ pub fn overlaps(store: &Path, dispatch_json: &Path) -> Value {
     let v = compute(store, dispatch_json);
     *CACHE.lock_recover() = Some((Instant::now(), v.clone()));
     v
+}
+
+/// Drops the snapshot: a rebase just changed what the worktrees touch.
+pub fn forget() {
+    *CACHE.lock_recover() = None;
+}
+
+/// `{worktree path: [other worktree paths touching the same files]}`; worktrees without overlaps are absent.
+pub fn overlaps(store: &Path, dispatch_json: &Path) -> Value {
+    let mut m = Map::new();
+    for (path, others) in invert(&snapshot(store, dispatch_json)) {
+        m.insert(path, json!(others));
+    }
+    Value::Object(m)
+}
+
+/// `{worktree path: [{"with": other worktree path, "files": [shared files]}]}`; worktrees without overlaps are absent.
+pub fn overlap_files(store: &Path, dispatch_json: &Path) -> Value {
+    let mut m = Map::new();
+    for (path, list) in shared_files(&snapshot(store, dispatch_json)) {
+        m.insert(path, json!(list.into_iter().map(|(with, files)| json!({"with": with, "files": files})).collect::<Vec<_>>()));
+    }
+    Value::Object(m)
 }
 
 #[cfg(test)]
@@ -107,6 +147,19 @@ mod tests {
         assert_eq!(m.get("a"), Some(&vec!["b".to_string()]));
         assert_eq!(m.get("b"), Some(&vec!["a".to_string()]));
         assert!(!m.contains_key("c") && !m.contains_key("d"));
+    }
+
+    #[test]
+    fn shared_files_lists_the_common_files_per_pair() {
+        let files = vec![
+            ("a".to_string(), set(&["src/x.rs", "README.md", "z"])),
+            ("b".to_string(), set(&["src/x.rs", "z"])),
+            ("c".to_string(), set(&["src/y.rs"])),
+        ];
+        let m = shared_files(&files);
+        assert_eq!(m["a"], vec![("b".to_string(), vec!["src/x.rs".to_string(), "z".to_string()])]);
+        assert_eq!(m["b"], vec![("a".to_string(), vec!["src/x.rs".to_string(), "z".to_string()])]);
+        assert!(!m.contains_key("c"));
     }
 
     #[test]
