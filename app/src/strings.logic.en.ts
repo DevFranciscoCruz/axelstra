@@ -72,6 +72,7 @@ export const enL: Widen<typeof ptL> = {
     idle: "Idle",
     waiting: "Waiting for a reply",
     done: "Finished",
+    stalled: "Stalled: went quiet without reporting, needs attention",
     attention: "Stopped: needs attention",
     queued: "Queued: the plan has not reached this task yet",
     running: "Terminal running",
@@ -136,6 +137,7 @@ export const enL: Widen<typeof ptL> = {
       body: (who: string, wt: string) =>
         `${who} asked a question in worktree "${wt}" and needs your answer to continue.`,
     },
+    stalledHead: (who: string, wt: string) => `${who} stalled, not reporting · ${wt}`,
     stopped: {
       head: (who: string, wt: string) => `${who} stopped · ${wt}`,
       body: (who: string, wt: string) =>

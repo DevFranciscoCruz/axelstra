@@ -60,6 +60,8 @@ export const pt = {
   // settings
   "settings.bad_shell": "A shell tem de ser auto, pwsh, powershell, bash, wsl ou cmd.",
   "settings.bad_notify_mode": "O modo de notificações tem de ser all, waiting ou off.",
+  "settings.bad_stall_minutes": "Os minutos de inatividade têm de ser um número inteiro de 0 (desligado) a 1440.",
+  "agent.stalled": "{task}: sem atividade há {min} min e sem reportar. Última linha: {line}",
   "settings.bad_terse": "O modo conciso tem de ser off, short ou tiny.",
   "settings.bad_pm": "O gestor de pacotes tem de ser bun, pnpm, yarn ou npm.",
   "settings.ui_not_object": "O estado da interface tem de ser um objeto de textos.",
@@ -127,6 +129,8 @@ export const en: Widen<typeof pt> = {
 
   "settings.bad_shell": "The shell must be auto, pwsh, powershell, bash, wsl or cmd.",
   "settings.bad_notify_mode": "The notification mode must be all, waiting or off.",
+  "settings.bad_stall_minutes": "The inactivity minutes must be a whole number from 0 (off) to 1440.",
+  "agent.stalled": "{task} has been stalled for {min} min without reporting. Last line: {line}",
   "settings.bad_terse": "The terse mode must be off, short or tiny.",
   "settings.bad_pm": "The package manager must be bun, pnpm, yarn or npm.",
   "settings.ui_not_object": "The interface state must be an object of strings.",
@@ -194,6 +198,8 @@ export const ptBR: Widen<typeof pt> = {
 
   "settings.bad_shell": "O shell precisa ser auto, pwsh, powershell, bash, wsl ou cmd.",
   "settings.bad_notify_mode": "O modo de notificações precisa ser all, waiting ou off.",
+  "settings.bad_stall_minutes": "Os minutos de inatividade precisam ser um número inteiro de 0 (desligado) a 1440.",
+  "agent.stalled": "{task}: sem atividade há {min} min e sem reportar. Última linha: {line}",
   "settings.bad_terse": "O modo conciso precisa ser off, short ou tiny.",
   "settings.bad_pm": "O gerenciador de pacotes precisa ser bun, pnpm, yarn ou npm.",
   "settings.ui_not_object": "O estado da interface precisa ser um objeto de textos.",

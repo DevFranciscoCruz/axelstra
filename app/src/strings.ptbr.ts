@@ -42,6 +42,12 @@ export const ptBRS: Widen<typeof ptS> = {
     off: { label: "Nenhuma", hint: "Sem notificações do sistema." },
   },
 
+  stall: "Agente parado",
+  stallNote:
+    "Se um agente ficar esse tempo sem atividade e sem chamar done ou escalate, passa a «parado»: o pai recebe uma mensagem e aparece uma notificação.",
+  stallOff: "Desligado",
+  stallMin: (n: number) => `${n} min`,
+
   shell: "Shell dos terminais",
   shellNote: "Vale para terminais e agentes novos. «Automático» usa o shell padrão do sistema.",
   shells: {

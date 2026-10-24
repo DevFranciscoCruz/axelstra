@@ -39,6 +39,12 @@ export const enS: Widen<typeof ptS> = {
     off: { label: "None", hint: "No system notifications." },
   },
 
+  stall: "Stalled agent",
+  stallNote:
+    "An agent that stays this long without activity and without calling done or escalate is marked stalled: its parent gets a message and a notification appears.",
+  stallOff: "Off",
+  stallMin: (n: number) => `${n} min`,
+
   shell: "Terminal shell",
   shellNote: "Applies to new terminals and agents. “Automatic” uses the system's default shell.",
   shells: {

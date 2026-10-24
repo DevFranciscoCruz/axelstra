@@ -13,6 +13,11 @@ use std::process::Command;
 
 const FOOTER: &str = "\n\nYou own this worktree and its topic. Later requests for the same topic are sent to you. When the work splits into independent parts, run `axelstra skills get axelstration` and delegate to workers; their sessions appear inside this worktree's box in the app. When the whole request is finished, run `axelstra done \"<report: what changed, commands run, what was not run>\"`: that report goes to whoever dispatched you and your session closes by itself (the worktree is cleaned up once its branch is integrated).";
 
+/// What a dispatched lead starts with: the request, who it is, how it finishes, and the rule against waiting silently.
+fn lead_prompt(request: &str) -> String {
+    format!("{request}{FOOTER} {}", axelstra_core::waiting::NEVER_WAIT_RULE)
+}
+
 /// A lead started by `dispatch` is ephemeral like a `--report-to` worker: it closes itself when it calls `axelstra done`
 /// (mode `exit`: never because it went quiet while waiting on its workers). The report goes to the dispatching session.
 fn lead_reap() -> Value {
@@ -262,7 +267,7 @@ pub fn run(cmd: DispCmd, mut c: Client) -> Result<()> {
                 paste(&mut c, id as u32, &request)?;
                 println!("sent to session {id} in {branch}");
             } else {
-                let id = spawn_agent(&mut c, Path::new(&path), &agent, Some(&format!("{request}{FOOTER}")), Some(lead_reap()), false)?;
+                let id = spawn_agent(&mut c, Path::new(&path), &agent, Some(&lead_prompt(&request)), Some(lead_reap()), false)?;
                 println!("no agent was running in {branch}: started session {id}");
             }
             remember(&mut meta, &path, None, &request);
@@ -275,7 +280,7 @@ pub fn run(cmd: DispCmd, mut c: Client) -> Result<()> {
                 .with_context(|| format!("no registered project matches {project:?}"))?;
             let w = c.call("worktree.create", json!({"project": pid, "name": name}))?;
             let path = w["path"].as_str().unwrap_or_default().to_string();
-            let id = spawn_agent(&mut c, Path::new(&path), &agent, Some(&format!("{request}{FOOTER}")), Some(lead_reap()), false)?;
+            let id = spawn_agent(&mut c, Path::new(&path), &agent, Some(&lead_prompt(&request)), Some(lead_reap()), false)?;
             remember(&mut meta, &path, title.as_deref(), &request);
             save(&mp, &meta)?;
             println!("worktree {path}\nsession {id}");
@@ -300,6 +305,15 @@ pub fn run(cmd: DispCmd, mut c: Client) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lead_prompt_keeps_the_request_and_forbids_silent_waiting() {
+        let p = super::lead_prompt("fix X");
+        assert!(p.starts_with("fix X"));
+        assert!(p.contains("axelstra done"));
+        assert!(p.contains("Never wait silently for the human"));
+        assert!(p.contains("axelstra ask $AXELSTRA_PARENT") && p.contains("axelstra escalate"));
+    }
+
     use super::*;
 
     #[test]

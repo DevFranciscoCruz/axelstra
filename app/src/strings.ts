@@ -47,6 +47,12 @@ export const ptS = {
     off: { label: "Nenhuma", hint: "Sem notificações do sistema." },
   },
 
+  stall: "Agente parado",
+  stallNote:
+    "Se um agente ficar este tempo sem atividade e sem chamar done ou escalate, passa a «parado»: o pai recebe uma mensagem e aparece uma notificação.",
+  stallOff: "Desligado",
+  stallMin: (n: number) => `${n} min`,
+
   shell: "Shell dos terminais",
   shellNote: "Vale para terminais e agentes novos. «Automático» usa o shell predefinido do sistema.",
   shells: { auto: "Automático", pwsh: "PowerShell 7", powershell: "Windows PowerShell", bash: "Bash", wsl: "WSL", cmd: "CMD" },

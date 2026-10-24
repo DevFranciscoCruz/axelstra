@@ -1,5 +1,6 @@
 import { createMemo, createRoot, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { coded } from "../msg";
 import { DispatchMeta, SessionInfo, callBg, flowTasks, listSessions } from "../api";
 import { errorText } from "../appError";
 import { pushNotification } from "../notifications";
@@ -24,6 +25,8 @@ export const sessionState = (s: SessionInfo): "working" | "waiting" | "idle" | "
 /** worktrees whose agent finished while the user was looking elsewhere; cleared when selected */
 export const [attention, setAttention] = createSignal<ReadonlySet<string>>(new Set());
 const lastState = new Map<number, string>();
+/** sessions the daemon already flagged as stalled, so each stall is announced once */
+const stalledSeen = new Set<number>();
 
 /** opens a session from a clicked notification */
 export const openSession = (path: string, id: number) =>
@@ -57,6 +60,7 @@ const trackAgents = (list: SessionInfo[]) => {
   const alive = new Set(list.map((s) => s.id));
   for (const id of lastState.keys()) if (!alive.has(id)) lastState.delete(id);
   for (const id of workingSince.keys()) if (!alive.has(id)) workingSince.delete(id);
+  for (const id of stalledSeen) if (!alive.has(id)) stalledSeen.delete(id);
   for (const s of list) {
     const state = sessionState(s);
     const prev = lastState.get(s.id);
@@ -64,6 +68,17 @@ const trackAgents = (list: SessionInfo[]) => {
     if (state === "working" && prev !== "working") workingSince.set(s.id, Date.now());
     const wtPath = s.meta?.worktree;
     if (s.meta?.kind !== "agent" || !wtPath) continue;
+    // went quiet without reporting: one bell entry and one system notification per stall, whether or not it is on screen
+    if (s.stalled && s.stall) {
+      if (!stalledSeen.has(s.id)) {
+        stalledSeen.add(s.id);
+        const who = s.label ?? L.defaultAgent;
+        const text = coded(s.stall.code, s.stall.params, s.stall.text);
+        pushNotification({ kind: "waiting", worktree: wtPath, session: s.id, text });
+        if (Date.now() - appStart >= NOTIFY_GRACE_MS)
+          void notify(L.notify.stalledHead(who, wtPath.split(/[\\/]/).pop() ?? wtPath), text, wtPath, s.id, true);
+      }
+    } else stalledSeen.delete(s.id);
     // back to work: the earlier "needs a look" flag is stale
     if (state === "working") {
       if (attention().has(norm(wtPath)))

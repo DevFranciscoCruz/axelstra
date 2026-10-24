@@ -19,6 +19,7 @@ import "./termui.css";
 import { Button, CheckboxField, Field, Input, RadioGroup } from "./ui";
 
 const TERSE: Terse[] = ["off", "short", "tiny"];
+const STALL_MINUTES = [0, 2, 5, 10, 15, 30];
 const NOTIFY: NotifyMode[] = ["all", "waiting", "off"];
 const SHELLS: ShellChoice[] = ["auto", "pwsh", "powershell", "bash", "wsl", "cmd"];
 const THEMES: TermTheme[] = ["dark", "light"];
@@ -193,6 +194,17 @@ export function Settings() {
                 <CheckboxField checked={cfg().notify_sound ?? true} onChange={(v) => void save({ notify_sound: v })}>
                   {S.notifySound}
                 </CheckboxField>
+              </Section>
+
+              <Section title={S.stall} note={S.stallNote}>
+                <Choices
+                  label={S.stall}
+                  value={String(cfg().stall_minutes ?? 5)}
+                  options={[...new Set([...STALL_MINUTES, cfg().stall_minutes ?? 5])]
+                    .sort((a, b) => a - b)
+                    .map((v) => ({ value: String(v), label: v === 0 ? S.stallOff : S.stallMin(v) }))}
+                  onPick={(v) => void save({ stall_minutes: Number(v) })}
+                />
               </Section>
 
               <Section title={S.shell} note={S.shellNote}>

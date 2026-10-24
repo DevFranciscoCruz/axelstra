@@ -11,6 +11,7 @@
   --ok: #4ade80;
   --danger: #f87171;
   --warn: #e5c07b;
+  --stall: #ff8a3d;
   --line-2: #3a3a45;
   --line-3: #43434f;
   --s1: #2b2e36;
@@ -34,6 +35,7 @@
   --ok-rgb: 74, 222, 128;
   --ok2-rgb: 127, 209, 139;
   --warn-rgb: 229, 192, 123;
+  --stall-rgb: 255, 138, 61;
   --danger-rgb: 248, 113, 113;
   --err-rgb: 229, 72, 77;
   /* focus ring: drawn inside the box so an ancestor with overflow:hidden cannot clip it */
@@ -70,6 +72,7 @@
   --ok: #1a7f37;
   --danger: #cf222e;
   --warn: #8a5a00;
+  --stall: #c2410c;
   --line-2: #dcdfe6;
   --line-3: #cfd3dc;
   --s1: #e8eaf0;
@@ -94,6 +97,7 @@
   --ok-rgb: 26, 127, 55;
   --ok2-rgb: 26, 127, 55;
   --warn-rgb: 138, 90, 0;
+  --stall-rgb: 194, 65, 12;
   --danger-rgb: 207, 34, 46;
   --err-rgb: 207, 34, 46;
   color-scheme: light;
@@ -565,6 +569,7 @@ button.danger { color: var(--danger); }
 .menu.up { bottom: calc(100% + 6px); }
 .off-main { color: var(--warn); font-size: var(--fs-sm); margin-left: 4px; }
 .dot.work { background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
+.dot.stall { background: var(--stall); box-shadow: 0 0 0 3px rgba(var(--stall-rgb), .3); animation: none; }
 .dot.attn { background: var(--warn); box-shadow: 0 0 0 3px rgba(var(--warn-rgb), .25); animation: none; }
 
 

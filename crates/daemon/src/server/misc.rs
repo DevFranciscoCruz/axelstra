@@ -79,7 +79,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let (shell, notify_sound, notify_mode) = ui_settings(&saved);
             Ok(
                 json!({"terse": terse, "rules": crate::skill::terse_rules(terse), "pm": pm, "installed": installed, "auto_install": saved["auto_install"] == json!(true),
-                "shell": shell, "notify_sound": notify_sound, "notify_mode": notify_mode, "ui": saved["ui"].as_object().cloned().unwrap_or_default(),
+                "shell": shell, "notify_sound": notify_sound, "notify_mode": notify_mode, "stall_minutes": crate::stall::minutes(&saved), "ui": saved["ui"].as_object().cloned().unwrap_or_default(),
                 "budgets": crate::budget::validate(&saved["budgets"]).unwrap_or_else(|_| json!({})),
                 "hosts": crate::hosts::validate(&saved["hosts"]).unwrap_or_else(|_| json!([]))}),
             )
@@ -104,6 +104,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 saved["auto_install"] = json!(b);
             }
             apply_ui_settings(&mut saved, p)?;
+            if let Some(v) = p.get("stall_minutes") {
+                let Some(m) = crate::stall::validate(v) else {
+                    return Err(axelstra_core::coded!(
+                        "settings.bad_stall_minutes",
+                        "stall_minutes must be a whole number from 0 (off) to 1440"
+                    ));
+                };
+                saved["stall_minutes"] = json!(m);
+            }
             // replaces the whole budgets setting; null removes it
             if let Some(b) = p.get("budgets") {
                 saved["budgets"] = if b.is_null() { json!({}) } else { crate::budget::validate(b)? };

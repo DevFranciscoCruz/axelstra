@@ -56,6 +56,8 @@ Put this at the end of every worker prompt:
 
 > When finished, run `axelstra done "<summary: what you did, what is left>"` (use `--status failed` or `--status blocked` when it applies). If you need a decision, run `axelstra ask $AXELSTRA_PARENT "<question>"` and continue with the answer. If you are stuck, run `axelstra escalate "<problem>"`.
 
+> Never wait silently for the human: if you need a decision, a confirmation or a permission, or you are blocked, run `axelstra ask $AXELSTRA_PARENT "<question>"` (it blocks until answered) or `axelstra escalate "<problem>"`. If the choice is reversible, decide, say so in your report and carry on.
+
 Cheap one-shot work (tests, builds, linters) does not need an agent:
 
 ```
@@ -154,6 +156,7 @@ For each new request:
 4. If the request touches files another worktree is already editing (`overlaps_with`, or its `areas`), say so before sending and let the user choose.
 5. Never send work to a worktree marked merged or archived (`list` hides them; `send` refuses). Open a new theme instead. When a theme is finished: `axelstra dispatch archive <branch>`.
 6. Leads report to you with `done`/`ask`/`escalate`. Answer with `reply`/`msg`; verify claims before telling the user it is done.
+   When a lead asks (or the stall watchdog reports one quiet), answer or decide yourself; if the decision is the user's, put it to them in one short message with your recommendation, then relay the answer. Never leave a lead waiting.
 
 - `axelstra dispatch title <worktree> "<title>"` — rename a theme.
 - Keep replies short: the user wants to see where each request went, not an essay.
@@ -165,6 +168,8 @@ You are the lead of this worktree's theme. Own it end to end:
 - Split the theme into tasks and start workers in **this** worktree (`axelstra agent . --prompt ... --report-to`); do not create more worktrees for subtasks. Their sessions appear inside this worktree's box in the app.
 - Workers report to you; answer their asks (`reply`), unblock escalations (`msg`), verify their reports, integrate their work.
 - Talk to main only through `axelstra done` / `ask` / `escalate` (they go to `$AXELSTRA_PARENT`). Workers never talk to main.
+- **Never wait silently for the human.** Writing "waiting for your decision" in the terminal tells nobody. Any decision or blocker goes up with `axelstra ask $AXELSTRA_PARENT "<question>"` (blocks until main answers) or `axelstra escalate "<problem>"`; a reversible choice you make yourself, noting it in the report. The same rule goes to every worker (see its prompt above).
+- **Stall watchdog.** An agent quiet for 5 minutes (Settings, "Agente parado") without `done`/`escalate` and with no running children is marked **stalled** (orange hourglass dot in the sidebar, never green), its parent gets an automatic message with the last screen line, and the app notifies. When you get that message, answer the worker (`axelstra msg <id> "…"`) or take over.
 - Work small enough to do yourself needs no worker.
 - **Lifecycle.** A lead started by `dispatch new/send` is ephemeral like a `--report-to` worker: when it calls `axelstra done "<report>"` its session closes by itself, and the report is typed into main and kept in the task file. Finish with `done` only when everything is committed and verified. Main only has to read the report; it does not close leads or remove worktrees.
 - **Cleanup.** The janitor sweep (every 10 minutes, and a few seconds after every `done` or merge) removes a worktree and its branch when the branch is inside the default branch or inside another live `ax/*` branch (stacked integration). It never touches a worktree with uncommitted changes, with a session that has not reported (a session that called `done` and is quiet does not count as busy), or with unmerged work, and it never deletes a branch whose commits no other ref holds. Every removal shows a toast and a notification-center entry ("worktree X removido (integrado em Y)"). `axelstra worktree sweep [--dry-run]` runs it by hand.

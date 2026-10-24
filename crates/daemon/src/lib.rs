@@ -31,6 +31,7 @@ pub mod remote;
 pub mod runner;
 pub mod server;
 pub mod skill;
+pub mod stall;
 pub mod store;
 pub mod timeline;
 pub mod triggers;
