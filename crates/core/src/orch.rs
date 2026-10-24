@@ -96,6 +96,9 @@ pub struct Report {
     pub blocked: Vec<String>,
     pub integ_branch: String,
     pub integ_wt: PathBuf,
+    /// Problems that did not stop the run (a log line that could not be written, a card status that could not be
+    /// saved, a task whose merge step failed). Empty on a clean run.
+    pub errors: Vec<String>,
 }
 
 fn task_branch(run: &str, id: &str) -> String {
@@ -221,15 +224,20 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
         recover(&repo, &integ_wt, &events_path)?;
     }
 
-    let mut tasks: HashMap<String, Task> = cards
-        .into_iter()
-        .map(|c| {
-            let st = if merged_before.contains(&c.meta.id) { St::Merged } else { St::Blocked };
-            (c.meta.id.clone(), Task { card: c, st, attempts: 0, live: None })
-        })
-        .collect();
+    let mut tasks = Tasks(
+        cards
+            .into_iter()
+            .map(|c| {
+                let st = if merged_before.contains(&c.meta.id) { St::Merged } else { St::Blocked };
+                (c.meta.id.clone(), Task { card: c, st, attempts: 0, live: None })
+            })
+            .collect(),
+    );
     let mut failures: Vec<(String, String)> = Vec::new();
     let mut reviews: Vec<(String, String)> = Vec::new();
+    // Anything that goes wrong while driving the run lands here (or fails the one task it belongs to) instead of
+    // aborting the whole run: an early `?` would leave the other cards "in-progress" with their agents running.
+    let mut errors: Vec<String> = Vec::new();
 
     loop {
         // 1. promote Blocked -> Ready once every dependency is Merged
@@ -244,37 +252,56 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
         let running: Vec<String> = tasks.values().filter(|t| t.st == St::Running).map(|t| t.card.meta.id.clone()).collect();
         for id in running {
             let t = tasks.get_mut(&id).unwrap();
-            let live = t.live.as_mut().unwrap();
-            let exited = live.handle.try_wait()?;
+            let Some(live) = t.live.as_mut() else {
+                let reason = "internal: running task without a process".to_string();
+                errors.push(format!("{id}: {reason}"));
+                log_ev(&mut log, Ev::Failed { task: id.clone(), reason: reason.clone() }, &mut errors);
+                t.st = St::Failed;
+                failures.push((id.clone(), reason));
+                continue;
+            };
+            let polled = live.handle.try_wait();
             // read after try_wait: an agent may write the result and exit between the two
             let sentinel = read_sentinel(&live.wt);
             let timeout = timeout_of(t.card.meta.timeout_min);
             let outcome = if let Some(r) = sentinel {
                 Some(if r.status == "done" { Ok(r.summary) } else { Err(format!("agent reported {}: {}", r.status, r.summary)) })
-            } else if let Some(s) = exited {
-                Some(Err(format!("{s} without result.json")))
-            } else if live.started.elapsed() > timeout {
-                Some(Err(format!("timeout after {} min", t.card.meta.timeout_min)))
             } else {
-                None
+                match polled {
+                    Err(e) => Some(Err(format!("could not poll the agent: {e:#}"))),
+                    Ok(Some(s)) => Some(Err(format!("{s} without result.json"))),
+                    Ok(None) if live.started.elapsed() > timeout => Some(Err(format!("timeout after {} min", t.card.meta.timeout_min))),
+                    Ok(None) => None,
+                }
             };
             let Some(outcome) = outcome else { continue };
 
-            let live = t.live.take().unwrap();
-            let mut live = live;
+            let mut live = t.live.take().unwrap();
             live.handle.kill();
 
             match outcome {
-                Ok(summary) => {
-                    let why = finish_task(&repo, &integ_wt, &integ_branch, &o.name, t, &live.wt, &live.branch, &summary, &mut log)?;
-                    if t.st == St::NeedsReview {
-                        reviews.push((id.clone(), why.into()));
-                    } else {
-                        card::set_status(&t.card.path, "done")?;
+                Ok(summary) => match finish_task(&repo, &integ_wt, &integ_branch, &o.name, t, &live.wt, &live.branch, &summary, &mut log) {
+                    Ok(why) => {
+                        if t.st == St::NeedsReview {
+                            reviews.push((id.clone(), why));
+                        } else if let Err(e) = card::set_status(&t.card.path, "done") {
+                            errors.push(format!("{id}: could not mark the card done: {e:#}"));
+                        }
                     }
-                }
+                    Err(e) => {
+                        // the agent finished, so its worktree and branch stay for a person to look at
+                        let reason = format!("finishing failed: {e:#}");
+                        errors.push(format!("{id}: {reason}"));
+                        if git::merge_in_progress(&integ_wt) {
+                            let _ = git::run(&integ_wt, &["merge", "--abort"]);
+                        }
+                        log_ev(&mut log, Ev::NeedsReview { task: id.clone(), reason: reason.clone() }, &mut errors);
+                        t.st = St::NeedsReview;
+                        reviews.push((id.clone(), reason));
+                    }
+                },
                 Err(reason) => {
-                    log.append(Ev::Failed { task: id.clone(), reason: reason.clone() })?;
+                    log_ev(&mut log, Ev::Failed { task: id.clone(), reason: reason.clone() }, &mut errors);
                     let _ = git::worktree_remove(&repo, &live.wt);
                     let _ = git::branch_delete(&repo, &live.branch);
                     if t.attempts <= t.card.meta.max_retries {
@@ -297,17 +324,25 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
             }
             let t = tasks.get_mut(&id).unwrap();
             t.attempts += 1;
-            log.append(Ev::Spawned { task: id.clone(), attempt: t.attempts })?;
+            log_ev(&mut log, Ev::Spawned { task: id.clone(), attempt: t.attempts }, &mut errors);
             match spawn(&repo, &integ_branch, o, &run_dir, t) {
                 Ok(live) => {
                     t.live = Some(live);
                     t.st = St::Running;
-                    card::set_status(&t.card.path, "in-progress")?;
+                    if let Err(e) = card::set_status(&t.card.path, "in-progress") {
+                        errors.push(format!("{id}: could not mark the card in-progress: {e:#}"));
+                    }
                     running_n += 1;
                 }
                 Err(e) => {
                     let reason = format!("spawn: {e:#}");
-                    log.append(Ev::Failed { task: id.clone(), reason: reason.clone() })?;
+                    // spawn may have gotten as far as creating the worktree
+                    let wt = o.wt_root.join(format!("{}-{}", o.name, id));
+                    if wt.exists() {
+                        let _ = git::worktree_remove(&repo, &wt);
+                    }
+                    let _ = git::branch_delete(&repo, &task_branch(&o.name, &id));
+                    log_ev(&mut log, Ev::Failed { task: id.clone(), reason: reason.clone() }, &mut errors);
                     t.st = St::Failed;
                     failures.push((id.clone(), reason));
                 }
@@ -327,20 +362,56 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
         std::thread::sleep(Duration::from_millis(o.poll_ms));
     }
 
-    for t in tasks.values_mut() {
-        if t.st == St::Failed || t.st == St::NeedsReview {
-            let s = if t.st == St::Failed { "backlog" } else { "needs-review" };
-            card::set_status(&t.card.path, s).ok();
-        } else if t.st == St::Blocked {
-            card::set_status(&t.card.path, "todo").ok();
-        }
-    }
     let by = |s: St| {
         let mut v: Vec<String> = tasks.values().filter(|t| t.st == s).map(|t| t.card.meta.id.clone()).collect();
         v.sort();
         v
     };
-    Ok(Report { merged: by(St::Merged), failed: failures, needs_review: reviews, blocked: by(St::Blocked), integ_branch, integ_wt })
+    // the cards' statuses are settled when `tasks` goes out of scope
+    Ok(Report { merged: by(St::Merged), failed: failures, needs_review: reviews, blocked: by(St::Blocked), integ_branch, integ_wt, errors })
+}
+
+/// The run's tasks. Dropping them (normal end, early error or panic alike) kills any agent still running and puts
+/// every card back to a status that matches what happened to it, so a failed run never leaves cards "in-progress".
+struct Tasks(HashMap<String, Task>);
+
+impl std::ops::Deref for Tasks {
+    type Target = HashMap<String, Task>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Tasks {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for Tasks {
+    fn drop(&mut self) {
+        for t in self.0.values_mut() {
+            if let Some(mut live) = t.live.take() {
+                live.handle.kill();
+                t.st = St::Ready; // interrupted, never finished
+            }
+            let s = match t.st {
+                St::Failed => "backlog",
+                St::NeedsReview => "needs-review",
+                St::Merged => "done",
+                // not started, not finished, or interrupted: a later run picks it up again
+                St::Blocked | St::Ready | St::Running => "todo",
+            };
+            card::set_status(&t.card.path, s).ok();
+        }
+    }
+}
+
+/// Appends to the run log; a log that cannot be written is reported with the run's errors instead of stopping it.
+fn log_ev(log: &mut Log, ev: Ev, errors: &mut Vec<String>) {
+    if let Err(e) = log.append(ev) {
+        errors.push(format!("run log: {e:#}"));
+    }
 }
 
 /// Never panics, whatever the value: invalid or huge minutes clamp to the cap.
@@ -450,6 +521,9 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
     };
     let pf = prompt.to_string_lossy().to_string();
     let spec: Vec<String> = spec.into_iter().map(|a| a.replace("{prompt_file}", &pf)).collect();
+    if spec.first().is_none_or(|p| p.trim().is_empty()) {
+        bail!("empty agent command (an `agent` override needs at least the program to run)");
+    }
 
     let handle = runner.spawn(&AgentSpawn {
         program: spec[0].clone(),
@@ -495,7 +569,7 @@ fn finish_task(
     branch: &str,
     summary: &str,
     log: &mut Log,
-) -> Result<&'static str> {
+) -> Result<String> {
     let id = t.card.meta.id.clone();
     git::commit_all(wt, &format!("{id}: {}", first_line(summary, &t.card.meta.title)))?;
     let before = git::head(integ_wt)?;
@@ -505,15 +579,15 @@ fn finish_task(
             git::reset_hard(integ_wt, &before)?;
             log.append(Ev::NeedsReview { task: id.clone(), reason: "merge conflict".into() })?;
             t.st = St::NeedsReview; // worktree + branch stay for inspection
-            return Ok("merge conflict");
+            return Ok("merge conflict".into());
         }
         Merge::Clean => {
             if let Some(cmd) = &t.card.meta.acceptance {
-                if !run_acceptance(integ_wt, cmd)? {
+                if let Some(why) = acceptance_failure(integ_wt, cmd, ACCEPTANCE_TIMEOUT) {
                     git::reset_hard(integ_wt, &before)?;
-                    log.append(Ev::NeedsReview { task: id.clone(), reason: "acceptance failed".into() })?;
+                    log.append(Ev::NeedsReview { task: id.clone(), reason: why.clone() })?;
                     t.st = St::NeedsReview;
-                    return Ok("acceptance failed");
+                    return Ok(why);
                 }
             }
             log.append(Ev::Merged { task: id.clone() })?;
@@ -523,7 +597,7 @@ fn finish_task(
             let _ = integ_branch;
         }
     }
-    Ok("")
+    Ok(String::new())
 }
 
 /// Merges a `needs-review` task again after the user fixed its branch (resolved the
@@ -563,10 +637,10 @@ pub fn retry_merge(repo: &Path, wt_root: &Path, name: &str, id: &str, trust_acce
         bail!("still conflicts with the integration branch; resolve it in {}", wt.display());
     }
     if let Some(cmd) = &card.meta.acceptance {
-        if !run_acceptance(&integ_wt, cmd)? {
+        if let Some(why) = acceptance_failure(&integ_wt, cmd, ACCEPTANCE_TIMEOUT) {
             git::reset_hard(&integ_wt, &before)?;
-            log.append(Ev::NeedsReview { task: id.into(), reason: "acceptance failed".into() })?;
-            bail!("acceptance failed after merging");
+            log.append(Ev::NeedsReview { task: id.into(), reason: why.clone() })?;
+            bail!("{why} after merging");
         }
     }
     log.append(Ev::Merged { task: id.into() })?;
@@ -585,13 +659,31 @@ fn first_line(summary: &str, fallback: &str) -> String {
     }
 }
 
-fn run_acceptance(wt: &Path, cmd: &str) -> Result<bool> {
-    let st = if cfg!(windows) {
-        git::quiet(&mut Command::new("cmd")).args(["/d", "/c", cmd]).current_dir(wt).status()?
+/// How long a card's acceptance command may run before it is killed (with everything it started) and the task goes
+/// to review.
+const ACCEPTANCE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// Output of the acceptance command that is kept (and discarded: it is only read for the exit status).
+const ACCEPTANCE_MAX_BYTES: usize = 1 << 20;
+
+/// Runs the card's acceptance command in `wt`. `None` when it passed; otherwise why the task needs review.
+/// A command that cannot even start counts as failed: the merge is rolled back either way.
+fn acceptance_failure(wt: &Path, cmd: &str, limit: Duration) -> Option<String> {
+    let mut c = if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.args(["/d", "/c", cmd]);
+        c
     } else {
-        Command::new("sh").args(["-c", cmd]).current_dir(wt).status()?
+        let mut c = Command::new("sh");
+        c.args(["-c", cmd]);
+        c
     };
-    Ok(st.success())
+    c.current_dir(wt);
+    match crate::exec::run_capped(&mut c, limit, ACCEPTANCE_MAX_BYTES) {
+        Ok(o) if o.timed_out => Some(format!("acceptance timed out after {} s", limit.as_secs())),
+        Ok(o) if o.success() => None,
+        Ok(_) => Some("acceptance failed".into()),
+        Err(e) => Some(format!("acceptance could not run: {e:#}")),
+    }
 }
 
 fn replay_merged(events: &Path) -> Result<Vec<String>> {
@@ -698,5 +790,60 @@ acceptance: make test
         let e = check_trust(&c, &Trust::None).unwrap_err().to_string();
         assert!(e.contains("a: permission_mode plan") && e.contains("make test") && e.contains(&card::fingerprint(&c)));
         assert!(check_trust(&[card_of("")], &Trust::None).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod error_path_tests {
+    use super::*;
+
+    #[test]
+    fn acceptance_passes_fails_and_is_killed_at_its_deadline() {
+        let dir = std::env::temp_dir();
+        assert_eq!(acceptance_failure(&dir, "exit 0", Duration::from_secs(30)), None);
+        assert_eq!(acceptance_failure(&dir, "exit 1", Duration::from_secs(30)).as_deref(), Some("acceptance failed"));
+        let hang = if cfg!(windows) { "ping -n 60 127.0.0.1 >nul" } else { "sleep 60" };
+        let t = Instant::now();
+        let why = acceptance_failure(&dir, hang, Duration::from_millis(400)).expect("must not pass");
+        assert!(why.starts_with("acceptance timed out"), "{why}");
+        assert!(t.elapsed() < Duration::from_secs(20), "took {:?}", t.elapsed());
+    }
+
+    #[test]
+    fn acceptance_that_cannot_start_counts_as_failed() {
+        let why = acceptance_failure(Path::new("/definitely/not/a/dir"), "exit 0", Duration::from_secs(5)).expect("must not pass");
+        assert!(why.starts_with("acceptance could not run"), "{why}");
+    }
+
+    #[test]
+    fn dropping_the_tasks_settles_every_card_status() {
+        let dir = std::env::temp_dir().join(format!("axelstra-tasks-drop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut map = HashMap::new();
+        for (id, st) in [
+            ("running", St::Running),
+            ("ready", St::Ready),
+            ("blocked", St::Blocked),
+            ("failed", St::Failed),
+            ("review", St::NeedsReview),
+            ("merged", St::Merged),
+        ] {
+            let path = dir.join(format!("{id}.md"));
+            std::fs::write(&path, format!("---\nid: {id}\nstatus: in-progress\n---\nbody\n")).unwrap();
+            let card = card::parse(&std::fs::read_to_string(&path).unwrap(), &path).unwrap();
+            map.insert(id.to_string(), Task { card, st, attempts: 1, live: None });
+        }
+        drop(Tasks(map));
+        let status = |id: &str| {
+            let p = dir.join(format!("{id}.md"));
+            card::parse(&std::fs::read_to_string(&p).unwrap(), &p).unwrap().meta.status
+        };
+        assert_eq!(status("running"), "todo");
+        assert_eq!(status("ready"), "todo");
+        assert_eq!(status("blocked"), "todo");
+        assert_eq!(status("failed"), "backlog");
+        assert_eq!(status("review"), "needs-review");
+        assert_eq!(status("merged"), "done");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
