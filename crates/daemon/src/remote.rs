@@ -37,7 +37,7 @@ fn is_ident(s: &str) -> bool {
     !s.is_empty() && s.len() <= 128 && !s.starts_with('-') && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
-fn check_bin(bin: &str) -> Result<()> {
+pub fn check_bin(bin: &str) -> Result<()> {
     let ok = !bin.is_empty()
         && bin.len() <= 200
         && !bin.starts_with('-')

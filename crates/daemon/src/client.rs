@@ -61,7 +61,9 @@ impl ChildShared {
             // let the stderr reader take the last bytes
             std::thread::sleep(Duration::from_millis(50));
         }
-        let said = String::from_utf8_lossy(&recover(&self.stderr)).trim().to_string();
+        // wsl.exe writes its own messages as UTF-16LE: dropping the NULs leaves the ASCII part readable
+        let raw: Vec<u8> = recover(&self.stderr).iter().copied().filter(|b| *b != 0).collect();
+        let said = String::from_utf8_lossy(&raw).trim().to_string();
         match (status, said.is_empty()) {
             (Some(st), true) => Some(format!("{} ended ({st})", self.label)),
             (Some(st), false) => Some(format!("{} ended ({st}) and said: {said}", self.label)),
@@ -560,6 +562,14 @@ impl Client {
         match &self.rd {
             Conn::Child(c) => Some(recover(&c.shared.child).id()),
             _ => None,
+        }
+    }
+
+    /// Ends the `ssh`/`wsl.exe` child of a remote connection now, so a thread blocked in `read` on a clone of it sees the
+    /// end of the stream (the child otherwise lives until the last clone is dropped). No effect on a local connection.
+    pub fn kill_child(&self) {
+        if let Conn::Child(c) = &self.rd {
+            let _ = recover(&c.shared.child).kill();
         }
     }
 

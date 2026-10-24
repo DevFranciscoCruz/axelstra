@@ -19,6 +19,7 @@ import { ContextMenu } from "./ContextMenu";
 import { Automations } from "./Automations";
 import { Dispatcher } from "./Dispatcher";
 import { Settings } from "./Settings";
+import { AddRemoteProject } from "./AddRemoteProject";
 import { Shortcuts } from "./Shortcuts";
 import { S } from "./strings";
 import { startDrag } from "./dragResize";
@@ -57,6 +58,7 @@ import {
   fileLine,
   projectTerse,
   changesMode,
+  showAddRemote,
   showAutomations,
   showDispatcher,
   setSessionCloser,
@@ -179,7 +181,7 @@ export function App() {
   });
 
   const spawnShell = async (c: NonNullable<ReturnType<typeof current>>) => {
-    const [program, args] = await defaultShell();
+    const [program, args] = await defaultShell(c.wt.path);
     const { id } = await spawnSession(program, args, "shell", c.wt.path, { project: c.project.id, worktree: c.wt.path, kind: "shell" });
     await refreshSessions();
     return id;
@@ -357,6 +359,9 @@ export function App() {
       </Show>
       <Show when={showDispatcher()}>
         <Dispatcher />
+      </Show>
+      <Show when={showAddRemote()}>
+        <AddRemoteProject />
       </Show>
       <Show when={showAutomations()}>
         <Automations />
