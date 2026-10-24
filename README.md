@@ -2,14 +2,14 @@
 
 # Axelstra
 
-Lightweight desktop workbench for parallel coding agents on git worktrees (Windows and macOS, Tauri + Rust).
+Lightweight desktop workbench for parallel coding agents on git worktrees (Windows and macOS, Tauri + Rust). The interface is in Portuguese (the strings are PT-PT/PT-BR style) and there is no language switch yet; the CLI, docs and commit messages are in English.
 
 <p align="center"><img src="assets/demo/demo.gif" width="820" alt="Axelstra tour: new worktree with an agent, notification, Ctrl+K, AI commit message, files and editor, Kanban, automations, dispatcher, sidebar groups and task reports, status bar overview, Docker, notification center and merge from the panel"></p>
 
 <sub>Scripted mock with fake data: source in [`assets/demo/index.html`](assets/demo/index.html), open it in a browser to watch it live. The tour: create a worktree and start an agent, get notified when another one finishes, jump with `Ctrl+K`, write the commit message with AI, browse and edit files, run the Kanban, scheduled automations and the dispatcher, then the sidebar groups with task reports, the status bar overview, the Docker screen, the notification center and the CI and merge flow in the right panel.</sub>
 
 - **Projects and worktrees:** one sidebar entry per repo, one worktree per task, each with its own terminals.
-- **Agents:** open Claude Code, Codex or Gemini in a worktree with one click; a dot shows working / idle / done and you get a notification when an agent stops.
+- **Agents:** open Claude Code, Codex or Gemini CLI in a worktree with one click; a dot shows working / idle / done and you get a notification when an agent stops. What each agent supports is in [Agent support](#agent-support).
 - **Terminals:** split view, command palette (`Ctrl+K`), dev-server ports shown as chips that open in the browser.
 - **Session restore:** terminals live in a background daemon. After a reboot or an update they reopen where they were, and Claude Code resumes its conversation (a `/clear` is followed, so you get the new one).
 - **Code:** file tree and editor, changes panel with diff and line comments sent to a running agent, commit box with an AI-suggested message, pull requests and issues (needs `gh`).
@@ -30,6 +30,18 @@ Lightweight desktop workbench for parallel coding agents on git worktrees (Windo
 - **Links:** URLs and file paths in terminal output are clickable (a path opens in the editor).
 - **Notifications:** when an agent finishes, stops or needs an answer. On Windows, clicking the toast opens that session. On macOS and Linux the notification is shown but clicking it does not select the session (the notification plugin has no click callback there); the worktree gets its attention dot instead.
 - **Layout:** `Ctrl+B` hides the project list, `Ctrl+Shift+B` the right panel (or use the panel buttons in the tab bar).
+
+## Agent support
+
+| | Claude Code | Codex | Gemini CLI |
+| --- | --- | --- | --- |
+| Launch from the app, one click | yes | yes | yes, flags unverified (taken from the official docs) |
+| Resume the previous conversation after a restart | yes (`--continue`, follows `/clear`) | yes (`resume --last`) | yes (`--resume latest`), unverified |
+| Status hooks (`axelstra hook`, exact waiting dot) | yes | no (the dot comes from the terminal screen) | no |
+| `/axelstration` skill installed | yes (`~/.claude/skills`) | yes (`~/.agents/skills`) | no |
+| Search past conversations and token usage | yes | yes | search only, unverified |
+
+Any other CLI on the `PATH` can be started as a plain terminal agent (`axelstra agent --agent <command>`), without resume, hooks or skill. The source of truth for launching and resuming is `crates/core/src/agents.rs`.
 
 ## Install
 
@@ -52,7 +64,7 @@ The first install is manual. Versions older than the first release with the upda
 
 ### Linux (experimental)
 
-Linux is not a supported platform yet. The release workflow builds a `.deb` and an AppImage in an experimental job that never blocks a release, and CI checks that the desktop host compiles on Ubuntu. Nobody has run the result on a Linux desktop, so expect rough edges. Known state:
+Linux is not a supported platform yet. The release workflow builds a `.deb` and an AppImage in an experimental job that never blocks a release, and CI checks that the desktop host compiles on Ubuntu (a Linux failure there does not fail CI, so check the job before relying on it). Nobody has run the result on a Linux desktop, so expect rough edges. Known state:
 
 - The files are not signed for the updater: a Linux install does not update itself, and `latest.json` has no Linux entry. Install each new release by hand.
 - Keep-awake uses `systemd-inhibit` when it is on `PATH`. Without it the switch shows `n/d` and does nothing.
@@ -144,3 +156,7 @@ Needs a paid Apple Developer account. Add these repository secrets and the next 
 | `APPLE_TEAM_ID` | the 10-character team id |
 
 The hardened runtime entitlements (microphone, webview JIT) are in `app/src-tauri/entitlements.plist`.
+
+## License
+
+[MIT](LICENSE).
