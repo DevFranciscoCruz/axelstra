@@ -65,7 +65,7 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             };
             let r = c.call("worktree.create", json!({"project": pid, "name": name, "parent": parent}))?;
             println!("{}", r["path"].as_str().unwrap_or_default());
-            eprintln!("note: a worktree needs a lead agent from the start. Start it now: `axelstra agent <path> --prompt \"<theme goal>\" --report-to` (or use `axelstra dispatch new`, which does both).");
+            eprintln!("note: a worktree needs a lead (\"main\") agent from the start: the first agent started there becomes it, and later agents are its tasks. Start it now: `axelstra agent <path> --prompt \"<theme goal>\" --report-to` (or use `axelstra dispatch new`, which does both).");
         }
         Cmd::Worktree { cmd: WtCmd::Rm { path } } => {
             let projects = c.call("project.list", json!({}))?;

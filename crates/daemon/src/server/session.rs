@@ -24,9 +24,36 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             };
             let mut meta = if p["meta"].is_null() { None } else { Some(p["meta"].clone()) };
             // a session started on behalf of another one (a worker): remembered as its child
-            let parent = p["parent"].as_u64().or_else(|| p["reap"]["parent"].as_u64()).map(|x| x as u32);
+            let mut parent = p["parent"].as_u64().or_else(|| p["reap"]["parent"].as_u64()).map(|x| x as u32);
+            // the lead of a worktree: its first agent. Tasks started there report to it; it reports to the project main
+            let (lead, parent_default) = {
+                let mut m = meta.clone().unwrap_or(Value::Null);
+                // a dispatched lead says so itself
+                if p["reap"]["lead"].as_bool() == Some(true) && m.is_object() {
+                    m["lead"] = json!(true);
+                }
+                let (project, wt) = (m["project"].as_str().unwrap_or_default().to_string(), axelstra_core::paths::norm(m["worktree"].as_str().unwrap_or_default()));
+                let sessions = reg.sessions.lock_recover();
+                let metas = reg.metas.lock_recover();
+                let live = |id: &u32| sessions.get(id).is_some_and(|s| s.try_wait().is_none());
+                let mut here = Vec::new();
+                let mut project_main = None;
+                for (id, o) in metas.iter().filter(|(id, o)| o["kind"] == "agent" && o["project"].as_str() == Some(project.as_str()) && live(id)) {
+                    if o["main"] == true {
+                        project_main = project_main.or(Some(*id));
+                    } else if axelstra_core::paths::norm(o["worktree"].as_str().unwrap_or_default()) == wt {
+                        here.push((*id, o["lead"] == true));
+                    }
+                }
+                let worker = p["worker"].as_bool() == Some(true);
+                crate::notes::pick_role(&m, p["label"].as_str(), worker, &here, project_main, parent)
+            };
+            if lead {
+                meta.get_or_insert_with(|| json!({}))["lead"] = json!(true);
+            }
+            parent = parent_default;
             // a dispatched lead is ephemeral like a worker but owns its worktree: it does not count against the worker limit
-            let is_worker = (p["reap"].is_object() && p["reap"]["lead"].as_bool() != Some(true)) || p["worker"].as_bool() == Some(true);
+            let is_worker = !lead && ((p["reap"].is_object() && p["reap"]["lead"].as_bool() != Some(true)) || p["worker"].as_bool() == Some(true));
             if is_worker {
                 let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
                 let (live, max) = (reg.bus.live_workers(alive), reg.bus.limit());
@@ -93,6 +120,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             }
             if let (Some(n), true) = (note, spec["meta"].is_object()) {
                 spec["meta"]["note"] = n;
+            }
+            // restoring brings the lead back as the lead
+            if lead && spec["meta"].is_object() {
+                spec["meta"]["lead"] = json!(true);
             }
             reg.specs.lock_recover().insert(id, spec);
             reg.persist();
