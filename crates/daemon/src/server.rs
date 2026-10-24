@@ -559,6 +559,33 @@ struct Req {
     params: Value,
 }
 
+/// True for the real `axelstra` executable. A test binary (`roundtrip-<hash>.exe`) or a renamed copy cannot serve
+/// `statusline-tee`, so it must never be written into a status line that every session will run.
+fn is_axelstra_exe(exe: &std::path::Path) -> bool {
+    exe.file_stem().is_some_and(|s| s.eq_ignore_ascii_case("axelstra"))
+}
+
+/// The settings file passed to Claude as `--settings`: a hook that records the agent's current conversation id (it
+/// changes on /clear), keyed by AXELSTRA_KEY, and a status line command that hands Claude's own numbers (context
+/// window, 5 h and weekly limits) to the app and then runs the user's own status line, so nothing they see changes.
+/// Without a real `axelstra` exe the status line is left out, and an existing file is not overwritten.
+fn hooks_json(exe: Option<&std::path::Path>) -> Value {
+    let mut hook = json!({"hooks": {"SessionStart": [{"hooks": [{"type": "command",
+        "command": "[ -n \"$AXELSTRA_KEY\" ] || exit 0; mkdir -p \"$AXELSTRA_DIR/sid\" && cat > \"$AXELSTRA_DIR/sid/$AXELSTRA_KEY.json\""}]}]}});
+    if let Some(exe) = exe.filter(|e| is_axelstra_exe(e)) {
+        hook["statusLine"] = json!({"type": "command", "command": format!("\"{}\" statusline-tee", exe.display())});
+    }
+    hook
+}
+
+fn write_hooks_json(dir: &std::path::Path, exe: Option<&std::path::Path>) {
+    let file = dir.join("hooks.json");
+    if !exe.is_some_and(is_axelstra_exe) && file.exists() {
+        return;
+    }
+    let _ = std::fs::write(file, hooks_json(exe).to_string());
+}
+
 /// Serves until the process dies. Fails if another daemon owns the pipe.
 pub async fn serve(pipe: String, token: String) -> Result<()> {
     serve_with_store(pipe, token, crate::projects::store_path()).await
@@ -568,18 +595,9 @@ pub async fn serve(pipe: String, token: String) -> Result<()> {
 pub async fn serve_with_store(pipe: String, token: String, store: std::path::PathBuf) -> Result<()> {
     origin::adopt_orphans();
     let reg = Arc::new(Registry::new(store, pipe.clone(), token.clone()));
-    // Claude Code hook: records the agent's current conversation id (it changes on /clear), keyed by AXELSTRA_KEY
     let dir = reg.saved.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
-    let hook = json!({"hooks": {"SessionStart": [{"hooks": [{"type": "command",
-        "command": "[ -n \"$AXELSTRA_KEY\" ] || exit 0; mkdir -p \"$AXELSTRA_DIR/sid\" && cat > \"$AXELSTRA_DIR/sid/$AXELSTRA_KEY.json\""}]}]}});
     let _ = std::fs::create_dir_all(&dir);
-    // the status line command hands Claude's own numbers (context window, 5 h and weekly limits) to the app; it then
-    // runs the user's own status line, if they have one, so nothing they see changes
-    let mut hook = hook;
-    if let Ok(exe) = std::env::current_exe() {
-        hook["statusLine"] = json!({"type": "command", "command": format!("\"{}\" statusline-tee", exe.display())});
-    }
-    let _ = std::fs::write(dir.join("hooks.json"), hook.to_string());
+    write_hooks_json(&dir, std::env::current_exe().ok().as_deref());
     spawn_scheduler(reg.clone());
     triggers::spawn_loop(reg.clone());
     spawn_idle_exit(reg.clone());
@@ -1205,5 +1223,41 @@ mod registry_tests {
         for _ in 0..4 {
             done_rx.recv_timeout(Duration::from_secs(30)).expect("deadlock between registry locks");
         }
+    }
+}
+
+#[cfg(test)]
+mod hooks_json_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn only_the_real_axelstra_exe_becomes_the_status_line() {
+        let status = |p: &str| hooks_json(Some(Path::new(p)))["statusLine"]["command"].as_str().map(String::from);
+        assert_eq!(status(r"D:\x\axelstra.exe").as_deref(), Some(r#""D:\x\axelstra.exe" statusline-tee"#));
+        assert_eq!(status("/usr/bin/axelstra").as_deref(), Some(r#""/usr/bin/axelstra" statusline-tee"#));
+        assert_eq!(status(r"C:\t\deps\roundtrip-d0504a754dee3ab3.exe"), None);
+        assert_eq!(status(r"C:\t\deps\axelstra_daemon-1a2b.exe"), None);
+        assert!(hooks_json(None)["statusLine"].is_null());
+        assert!(hooks_json(None)["hooks"]["SessionStart"].is_array());
+    }
+
+    #[test]
+    fn a_test_binary_does_not_clobber_the_hooks_file() {
+        let dir = std::env::temp_dir().join(format!("axl-hj-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        write_hooks_json(&dir, Some(Path::new(r"C:\x\axelstra.exe")));
+        let good = std::fs::read_to_string(dir.join("hooks.json")).unwrap();
+        assert!(good.contains("statusline-tee"));
+        write_hooks_json(&dir, Some(Path::new(r"C:\x\deps\roundtrip-1.exe")));
+        assert_eq!(std::fs::read_to_string(dir.join("hooks.json")).unwrap(), good);
+        // first run from a non-axelstra exe still gets the session hook, just no status line
+        let fresh = dir.join("fresh");
+        std::fs::create_dir_all(&fresh).unwrap();
+        write_hooks_json(&fresh, Some(Path::new(r"C:\x\deps\roundtrip-1.exe")));
+        let t = std::fs::read_to_string(fresh.join("hooks.json")).unwrap();
+        assert!(t.contains("SessionStart") && !t.contains("statusLine"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
