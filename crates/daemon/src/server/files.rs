@@ -70,12 +70,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             // only editors we know; never a program name from the client, and never through the shell
             let (prog, args) = match p["app"].as_str().unwrap_or_default() {
                 "code" => crate::fsops::code_launch(&wt)?,
-                other => anyhow::bail!("unknown editor {other:?}"),
+                other => return Err(axelstra_core::coded!("fs.unknown_editor", "unknown editor {editor:?}", editor = other)),
             };
-            axelstra_core::git::quiet(&mut std::process::Command::new(&prog))
-                .args(args)
-                .spawn()
-                .map_err(|e| anyhow::anyhow!("could not start {}: {e}", prog.display()))?;
+            axelstra_core::git::quiet(&mut std::process::Command::new(&prog)).args(args).spawn().map_err(|e| {
+                axelstra_core::coded!("fs.editor_start_failed", "could not start {program}: {detail}", program = prog.display(), detail = e)
+            })?;
             Ok(json!({}))
         }
         m => anyhow::bail!("unknown method {m}"),

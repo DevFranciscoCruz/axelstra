@@ -2,8 +2,8 @@
 //! JSON file; git itself is the source of truth for worktrees.
 
 use crate::store::{read_json, write_json, LockRecover};
-use anyhow::{bail, Context, Result};
-use axelstra_core::git;
+use anyhow::Result;
+use axelstra_core::{coded, git};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -36,14 +36,21 @@ pub fn store_path() -> PathBuf {
 /// The saved projects. A file that exists but cannot be read is an error, never silently an empty list; a corrupt
 /// one was already moved aside by `read_json`, which recorded a notice.
 pub fn try_load(store: &Path) -> Result<Vec<Project>> {
-    Ok(read_json(store).with_context(|| format!("could not read {}", store.display()))?.unwrap_or_default())
+    Ok(read_json(store)
+        .map_err(|e| coded!("project.read_failed", "could not read {path}: {detail}", path = store.display(), detail = e))?
+        .unwrap_or_default())
 }
 
 /// `try_load` for read-only callers that cannot report: a read error is logged and recorded as a notice
 /// (`store::take_notices`) and the list is empty for that call only; nothing is saved back from it.
 pub fn load(store: &Path) -> Vec<Project> {
     try_load(store).unwrap_or_else(|e| {
-        crate::store::notice(format!("projects unavailable: {e:#}"));
+        let detail = format!("{e:#}");
+        crate::store::notice_coded(axelstra_core::msg::Coded::new(
+            "store.projects_unavailable",
+            format!("projects unavailable: {detail}"),
+            &[("detail", detail)],
+        ));
         Vec::new()
     })
 }
@@ -123,10 +130,14 @@ pub fn resolve_root(path: &str) -> Result<PathBuf> {
     let root = match git::repo_root(Path::new(path)) {
         Ok(r) => r,
         Err(_) if Path::new(path).is_dir() => git::canon(Path::new(path))?,
-        Err(e) => return Err(e).with_context(|| format!("{path} is not a folder")),
+        Err(e) => return Err(coded!("project.not_folder", "{path} is not a folder: {detail}", path = path, detail = format!("{e:#}"))),
     };
     if forbidden_root(&root) {
-        anyhow::bail!("{} cannot be a project: it is a filesystem root, the home folder or a system folder", root.display());
+        return Err(coded!(
+            "project.forbidden_root",
+            "{path} cannot be a project: it is a filesystem root, the home folder or a system folder",
+            path = root.display()
+        ));
     }
     Ok(root)
 }
@@ -177,7 +188,7 @@ pub fn package_managers(path: Option<&Path>, preferred: Option<&str>) -> (Vec<&'
 pub fn set_setup(store: &Path, id: &str, setup: Option<String>) -> Result<()> {
     let _g = STORE_LOCK.lock_recover();
     let mut v = load_for_update(store)?;
-    let p = v.iter_mut().find(|p| p.id == id).with_context(|| format!("unknown project {id}"))?;
+    let p = v.iter_mut().find(|p| p.id == id).ok_or_else(|| coded!("project.unknown", "unknown project {id}", id = id))?;
     p.setup = setup.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     save(store, &v)
 }
@@ -200,11 +211,11 @@ pub fn known_worktree(store: &Path, path: &str) -> Result<PathBuf> {
             }
         }
     }
-    Err(axelstra_core::coded!("worktree.unknown", "not a worktree of a registered project: {path}", path = path))
+    Err(coded!("worktree.unknown", "not a worktree of a registered project: {path}", path = path))
 }
 
 pub fn find(store: &Path, id: &str) -> Result<Project> {
-    try_load(store)?.into_iter().find(|p| p.id == id).with_context(|| format!("unknown project {id}"))
+    try_load(store)?.into_iter().find(|p| p.id == id).ok_or_else(|| coded!("project.unknown", "unknown project {id}", id = id))
 }
 
 /// New worktree on a new branch `ax/<name>` from the repo's current HEAD.
@@ -227,8 +238,14 @@ pub fn worktree_from_pr(p: &Project, number: u64) -> Result<git::Worktree> {
 /// the code of a pull request is not trusted, so nothing is copied into its worktree and the user is told.
 pub fn worktree_from_pr_report(p: &Project, number: u64) -> Result<(git::Worktree, Option<String>)> {
     let repo = Path::new(&p.path);
-    git::must(repo, &["fetch", "origin", &format!("pull/{number}/head")])
-        .with_context(|| format!("could not fetch pull request {number} from origin"))?;
+    git::must(repo, &["fetch", "origin", &format!("pull/{number}/head")]).map_err(|e| {
+        coded!(
+            "worktree.fetch_pr_failed",
+            "could not fetch pull request {number} from origin: {detail}",
+            number = number,
+            detail = format!("{e:#}")
+        )
+    })?;
     let wt = create_at(p, &format!("pr-{number}"), "FETCH_HEAD", false)?.0;
     let warning = crate::wtenv::plan(repo).ok().filter(|pl| !pl.files.is_empty()).map(|pl| {
         format!(
@@ -243,22 +260,29 @@ pub fn worktree_from_pr_report(p: &Project, number: u64) -> Result<(git::Worktre
 /// Folder of the worktree `name` of project `p`.
 fn wt_dir(p: &Project, name: &str) -> Result<PathBuf> {
     let repo = Path::new(&p.path);
-    Ok(repo.parent().context("repo has no parent directory")?.join(".axelstra-wt").join(format!("{}-{}", slug(&p.name), name)))
+    Ok(repo.parent().ok_or_else(|| coded!("worktree.no_parent_dir", "repo has no parent directory"))?.join(".axelstra-wt").join(format!(
+        "{}-{}",
+        slug(&p.name),
+        name
+    )))
 }
 
 /// `copy_env`: also copy the git-ignored files `.worktreeinclude` selects (never for code that is not the user's own).
 pub(crate) fn create_at(p: &Project, name: &str, base: &str, copy_env: bool) -> Result<(git::Worktree, crate::wtenv::Report)> {
     let n = slug(name);
     if n.is_empty() {
-        bail!("worktree name is empty");
+        return Err(coded!("worktree.name_empty", "worktree name is empty"));
     }
     let repo = Path::new(&p.path);
     if !git::is_repo(repo) {
-        bail!("este projeto ainda não é um repositório git: corre `git init` na pasta para poderes criar worktrees");
+        return Err(coded!(
+            "worktree.not_repo",
+            "this project is not a git repository yet: run `git init` in the folder so you can create worktrees"
+        ));
     }
     let dir = wt_dir(p, &n)?;
     if dir.exists() {
-        bail!("{} already exists", dir.display());
+        return Err(coded!("worktree.dir_exists", "{path} already exists", path = dir.display()));
     }
     std::fs::create_dir_all(dir.parent().unwrap())?;
     git::worktree_add(repo, &dir, &format!("ax/{n}"), base)?;
@@ -267,7 +291,7 @@ pub(crate) fn create_at(p: &Project, name: &str, base: &str, copy_env: bool) -> 
     let wt = git::worktree_list(repo)?
         .into_iter()
         .find(|w| Path::new(&w.path).file_name() == dir.file_name())
-        .context("worktree created but not listed")?;
+        .ok_or_else(|| coded!("worktree.not_listed", "worktree created but not listed"))?;
     Ok((wt, report))
 }
 
@@ -277,26 +301,26 @@ pub(crate) fn create_at(p: &Project, name: &str, base: &str, copy_env: bool) -> 
 pub fn worktree_rename(p: &Project, path: &str, name: &str, busy: bool) -> Result<git::Worktree> {
     let repo = Path::new(&p.path);
     if !axelstra_core::card::valid_slug(name) {
-        bail!("nome inválido: usa só letras, números, ponto, _ e - (sem começar por ponto)");
+        return Err(coded!("worktree.bad_name", "invalid name: use only letters, digits, '.', '_' and '-' (not starting with a dot)"));
     }
     let wt = git::worktree_list(repo)?
         .into_iter()
         .find(|w| axelstra_core::paths::same(&w.path, path))
-        .context("not a worktree of this project")?;
+        .ok_or_else(|| coded!("worktree.not_of_project", "not a worktree of this project"))?;
     if wt.is_main {
-        bail!("cannot rename the main worktree");
+        return Err(coded!("worktree.main_rename", "cannot rename the main worktree"));
     }
     if busy {
-        bail!("há uma sessão ativa neste worktree: espera que fique inativa antes de mudar o nome");
+        return Err(coded!("worktree.busy", "there is an active session in this worktree: wait until it is idle before renaming"));
     }
-    let old_branch = wt.branch.clone().context("o worktree não tem ramo (detached HEAD)")?;
+    let old_branch = wt.branch.clone().ok_or_else(|| coded!("worktree.detached", "the worktree has no branch (detached HEAD)"))?;
     let new_branch = format!("ax/{name}");
     let to = wt_dir(p, name)?;
     if to.exists() {
-        bail!("{} already exists", to.display());
+        return Err(coded!("worktree.dir_exists", "{path} already exists", path = to.display()));
     }
     if git::run(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{new_branch}")])?.ok {
-        bail!("o ramo {new_branch} já existe");
+        return Err(coded!("worktree.branch_exists", "branch {branch} already exists", branch = new_branch));
     }
     git::forget_worktree_lists();
     git::must(repo, &["worktree", "move", &wt.path, &to.to_string_lossy()])?;
@@ -307,7 +331,10 @@ pub fn worktree_rename(p: &Project, path: &str, name: &str, busy: bool) -> Resul
         return Err(e);
     }
     git::forget_worktree_lists();
-    git::worktree_list(repo)?.into_iter().find(|w| w.branch.as_deref() == Some(new_branch.as_str())).context("renamed worktree not listed")
+    git::worktree_list(repo)?
+        .into_iter()
+        .find(|w| w.branch.as_deref() == Some(new_branch.as_str()))
+        .ok_or_else(|| coded!("worktree.not_listed", "renamed worktree not listed"))
 }
 
 pub fn worktree_remove(p: &Project, path: &str) -> Result<()> {
@@ -315,9 +342,9 @@ pub fn worktree_remove(p: &Project, path: &str) -> Result<()> {
     let wt = git::worktree_list(repo)?
         .into_iter()
         .find(|w| axelstra_core::paths::same(&w.path, path))
-        .context("not a worktree of this project")?;
+        .ok_or_else(|| coded!("worktree.not_of_project", "not a worktree of this project"))?;
     if wt.is_main {
-        bail!("cannot remove the main worktree");
+        return Err(coded!("worktree.main_remove", "cannot remove the main worktree"));
     }
     git::worktree_remove(repo, Path::new(&wt.path))?;
     if let Some(b) = wt.branch {
@@ -332,9 +359,9 @@ fn plain_worktree(p: &Project, path: &str) -> Result<git::Worktree> {
     let wt = git::worktree_list(Path::new(&p.path))?
         .into_iter()
         .find(|w| norm_path(&w.path) == want)
-        .context("not a worktree of this project")?;
+        .ok_or_else(|| coded!("worktree.not_of_project", "not a worktree of this project"))?;
     if wt.is_main {
-        bail!("o worktree principal não pode fazer parte de um grupo");
+        return Err(coded!("worktree.main_in_group", "the main worktree cannot be part of a group"));
     }
     Ok(wt)
 }
@@ -359,15 +386,22 @@ fn reaches(parents: &BTreeMap<String, String>, start: &str, target: &str) -> boo
 /// itself, and not one of its own descendants (that would make a cycle). With `path` None (a worktree not created
 /// yet) only the parent is checked.
 pub fn check_parent(p: &Project, path: Option<&str>, parent: &str) -> Result<()> {
-    let par = plain_worktree(p, parent).context("o grupo escolhido não é um worktree deste projeto")?;
+    // the main worktree keeps its own message; any other refusal means the group is not one of this project's worktrees
+    let par = plain_worktree(p, parent).map_err(|e| {
+        if axelstra_core::msg::find(&e).is_some_and(|c| c.code == "worktree.main_in_group") {
+            e
+        } else {
+            coded!("worktree.group_not_worktree", "the chosen group is not a worktree of this project")
+        }
+    })?;
     let Some(path) = path else { return Ok(()) };
     let me = plain_worktree(p, path)?;
     let (me, par) = (norm_path(&me.path), norm_path(&par.path));
     if me == par {
-        bail!("um worktree não pode ficar dentro de si próprio");
+        return Err(coded!("worktree.group_self", "a worktree cannot be placed inside itself"));
     }
     if reaches(&p.parents, &par, &me) {
-        bail!("isso criava um ciclo: o grupo escolhido já está dentro deste worktree");
+        return Err(coded!("worktree.group_cycle", "that would create a cycle: the chosen group is already inside this worktree"));
     }
     Ok(())
 }
@@ -377,7 +411,7 @@ pub fn check_parent(p: &Project, path: Option<&str>, parent: &str) -> Result<()>
 pub fn set_parent(store: &Path, id: &str, path: &str, parent: Option<&str>) -> Result<()> {
     let _g = STORE_LOCK.lock_recover();
     let mut v = load_for_update(store)?;
-    let p = v.iter_mut().find(|p| p.id == id).with_context(|| format!("unknown project {id}"))?;
+    let p = v.iter_mut().find(|p| p.id == id).ok_or_else(|| coded!("project.unknown", "unknown project {id}", id = id))?;
     let me = norm_path(&plain_worktree(p, path)?.path);
     match parent.map(str::trim).filter(|s| !s.is_empty()) {
         Some(par) => {
@@ -637,15 +671,18 @@ mod rename_tests {
         let b = worktree_create(&p, "b").unwrap();
         let err = |r: Result<git::Worktree>| r.unwrap_err().to_string();
         assert!(err(worktree_rename(&p, &a.path, "b", false)).contains("already exists"));
-        assert!(err(worktree_rename(&p, &a.path, "../x", false)).contains("inválido"));
-        assert!(err(worktree_rename(&p, &a.path, ".hidden", false)).contains("inválido"));
-        assert!(err(worktree_rename(&p, &a.path, "", false)).contains("inválido"));
-        assert!(err(worktree_rename(&p, &a.path, "busy", true)).contains("sessão ativa"));
+        assert!(err(worktree_rename(&p, &a.path, "../x", false)).contains("invalid name"));
+        assert!(err(worktree_rename(&p, &a.path, ".hidden", false)).contains("invalid name"));
+        assert!(err(worktree_rename(&p, &a.path, "", false)).contains("invalid name"));
+        assert_eq!(axelstra_core::msg::find(&worktree_rename(&p, &a.path, "busy", true).unwrap_err()).unwrap().code, "worktree.busy");
         assert!(err(worktree_rename(&p, &p.path, "main2", false)).contains("main worktree"));
         assert!(err(worktree_rename(&p, "C:/nowhere", "z", false)).contains("not a worktree"));
         // a branch of that name without a folder blocks it too
         git::must(Path::new(&p.path), &["branch", "ax/taken"]).unwrap();
-        assert!(err(worktree_rename(&p, &b.path, "taken", false)).contains("já existe"));
+        assert_eq!(
+            axelstra_core::msg::find(&worktree_rename(&p, &b.path, "taken", false).unwrap_err()).unwrap().code,
+            "worktree.branch_exists"
+        );
         assert!(Path::new(&a.path).exists() && Path::new(&b.path).exists());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -741,14 +778,14 @@ mod parent_tests {
         let b = worktree_create(&p, "b").unwrap();
         let c = worktree_create(&p, "c").unwrap();
         let err = |r: Result<()>| format!("{:#}", r.unwrap_err());
-        assert!(err(set_parent(&store, "p", &a.path, Some(&a.path))).contains("si próprio"));
+        assert!(err(set_parent(&store, "p", &a.path, Some(&a.path))).contains("inside itself"));
         set_parent(&store, "p", &b.path, Some(&a.path)).unwrap();
         set_parent(&store, "p", &c.path, Some(&b.path)).unwrap();
         // a under c would close the loop a -> c -> b -> a
-        assert!(err(set_parent(&store, "p", &a.path, Some(&c.path))).contains("ciclo"));
-        assert!(err(set_parent(&store, "p", &a.path, Some(&p.path))).contains("principal"));
-        assert!(err(set_parent(&store, "p", &p.path, Some(&a.path))).contains("principal"));
-        assert!(err(set_parent(&store, "p", &a.path, Some("C:/nowhere"))).contains("worktree deste projeto"));
+        assert!(err(set_parent(&store, "p", &a.path, Some(&c.path))).contains("cycle"));
+        assert!(err(set_parent(&store, "p", &a.path, Some(&p.path))).contains("main worktree"));
+        assert!(err(set_parent(&store, "p", &p.path, Some(&a.path))).contains("main worktree"));
+        assert!(err(set_parent(&store, "p", &a.path, Some("C:/nowhere"))).contains("worktree of this project"));
         assert!(err(set_parent(&store, "other", &a.path, Some(&b.path))).contains("unknown project"));
         // the refusals changed nothing
         assert_eq!(reload(&store).parents.len(), 2);

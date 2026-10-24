@@ -10,6 +10,7 @@ import { planStart, restorePayload } from "./kanbanLogic";
 import { S } from "./strings";
 import { P } from "./strings.panels";
 import { press } from "./a11y";
+import { coded } from "./msg";
 
 /** only cards are accepted by the columns: a terminal tab or a file dragged over is ignored */
 const CARD_MIME = "application/x-axelstra-card";
@@ -165,7 +166,15 @@ export function Kanban(props: { project: string }) {
     const i = Math.max(r.integ_wt.lastIndexOf("/"), r.integ_wt.lastIndexOf("\\"));
     return `${r.integ_wt.slice(0, i + 1)}${r.name}-${id}`;
   };
-  const reason = (id: string) => run().needs_review?.find((r) => r[0] === id)?.[1] ?? P.kanban.waitingReview;
+  // the reason of a failed / needs-review card in the UI language (the daemon's English text when it sent no code)
+  const why = (f: [string, string]) => {
+    const c = run().reason_codes?.[f[0]];
+    return coded(c?.code, c?.params, f[1]);
+  };
+  const reason = (id: string) => {
+    const r = run().needs_review?.find((x) => x[0] === id);
+    return r ? why(r) : P.kanban.waitingReview;
+  };
   const act = async (fn: () => Promise<unknown>) => {
     try {
       await fn();
@@ -223,17 +232,17 @@ export function Kanban(props: { project: string }) {
           </Show>
           <Show when={run().state === "done"}>
             {P.kanban.doneBanner(run().merged?.length ?? 0, run().integ_branch)}
-            <Show when={(run().failed?.length ?? 0) > 0}>{P.kanban.failedBanner(run().failed!.map((f) => `${f[0]} (${f[1]})`).join(", "))}</Show>
-            <Show when={(run().needs_review?.length ?? 0) > 0}>{P.kanban.reviewBanner(run().needs_review!.map((f) => `${f[0]} (${f[1]})`).join(", "))}</Show>
+            <Show when={(run().failed?.length ?? 0) > 0}>{P.kanban.failedBanner(run().failed!.map((f) => `${f[0]} (${why(f)})`).join(", "))}</Show>
+            <Show when={(run().needs_review?.length ?? 0) > 0}>{P.kanban.reviewBanner(run().needs_review!.map((f) => `${f[0]} (${why(f)})`).join(", "))}</Show>
             <Show when={(run().blocked?.length ?? 0) > 0}>{P.kanban.blockedBanner(run().blocked!.join(", "))}</Show>
           </Show>
-          <Show when={run().state === "error"}>{P.kanban.errorBanner(run().error)}</Show>
+          <Show when={run().state === "error"}>{P.kanban.errorBanner(coded(run().error_code, run().error_params, run().error ?? ""))}</Show>
         </div>
       </Show>
       <Show when={board().broken.length > 0}>
         <div class="kerr">
           {P.kanban.broken}{" "}
-          <For each={board().broken}>{(b) => <span title={b.error}>{b.file} </span>}</For>
+          <For each={board().broken}>{(b) => <span title={coded(b.error_code, b.error_params, b.error)}>{b.file} </span>}</For>
         </div>
       </Show>
       <div class="kcols">

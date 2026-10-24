@@ -1,8 +1,8 @@
 //! What changed in a worktree, and the diff of one file.
 //! Everything shells out to git so the numbers match what `git diff` shows.
 
-use anyhow::{bail, Context, Result};
-use axelstra_core::git;
+use anyhow::Result;
+use axelstra_core::{coded, git};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Component, Path};
@@ -29,14 +29,21 @@ pub struct Changes {
     pub files: Vec<FileChange>,
 }
 
+/// A failed git command as an error: git's own words in the English text, a message code for the usual causes.
+fn git_err(cmd: &str, stderr: &str) -> anyhow::Error {
+    let code = git::classify_failure(stderr).unwrap_or("git.failed");
+    axelstra_core::msg::Coded::new(code, format!("git {cmd}: {stderr}"), &[("cmd", cmd.to_string()), ("detail", stderr.to_string())])
+        .into_error()
+}
+
 /// The commit a caller-supplied ref names. A ref starting with a dash would act as a git option, and anything
 /// that is not an existing commit is refused before it reaches another command.
 fn resolve_base(wt: &Path, b: &str) -> Result<String> {
     if b.is_empty() || b.starts_with('-') || b.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        bail!("invalid base ref '{b}'");
+        return Err(coded!("change.invalid_base", "invalid base ref '{base}'", base = b));
     }
     git::must(wt, &["rev-parse", "--verify", "--quiet", "--end-of-options", &format!("{b}^{{commit}}")])
-        .with_context(|| format!("unknown base ref '{b}'"))
+        .map_err(|e| coded!("change.unknown_base", "unknown base ref '{base}': {detail}", base = b, detail = format!("{e:#}")))
 }
 
 /// Commit to diff against: HEAD, or the merge-base of HEAD and `base` for a branch-wide view.
@@ -45,7 +52,9 @@ fn reference(wt: &Path, base: Option<&str>) -> Result<String> {
         None => git::must(wt, &["rev-parse", "HEAD"]),
         Some(b) => {
             let commit = resolve_base(wt, b)?;
-            git::must(wt, &["merge-base", "HEAD", &commit]).with_context(|| format!("no common history with '{b}'"))
+            git::must(wt, &["merge-base", "HEAD", &commit]).map_err(|e| {
+                coded!("change.no_common_history", "no common history with '{base}': {detail}", base = b, detail = format!("{e:#}"))
+            })
         }
     }
 }
@@ -55,7 +64,7 @@ pub fn changes(wt: &Path, base: Option<&str>) -> Result<Changes> {
 
     let o = git::run(wt, &["-c", "status.renames=false", "status", "--porcelain=v2", "-z", "--untracked-files=all"])?;
     if !o.ok {
-        bail!("git status: {}", o.stderr);
+        return Err(git_err("status", &o.stderr));
     }
     let mut files: Vec<FileChange> = Vec::new();
     for rec in o.stdout.split('\0').filter(|r| !r.is_empty()) {
@@ -137,7 +146,7 @@ fn count_lines(p: &Path) -> (u32, bool) {
 fn safe_rel(path: &str) -> Result<()> {
     let p = Path::new(path);
     if path.is_empty() || p.is_absolute() || p.components().any(|c| !matches!(c, Component::Normal(_))) {
-        bail!("invalid path");
+        return Err(coded!("fs.invalid_path", "invalid path"));
     }
     Ok(())
 }
@@ -150,7 +159,7 @@ pub fn diff(wt: &Path, path: &str, base: Option<&str>) -> Result<String> {
     let mut out = if tracked {
         let o = git::run(wt, &["diff", &against, "--no-color", "--no-ext-diff", "--no-renames", "-U3", "--", path])?;
         if !o.ok {
-            bail!("git diff: {}", o.stderr);
+            return Err(git_err("diff", &o.stderr));
         }
         o.stdout
     } else {
@@ -209,7 +218,7 @@ pub fn log(wt: &Path, base: Option<&str>) -> Result<Vec<Commit>> {
     args.push("--");
     let o = git::run(wt, &args)?;
     if !o.ok {
-        bail!("git log: {}", o.stderr);
+        return Err(git_err("log", &o.stderr));
     }
     let mut out = Vec::new();
     for rec in o.stdout.split('\u{1e}').filter(|r| !r.trim().is_empty()) {
@@ -245,11 +254,11 @@ pub fn log(wt: &Path, base: Option<&str>) -> Result<Vec<Commit>> {
 /// Full patch of one commit. `sha` must be a plain hex id so it can never act as an option.
 pub fn show(wt: &Path, sha: &str) -> Result<String> {
     if !(7..=40).contains(&sha.len()) || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
-        bail!("invalid commit id");
+        return Err(coded!("change.invalid_commit", "invalid commit id"));
     }
     let o = git::run(wt, &["show", "--no-color", "--no-ext-diff", "--no-renames", "-U3", "--format=", sha])?;
     if !o.ok {
-        bail!("git show: {}", o.stderr);
+        return Err(git_err("show", &o.stderr));
     }
     let mut s = o.stdout;
     if s.len() > MAX_DIFF_BYTES {
@@ -266,6 +275,19 @@ pub fn show(wt: &Path, sha: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_carry_message_codes() {
+        let here = std::env::temp_dir();
+        let c = |e: anyhow::Error| axelstra_core::msg::find(&e).map(|c| c.code.clone()).unwrap_or_default();
+        assert_eq!(c(resolve_base(&here, "-n1").unwrap_err()), "change.invalid_base");
+        assert_eq!(c(show(&here, "zz").unwrap_err()), "change.invalid_commit");
+        assert_eq!(c(diff(&here, "../x", None).unwrap_err()), "fs.invalid_path");
+        // git's own failure keeps its classified code
+        let e = git_err("status", "fatal: not a git repository");
+        assert_eq!(c(e), "git.not_repo");
+        assert_eq!(c(git_err("status", "weird")), "git.failed");
+    }
 
     #[test]
     fn a_base_that_looks_like_an_option_is_refused() {

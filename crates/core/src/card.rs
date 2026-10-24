@@ -1,5 +1,5 @@
 use crate::agents;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -73,16 +73,27 @@ pub fn is_bypass(mode: &str) -> bool {
 
 fn validate(m: &Meta) -> Result<()> {
     if !valid_slug(&m.id) {
-        bail!("invalid card id {:?}: use letters, digits, '.', '_' or '-' (no '..')", m.id);
+        return Err(crate::coded!("card.invalid_id", "invalid card id {id:?}: use letters, digits, '.', '_' or '-' (no '..')", id = m.id));
     }
     if agents::get(&m.agent).is_none() {
-        bail!("card '{}': unknown agent {:?}", m.id, m.agent);
+        return Err(crate::coded!("card.bad_agent", "card '{id}': unknown agent {agent:?}", id = m.id, agent = m.agent));
     }
     if !PERMISSION_MODES.contains(&m.permission_mode.as_str()) {
-        bail!("card '{}': unknown permission_mode {:?}", m.id, m.permission_mode);
+        return Err(crate::coded!(
+            "card.bad_permission",
+            "card '{id}': unknown permission_mode {mode:?}",
+            id = m.id,
+            mode = m.permission_mode
+        ));
     }
     if !m.timeout_min.is_finite() || m.timeout_min <= 0.0 || m.timeout_min > MAX_TIMEOUT_MIN {
-        bail!("card '{}': timeout_min must be a number in (0, {MAX_TIMEOUT_MIN}], got {}", m.id, m.timeout_min);
+        return Err(crate::coded!(
+            "card.bad_timeout",
+            "card '{id}': timeout_min must be a number in (0, {max}], got {value}",
+            id = m.id,
+            max = MAX_TIMEOUT_MIN,
+            value = m.timeout_min
+        ));
     }
     Ok(())
 }
@@ -167,10 +178,15 @@ fn sha256_hex(data: &[u8]) -> String {
 
 pub fn parse(text: &str, path: &Path) -> Result<Card> {
     let text = text.trim_start_matches('\u{feff}').replace("\r\n", "\n");
-    let rest = text.strip_prefix("---\n").with_context(|| format!("{}: missing frontmatter", path.display()))?;
-    let (front, body) = rest.split_once("\n---").with_context(|| format!("{}: unterminated frontmatter", path.display()))?;
+    let rest = text
+        .strip_prefix("---\n")
+        .ok_or_else(|| crate::coded!("card.no_frontmatter", "{path}: missing frontmatter", path = path.display()))?;
+    let (front, body) = rest
+        .split_once("\n---")
+        .ok_or_else(|| crate::coded!("card.open_frontmatter", "{path}: unterminated frontmatter", path = path.display()))?;
     let body = body.trim_start_matches('\n').to_string();
-    let meta: Meta = serde_norway::from_str(front).with_context(|| format!("{}: bad frontmatter", path.display()))?;
+    let meta: Meta = serde_norway::from_str(front)
+        .map_err(|e| crate::coded!("card.bad_frontmatter", "{path}: bad frontmatter: {detail}", path = path.display(), detail = e))?;
     validate(&meta).with_context(|| path.display().to_string())?;
     Ok(Card { meta, body, path: path.to_path_buf() })
 }
@@ -245,12 +261,12 @@ pub fn set_status(path: &Path, status: &str) -> Result<()> {
 pub fn topo_order(cards: &[Card]) -> Result<Vec<String>> {
     let ids: HashSet<&str> = cards.iter().map(|c| c.meta.id.as_str()).collect();
     if ids.len() != cards.len() {
-        bail!("duplicate card ids");
+        return Err(crate::coded!("card.duplicate_ids", "duplicate card ids"));
     }
     for c in cards {
         for d in &c.meta.depends_on {
             if !ids.contains(d.as_str()) {
-                bail!("card '{}' depends on unknown '{}'", c.meta.id, d);
+                return Err(crate::coded!("card.unknown_dep", "card '{id}' depends on unknown '{dep}'", id = c.meta.id, dep = d));
             }
         }
     }
@@ -270,7 +286,7 @@ pub fn topo_order(cards: &[Card]) -> Result<Vec<String>> {
         }
     }
     if order.len() != cards.len() {
-        bail!("dependency cycle among cards");
+        return Err(crate::coded!("card.cycle", "dependency cycle among cards"));
     }
     Ok(order)
 }
@@ -278,6 +294,21 @@ pub fn topo_order(cards: &[Card]) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_carry_message_codes() {
+        let c = |e: anyhow::Error| crate::msg::find(&e).map(|c| c.code.clone()).unwrap_or_default();
+        let p = Path::new("x.md");
+        assert_eq!(c(parse("body", p).unwrap_err()), "card.no_frontmatter");
+        assert_eq!(c(parse("---\nid: a\n", p).unwrap_err()), "card.open_frontmatter");
+        assert_eq!(c(parse("---\nid: [\n---\n", p).unwrap_err()), "card.bad_frontmatter");
+        assert_eq!(c(parse("---\nid: ../a\n---\n", p).unwrap_err()), "card.invalid_id");
+        assert_eq!(c(parse("---\nid: a\nagent: nope\n---\n", p).unwrap_err()), "card.bad_agent");
+        assert_eq!(c(parse("---\nid: a\ntimeout_min: 0\n---\n", p).unwrap_err()), "card.bad_timeout");
+        assert_eq!(c(topo_order(&[card("a", &["zz"])]).unwrap_err()), "card.unknown_dep");
+        assert_eq!(c(topo_order(&[card("a", &["b"]), card("b", &["a"])]).unwrap_err()), "card.cycle");
+        assert_eq!(c(topo_order(&[card("a", &[]), card("a", &[])]).unwrap_err()), "card.duplicate_ids");
+    }
 
     fn card(id: &str, deps: &[&str]) -> Card {
         let t = format!("---\nid: {id}\nstatus: todo\ndepends_on: [{}]\n---\nbody\n", deps.join(","));
