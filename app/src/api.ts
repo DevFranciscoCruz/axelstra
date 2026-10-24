@@ -7,6 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 import { AppError, toAppError } from "./appError";
 import { apiContext } from "./apiContext";
 import { hostOf, norm } from "./paths";
+import { coded } from "./msg";
 
 /** Mirrors the Rust `meta` of a session (crates/daemon). `blank`, `interrupted` and `lost_workers` are set on entries of `session.pending`. */
 export type SessionMeta = {
@@ -705,7 +706,11 @@ export const hookAgentsToShow = (list: AgentInfo[] | undefined): HookAgent[] =>
 
 // ---- daemon methods newer than some running daemons: each degrades (null / empty) on "unknown method" ----
 /** Messages the daemon's store recorded (a corrupt file it recovered from, ...), taken once. Empty on an older daemon. */
-export const storeNotices = () => callOr<{ notices: string[] }>("notices.take", {}, { notices: [] }).then((r) => r.notices);
+export const storeNotices = () =>
+  callOr<{ notices: string[]; items?: { text: string; code?: string; params?: Record<string, unknown> }[] }>("notices.take", {}, { notices: [] }).then(
+    // `items` pairs each English line with its message code, which is shown in the UI language
+    (r) => (r.items ? r.items.map((i) => coded(i.code, i.params, i.text)) : r.notices),
+  );
 /** One command line tool Axelstra uses, as the daemon finds it on its PATH. */
 export type EnvTool = { id: string; found: boolean; path: string | null; version: string | null };
 /** git, claude and gh with their versions; null on a daemon without `env.tools`. */
