@@ -20,6 +20,7 @@ worker  ->  lead of the worktree  ->  main of the project
 - The **lead** owns its worktree's theme. It splits the theme into tasks, starts workers in **its own worktree**, receives their messages, reports and asks, answers them, integrates, and is the only one that talks to main (`axelstra done` / `ask` / `escalate` go to `$AXELSTRA_PARENT`).
 - **Workers** talk only to their lead. `--report-to` with no value defaults to the session in `$AXELSTRA_SESSION`, so a lead's workers report to the lead.
 - Reports flow up, instructions flow down. A worktree must never exist without its lead.
+- The lead is the **first agent of the worktree**, whichever way it is started (Novo worktree dialog, `dispatch new`, the sidebar action "Iniciar main do worktree", or a plain `axelstra agent <worktree>` in a worktree with no lead). The daemon names it **`main`** (session meta `lead: true`; the sidebar shows it first with a star) and its task file is `main - <worktree folder>.md`. Every later agent in that worktree is a task: it is named `Tarefa N` (the counter counts only tasks, and starts at 1 again when the project has no running agent) and its `$AXELSTRA_PARENT` is the lead. The lead's own parent is the project main when one runs. Orchestration flow tasks never become leads. Sessions saved before this change come back as they were: a named `Tarefa N` is never promoted.
 
 Before launching any agent:
 

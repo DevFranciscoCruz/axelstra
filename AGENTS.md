@@ -41,6 +41,12 @@ backup.restore, orch.trust_info, env.tools, janitor.events).
 
 ## Worktree and agent lifecycle
 
+- Every non-main worktree has a lead: its first fresh agent (`notes::pick_role`, called from `session.spawn`). It is
+  named `main`, has `meta.lead = true`, takes no `Tarefa N` number (the counter counts tasks only and still restarts
+  when the project has no running agent) and its task file is `main - <worktree folder>.md`. Later agents of that
+  worktree get the lead as default parent (`AXELSTRA_PARENT`, `meta.parent`); the lead's parent is the project's main
+  agent. A `worker: true` spawn, a named (restored) session and the main checkout never become leads. The app sends
+  `lead` back on restore so a restart keeps the roles; the sidebar offers "Iniciar main do worktree" when none runs.
 - A lead started by `axelstra dispatch new/send` is ephemeral: when it calls `axelstra done` its session closes (a
   reaper in mode `exit` with `lead: true`, so it does not count against the worker limit) and the report goes to main
   and to the task file. Main only reads the report.
