@@ -15,7 +15,7 @@ describe("fitPanel", () => {
   });
   it("respects its own range", () => {
     expect(fitPanel(900, RIGHT, 0, 3000)).toBe(640);
-    expect(fitPanel(10, RIGHT, 0, 3000)).toBe(240);
+    expect(fitPanel(10, RIGHT, 0, 3000)).toBe(300);
   });
 });
 
@@ -24,7 +24,7 @@ describe("resizeTo", () => {
     expect(resizeTo(260, "ArrowRight", false, 1, LEFT)).toBe(276);
     expect(resizeTo(260, "ArrowLeft", false, 1, LEFT)).toBe(244);
     expect(resizeTo(320, "ArrowLeft", false, -1, RIGHT)).toBe(336);
-    expect(resizeTo(320, "ArrowRight", true, -1, RIGHT)).toBe(256);
+    expect(resizeTo(320, "ArrowRight", true, -1, RIGHT)).toBe(300);
   });
   it("stops at the ends and jumps with Home/End", () => {
     expect(resizeTo(480, "ArrowRight", true, 1, LEFT)).toBe(480);

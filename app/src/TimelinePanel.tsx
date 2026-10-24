@@ -6,11 +6,14 @@ import { Icon } from "./Icon";
 import { Loading } from "./Loading";
 import { RightTabs } from "./RightTabs";
 import { findWorktree, rightTab, selectedWorktree, setError, showNotice } from "./store";
+import { S } from "./strings";
 import { P } from "./strings.panels";
-import { ciLine, eventTitle, stamp, toMarkdown, tokenLine } from "./timelineLogic";
-import { Badge, Button } from "./ui";
+import { ciLine, eventTitle, stamp, toMarkdown, tokenLine, withTimeout } from "./timelineLogic";
+import { Badge, Button, cn } from "./ui";
 
 const T = P.timeline;
+/** the daemon scans every agent log for the token total: when that drags, say so instead of waiting for ever */
+const TIMEOUT_MS = 20_000;
 
 /** What happened in the selected worktree: commits, merges, agent reports, with the tokens and CI as totals; copyable as markdown. */
 export function TimelinePanel() {
@@ -21,7 +24,7 @@ export function TimelinePanel() {
       const c = current();
       return c ? { wt: c.wt.path, project: c.project.id, ci: withCi() } : null;
     },
-    (k) => gitTimeline(k.wt, k.project, k.ci),
+    (k) => withTimeout(gitTimeline(k.wt, k.project, k.ci), TIMEOUT_MS, () => T.timedOut(TIMEOUT_MS / 1000)),
   );
 
   const copy = async () => {
@@ -44,8 +47,8 @@ export function TimelinePanel() {
       <div class="rtools">
         <Button
           variant="icon"
-          size="icon"
-          class={withCi() ? "text-primary" : undefined}
+          size="sm"
+          class={cn("min-w-0 shrink truncate", withCi() && "text-primary")}
           aria-pressed={withCi()}
           title={T.withCiTip}
           onClick={() => setWithCi(!withCi())}
@@ -70,7 +73,19 @@ export function TimelinePanel() {
       <div class="rlist" aria-label={T.title}>
         <Show when={current()} fallback={<div class="placeholder">{T.nothing}</div>}>
           <Show when={!data.loading} fallback={<Loading onRetry={() => void refetch()} />}>
-            <Show when={!data.error} fallback={<div class="placeholder">{errorText(data.error)}</div>}>
+            <Show
+              when={!data.error}
+              fallback={
+                <div class="placeholder" role="alert">
+                  <span>{errorText(data.error)}</span>
+                  <div>
+                    <Button size="sm" onClick={() => void refetch()}>
+                      {S.retry}
+                    </Button>
+                  </div>
+                </div>
+              }
+            >
               <Show when={data()}>
                 {(t) => (
                   <>

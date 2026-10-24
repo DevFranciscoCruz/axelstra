@@ -4,7 +4,7 @@ export const MIN_CENTER = 360;
 const FLOOR = 120;
 
 export const LEFT = { min: 180, max: 480 } as const;
-export const RIGHT = { min: 240, max: 640 } as const;
+export const RIGHT = { min: 300, max: 640 } as const;
 
 /** Width for a side panel: inside its own range, and small enough that the centre keeps MIN_CENTER next to the
  *  other panel (`otherPx`, 0 when that one is hidden) in a window `win` px wide. A very narrow window wins over the range. */
@@ -16,7 +16,13 @@ export const fitPanel = (w: number, range: { min: number; max: number }, otherPx
 
 /** Keyboard step for a resizer: arrows move 16px (64px with Shift), Home/End jump to the ends; null for other keys.
  *  `dir` is 1 for the left panel (Right grows it) and -1 for the right one (Left grows it). */
-export const resizeTo = (w: number, key: string, shift: boolean, dir: 1 | -1, range: { min: number; max: number }): number | null => {
+export const resizeTo = (
+  w: number,
+  key: string,
+  shift: boolean,
+  dir: 1 | -1,
+  range: { min: number; max: number },
+): number | null => {
   const step = shift ? 64 : 16;
   if (key === "ArrowRight") return Math.min(range.max, Math.max(range.min, w + dir * step));
   if (key === "ArrowLeft") return Math.min(range.max, Math.max(range.min, w - dir * step));

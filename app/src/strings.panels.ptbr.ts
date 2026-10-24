@@ -491,6 +491,7 @@ export const ptBRP: Widen<typeof ptP> = {
     withCiTip: "Consulta o GitHub sobre o estado dos checks (pode demorar)",
     copy: "Copiar markdown",
     copied: "Linha do tempo copiada.",
+    timedOut: (s: number) => `Sem resposta após ${s} s. O daemon pode estar ocupado lendo os registros dos agentes.`,
     nothing: "Escolha um worktree.",
     empty: "Sem eventos neste worktree.",
     events: "Eventos",

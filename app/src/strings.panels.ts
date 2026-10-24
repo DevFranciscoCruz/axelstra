@@ -494,6 +494,8 @@ export const ptP = {
     withCiTip: "Pergunta ao GitHub pelo estado dos checks (pode demorar)",
     copy: "Copiar markdown",
     copied: "Linha do tempo copiada.",
+    timedOut: (s: number) =>
+      `Sem resposta ao fim de ${s} s. O daemon pode estar ocupado a ler os registos dos agentes.`,
     nothing: "Escolhe um worktree.",
     empty: "Sem eventos neste worktree.",
     events: "Eventos",
