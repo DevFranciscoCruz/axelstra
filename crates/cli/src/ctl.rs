@@ -299,6 +299,11 @@ fn with_prompt_file(line: &str, file: &str, ps: bool) -> String {
     }
 }
 
+/// The flags that put `agent`'s interactive TUI on a first prompt, each with a leading space ("" when it needs none).
+fn prompt_flags(agent: &str) -> String {
+    axelstra_core::agents::get(agent).and_then(|a| a.interactive_prompt).unwrap_or(&[]).iter().map(|f| format!(" {f}")).collect()
+}
+
 /// Starts a claude/codex session in `worktree` (visible in the app); returns its session id.
 pub(crate) fn spawn_agent(
     c: &mut Client,
@@ -310,7 +315,7 @@ pub(crate) fn spawn_agent(
 ) -> Result<u32> {
     // what the agent was asked, kept as the goal at the top of its task file
     let goal = prompt.unwrap_or_default().to_string();
-    // any agent CLI on the PATH works (gemini...); only claude and codex get conversation resume
+    // any agent CLI on the PATH works; claude, codex and gemini get conversation resume
     if agent.is_empty() || !agent.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')) {
         bail!("--agent must be the name of a command on the PATH (claude, codex, gemini...)");
     }
@@ -351,6 +356,8 @@ pub(crate) fn spawn_agent(
             pr.to_string()
         };
         // the text never goes through a command line: a file the shell reads, so <, >, &, quotes and newlines arrive as typed
+        // an agent whose first prompt needs a flag (gemini: -i, else a bare prompt runs one-shot and exits) gets it here
+        line.push_str(&prompt_flags(agent));
         let file = format!("{dir}/prompts/{}.txt", new_uuid());
         std::fs::create_dir_all(Path::new(&file).parent().context("bad data dir")?)?;
         std::fs::write(&file, &full).with_context(|| format!("cannot write {file}"))?;
@@ -647,6 +654,12 @@ mod tests {
 
     const NASTY: &str =
         "corrige <login> & testa > saída | \"citado\" 'simples' \\\"barra\\ $HOME `tick` %PATH% ^ !\nsegunda linha\n\n  recuo\\";
+
+    #[test]
+    fn gemini_needs_the_interactive_prompt_flag_the_others_do_not() {
+        assert_eq!(prompt_flags("gemini"), " -i");
+        assert_eq!((prompt_flags("claude"), prompt_flags("codex"), prompt_flags("other")), (String::new(), String::new(), String::new()));
+    }
 
     #[test]
     fn prompt_comes_from_text_stdin_or_file() {

@@ -1,6 +1,6 @@
 # Axelstration
 
-You are running inside an Axelstra terminal (as Claude Code, Codex or any other agent that can run shell commands). The `axelstra` CLI talks to the same daemon as the app, so everything you start appears as a tab in the app and the user can watch or take over.
+You are running inside an Axelstra terminal (as Claude Code, Codex, Gemini CLI or any other agent that can run shell commands). The `axelstra` CLI talks to the same daemon as the app, so everything you start appears as a tab in the app and the user can watch or take over.
 
 Your own session id is `$AXELSTRA_SESSION` (PowerShell: `$env:AXELSTRA_SESSION`). A worker or lead started by you finds you in `$AXELSTRA_PARENT`.
 
@@ -49,7 +49,7 @@ axelstra agent <worktree> --prompt "<task, with acceptance criteria>" --report-t
 ```
 
 - `--report-to` (no value) makes the worker **ephemeral**: when it calls `axelstra done`, goes idle (`--when idle`, default, with `--idle-secs`) or exits (`--when exit`), the daemon types its report into your session, closes the worker and frees its resources. You do not need to poll.
-- `--agent codex` starts Codex instead of Claude.
+- `--agent codex` starts Codex instead of Claude, `--agent gemini` starts Gemini CLI.
 - A worker cannot see your conversation. Give it a self-contained prompt: goal, files involved, how to verify, and the instruction below.
 
 Put this at the end of every worker prompt:
