@@ -3,7 +3,7 @@ import { Icon } from "./Icon";
 import { Automation, agentOptions, agentWarning, agentsList, deleteAutomation, listAutomations, runAutomation, saveAutomation } from "./api";
 import { Modal } from "./Modal";
 import { ask, askDiscard } from "./Confirm";
-import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations, toast } from "./store";
+import { projects, refreshProjects, refreshSessions, navStamp, selectIfStill, setError, setShowAutomations, toast } from "./store";
 import { S } from "./strings";
 import { P } from "./strings.panels";
 import { Button, Field, Input, Select, Textarea } from "./ui";
@@ -71,11 +71,12 @@ export function Automations() {
   };
   const doRun = (a: Automation) =>
     guard(async () => {
+      const stamp = navStamp();
       const r = await runAutomation(a.id);
       await refreshProjects();
       await refreshSessions();
       setShowAutomations(false);
-      selectWorktree(r.worktree);
+      selectIfStill(stamp, r.worktree);
     });
 
   const toggle = (a: Automation) =>

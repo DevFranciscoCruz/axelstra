@@ -12,7 +12,6 @@ import { Opened, fsRead, fsStat, fsWrite } from "./api";
 import { isLight } from "./theme";
 import { fsTick, guarded, setEditorDirty, setEditorSaver, setOpenFile } from "./store";
 import { clampLine, describeReadError, docDiffers, isLarge, sizeLabel } from "./editorLogic";
-import { createPoller, type Poller } from "./poller";
 import { P } from "./strings.panels";
 
 /** Language packs load on demand so the editor itself stays small. */
@@ -133,9 +132,9 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
     }
   };
 
-  let poller: Poller | undefined;
+  let unfocus: (() => void) | undefined;
   // cleanup is registered synchronously (before any await), otherwise it would never run
-  onCleanup(() => poller?.stop());
+  onCleanup(() => unfocus?.());
   onMount(() => {
     view = new EditorView({
       parent: host,
@@ -174,7 +173,7 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
       }
     })();
     // agents write to the same files: notice changes made behind our back. The daemon reports file
-    // changes (fsTick); the slow timer only covers files the watcher ignores.
+    // changes (fsTick); coming back to the window covers files the watcher ignores.
     const check = async () => {
       if (document.hidden || !meta || saving()) return;
       try {
@@ -183,12 +182,17 @@ export function Editor(props: { wt: string; path: string; initialLine?: number }
         if (dirty()) setConflict(true);
         else await load();
       } catch {
-        /* transient; the next change or tick retries */
+        /* transient; the next change or the next visit to the window retries */
       }
     };
-    // eslint-disable-next-line solid/reactivity -- poll trigger, called from a timer and from an effect
+    // eslint-disable-next-line solid/reactivity -- trigger called from an event handler and from an effect
     checkNow = () => void check();
-    poller = createPoller(check, 30000);
+    window.addEventListener("focus", checkNow);
+    document.addEventListener("visibilitychange", checkNow);
+    unfocus = () => {
+      window.removeEventListener("focus", checkNow!);
+      document.removeEventListener("visibilitychange", checkNow!);
+    };
   });
   // same file, new line (clicking another link to it)
   createEffect(on(() => props.initialLine, () => meta && gotoLine(), { defer: true }));

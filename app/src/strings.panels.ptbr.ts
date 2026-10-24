@@ -158,6 +158,11 @@ export const ptBRP: Widen<typeof ptP> = {
       setupCmd: "Comando de setup…",
       runSetup: "Executar setup do projeto",
       defaultAgent: "Agente padrão",
+      agentOpen: "Abrir sessão",
+      agentCopyId: "Copiar id",
+      agentCopyWt: "Copiar caminho do worktree",
+      agentEnd: "Encerrar sessão",
+      agentReveal: "Mostrar no explorador",
     },
   },
   docker: {

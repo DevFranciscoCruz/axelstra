@@ -158,6 +158,11 @@ export const enP: Widen<typeof ptP> = {
       setupCmd: "Setup command…",
       runSetup: "Run project setup",
       defaultAgent: "Default agent",
+      agentOpen: "Open session",
+      agentCopyId: "Copy id",
+      agentCopyWt: "Copy worktree path",
+      agentEnd: "End session",
+      agentReveal: "Show in file explorer",
     },
   },
   docker: {

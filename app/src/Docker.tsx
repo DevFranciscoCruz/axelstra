@@ -5,7 +5,7 @@ import { MenuItem, isMenuKey, showMenu, showMenuAt } from "./ContextMenu";
 import { Icon } from "./Icon";
 import { Button, Input, cn } from "./ui";
 import { Filter, pruneShells, filterContainers, groupByProject, isRunning } from "./dockerLogic";
-import { findWorktree, keepSame, openSession, refreshSessions, selectedWorktree, sessions, setShowDocker, showDocker } from "./store";
+import { findWorktree, keepSame, navStamp, openIfStill, refreshSessions, selectedWorktree, sessions, setShowDocker, showDocker } from "./store";
 import { say, nameOf, shells, DTab } from "./docker/shared";
 import { Empty, Unavailable, ComposeBar, Row, VolumesList, ImagesList, NetworksList } from "./docker/Lists";
 import { FAST_MS } from "./docker/shared";
@@ -199,12 +199,13 @@ export function DockerView() {
   const openAsTab = async (kind: "logs" | "shell", c: DockerContainer) => {
     const wt = selectedWorktree();
     if (!wt) return say(P.docker.pickWorktreeTab, true);
+    const stamp = navStamp();
     try {
       const project = findWorktree(wt)?.project.id;
       const id = await (kind === "logs" ? dockerOpenLogs(wt, c.name, project) : dockerOpenShell(wt, c.name, project));
       await refreshSessions();
       setShowDocker(false);
-      openSession(wt, id);
+      openIfStill(stamp, wt, id);
     } catch (e) {
       say(nameOf(e), true);
     }

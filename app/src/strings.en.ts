@@ -85,6 +85,7 @@ export const enS: Widen<typeof ptS> = {
   cancel: "Cancel",
   /** names of the known agent CLIs, by key; the others show their key */
   agentNames: { claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI" } as Record<string, string>,
+  agentDescs: { claude: "AI by Anthropic (Claude)", codex: "AI by OpenAI (GPT)", gemini: "AI by Google (Gemini)" } as Record<string, string>,
   toolFailed: "An external tool (git, gh or docker) failed. Original message:",
 
   status: {

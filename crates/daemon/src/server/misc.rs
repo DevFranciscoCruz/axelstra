@@ -45,6 +45,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "flow.clear" => {
             reg.flows.lock_recover().remove(p["flow"].as_str().unwrap_or_default());
+            // its worktrees are no longer held by the plan
+            reg.janitor.bump();
             Ok(json!({}))
         }
         "flow.list" => {
@@ -122,6 +124,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 saved["hosts"] = crate::hosts::validate(h)?;
             }
             write_json(&reg.saved.with_file_name("settings.json"), &saved)?;
+            // the budget loop sleeps while there is no budget: it reads the settings again
+            reg.budget_wake.notify_one();
             Ok(json!({}))
         }
         "agent.search" => {
@@ -289,6 +293,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     }
                 }
             }
+            reg.closing.store(true, Ordering::SeqCst);
             reg.persist();
             // keep what each agent terminal showed, so the restored tab is not empty
             save_histories(reg);
@@ -377,5 +382,6 @@ pub(super) fn budget_check(reg: &Arc<Registry>) -> Vec<crate::budget::Row> {
     if state != before {
         let _ = write_json(&path, &state);
     }
+    reg.announce_events();
     budget::status(&state, &budgets, &totals, date)
 }

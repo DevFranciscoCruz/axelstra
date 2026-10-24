@@ -86,6 +86,8 @@ export const ptS = {
   cancel: "Cancelar",
   /** names of the known agent CLIs, by key; the others show their key */
   agentNames: { claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI" } as Record<string, string>,
+  /** second line of each agent in the "Novo agente" picker: which AI it is */
+  agentDescs: { claude: "IA da Anthropic (Claude)", codex: "IA da OpenAI (GPT)", gemini: "IA da Google (Gemini)" } as Record<string, string>,
   toolFailed: "Uma ferramenta externa (git, gh ou docker) falhou. Mensagem original:",
 
   status: {

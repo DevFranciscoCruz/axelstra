@@ -3,7 +3,7 @@ import { AgentHit, agentSearch, geminiPathVariants, hitResume, launchDefaultAgen
 import { moveIndex } from "./a11y";
 import { ago } from "./time";
 import { Modal } from "./Modal";
-import { findWorktree, projects, projectTerse, refreshSessions, setError, setShowAgentSearch, setActiveSession, selectWorktree } from "./store";
+import { findWorktree, projects, projectTerse, refreshSessions, setError, setShowAgentSearch, setActiveSession, selectWorktree, navStamp } from "./store";
 import { Input } from "./ui";
 import { P } from "./strings.panels";
 
@@ -60,10 +60,11 @@ export function AgentSearch() {
     if (!t) return;
     setShowAgentSearch(false);
     selectWorktree(t.wt.path);
+    const stamp = navStamp();
     try {
       const id = await launchDefaultAgent(t.project.id, t.wt.path, h.agent, h.agent, { resume: hitResume(h) ?? undefined }, undefined, projectTerse(t.project.id));
       await refreshSessions();
-      setActiveSession(id);
+      if (stamp === navStamp()) setActiveSession(id);
     } catch (e) {
       setError(String(e));
     }

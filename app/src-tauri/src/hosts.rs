@@ -17,7 +17,7 @@ use axelstra_daemon::remote::RemoteSpec;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tauri::ipc::{Channel, InvokeResponseBody};
 
@@ -394,6 +394,8 @@ struct Info {
 pub struct Remote {
     pub def: Def,
     info: Mutex<Info>,
+    /// tells the keeper thread that `info` changed (state, next try) or that the host was removed
+    wake: Condvar,
     control: Mutex<Option<Client>>,
     bg: Mutex<Option<Client>>,
     input: Mutex<Option<Client>>,
@@ -451,6 +453,7 @@ impl Remote {
                 next_try: Instant::now(),
                 fails: 0,
             }),
+            wake: Condvar::new(),
             control: Mutex::new(None),
             bg: Mutex::new(None),
             input: Mutex::new(None),
@@ -507,6 +510,7 @@ impl Remote {
             i.error = error.clone();
             i.error_code = code.clone();
         }
+        self.wake.notify_all();
         let mut p = json!({"id": self.def.id, "state": state.name()});
         if let Some(e) = error {
             p["error"] = json!(e);
@@ -531,6 +535,7 @@ impl Remote {
             let wait = if auth { 60 } else { (5 * u64::from(i.fails)).min(60) };
             i.next_try = Instant::now() + Duration::from_secs(wait);
         }
+        self.wake.notify_all();
         let code = if e.chain().count() == 1 { axelstra_core::msg::find(e).cloned() } else { None };
         self.set_state_coded(if auth { St::Auth } else { St::Lost }, Some(msg), code);
     }
@@ -828,16 +833,30 @@ pub fn load() {
 /// Connects a host at startup and again whenever it is lost, with a growing wait (a refused login waits longer).
 fn keep(h: Arc<Remote>) {
     let _ = std::thread::Builder::new().name(format!("host-keeper-{}", h.def.id)).spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(1));
         if get(&h.def.id).is_none_or(|x| !Arc::ptr_eq(&x, &h)) {
             return;
         }
-        let (state, due) = {
-            let i = lock(&h.info);
-            (i.state, Instant::now() >= i.next_try)
-        };
-        if matches!(state, St::Idle | St::Lost | St::Auth) && due {
+        let i = lock(&h.info);
+        let retry = matches!(i.state, St::Idle | St::Lost | St::Auth);
+        if retry && Instant::now() >= i.next_try {
+            drop(i);
             let _ = h.connect_now();
+            // a connect that failed has pushed `next_try` out; one that worked changed the state: look again
+            let i = lock(&h.info);
+            if !matches!(i.state, St::Idle | St::Lost | St::Auth) || Instant::now() < i.next_try {
+                continue;
+            }
+            // still due (the gate was busy): do not spin on it
+            drop(i);
+            std::thread::sleep(Duration::from_secs(1));
+            continue;
+        }
+        // asleep until the next try is due, or (connected, connecting) until the state changes or the host is removed
+        if retry {
+            let left = i.next_try.saturating_duration_since(Instant::now());
+            drop(h.wake.wait_timeout(i, left));
+        } else {
+            drop(h.wake.wait(i));
         }
     });
 }
@@ -878,8 +897,8 @@ pub fn add(c: &mut Client, name: &str, spec: &str, bin: Option<&str>) -> Result<
     cur.push(def.clone());
     save(c, &cur)?;
     let h = Remote::new(def);
-    keep(h.clone());
     lock(&HOSTS).push(h.clone());
+    keep(h.clone());
     emit("host-state", json!({"id": h.def.id, "state": "idle"}));
     Ok(h.describe())
 }
@@ -902,6 +921,8 @@ pub fn remove(c: &mut Client, id: &str) -> Result<()> {
         h.link.fetch_add(1, Ordering::SeqCst);
         h.set_state(St::Idle, None);
         h.drop_connections();
+        // the keeper looks again and ends
+        h.wake.notify_all();
     }
     Ok(())
 }

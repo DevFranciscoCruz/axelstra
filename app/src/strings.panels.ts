@@ -160,6 +160,11 @@ export const ptP = {
       setupCmd: "Comando de setup…",
       runSetup: "Executar setup do projeto",
       defaultAgent: "Agente por omissão",
+      agentOpen: "Abrir sessão",
+      agentCopyId: "Copiar id",
+      agentCopyWt: "Copiar caminho do worktree",
+      agentEnd: "Terminar sessão",
+      agentReveal: "Mostrar no explorador",
     },
   },
   docker: {
