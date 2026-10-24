@@ -30,6 +30,7 @@
   --on-accent: #15121f;
   --fg-rgb: 255, 255, 255;
   --accent-rgb: 167, 139, 250;
+  --claude: #d97757;
   --ok-rgb: 74, 222, 128;
   --ok2-rgb: 127, 209, 139;
   --warn-rgb: 229, 192, 123;
@@ -89,6 +90,7 @@
   --accent-fg: #ffffff;
   --fg-rgb: 0, 0, 0;
   --accent-rgb: 109, 79, 224;
+  --claude: #b4482a;
   --ok-rgb: 26, 127, 55;
   --ok2-rgb: 26, 127, 55;
   --warn-rgb: 138, 90, 0;
@@ -937,3 +939,13 @@ button.icon, button.x, button.cbtn { display: inline-flex; align-items: center; 
 
 
 
+
+/* tokens-per-worktree popover opened from the status area */
+.wt-usage-pop { position: fixed; top: 40px; right: 12px; z-index: 50; background: var(--panel); color: var(--text); border: 1px solid var(--line-ctl); border-radius: var(--r-md); padding: 8px 10px; font-size: var(--fs-sm); max-width: 360px; box-shadow: 0 4px 16px rgba(0, 0, 0, .35); }
+.wup-note { color: var(--muted); }
+.wup-note:first-child { margin-bottom: 4px; }
+.wup-foot { margin-top: 4px; }
+.wup-row { display: flex; gap: 12px; justify-content: space-between; }
+.wup-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wup-total { border-top: 1px solid var(--line-ctl); margin-top: 4px; padding-top: 4px; }
+.claude-ico { color: var(--claude); }
