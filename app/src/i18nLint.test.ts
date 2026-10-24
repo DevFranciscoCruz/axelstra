@@ -96,8 +96,8 @@ describe("the language changes live", () => {
     setLocale("pt-BR");
     expect(ago(300)).toBe("há 5 min.");
   });
-  it("pt-BR keeps pt-PT for what it does not override", () => {
+  it("pt-BR reads its own complete layer", () => {
     setLocale("pt-BR");
-    expect(S.settings).toBe("Definições");
+    expect(S.settings).toBe("Configurações");
   });
 });
