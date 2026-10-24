@@ -67,6 +67,8 @@ Trusting a folder lets its `.gemini/` settings, hooks, MCP servers and skills ru
   folder exits 1 with "Gemini CLI is not running in a trusted directory" (verified), and an interactive worker would sit
   at the dialog. This is the one place Axelstra decides trust for the user: the folder is a worktree they asked an agent
   to work in. `GEMINI_CLI_TRUST_WORKSPACE=true` is the environment alternative.
+  Only worktrees on an `ax/*` branch that were not made from a pull request get the flag (`git::folder_trusted`): a PR's
+  worktree is marked (`axelstra-untrusted` in its git dir, also named `ax/pr-N`) and a folder outside `ax/*` is left to ask.
 
 ## Conversation logs
 
