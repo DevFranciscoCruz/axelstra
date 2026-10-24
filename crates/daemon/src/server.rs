@@ -174,7 +174,8 @@ impl Registry {
     /// Deletes the files a saved session left behind: the `sid/<key>.json` the hook wrote (the conversation id used to
     /// resume it) and its saved terminal history.
     fn drop_sid_of(&self, rec: &Value) {
-        let Some(key) = rec["meta"]["key"].as_str().filter(|k| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')) else {
+        let Some(key) = rec["meta"]["key"].as_str().filter(|k| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        else {
             return;
         };
         let _ = std::fs::remove_file(self.saved.with_file_name("sid").join(format!("{key}.json")));
