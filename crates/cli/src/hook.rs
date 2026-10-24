@@ -184,7 +184,10 @@ mod tests {
         assert_eq!((e.0, e.1), ("waiting", Some("permission")));
         assert!(e.2.ends_with(": mkdir newdir_stub"), "{}", e.2);
         assert_eq!(ev("gemini", "Notification", json!({"notification_type": "Other"})), None);
-        assert_eq!((ev("gemini", "BeforeAgent", Value::Null).unwrap().0, ev("gemini", "AfterAgent", Value::Null).unwrap().0), ("working", "idle"));
+        assert_eq!(
+            (ev("gemini", "BeforeAgent", Value::Null).unwrap().0, ev("gemini", "AfterAgent", Value::Null).unwrap().0),
+            ("working", "idle")
+        );
         assert_eq!(ev("gemini", "AfterTool", Value::Null).unwrap().0, "working");
         assert_eq!(ev("gemini", "BeforeTool", Value::Null), None);
     }

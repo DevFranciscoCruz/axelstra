@@ -62,11 +62,19 @@ fn only_events_make_a_session_wait_and_the_parent_hears_once() {
 
     // 1. no event: even a screen full of prompts, questions and turn summaries is not a wait
     let (prog, args) = if cfg!(windows) {
-        ("cmd", json!(["/c", "echo Do you want to proceed? (y/n) & echo Posso continuar? & echo Cooked for 2m 18s - done & ping -n 30 127.0.0.1 >nul"]))
+        (
+            "cmd",
+            json!([
+                "/c",
+                "echo Do you want to proceed? (y/n) & echo Posso continuar? & echo Cooked for 2m 18s - done & ping -n 30 127.0.0.1 >nul"
+            ]),
+        )
     } else {
         ("sh", json!(["-c", "echo 'Do you want to proceed? (y/n)'; echo 'Posso continuar?'; echo 'Cooked for 2m 18s - done'; sleep 30"]))
     };
-    let screeny = c.call("session.spawn", json!({"program": prog, "args": args, "label": "screeny", "meta": {"kind": "agent"}, "parent": boss})).unwrap()["id"]
+    let screeny = c
+        .call("session.spawn", json!({"program": prog, "args": args, "label": "screeny", "meta": {"kind": "agent"}, "parent": boss}))
+        .unwrap()["id"]
         .as_u64()
         .unwrap();
     c.call("session.subscribe", json!({"id": w})).unwrap();
@@ -79,7 +87,8 @@ fn only_events_make_a_session_wait_and_the_parent_hears_once() {
 
     // 2. a permission event: waiting, with the agent's text, and the parent is told
     std::thread::sleep(Duration::from_millis(2500));
-    c.call("session.hint", json!({"id": w, "state": "waiting", "kind": "permission", "text": "Claude needs your permission to use Bash"})).unwrap();
+    c.call("session.hint", json!({"id": w, "state": "waiting", "kind": "permission", "text": "Claude needs your permission to use Bash"}))
+        .unwrap();
     let r = row(&mut c, w);
     assert_eq!(r["waiting"], true);
     assert_eq!(r["wait"], json!({"kind": "permission", "text": "Claude needs your permission to use Bash"}));
@@ -87,7 +96,8 @@ fn only_events_make_a_session_wait_and_the_parent_hears_once() {
     assert_eq!(told.as_array().unwrap().len(), 1, "{told}");
     assert!(told[0]["text"].as_str().unwrap().contains("needs your permission to use Bash"));
     // the same event again does not tell the parent again
-    c.call("session.hint", json!({"id": w, "state": "waiting", "kind": "permission", "text": "Claude needs your permission to use Bash"})).unwrap();
+    c.call("session.hint", json!({"id": w, "state": "waiting", "kind": "permission", "text": "Claude needs your permission to use Bash"}))
+        .unwrap();
     assert_eq!(c.call("msg.inbox", json!({"session": boss})).unwrap().as_array().unwrap().len(), 0);
 
     // 3. Stop / UserPromptSubmit clear it
@@ -105,7 +115,9 @@ fn only_events_make_a_session_wait_and_the_parent_hears_once() {
     assert_eq!(row(&mut c, w)["waiting"], false);
 
     // 5. ask is a wait with the question until the reply; the reply clears it
-    let q = c.call("msg.send", json!({"from": w, "to": boss, "text": "Postgres or SQLite?", "kind": "ask", "quiet": true})).unwrap()["id"].as_u64().unwrap();
+    let q = c.call("msg.send", json!({"from": w, "to": boss, "text": "Postgres or SQLite?", "kind": "ask", "quiet": true})).unwrap()["id"]
+        .as_u64()
+        .unwrap();
     let r = row(&mut c, w);
     assert_eq!((r["waiting"].clone(), r["wait"]["text"].clone()), (json!(true), json!("Postgres or SQLite?")));
     c.call("msg.send", json!({"from": boss, "to": w, "text": "SQLite", "kind": "reply", "reply_to": q, "quiet": true})).unwrap();
@@ -146,7 +158,8 @@ fn an_agent_can_only_say_that_it_itself_waits() {
         std::thread::sleep(Duration::from_millis(200));
     };
     let mut agent = Client::connect_agent(&pipe, &"x".repeat(32), &agent_token).unwrap();
-    let e = agent.call("session.hint", json!({"id": other, "state": "waiting", "kind": "permission", "text": "x"})).unwrap_err().to_string();
+    let e =
+        agent.call("session.hint", json!({"id": other, "state": "waiting", "kind": "permission", "text": "x"})).unwrap_err().to_string();
     assert!(e.contains("own session"), "{e}");
     assert!(agent.call("session.hint", json!({"id": me, "state": "waiting", "kind": "permission", "text": "mine"})).is_ok());
     assert_eq!(row(&mut app, me)["wait"]["text"], "mine");

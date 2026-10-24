@@ -149,7 +149,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let id = sid()?;
             // only the agent itself says it waits
             if c.agent.is_some_and(|me| me != id) {
-                return Err(axelstra_core::coded!("rpc.agent_own_session", "{method} is only allowed for the agent's own session", method = req.method));
+                return Err(axelstra_core::coded!(
+                    "rpc.agent_own_session",
+                    "{method} is only allowed for the agent's own session",
+                    method = req.method
+                ));
             }
             let wait = p["kind"].as_str().and_then(axelstra_core::waiting::WaitKind::parse).map(|kind| axelstra_core::waiting::Wait {
                 kind,
