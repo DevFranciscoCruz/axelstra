@@ -7,6 +7,7 @@ import { ask } from "./Confirm";
 import { Modal } from "./Modal";
 import { Badge, Button, Input } from "./ui";
 import { openSession, refreshSessions, sessionState, sessions, setShowOrchestra } from "./store";
+import { fmtFixed } from "./i18n";
 
 const baseName = (p?: string) => (p ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
 const STATE = P.orchestra.state;
@@ -40,7 +41,7 @@ export function Orchestra() {
     const t = createPoller(pollRes, 3000);
     onCleanup(t.stop);
   });
-  const mb = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.round(n / 1024 ** 2)} MB`);
+  const mb = (n: number) => (n >= 1024 ** 3 ? `${fmtFixed(n / 1024 ** 3, 1)} GB` : `${Math.round(n / 1024 ** 2)} MB`);
 
   const kids = (id: number) => sessions().filter((s) => s.meta?.parent === id);
   const known = (id: number) => sessions().some((s) => s.id === id);
@@ -92,7 +93,7 @@ export function Orchestra() {
           <Show when={res()[props.s.id]}>
             <span class="auto-note" title={P.orchestra.resTip}>
               {mb(res()[props.s.id].mem)}
-              {res()[props.s.id].cpu !== null ? ` · ${res()[props.s.id].cpu!.toFixed(res()[props.s.id].cpu! < 10 ? 1 : 0)}% CPU` : ""}
+              {res()[props.s.id].cpu !== null ? ` · ${fmtFixed(res()[props.s.id].cpu!, res()[props.s.id].cpu! < 10 ? 1 : 0)}% CPU` : ""}
             </span>
           </Show>
           <Show when={(props.s.unread ?? 0) > 0}>

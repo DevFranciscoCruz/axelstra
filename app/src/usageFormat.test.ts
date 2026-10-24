@@ -6,8 +6,8 @@ const u = (worktree: string, input: number, output: number, cache_read = 0, cach
 describe("usageFormat", () => {
   it("shortens counts", () => {
     expect(fmtTokens(950)).toBe("950");
-    expect(fmtTokens(1500)).toBe("1.5k");
-    expect(fmtTokens(2_400_000)).toBe("2.4M");
+    expect(fmtTokens(1500)).toBe("1,5k");
+    expect(fmtTokens(2_400_000)).toBe("2,4M");
   });
 
   it("ranks by what was paid for and drops unused worktrees", () => {
@@ -20,8 +20,8 @@ describe("usageFormat", () => {
     const list = [u("a", 1000, 500, 4000, 100), u("b", 200, 100)];
     expect(totalOf(list)).toMatchObject({ input: 1200, output: 600, cache_read: 4000, cache_write: 100, claude_sessions: 2 });
     const tip = usageTip(list, (p) => p.toUpperCase());
-    expect(tip.split("\n")[0]).toContain("1.9k gastos");
-    expect(tip).toContain("A: 1.6k");
+    expect(tip.split("\n")[0]).toContain("1,9k gastos");
+    expect(tip).toContain("A: 1,6k");
     expect(usageTip([u("a", 0, 0)], String)).toMatch(/Nenhum/);
   });
 });

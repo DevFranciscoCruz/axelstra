@@ -9,6 +9,7 @@ import { B } from "./strings.budget";
 import { BudgetMeter } from "./BudgetMeter";
 import { budgetRows, loadBudgets } from "./budgetStore";
 import { rowsFor, worstLevel } from "./budgetLogic";
+import { fmtNumber } from "./i18n";
 
 const [wtUsage, setWtUsage] = createSignal<WtUsage[]>([]);
 let lastLoad = 0;
@@ -86,7 +87,7 @@ function WorktreeUsageList() {
             <For each={rows()}>
               {(u) => (
                 <>
-                <div class="wup-row" title={P.usage.rowTip(u.worktree, u.input.toLocaleString(), u.output.toLocaleString(), u.cache_write.toLocaleString(), u.cache_read.toLocaleString(), u.claude_sessions, u.codex_sessions)}>
+                <div class="wup-row" title={P.usage.rowTip(u.worktree, fmtNumber(u.input), fmtNumber(u.output), fmtNumber(u.cache_write), fmtNumber(u.cache_read), u.claude_sessions, u.codex_sessions)}>
                   <span class="wup-name">{wtName(u.worktree)}</span>
                   <span>{fmt(spentOf(u))}</span>
                 </div>
@@ -144,7 +145,7 @@ export function UsageChip() {
     <Show when={usage() && usage()!.messages > 0}>
       <span
         class="usage-chip"
-        title={P.usage.chipTip(ctx().toLocaleString(), fmt(spent()), usage()!.input.toLocaleString(), usage()!.output.toLocaleString(), usage()!.cache_write.toLocaleString(), usage()!.cache_read.toLocaleString(), usage()!.messages)}
+        title={P.usage.chipTip(fmtNumber(ctx()), fmt(spent()), fmtNumber(usage()!.input), fmtNumber(usage()!.output), fmtNumber(usage()!.cache_write), fmtNumber(usage()!.cache_read), usage()!.messages)}
       >
         {fmt(ctx())} ctx
       </span>

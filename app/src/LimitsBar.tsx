@@ -7,6 +7,7 @@ import { BudgetMeter } from "./BudgetMeter";
 import { budgetRows } from "./budgetStore";
 import { rowsFor } from "./budgetLogic";
 import { wtName } from "./Usage";
+import { fmtNumber } from "./i18n";
 
 /** time until a reset: "1h 49m", "4d", "29d 23h" */
 export const until = (secs: number) => {
@@ -17,7 +18,7 @@ export const until = (secs: number) => {
   return h ? `${h}h ${m % 60}m` : `${m}m`;
 };
 
-const kfmt = (n: number) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1e3)}k`);
+const kfmt = (n: number) => (n >= 1e6 ? `${fmtNumber(n / 1e6, { maximumFractionDigits: 1 })}M` : `${Math.round(n / 1e3)}k`);
 
 const svg = { width: 14, height: 14, viewBox: "0 0 16 16", fill: "currentColor" } as const;
 const ClaudeIcon = () => (

@@ -1,5 +1,6 @@
 import { count, dict } from "./i18n";
 import { enL } from "./strings.logic.en";
+import { ptBRL } from "./strings.logic.ptbr";
 
 /** pt-PT texts built by the logic modules (commands and cheat sheet, status dots, friendly errors, notifications, ...). */
 export const ptL = {
@@ -11,6 +12,21 @@ export const ptL = {
     worktree: "Worktrees e projetos",
     ferramentas: "Ferramentas",
     rato: "Rato",
+  },
+  settingsRows: {
+    a11y: "Acessibilidade",
+    a11yNote: "Para leitores de ecrã. Desligado por omissão porque deixa os terminais mais lentos.",
+    screenReader: "Modo leitor de ecrã nos terminais",
+    backup: "Cópia de segurança",
+    backupNote: "Guarda ou repõe as definições, projetos e sessões do daemon.",
+    export: "Exportar…",
+    restore: "Restaurar…",
+    exported: "Cópia guardada em ",
+    restored: "Cópia restaurada. Reinicia o Axelstra para aplicar.",
+    noBackup: "Este daemon ainda não suporta cópias de segurança. Atualiza e reinicia o Axelstra.",
+    restorePath: "Escolhe a pasta da cópia a restaurar",
+    copyDiag: "Copiar diagnóstico",
+    diagCopied: "Diagnóstico copiado para a área de transferência.",
   },
   actionHint: "ação",
   lang: { title: "Idioma", note: "Muda já, sem reiniciar. Fica guardado nas definições." },
@@ -163,4 +179,4 @@ export const ptL = {
   },
 } as const;
 
-export const L = dict(ptL, enL);
+export const L = dict(ptL, enL, ptBRL);

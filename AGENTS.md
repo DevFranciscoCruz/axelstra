@@ -31,7 +31,7 @@ Notes for coding agents and new contributors.
 - E2E against the real app: `tools/e2e.mjs`, see `docs/E2E.md`. Smoke of the CLI and daemon: `tools/smoke.mjs`.
 - **Tests never use the real data dir** (`%LOCALAPPDATA%/axelstra`) or the real pipe: use the helper in `crates/daemon/tests/common` and `AXELSTRA_DATA_DIR` (see `docs/TESTING.md`; `server::serve*` refuses the real dir under test, `scripts/check.mjs` verifies it).
 - Heavy cargo/npm runs inside an Axelstra worktree go through `axelstra lock verify -- <cmd>`.
-
+- **Languages (i18n).** Every user-visible text lives in a typed dictionary: `app/src/strings*.ts` (pt-PT, the source: `S`, `P`, `B`, `R`, `W`, `WS`, `U` for components, `L` for logic modules) with a sibling `*.en.ts` typed `Widen<typeof pt...>` (a missing key is a compile error) and an optional partial pt-BR layer (`strings.logic.ptbr.ts`, falls back to pt-PT). `dict()` in `i18n.ts` makes reads follow the `locale()` signal, so the language changes live; the choice is stored under `axelstra.locale` (localStorage, mirrored to the daemon's settings `ui`). Never copy a dictionary text into a module-level `const` (use a function, `lazy`/`lazyPair`); `node scripts/check-i18n-static.mjs` (part of `scripts/check.mjs`) finds those. Plurals and numbers: `count`/`plural`/`fmtNumber`/`fmtFixed` from `i18n.ts`, never `toFixed`/`toLocaleString`. `i18n.test.ts` and `i18nLint.test.ts` fail on missing keys, English copies of pt-PT and hardcoded literals in components.
 ## Bumping PROTO
 
 `PROTO` in `crates/daemon/src/proto.rs` is the app <-> daemon contract version. A daemon outlives

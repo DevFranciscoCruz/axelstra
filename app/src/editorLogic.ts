@@ -1,4 +1,5 @@
 import { L } from "./strings.logic";
+import { fmtFixed } from "./i18n";
 /** Above this many characters the editor asks before opening (CodeMirror slows down on big files). */
 export const LARGE_FILE_CHARS = 2 * 1024 * 1024;
 
@@ -15,7 +16,7 @@ export function describeReadError(err: unknown): string {
 export const isLarge = (chars: number) => chars > LARGE_FILE_CHARS;
 
 /** Size as shown in the large-file warning, e.g. "3,4 MB". */
-export const sizeLabel = (chars: number) => `${(chars / (1024 * 1024)).toFixed(1).replace(".", ",")} MB`;
+export const sizeLabel = (chars: number) => `${fmtFixed(chars / (1024 * 1024), 1)} MB`;
 
 /**
  * Cheap dirty check run on every keystroke: lengths differ -> dirty without building the string;

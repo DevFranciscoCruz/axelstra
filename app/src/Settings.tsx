@@ -23,22 +23,8 @@ const NOTIFY: NotifyMode[] = ["all", "waiting", "off"];
 const SHELLS: ShellChoice[] = ["auto", "pwsh", "powershell", "bash", "wsl", "cmd"];
 const THEMES: TermTheme[] = ["dark", "light"];
 
-// texts of the backup / diagnostics / accessibility rows (kept here with the buttons that use them)
-const T = {
-  a11y: "Acessibilidade",
-  a11yNote: "Para leitores de ecrã. Desligado por omissão porque deixa os terminais mais lentos.",
-  screenReader: "Modo leitor de ecrã nos terminais",
-  backup: "Cópia de segurança",
-  backupNote: "Guarda ou repõe as definições, projetos e sessões do daemon.",
-  export: "Exportar…",
-  restore: "Restaurar…",
-  exported: "Cópia guardada em ",
-  restored: "Cópia restaurada. Reinicia o Axelstra para aplicar.",
-  noBackup: "Este daemon ainda não suporta cópias de segurança. Atualiza e reinicia o Axelstra.",
-  restorePath: "Escolhe a pasta da cópia a restaurar",
-  copyDiag: "Copiar diagnóstico",
-  diagCopied: "Diagnóstico copiado para a área de transferência.",
-};
+// texts of the backup / diagnostics / accessibility rows
+const T = L.settingsRows;
 
 /** A row of exclusive choices (a null value, "auto", is keyed by a sentinel: radio values are strings). */
 const NONE = "__none__";

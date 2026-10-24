@@ -28,11 +28,11 @@ beforeEach(() => {
 
 describe("budgetText", () => {
   it("says the percentage for a warning", () => {
-    expect(budgetText(ev(), name)).toBe("Orçamento diário de a a 80%: 4.0M de 5.0M tokens");
+    expect(budgetText(ev(), name)).toBe("Orçamento diário de a a 80%: 4,0M de 5,0M tokens");
   });
   it("says exceeded for over, and how many agents were interrupted", () => {
     expect(budgetText(ev({ level: "over", period: "weekly", used: 6_000_000, pct: 120 }), name)).toBe(
-      "Orçamento semanal de a excedido: 6.0M de 5.0M tokens",
+      "Orçamento semanal de a excedido: 6,0M de 5,0M tokens",
     );
     expect(budgetText(ev({ level: "over", paused: [3] }), name)).toContain(" · 1 agente interrompido");
     expect(budgetText(ev({ level: "over", paused: [3, 4] }), name)).toContain(" · 2 agentes interrompidos");

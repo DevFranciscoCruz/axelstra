@@ -18,12 +18,13 @@ import { ranked, spentOf, totalOf, fmtTokens } from "./usageFormat";
 import { Button, cn } from "./ui";
 import { K } from "./keyboard";
 import "./shell.css";
+import { fmtFixed, fmtNumber } from "./i18n";
 
 type Usage = { app: number; daemon: number; sessions: number; ports: { port: number; pid: number }[]; cpu: number | null; gpu: number | null; gpu_adapters: [string, number][] };
 
 const KEY = "axelstra.keepAwake";
 
-const fmt = (b: number) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(2)} GB` : `${Math.round(b / 1024 ** 2)} MB`);
+const fmt = (b: number) => (b >= 1024 ** 3 ? `${fmtFixed(b / 1024 ** 3, 2)} GB` : `${Math.round(b / 1024 ** 2)} MB`);
 
 const svg = { width: 14, height: 14, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", "stroke-width": 1.3, "stroke-linecap": "round", "stroke-linejoin": "round" } as const;
 
@@ -164,7 +165,7 @@ export function StatusBar() {
     return S.status.memTip(fmt(u.app), fmt(u.daemon), fmt(u.sessions));
   };
   const ports = () => usage()?.ports ?? [];
-  const pct = (n: number) => (n < 10 ? n.toFixed(1) : String(Math.round(n)));
+  const pct = (n: number) => (n < 10 ? fmtFixed(n, 1) : fmtNumber(Math.round(n)));
 
   return (
     <div class="statusbar">
