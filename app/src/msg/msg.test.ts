@@ -71,6 +71,23 @@ describe("message codes", () => {
   });
 });
 
+describe("stall notice", () => {
+  it("agent.stalled reads in the three languages with its params", () => {
+    const params = { task: "Tarefa 2", min: 5, line: "à espera da tua decisão" };
+    for (const l of LOCALES) {
+      setLocale(l);
+      const t = msgText("agent.stalled", params)!;
+      expect(t, l).toContain("Tarefa 2");
+      expect(t, l).toContain("5");
+      expect(t, l).toContain("à espera da tua decisão");
+      expect(t, l).not.toContain("{");
+    }
+    setLocale("pt-PT");
+    expect(msgText("agent.stalled", params)).not.toBe((setLocale("en"), msgText("agent.stalled", params)));
+    setLocale("pt-PT");
+  });
+});
+
 describe("msgText / errors with a code", () => {
   it("fills params and leaves unknown names alone", () => {
     expect(fill("{a} e {b}", { a: 1 })).toBe("1 e {b}");

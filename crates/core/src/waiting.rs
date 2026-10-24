@@ -40,6 +40,10 @@ pub fn strip_ansi(bytes: &[u8]) -> String {
     out
 }
 
+/// Rule typed into every lead/worker prompt (English on purpose: agents are prompted in English). Writing "waiting for
+/// your decision" in the terminal tells nobody; the stall watchdog only flags the silence after the fact.
+pub const NEVER_WAIT_RULE: &str = "Never wait silently for the human: if you need a decision, a confirmation or a permission, or you are blocked, run `axelstra ask $AXELSTRA_PARENT \"<question>\"` (it blocks until answered) or `axelstra escalate \"<problem>\"`; if the choice is reversible, decide, say so in your report and carry on. Text such as \"waiting for your decision\" in the terminal reaches nobody, and after a few quiet minutes you are flagged as stalled.";
+
 const MARKERS: &[&str] = &[
     "do you want to proceed",
     "do you want to make this edit",
@@ -64,13 +68,77 @@ pub fn needs_input(tail: &[u8]) -> bool {
     MARKERS.iter().any(|m| last.contains(m)) || (last.contains("❯ 1.") && last.contains("2."))
 }
 
+/// Phrases (lowercase) with which an agent hands a decision, a confirmation or a permission to the user without a
+/// question mark: "continuo parado à espera da tua decisão", "let me know how to proceed". PT-PT, PT-BR and English.
+const ASK_PHRASES: &[&str] = &[
+    "à espera d",
+    "a aguardar",
+    "aguardo ",
+    "aguardando",
+    "espero pela",
+    "espero a tua",
+    "sua decisão",
+    "tua decisão",
+    "a tua confirmação",
+    "a sua confirmação",
+    "me confirma",
+    "confirma-me",
+    "confirme se",
+    "confirma se",
+    "diz-me se",
+    "diga-me se",
+    "avisa-me",
+    "me avise",
+    "queres que eu",
+    "quer que eu",
+    "posso prosseguir",
+    "posso avançar",
+    "posso continuar",
+    "posso seguir",
+    "devo prosseguir",
+    "devo continuar",
+    "preciso da tua",
+    "preciso da sua",
+    "preciso de permissão",
+    "waiting for your",
+    "waiting on your",
+    "waiting for you",
+    "waiting for a decision",
+    "waiting for confirmation",
+    "awaiting your",
+    "awaiting confirmation",
+    "awaiting approval",
+    "should i proceed",
+    "should i continue",
+    "shall i proceed",
+    "shall i continue",
+    "let me know if",
+    "let me know how",
+    "let me know when",
+    "let me know whether",
+    "please confirm",
+    "need your decision",
+    "need your confirmation",
+    "need your approval",
+    "need your permission",
+    "your decision",
+    "want me to",
+];
+
 /// True when the screen's last lines (as rendered, see `Session::screen_lines`) contain a free-form question
-/// the agent put to the user ("Uso X ou Y?"), which has no fixed marker. The TUI's own hints don't count.
+/// the agent put to the user ("Uso X ou Y?"), which has no fixed marker, or a statement that hands a decision,
+/// confirmation or permission to the user without a question mark. The TUI's own hints don't count.
 pub fn asks_question(lines: &[String]) -> bool {
     let from = lines.len().saturating_sub(8);
     lines[from..].iter().any(|l| {
         let t = l.trim().trim_matches(|c: char| "│┃|>* ".contains(c)).trim();
-        t.chars().count() >= 8 && t.ends_with('?') && !t.contains("for shortcuts") && !t.starts_with("? ")
+        if t.chars().count() < 8 || t.contains("for shortcuts") || t.starts_with("? ") {
+            return false;
+        }
+        t.ends_with('?') || {
+            let low = t.to_lowercase();
+            ASK_PHRASES.iter().any(|p| low.contains(p))
+        }
     })
 }
 
@@ -173,6 +241,30 @@ mod tests {
         assert!(asks_question(&[l("Analisei o código."), l("● Uso a opção A ou a B?"), l("╭──╮"), l("│ > │")]));
         assert!(!asks_question(&[l("Tudo feito."), l("  ? for shortcuts")]));
         assert!(!asks_question(&[l("Terminei.")]));
+    }
+
+    #[test]
+    fn decision_phrases_without_question_mark_count() {
+        let l = |s: &str| vec!["Testes verdes.".to_string(), s.to_string(), "╭──╮".to_string()];
+        for t in [
+            "Continuo parado à espera da tua decisão sobre retomar os testes.",
+            "Fico a aguardar a sua confirmação para avançar.",
+            "Aguardando a sua decisão.",
+            "I am waiting for your decision on the migration.",
+            "Let me know how to proceed.",
+            "Please confirm before I delete the branch.",
+            "Posso prosseguir com o merge.",
+            "I need your permission to run this.",
+        ] {
+            assert!(asks_question(&l(t)), "{t}");
+        }
+        for t in ["Editei 3 ficheiros e corri os testes.", "Build finished, all tests pass.", "Reading src/main.rs"] {
+            assert!(!asks_question(&l(t)), "{t}");
+        }
+        // an old phrase scrolled out of the last 8 lines is ignored
+        let mut old = vec!["Waiting for your decision.".to_string()];
+        old.extend((0..10).map(|i| format!("saída {i} do comando")));
+        assert!(!asks_question(&old));
     }
 
     #[test]

@@ -36,13 +36,27 @@ describe("lead of a worktree in the sidebar", () => {
       live: 2,
       waiting: false,
       working: false,
+      stalled: false,
     });
     // lead working
     expect(worktreeSignals([a(1, { lead: true, state: "working" }), a(2)], stateOf).working).toBe(true);
     // a task asks something
     expect(worktreeSignals([a(1, { lead: true }), a(2, { state: "waiting" })], stateOf).waiting).toBe(true);
+    // a stalled task (or lead) shows on the worktree
+    expect(worktreeSignals([a(1, { lead: true }), { ...a(2), stalled: true }], stateOf).stalled).toBe(true);
+    expect(
+      worktreeSignals([a(1, { lead: true }), { ...a(2, { kind: "shell" }), stalled: true }], stateOf).stalled,
+    ).toBe(false);
+    expect(
+      worktreeSignals([a(1, { lead: true }), { ...a(2, { running: false }), stalled: true }], stateOf).stalled,
+    ).toBe(false);
     // no lead (older sessions): any agent counts, as before
-    expect(worktreeSignals([a(1, { state: "working" })], stateOf)).toEqual({ live: 1, waiting: false, working: true });
+    expect(worktreeSignals([a(1, { state: "working" })], stateOf)).toEqual({
+      live: 1,
+      waiting: false,
+      working: true,
+      stalled: false,
+    });
     // ended sessions do not count
     expect(worktreeSignals([a(1, { lead: true, running: false }), a(2)], stateOf).live).toBe(1);
   });

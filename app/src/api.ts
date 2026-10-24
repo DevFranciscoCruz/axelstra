@@ -19,7 +19,9 @@ export type SessionMeta = {
   /** workers this agent started that the restart stopped */
   lost_workers?: string[];
 };
-export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
+/** Set by the daemon on an agent that went quiet without reporting: the notice in message-code form (see msg/agents.ts). */
+export type StallInfo = { minutes: number; code: string; params: Record<string, unknown>; text: string };
+export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; stalled?: boolean; stall?: StallInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean; /** worktree of the same project this one is grouped under */ parent?: string | null };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   /** false for a plain folder that is not a git repository (yet) */
@@ -70,13 +72,13 @@ export type ShellChoice = "auto" | "pwsh" | "powershell" | "bash" | "wsl" | "cmd
 export type Settings = {
   terse: Terse; rules: string | null; pm: string | null; installed: string[]; auto_install: boolean;
   /** absent on a daemon from before these keys existed */
-  notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice;
+  notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice; stall_minutes?: number;
   /** UI choices the webview keeps (pins, folded groups, notifications...): `axelstra.*` key -> saved string */
   ui?: Record<string, string>;
   /** token limits per day / week; absent on a daemon from before budgets */
   budgets?: Budgets;
 };
-export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice; budgets?: Budgets };
+export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice; stall_minutes?: number; budgets?: Budgets };
 /** `terse` asks for the rules of that level (a project's own choice) instead of the saved one */
 export const getSettings = (terse?: Terse) => call<Settings>("settings.get", terse ? { terse } : {});
 /** `ui`: UI state to store (`null` removes a key), sent by uiState.ts only, so it is not part of what the Settings screen merges */

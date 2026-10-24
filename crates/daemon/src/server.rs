@@ -69,6 +69,8 @@ struct Registry {
     computer: AtomicBool,
     /// what agents' own hooks said they are doing (`session.hint`)
     hints: axelstra_core::waiting::Hints,
+    /// sessions the stall watchdog already told their parent about (until they work again)
+    stall_notified: Mutex<std::collections::HashSet<u32>>,
     /// bumped when a request changed projects or worktrees; watchers hear it as `projects.changed`
     wt_gen: AtomicU64,
     /// what agents asked the daemon to do (`audit.list`)
@@ -115,6 +117,7 @@ impl Registry {
             clients: Default::default(),
             computer: AtomicBool::new(false),
             hints: Default::default(),
+            stall_notified: Default::default(),
             wt_gen: AtomicU64::new(0),
             audit,
             bad_hellos: AtomicU32::new(0),
@@ -643,6 +646,7 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     let _ = std::fs::create_dir_all(&dir);
     write_hooks_json(&dir, std::env::current_exe().ok().as_deref());
     spawn_scheduler(reg.clone());
+    spawn_stall_watchdog(reg.clone());
     triggers::spawn_loop(reg.clone());
     spawn_idle_exit(reg.clone());
     accept_loop(&pipe, reg, token).await
@@ -1056,6 +1060,89 @@ fn note_path(reg: &Registry, id: u32) -> Option<std::path::PathBuf> {
     crate::notes::inside_root(&root, &note).then_some(note)
 }
 
+type Picked = (u32, Arc<Session>, axelstra_core::pty::View, Option<String>, Option<Value>);
+
+/// Parents of the sessions that still run for them: a parent waiting on live children is not stalled.
+fn busy_parents(reg: &Registry, picked: &[Picked]) -> std::collections::HashSet<u32> {
+    picked
+        .iter()
+        .filter(|(id, s, ..)| s.try_wait().is_none() && reg.bus.finished(*id).is_none())
+        .filter_map(|(_, _, _, _, m)| m.as_ref().and_then(|m| m["parent"].as_u64()).map(|p| p as u32))
+        .collect()
+}
+
+/// What the stall watchdog needs to know about a session (see `stall::is_stalled`).
+fn stall_facts(
+    reg: &Registry,
+    id: u32,
+    running: bool,
+    idle_ms: u64,
+    since_input_ms: u64,
+    meta: Option<&Value>,
+    busy: &std::collections::HashSet<u32>,
+) -> crate::stall::Facts {
+    crate::stall::Facts {
+        agent: meta.is_some_and(|m| m["kind"] == "agent"),
+        main: meta.is_some_and(|m| m["main"] == true),
+        running,
+        reported: reg.bus.finished(id).is_some(),
+        escalated: reg.bus.is_escalated(id),
+        live_children: busy.contains(&id),
+        idle_ms,
+        since_input_ms,
+    }
+}
+
+/// Every 10 s: an agent that became stalled gets one message to its parent (until it works again).
+fn spawn_stall_watchdog(reg: Arc<Registry>) {
+    std::thread::spawn(move || loop {
+        // tests shorten the threshold to seconds and then need a faster pass too
+        std::thread::sleep(if std::env::var_os("AXELSTRA_STALL_SECS").is_some() {
+            Duration::from_millis(300)
+        } else {
+            Duration::from_secs(10)
+        });
+        stall_tick(&reg);
+    });
+}
+
+/// One pass of the watchdog.
+fn stall_tick(reg: &Arc<Registry>) {
+    let threshold = crate::stall::threshold_ms(&read_settings(&reg.saved));
+    let minutes = crate::stall::display_minutes(threshold);
+    let picked: Vec<Picked> = {
+        let l = reg.sessions.lock_recover();
+        let labels = reg.labels.lock_recover();
+        let metas = reg.metas.lock_recover();
+        l.iter().map(|(id, s)| (*id, s.clone(), s.view(), labels.get(id).cloned(), metas.get(id).cloned())).collect()
+    };
+    let busy = busy_parents(reg, &picked);
+    let mut stalled = Vec::new();
+    for (id, s, view, label, meta) in &picked {
+        let facts = stall_facts(reg, *id, s.try_wait().is_none(), view.idle_ms(), view.since_input_ms(), meta.as_ref(), &busy);
+        if crate::stall::is_stalled(&facts, threshold) {
+            let parent = meta.as_ref().and_then(|m| m["parent"].as_u64()).map(|p| p as u32);
+            stalled.push((*id, label.clone(), parent, view.screen_tail(12)));
+        }
+    }
+    let ids: std::collections::HashSet<u32> = stalled.iter().map(|x| x.0).collect();
+    let fresh: Vec<_> = {
+        let mut seen = reg.stall_notified.lock_recover();
+        seen.retain(|id| ids.contains(id));
+        stalled.into_iter().filter(|x| seen.insert(x.0)).collect()
+    };
+    for (id, label, parent, screen) in fresh {
+        let Some((pid, ps)) = parent.and_then(|p| reg.get(p).map(|s| (p, s))) else { continue };
+        let label = label.unwrap_or_else(|| format!("session {id}"));
+        let text = crate::stall::parent_text(&label, id, minutes, &crate::stall::last_line(&screen));
+        let m = reg.bus.send(Some(id), pid, "message", &text, None, None);
+        let agent = reg.metas.lock_recover().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
+        if agent {
+            reg.deliver_untrusted(pid, ps, &crate::msgbus::notice(&m, &format!("{label} (sessão {id})")));
+        }
+    }
+}
+
 /// What `session.list` answers. Takes sessions, labels, metas in the registry's lock order.
 fn session_list(reg: &Registry) -> Vec<Value> {
     // the locks only pick the sessions (cheap views and clones); screen rendering and the waiting heuristics run after
@@ -1065,6 +1152,9 @@ fn session_list(reg: &Registry) -> Vec<Value> {
         let metas = reg.metas.lock_recover();
         l.iter().map(|(id, s)| (*id, s.clone(), s.view(), labels.get(id).cloned(), metas.get(id).cloned())).collect()
     };
+    let stall_ms = crate::stall::threshold_ms(&read_settings(&reg.saved));
+    let stall_min = crate::stall::display_minutes(stall_ms);
+    let busy = busy_parents(reg, &picked);
     let mut v: Vec<Value> = picked
         .into_iter()
         .map(|(id, s, view, label, meta)| {
@@ -1078,7 +1168,19 @@ fn session_list(reg: &Registry) -> Vec<Value> {
                         && (axelstra_core::waiting::needs_input(&view.tail(4096))
                             || (agent && axelstra_core::waiting::asks_question(&view.screen_tail(12)))))
                     || reg.hints.waiting(id, view.since_input_ms(), idle));
-            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
+            let facts = stall_facts(reg, id, running, idle, view.since_input_ms(), meta.as_ref(), &busy);
+            let stalled = crate::stall::is_stalled(&facts, stall_ms);
+            let stall = stalled.then(|| {
+                let line = crate::stall::last_line(&view.screen_tail(12));
+                let task = label.clone().unwrap_or_else(|| format!("session {id}"));
+                let c = axelstra_core::msg::Coded::new(
+                    "agent.stalled",
+                    format!("{task} has been stalled for {stall_min} min without reporting. Last line: {line}"),
+                    &[("task", task.clone()), ("min", stall_min.to_string()), ("line", line)],
+                );
+                json!({"minutes": stall_min, "code": c.code, "params": c.params_json(), "text": c.to_string()})
+            });
+            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "stalled": stalled, "stall": stall, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
         })
         .collect();
     v.sort_by_key(|x| x["id"].as_u64());

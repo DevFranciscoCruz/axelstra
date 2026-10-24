@@ -75,6 +75,7 @@ export const ptL = {
     idle: "Parado",
     waiting: "À espera de resposta",
     done: "Terminado",
+    stalled: "Parada: sem reportar, precisa de atenção",
     attention: "Parou: precisa de atenção",
     queued: "Na fila: o plano ainda não chegou a esta tarefa",
     running: "Terminal ativo",
@@ -144,6 +145,7 @@ export const ptL = {
       body: (who: string, wt: string) =>
         `${who} fez uma pergunta na worktree "${wt}" e precisa da tua resposta para continuar.`,
     },
+    stalledHead: (who: string, wt: string) => `${who} sem atividade e sem reportar · ${wt}`,
     stopped: {
       head: (who: string, wt: string) => `${who} parou · ${wt}`,
       body: (who: string, wt: string) =>

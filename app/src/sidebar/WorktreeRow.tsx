@@ -116,6 +116,7 @@ export function WorktreeRow(props: {
           <StateDot
             state={dotOfWorktree({
               queued: queued(),
+              stalled: signals().stalled,
               waiting: waiting(),
               working: working(),
               needs: needs(),

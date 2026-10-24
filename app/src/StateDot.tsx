@@ -10,6 +10,7 @@ export function StateDot(props: { state: DotState }) {
         on: props.state !== "none" && props.state !== "done",
         work: props.state === "working",
         wait: props.state === "waiting",
+        stall: props.state === "stalled",
         attn: props.state === "attention",
         queued: props.state === "queued",
         done: props.state === "done",

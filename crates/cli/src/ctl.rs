@@ -350,11 +350,7 @@ pub(crate) fn spawn_agent(
     let prompt = prompt_owned.as_deref();
     if let Some(pr) = prompt {
         // an ephemeral worker must know how to report: without it the daemon can only scrape its screen
-        let full = if reap.is_some() && !pr.contains("axelstra done") {
-            format!("{pr}\n\nWhen finished, run `axelstra done \"<summary: what you did, what is left>\"` (add `--status failed` or `--status blocked` when it applies). If you need a decision, run `axelstra ask $AXELSTRA_PARENT \"<question>\"`. If you are stuck, run `axelstra escalate \"<problem>\"`.")
-        } else {
-            pr.to_string()
-        };
+        let full = if reap.is_some() && !pr.contains("axelstra done") { worker_prompt(pr) } else { pr.to_string() };
         // the text never goes through a command line: a file the shell reads, so <, >, &, quotes and newlines arrive as typed
         // an agent whose first prompt needs a flag (gemini: -i, else a bare prompt runs one-shot and exits) gets it here
         line.push_str(&prompt_flags(agent));
@@ -469,6 +465,14 @@ fn shell_run(program: &str, args: &mut Vec<String>, ps: bool, line: &str, keep_o
     } else {
         args.extend(["-c".into(), line.into()]);
     }
+}
+
+/// What an ephemeral worker starts with: its task, how to report, and the rule against waiting silently for the human.
+fn worker_prompt(task: &str) -> String {
+    format!(
+        "{task}\n\nWhen finished, run `axelstra done \"<summary: what you did, what is left>\"` (add `--status failed` or `--status blocked` when it applies). {}",
+        axelstra_core::waiting::NEVER_WAIT_RULE
+    )
 }
 
 /// `--report-to` resolution: Some(None) means "this session", from $AXELSTRA_SESSION.
@@ -624,6 +628,15 @@ pub fn strip_ansi(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_prompt_says_how_to_report_and_never_to_wait_silently() {
+        let p = worker_prompt("do the thing");
+        assert!(p.starts_with("do the thing"));
+        assert!(p.contains("axelstra done"));
+        assert!(p.contains("Never wait silently for the human"));
+        assert!(p.contains("axelstra ask $AXELSTRA_PARENT") && p.contains("axelstra escalate"));
+    }
 
     #[test]
     fn strips_sequences() {
