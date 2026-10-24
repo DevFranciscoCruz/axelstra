@@ -679,3 +679,39 @@ export const pickAndRestoreBackup = (title: string): Promise<{ restored: string[
 export type JanitorEvent = { project: string; path: string; branch: string; into: string; why: string; at: number };
 /** Worktrees the automatic sweep removed since the last call (take semantics); an older daemon has none. */
 export const janitorEvents = () => callOr<{ events: JanitorEvent[] }>("janitor.events", {}, { events: [] }).then((r) => r.events ?? []);
+// ---- CI-fix trigger (daemon: triggers.*) ----
+export type TriggerFiring = { ts: number; worktree: string; sha: string; checks: string[]; kind: "fired" | "limited" | "failed"; detail: string };
+export type TriggerLimits = { cooldown_secs: number; max_per_hour: number; poll_secs: number; cooldown_range: [number, number]; max_per_hour_range: [number, number] };
+export type TriggerState = {
+  project: string;
+  ci_fix: boolean;
+  /** epoch seconds of the user's first confirmation; null until then */
+  confirmed_at: number | null;
+  limits: TriggerLimits;
+  history: TriggerFiring[];
+  agent: string;
+  confirm_word: string;
+  template: string;
+  example: string;
+};
+export type TriggerPreview = {
+  project: string;
+  prompt: string;
+  template: string;
+  limits: TriggerLimits;
+  agent: string;
+  confirm_word: string;
+  never_main: boolean;
+  never_pr_worktrees: boolean;
+  audit_method: string;
+};
+export type TriggerEvent = { kind: "ci_fix" | "ci_fix_limited" | "ci_fix_failed"; project: string; worktree: string; branch: string; sha?: string; detail?: string };
+/** State, limits and prompt template of a project's CI-fix trigger; null on a daemon without `triggers.*`. */
+export const triggersGet = (project: string) => callOr<TriggerState | null>("triggers.get", { project }, null);
+/** What enabling would do (the prompt with an example failure, the limits); null on an older daemon. */
+export const triggersPreview = (project: string) => callOr<TriggerPreview | null>("triggers.preview", { project }, null);
+/** Turns the trigger on/off and/or changes its limits. The first enabling needs `confirm` = the state's `confirm_word`. */
+export const triggersSet = (project: string, patch: { ci_fix?: boolean; confirm?: string; cooldown_secs?: number; max_per_hour?: number }) =>
+  call<TriggerState>("triggers.set", { project, ...patch });
+/** What the trigger did since the last call (take semantics); an older daemon has none. */
+export const triggersEvents = () => callOr<{ events: TriggerEvent[] }>("triggers.events", {}, { events: [] }).then((r) => r.events ?? []);
