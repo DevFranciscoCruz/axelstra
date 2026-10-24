@@ -1,6 +1,7 @@
 import { Show, createSignal } from "solid-js";
 import { Modal } from "./Modal";
-import { Button, Input } from "./ui";
+import { P } from "./strings.panels";
+import { Button, Input, cn } from "./ui";
 
 type Opts = { title?: string; kind?: "danger" | "warning" | "info" | "error"; okLabel?: string; cancelLabel?: string;
   /** the OK button stays off until this exact text is typed (removing work that is not saved anywhere else) */
@@ -25,11 +26,11 @@ export const typedMatches = (expected: string, typed: string) => typed.trim().to
 export const askSave = (message: string, title: string) =>
   new Promise<"save" | "discard" | "cancel">((resolve) => {
     pending()?.resolve(false);
-    setPending({ message, opts: { title, kind: "warning", okLabel: "Guardar", cancelLabel: "Cancelar" }, resolve: (ok) => resolve(ok ? "save" : "cancel"), third: { label: "Não guardar", resolve: () => resolve("discard") } });
+    setPending({ message, opts: { title, kind: "warning", okLabel: P.confirm.save, cancelLabel: P.confirm.cancel }, resolve: (ok) => resolve(ok ? "save" : "cancel"), third: { label: P.confirm.dontSave, resolve: () => resolve("discard") } });
   });
 
 /** discarding unsaved text (a draft, an edited form) */
-export const askDiscard = (what: string) => ask(`${what} Descartar as alterações?`, { title: "Descartar alterações", kind: "warning", okLabel: "Descartar", cancelLabel: "Continuar a editar" });
+export const askDiscard = (what: string) => ask(P.confirm.discardAsk(what), { title: P.confirm.discardTitle, kind: "warning", okLabel: P.confirm.discard, cancelLabel: P.confirm.keepEditing });
 
 /** a danger or an error is about something that cannot be undone, a warning about something that is merely consequential (push, merge): both focus the safe button, not the one that proceeds */
 export const focusesCancel = (kind: Opts["kind"]) => kind === "danger" || kind === "warning" || kind === "error";
@@ -54,17 +55,17 @@ export function ConfirmHost() {
   return (
     <Show when={pending()} keyed>
       {(p) => (
-        <Modal label={p.opts.title ?? "Confirmar"} onClose={() => answer(false)}>
-          <div class="m-title" style={{ "font-weight": "600" }}>
-            {p.opts.title ?? "Confirmar"}
+        <Modal label={p.opts.title ?? P.confirm.title} onClose={() => answer(false)}>
+          <div class="m-title font-semibold">
+            {p.opts.title ?? P.confirm.title}
           </div>
-          <div class="auto-note" style={{ "white-space": "pre-wrap" }}>
+          <div class="auto-note whitespace-pre-wrap">
             {p.message}
           </div>
           <Show when={p.opts.typeToConfirm}>
             {(want) => (
               <Input
-                aria-label={`Escreva "${want()}" para confirmar`}
+                aria-label={P.confirm.typeToConfirm(want())}
                 placeholder={want()}
                 value={typed()}
                 onInput={(e) => setTyped(e.currentTarget.value)}
@@ -72,11 +73,11 @@ export function ConfirmHost() {
               />
             )}
           </Show>
-          <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-            <Button ref={(el: HTMLButtonElement) => focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(false)}>{p.opts.cancelLabel ?? "Cancelar"}</Button>
+          <div class="m-actions justify-end">
+            <Button ref={(el: HTMLButtonElement) => focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(false)}>{p.opts.cancelLabel ?? P.confirm.cancel}</Button>
             <Show when={p.third}>{(t) => <Button variant="destructive" onClick={answerThird}>{t().label}</Button>}</Show>
-            <Button variant={isDanger(p.opts.kind) && !p.third ? "destructive" : "default"} class={isDanger(p.opts.kind) && !p.third ? "primary kind-warn" : "primary"} ref={(el: HTMLButtonElement) => !focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} disabled={!!p.opts.typeToConfirm && !typedMatches(p.opts.typeToConfirm, typed())} onClick={() => answer(true)}>
-              {p.opts.okLabel ?? "Sim"}
+            <Button variant={isDanger(p.opts.kind) && !p.third ? "destructive" : "default"} class={cn("primary", isDanger(p.opts.kind) && !p.third && "kind-warn")} ref={(el: HTMLButtonElement) => !focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} disabled={!!p.opts.typeToConfirm && !typedMatches(p.opts.typeToConfirm, typed())} onClick={() => answer(true)}>
+              {p.opts.okLabel ?? P.confirm.yes}
             </Button>
           </div>
         </Modal>

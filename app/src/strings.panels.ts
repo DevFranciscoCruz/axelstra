@@ -2,6 +2,18 @@ import { count } from "./strings";
 
 /** pt-PT texts of the panels (sidebar, docker, kanban...) that strings.ts does not hold; same glossary as strings.ts. */
 export const P = {
+  confirm: {
+    title: "Confirmar",
+    yes: "Sim",
+    cancel: "Cancelar",
+    save: "Guardar",
+    dontSave: "Não guardar",
+    discardTitle: "Descartar alterações",
+    discard: "Descartar",
+    keepEditing: "Continuar a editar",
+    discardAsk: (what: string) => `${what} Descartar as alterações?`,
+    typeToConfirm: (want: string) => `Escreve "${want}" para confirmar`,
+  },
   sidebar: {
     addProject: "+ Adicionar projeto",
     projects: "Projetos",
