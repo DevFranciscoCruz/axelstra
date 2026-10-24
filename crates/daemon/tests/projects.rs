@@ -43,7 +43,7 @@ fn projects_worktrees_and_session_meta() {
             .block_on(server::serve_with_store(p, t, s))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();
 
     // a plain folder is accepted (a project can start without git); a path that does not exist is not
@@ -149,7 +149,7 @@ fn worktree_from_pull_request_head() {
             .block_on(server::serve_with_store(p, t, s))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();
     let id = c.call("project.add", json!({"path": &repo})).unwrap()["id"].as_str().unwrap().to_string();
     let wt = c.call("worktree.from_pr", json!({"project": id, "number": 1})).unwrap();

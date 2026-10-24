@@ -20,7 +20,7 @@ fn start(tag: &str) -> (String, String) {
             .block_on(server::serve_with_store(p, t, s))
             .unwrap();
     });
-    std::thread::sleep(Duration::from_millis(300));
+    common::wait_ready(&pipe, &token);
     (pipe, token)
 }
 

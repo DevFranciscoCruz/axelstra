@@ -42,3 +42,16 @@ pub fn store(tag: &str) -> PathBuf {
     std::fs::create_dir_all(&d).expect("create test store dir");
     d.join("projects.json")
 }
+
+/// Blocks until the daemon serving `pipe` accepts and authenticates a connection (it starts on another thread), so a test
+/// never guesses how long that takes. Panics after 30 s.
+pub fn wait_ready(pipe: &str, token: &str) {
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        match axelstra_daemon::client::Client::connect(pipe, token) {
+            Ok(_) => return,
+            Err(e) => assert!(std::time::Instant::now() < end, "daemon on {pipe} not ready after 30s: {e:#}"),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
