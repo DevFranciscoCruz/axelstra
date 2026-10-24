@@ -7,37 +7,19 @@ use anyhow::Result;
 use axelstra_core::git;
 use serde_json::{json, Value};
 use std::path::Path;
-use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
+use axelstra_core::exec::Captured;
 
 /// Longest a network call (`git fetch`, `gh`) of the sweep may take; the scheduler loop must not wait on a hung one.
 const NET_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Runs `cmd` and kills it after `limit`; `None` when it cannot start or ran out of time.
-fn output_within(cmd: &mut Command, limit: Duration) -> Option<Output> {
-    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().ok()?;
-    let (out, err) = (child.stdout.take()?, child.stderr.take()?);
-    let drain = |mut r: Box<dyn std::io::Read + Send>| {
-        std::thread::spawn(move || {
-            let mut b = Vec::new();
-            let _ = r.read_to_end(&mut b);
-            b
-        })
-    };
-    let (ot, et) = (drain(Box::new(out)), drain(Box::new(err)));
-    let deadline = Instant::now() + limit;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(s)) => break s,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    };
-    Some(Output { status, stdout: ot.join().unwrap_or_default(), stderr: et.join().unwrap_or_default() })
+/// Output cap of the sweep's network calls.
+const NET_MAX_OUT: usize = 1 << 20;
+
+/// Runs `cmd` and kills its whole tree after `limit`; `None` when it cannot start or ran out of time.
+fn output_within(cmd: &mut Command, limit: Duration) -> Option<Captured> {
+    axelstra_core::exec::run_capped(cmd, limit, NET_MAX_OUT).ok().filter(|o| !o.timed_out)
 }
 
 /// Why this branch counts as merged, `None` when it does not (or cannot be told).
@@ -56,7 +38,7 @@ pub fn merged_reason(repo: &Path, branch: &str, default: &str) -> Option<String>
         return Some(format!("already in local {default}"));
     }
     let o = output_within(
-        git::quiet(&mut Command::new("gh")).current_dir(repo).env("GH_PROMPT_DISABLED", "1").args([
+        Command::new("gh").current_dir(repo).env("GH_PROMPT_DISABLED", "1").args([
             "pr",
             "list",
             "--state",
@@ -70,7 +52,7 @@ pub fn merged_reason(repo: &Path, branch: &str, default: &str) -> Option<String>
         ]),
         NET_TIMEOUT,
     )
-    .filter(|o| o.status.success())?;
+    .filter(|o| o.success())?;
     let v: Value = serde_json::from_slice(&o.stdout).ok()?;
     let pr = v.as_array()?.first()?.clone();
     // the merged PR must be exactly what is here: commits added after the merge would be lost with the branch
@@ -99,7 +81,7 @@ fn sweep_project(p: &Project, busy: &dyn Fn(&str) -> bool, dry: bool, out: &mut 
         if !fetched {
             // so a merge done on GitHub since the last fetch is seen; a failure (offline) just means less is found
             let _ = output_within(
-                git::quiet(&mut Command::new("git")).current_dir(repo).env("GIT_TERMINAL_PROMPT", "0").args(["fetch", "--quiet", "origin"]),
+                Command::new("git").current_dir(repo).env("GIT_TERMINAL_PROMPT", "0").args(["fetch", "--quiet", "origin"]),
                 NET_TIMEOUT,
             );
             fetched = true;
@@ -123,6 +105,7 @@ pub fn sweep(store: &Path, busy: &dyn Fn(&str) -> bool, dry: bool) -> Vec<Value>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn a_hung_command_is_killed_at_the_limit() {
@@ -132,7 +115,7 @@ mod tests {
         assert!(t.elapsed() < Duration::from_secs(10));
         let (prog, args): (&str, &[&str]) = if cfg!(windows) { ("cmd", &["/C", "echo", "hi"]) } else { ("echo", &["hi"]) };
         let o = output_within(Command::new(prog).args(args), Duration::from_secs(10)).unwrap();
-        assert!(o.status.success() && String::from_utf8_lossy(&o.stdout).contains("hi"));
+        assert!(o.success() && o.stdout_lossy().contains("hi"));
     }
 
     #[test]

@@ -2,14 +2,13 @@
 //! and every id, name and image reference is checked before it reaches the command line.
 
 use anyhow::{bail, Context, Result};
-use axelstra_core::git;
 use axelstra_core::pty::Spawn;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
 const QUERY: Duration = Duration::from_secs(10);
 const ACTION: Duration = Duration::from_secs(60);
@@ -144,52 +143,32 @@ fn run(args: &[&str], limit: Duration) -> Result<String> {
     run_full(args, limit).map(|(out, _)| out)
 }
 
+/// Most of each stream kept from one docker call (`docker logs` of a chatty container, a huge `inspect`).
+const MAX_OUT: usize = 8 << 20;
+
+/// `docker`, started through the shared runner: a timeout kills the whole tree, output is capped, a lingering
+/// grandchild holding the pipe cannot hang the caller.
+fn docker_capped(cmd: &mut Command, limit: Duration, what: &str) -> Result<axelstra_core::exec::Captured> {
+    let o = axelstra_core::exec::run_capped(cmd, limit, MAX_OUT).map_err(|e| match e.downcast_ref::<std::io::Error>() {
+        Some(io) if io.kind() == std::io::ErrorKind::NotFound => anyhow::anyhow!("docker is not installed"),
+        _ => e.context("could not start docker"),
+    })?;
+    if o.timed_out {
+        bail!("docker {what} timed out after {}s", limit.as_secs());
+    }
+    Ok(o)
+}
+
 /// Same, keeping stderr too (`docker logs` prints the container's stderr there).
 fn run_full(args: &[&str], limit: Duration) -> Result<(String, String)> {
-    let mut child = git::quiet(&mut Command::new("docker"))
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                anyhow::anyhow!("docker is not installed")
-            } else {
-                anyhow::Error::new(e).context("could not start docker")
-            }
-        })?;
-    // drained on their own threads: a full pipe would block docker before the timeout could matter
-    let mut out = child.stdout.take().unwrap();
-    let mut err = child.stderr.take().unwrap();
-    let out_t = std::thread::spawn(move || {
-        let mut s = String::new();
-        let _ = out.read_to_string(&mut s);
-        s
-    });
-    let err_t = std::thread::spawn(move || {
-        let mut s = String::new();
-        let _ = err.read_to_string(&mut s);
-        s
-    });
-    let start = Instant::now();
-    let code = loop {
-        if let Some(st) = child.try_wait()? {
-            break st;
-        }
-        if start.elapsed() > limit {
-            let _ = child.kill();
-            let _ = child.wait();
-            bail!("docker {} timed out after {}s", args.first().unwrap_or(&""), limit.as_secs());
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    let (stdout, stderr) = (out_t.join().unwrap_or_default(), err_t.join().unwrap_or_default());
-    if !code.success() {
-        let msg = stderr.trim();
-        bail!("{}", if msg.is_empty() { format!("docker {} failed", args.first().unwrap_or(&"")) } else { msg.to_string() });
+    let what = args.first().copied().unwrap_or("");
+    let o = docker_capped(Command::new("docker").args(args), limit, what)?;
+    if !o.success() {
+        let msg = o.stderr_lossy();
+        let msg = msg.trim();
+        bail!("{}", if msg.is_empty() { format!("docker {what} failed") } else { msg.to_string() });
     }
-    Ok((stdout, stderr))
+    Ok((o.stdout_lossy(), o.stderr_lossy()))
 }
 
 /// Not installed and engine not running are different problems with different fixes.
@@ -492,6 +471,53 @@ pub fn compose_project(wt: &Path) -> String {
     format!("axelstra-{}", clean.trim_matches('-'))
 }
 
+/// Reads the resolved `docker compose config --format json` and returns `(refusals, warnings)`: what must not be
+/// started from a worktree (privileged containers, the engine socket, bind mounts outside the worktree, host
+/// namespaces) and what only deserves a look (added capabilities, devices, security options).
+pub fn compose_audit(config: &str, wt: &Path) -> (Vec<String>, Vec<String>) {
+    let (mut deny, mut warn) = (vec![], vec![]);
+    let Ok(v) = serde_json::from_str::<Value>(config) else {
+        return (vec!["could not read the resolved compose config".into()], warn);
+    };
+    let wt_s = axelstra_core::paths::norm_path(wt);
+    let Some(services) = v["services"].as_object() else { return (deny, warn) };
+    for (name, svc) in services {
+        if svc["privileged"].as_bool() == Some(true) {
+            deny.push(format!("service {name} is privileged"));
+        }
+        for key in ["network_mode", "pid", "ipc", "userns_mode", "uts"] {
+            if svc[key].as_str() == Some("host") {
+                deny.push(format!("service {name} uses the host namespace ({key}: host)"));
+            }
+        }
+        for m in svc["volumes"].as_array().into_iter().flatten() {
+            // long syntax after `config`; a bare string only on very old compose versions
+            let (kind, source) = match m {
+                Value::Object(_) => (m["type"].as_str().unwrap_or("volume"), m["source"].as_str().unwrap_or_default().to_string()),
+                Value::String(s) => ("bind", s.split(':').next().unwrap_or_default().to_string()),
+                _ => continue,
+            };
+            let lower = source.to_lowercase();
+            if lower.contains("docker.sock") || lower.contains("docker_engine") {
+                deny.push(format!("service {name} mounts the Docker engine socket ({source})"));
+            } else if kind == "bind" && !axelstra_core::paths::is_within(&source, &wt_s) {
+                deny.push(format!("service {name} bind-mounts {source}, outside the worktree"));
+            }
+        }
+        for d in svc["devices"].as_array().into_iter().flatten() {
+            warn.push(format!("service {name} gets device {}", d.as_str().or_else(|| d["source"].as_str()).unwrap_or("?")));
+        }
+        let caps: Vec<&str> = svc["cap_add"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        if !caps.is_empty() {
+            warn.push(format!("service {name} adds capabilities {}", caps.join(", ")));
+        }
+        for o in svc["security_opt"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            warn.push(format!("service {name} sets security_opt {o}"));
+        }
+    }
+    (deny, warn)
+}
+
 /// One action on one thing: `action` is `container.start`, `image.remove`, `prune.volumes`, `compose.up`...
 /// `target` is the container, image or volume; `wt` the (already checked) worktree for compose.
 pub fn action(action: &str, target: &str, force: bool, volumes: bool, wt: Option<&Path>) -> Result<String> {
@@ -533,17 +559,38 @@ pub fn action(action: &str, target: &str, force: bool, volumes: bool, wt: Option
                 a.push("down");
             }
             // compose reads the file relative to the working dir, so run it there
-            let o = git::quiet(&mut Command::new("docker"))
-                .current_dir(wt)
-                .args(&a)
-                .stdin(Stdio::null())
-                .output()
-                .context("could not start docker")?;
-            if !o.status.success() {
-                bail!("{}", String::from_utf8_lossy(&o.stderr).trim());
+            let compose = |tail: &[&str], limit: Duration| -> Result<axelstra_core::exec::Captured> {
+                let mut c = Command::new("docker");
+                c.current_dir(wt).args(["compose", "-p", project.as_str(), "-f", file]).args(tail);
+                docker_capped(&mut c, limit, "compose")
+            };
+            // what compose would actually run, with includes, extends and variables resolved: a worktree's compose
+            // file is untrusted (an agent or a PR wrote it), and `up` can mount the host or take the engine over
+            let (refusals, mut warnings) = match compose(&["config", "--format", "json"], ACTION) {
+                Ok(o) if o.success() => compose_audit(&o.stdout_lossy(), wt),
+                Ok(o) => (vec![format!("`docker compose config` failed: {}", o.stderr_lossy().trim())], vec![]),
+                Err(e) => (vec![e.to_string()], vec![]),
+            };
+            if action == "compose.up" && !refusals.is_empty() {
+                bail!("refusing compose up:
+- {}", refusals.join("
+- "));
+            }
+            // down only stops what exists, so a finding there is reported, not blocking
+            warnings.extend(refusals);
+            let o = compose(if action == "compose.up" { &["up", "-d"] } else { &["down"] }, ACTION * 5)?;
+            if !o.success() {
+                bail!("{}", o.stderr_lossy().trim());
             }
             // compose writes its progress to stderr
-            String::from_utf8_lossy(&o.stderr).into_owned()
+            let mut text = o.stderr_lossy();
+            if !warnings.is_empty() {
+                text = format!("warnings:
+- {}
+{text}", warnings.join("
+- "));
+            }
+            text
         }
         _ => bail!("unknown docker action {action}"),
     };
@@ -784,6 +831,27 @@ mod tests {
         let v = parse_volumes(out, &c);
         assert_eq!(v[0].used_by, vec!["demo-postgres-1"]);
         assert!(v[1].used_by.is_empty());
+    }
+
+    #[test]
+    fn compose_audit_refuses_host_access_and_warns_on_the_rest() {
+        let wt = std::env::temp_dir().join("axl-wt-audit");
+        let inside = axelstra_core::paths::norm_path(&wt.join("data"));
+        let cfg = json!({"services": {
+            "ok": {"volumes": [{"type": "bind", "source": inside, "target": "/d"}, {"type": "volume", "source": "v", "target": "/v"}]},
+            "bad": {"privileged": true, "network_mode": "host",
+                    "volumes": [{"type": "bind", "source": "/var/run/docker.sock", "target": "/s"},
+                                {"type": "bind", "source": "/etc", "target": "/e"}],
+                    "cap_add": ["SYS_ADMIN"]}
+        }});
+        let (deny, warn) = compose_audit(&cfg.to_string(), &wt);
+        assert!(deny.iter().all(|d| d.contains("bad")), "{deny:?}");
+        for needle in ["privileged", "host namespace", "engine socket", "outside the worktree"] {
+            assert!(deny.iter().any(|d| d.contains(needle)), "{needle} in {deny:?}");
+        }
+        assert!(warn.iter().any(|w| w.contains("SYS_ADMIN")));
+        assert_eq!(compose_audit(r#"{"services":{"a":{}}}"#, &wt), (vec![], vec![]));
+        assert!(!compose_audit("nope", &wt).0.is_empty());
     }
 
     #[test]
