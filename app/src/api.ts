@@ -96,6 +96,9 @@ export type Diagnostics = {
   daemon_connected: boolean;
   daemon_proto: number | null;
   daemon_instance: number | null;
+  daemon_build: string | null;
+  daemon_security: number | null;
+  app_security_min: number;
   data_dir: string;
   lag_log: string;
   lag_log_bytes: number;

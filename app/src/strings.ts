@@ -130,6 +130,11 @@ export const S = {
     error: "Erro",
   },
 
+  versionSkew: {
+    text: "O daemon é mais antigo que a app: reiniciar (os terminais restauram).",
+    restart: "Reiniciar daemon",
+  },
+
   toast: {
     close: "Fechar",
     reconnecting: "A reconectar ao daemon…",

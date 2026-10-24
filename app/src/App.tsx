@@ -31,6 +31,7 @@ import { useBootstrap } from "./useBootstrap";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
+import { VersionSkew } from "./VersionSkew";
 import { PanelIcon } from "./PanelIcon";
 import { CloseConfirm } from "./CloseConfirm";
 import { ConfirmHost } from "./Confirm";
@@ -503,6 +504,7 @@ export function App() {
     <ContextMenu />
     <ErrorToast>
       <UpdateToast />
+      <VersionSkew />
     </ErrorToast>
     </>
   );
