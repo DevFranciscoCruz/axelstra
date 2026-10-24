@@ -11,7 +11,7 @@
 // Scenarios: boot (window renders, no CSP violation, no uncaught error), session (a session spawned through the CLI
 // shows up in the UI with a live terminal), restore (the app is closed and relaunched: the daemon kept the session).
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,7 +68,8 @@ async function connect() {
     if (app.gone !== undefined) throw new Error(`app exited early (${app.gone})`);
     try {
       const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-      target = list.find((t) => t.type === "page" && t.webSocketDebuggerUrl);
+      // the page target exists at about:blank before the app navigates; reloading that would leave the window blank
+      target = list.find((t) => t.type === "page" && t.webSocketDebuggerUrl && t.url !== "about:blank");
     } catch {
       /* not listening yet */
     }
@@ -154,11 +155,40 @@ async function selectWorktree(page) {
   }
 }
 
+/** What the throwaway data dir holds, for a failure report (state files and the tail of each log). */
+function dataDirReport() {
+  const out = [];
+  const walk = (d, depth) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const f = join(d, e.name);
+      if (e.isDirectory()) {
+        if (depth < 2) walk(f, depth + 1);
+      } else if (/\.(json|log|bad)(\.\d+)?$/.test(e.name)) {
+        out.push(`--- ${f}
+${readFileSync(f, "utf8").slice(-1500)}`);
+      }
+    }
+  };
+  try {
+    walk(join(home, "axelstra"), 0);
+  } catch (e) {
+    out.push(String(e));
+  }
+  return out.join("\n");
+}
+
 let failed = null;
 try {
   launch();
   let page = await connect();
-  await until("the UI to render", () => page.evaluate("document.getElementById('root')?.children.length > 0"));
+  await until("the UI to render", () => page.evaluate("document.getElementById('root')?.children.length > 0")).catch(
+    async (e) => {
+      const st = await page
+        .evaluate("JSON.stringify({url: location.href, ready: document.readyState, html: document.body?.innerHTML.slice(0, 300)})")
+        .catch((x) => String(x));
+      throw new Error(`${e.message}\npage: ${st}\nproblems: ${[...new Set(problems)].join(" | ")}\n${dataDirReport()}`);
+    },
+  );
   console.log("ok  boot: the frontend rendered");
   const title = await page.evaluate("document.title");
   if (title !== "Axelstra") throw new Error(`unexpected document title ${JSON.stringify(title)}`);
@@ -176,7 +206,8 @@ try {
   if (sp.status !== 0) {
     const seen = cli("projects");
     throw new Error(`terminal failed: ${sp.stderr || sp.stdout}
-projects: ${seen.stdout || seen.stderr}`);
+projects: ${seen.stdout || seen.stderr}
+${dataDirReport()}`);
   }
   console.log("ok  session: project added and terminal started through the CLI");
   // the UI learns about CLI-made changes on its next refresh; a reload is the deterministic way to get one

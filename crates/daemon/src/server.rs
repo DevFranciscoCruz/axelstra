@@ -1215,16 +1215,35 @@ struct Ctx<'a> {
     after: &'a mut Vec<Box<dyn FnOnce() + Send>>,
 }
 
+/// Whether `method` changes projects or worktrees, which makes the cached project list stale.
+fn changes_projects(method: &str) -> bool {
+    (method.starts_with("worktree.") && !matches!(method, "worktree.status" | "worktree.overview"))
+        || (method.starts_with("project.") && !matches!(method, "project.list" | "project.logo" | "project.log"))
+}
+
+/// Drops the cached project list and bumps the generation a `project.list` in flight checks before caching its answer.
+fn forget_project_list(reg: &Registry) {
+    *reg.plist.lock_recover() = None;
+    crate::overview::invalidate();
+    reg.wt_gen.fetch_add(1, Ordering::SeqCst);
+}
+
 fn dispatch(c: &mut Ctx) -> Result<Value> {
-    let (req, p, reg) = (c.req, c.p, c.reg);
-    // anything that changes projects or worktrees makes the cached project list stale
-    if (req.method.starts_with("worktree.") && !matches!(req.method.as_str(), "worktree.status" | "worktree.overview"))
-        || (req.method.starts_with("project.") && !matches!(req.method.as_str(), "project.list" | "project.logo" | "project.log"))
-    {
-        *reg.plist.lock_recover() = None;
-        crate::overview::invalidate();
-        reg.wt_gen.fetch_add(1, Ordering::SeqCst);
+    // Forgotten before the call and again after it: a `project.list` that started in between (the UI polls it) would
+    // otherwise cache the state from before the change and serve it for the next seconds.
+    let (reg, mutating) = (c.reg.clone(), changes_projects(&c.req.method));
+    if mutating {
+        forget_project_list(&reg);
     }
+    let out = dispatch_call(c);
+    if mutating {
+        forget_project_list(&reg);
+    }
+    out
+}
+
+fn dispatch_call(c: &mut Ctx) -> Result<Value> {
+    let (req, p) = (c.req, c.p);
     if c.agent.is_some() && agent_forbidden(&req.method, p) {
         return Err(axelstra_core::coded!(
             "rpc.agent_forbidden",
