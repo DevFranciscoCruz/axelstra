@@ -7,23 +7,33 @@ use serde::Serialize;
 use std::path::Path;
 use std::process::Command;
 
+/// Longest one git/gh call may take (commit and push run the user's hooks).
+const EXEC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+/// Most of each stream kept from a call.
+const EXEC_MAX_OUT: usize = 4 << 20;
+
+/// Stops Windows from looking for the program in the current directory, where a worktree could plant a `git.exe`.
+fn no_cwd_lookup(cmd: &mut Command) -> &mut Command {
+    cmd.env("NoDefaultCurrentDirectoryInExePath", "1")
+}
+
 fn exec(cwd: &Path, prog: &str, args: &[&str]) -> Result<(bool, String)> {
-    let o = axelstra_core::git::quiet(&mut Command::new(prog))
-        .current_dir(cwd)
-        // never block waiting for a credential prompt nobody can see
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .args(args)
-        .output()
-        .with_context(|| format!("could not start {prog}"))?;
-    let mut text = String::from_utf8_lossy(&o.stdout).trim().to_string();
-    let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+    let mut cmd = Command::new(prog);
+    // never block waiting for a credential prompt nobody can see
+    no_cwd_lookup(&mut cmd).current_dir(cwd).env("GIT_TERMINAL_PROMPT", "0").env("GH_PROMPT_DISABLED", "1").args(args);
+    let o = axelstra_core::exec::run_capped(&mut cmd, EXEC_TIMEOUT, EXEC_MAX_OUT).with_context(|| format!("could not start {prog}"))?;
+    if o.timed_out {
+        bail!("{prog} {} took longer than {}s", args.first().unwrap_or(&""), EXEC_TIMEOUT.as_secs());
+    }
+    let mut text = o.stdout_lossy().trim().to_string();
+    let err = o.stderr_lossy().trim().to_string();
     if !err.is_empty() {
         if !text.is_empty() {
             text.push('\n');
         }
         text.push_str(&err);
     }
-    Ok((o.status.success(), text))
+    Ok((o.success(), text))
 }
 
 fn branch(wt: &Path) -> Result<String> {
@@ -92,6 +102,7 @@ pub fn pull_request(wt: &Path, title: &str, body: &str, base: Option<&str>) -> R
 
 /// Most diff text the agent is shown; the file list still covers everything.
 const SUGGEST_DIFF_CAP: usize = 24_000;
+const SUGGEST_MAX_OUT: usize = 256 << 10;
 const SUGGEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
 fn cap_chars(s: &str, max: usize) -> &str {
@@ -136,42 +147,40 @@ fn agent_args() -> [&'static str; 3] {
 }
 
 fn run_agent(prompt: &str) -> Result<String> {
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::process::Stdio;
-    // `cmd /C` so a `claude.cmd` shim is found on Windows too; the prompt goes through stdin, never the command line
-    let mut cmd = if cfg!(windows) {
-        let mut c = Command::new("cmd");
-        c.args(["/C", "claude"]);
-        c
-    } else {
-        Command::new("claude")
-    };
+    // the full path found on PATH, so a `claude.cmd` shim works without `cmd /C` and a program of that name in the
+    // worktree is never picked; the prompt goes through stdin, never the command line
+    let exe = axelstra_core::agents::get("claude")
+        .and_then(|a| a.locate())
+        .ok_or_else(|| anyhow::anyhow!("the `claude` CLI was not found on PATH"))?;
+    let mut cmd = Command::new(exe);
     cmd.args(agent_args());
+    no_cwd_lookup(&mut cmd);
     axelstra_core::git::quiet(&mut cmd);
     // outside the repo, so the agent works from the prompt alone and does not wander through the project
     let mut child = cmd
-        .current_dir(std::env::temp_dir())
+        .current_dir(neutral_cwd())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| anyhow::anyhow!("the `claude` CLI was not found on PATH"))?;
+        .context("could not start the `claude` CLI")?;
     let mut stdin = child.stdin.take().context("no stdin")?;
     let text = prompt.to_string();
     std::thread::spawn(move || {
         let _ = stdin.write_all(text.as_bytes());
     });
+    // wait_with_output would not stop at the deadline; the shared runner owns stdin as null, so drain by hand with a bound
     let (mut out, mut err) = (child.stdout.take().context("no stdout")?, child.stderr.take().context("no stderr")?);
-    let out_t = std::thread::spawn(move || {
-        let mut s = String::new();
-        let _ = out.read_to_string(&mut s);
-        s
-    });
-    let err_t = std::thread::spawn(move || {
-        let mut s = String::new();
-        let _ = err.read_to_string(&mut s);
-        s
-    });
+    let cap = |r: &mut dyn std::io::Read| {
+        let mut b = Vec::new();
+        let _ = r.take(SUGGEST_MAX_OUT as u64).read_to_end(&mut b);
+        b
+    };
+    use std::io::Read;
+    let out_t = std::thread::spawn(move || cap(&mut out));
+    let err_t = std::thread::spawn(move || cap(&mut err));
     let deadline = std::time::Instant::now() + SUGGEST_TIMEOUT;
     let status = loop {
         if let Some(s) = child.try_wait()? {
@@ -184,11 +193,24 @@ fn run_agent(prompt: &str) -> Result<String> {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     };
-    let (out, err) = (out_t.join().unwrap_or_default(), err_t.join().unwrap_or_default());
+    // the pipes close with the child; a straggler holding them is not waited for
+    let join = |t: std::thread::JoinHandle<Vec<u8>>| {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !t.is_finished() && std::time::Instant::now() < end {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if t.is_finished() { String::from_utf8_lossy(&t.join().unwrap_or_default()).into_owned() } else { String::new() }
+    };
+    let (out, err) = (join(out_t), join(err_t));
     if !status.success() {
         bail!("claude failed: {}", cap_chars(err.trim(), 300));
     }
     Ok(out)
+}
+
+/// A directory with nothing of the project in it (the home folder is not neutral: it may hold a `.claude/`).
+fn neutral_cwd() -> std::path::PathBuf {
+    std::env::temp_dir()
 }
 
 /// Asks the user's `claude` CLI for a commit message that fits the pending changes and the repo's recent style.
