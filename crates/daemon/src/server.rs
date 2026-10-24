@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
+mod containers;
 mod files;
 mod session;
 mod vcs;
@@ -983,6 +984,7 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
         "worktree" | "project" | "pm" | "janitor" | "dispatch" | "ports" => worktrees::call(c),
         "fs" | "watch" | "open" => files::call(c),
         "git" | "gh" => vcs::call(c),
+        "docker" => containers::call(c),
         _ => legacy(c),
     }
 }
@@ -1287,14 +1289,6 @@ fn legacy(c: &mut Ctx) -> Result<Value> {
                     }
                 })
             })
-        }
-        "docker.open_logs" | "docker.open_shell" => {
-            let (s, label, meta) = crate::docker::terminal(&reg.store, &req.method, p)?;
-            Ok(json!({"id": reg.spawn(&s, Some(&label), Some(meta))?}))
-        }
-        "docker.status" | "docker.containers" | "docker.stats" | "docker.images" | "docker.volumes" | "docker.networks"
-        | "docker.inspect" | "docker.logs" | "docker.fs_list" | "docker.fs_read" | "docker.action" => {
-            tokio::task::block_in_place(|| crate::docker::call(&reg.store, &req.method, p))
         }
         "automation.list" => {
             let _g = reg.auto_lock.lock_recover();
