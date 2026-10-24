@@ -625,4 +625,12 @@ export const P = {
     none: "Nada encontrado.",
     note: "Só as conversas do Claude e do Gemini em worktrees conhecidos podem ser retomadas aqui; as restantes aparecem a cinzento.",
   },
+  terminal: {
+    linkRefused: (raw: string) => `Ligação não aberta: só são permitidos endereços http e https (${raw}).`,
+    linkAsk: (url: string) => `Abrir este endereço no navegador?\n\n${url}`,
+    linkTitle: "Abrir ligação",
+    open: "Abrir",
+    cancel: "Cancelar",
+    outside: (p: string) => `O caminho ${p} está fora deste worktree e não é aberto a partir do terminal.`,
+  },
 } as const;

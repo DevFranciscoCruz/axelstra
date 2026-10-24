@@ -8,6 +8,7 @@ import { fsStat } from "../api";
 import { findPathLinks, resolvePathLink, safeLinkUrl, type PathLink } from "../pathlinks";
 import { ask } from "../Confirm";
 import { S } from "../strings";
+import { P } from "../strings.panels";
 import { THEMES, cursorBlinks, termPrefs } from "../termprefs";
 import { openFileAt, selectedWorktree, showNotice } from "../store";
 
@@ -18,8 +19,8 @@ export const SCROLLBACK_HIDDEN = 2000;
 /** opens a link from terminal output: http(s) only; `confirmFirst` (OSC 8, where the visible text can hide the target) shows the real URL before leaving */
 export async function openTermUrl(raw: string, confirmFirst: boolean) {
   const url = safeLinkUrl(raw);
-  if (!url) return void showNotice(`Ligação não aberta: só são permitidos endereços http e https (${raw.slice(0, 80)}).`);
-  if (confirmFirst && !(await ask(`Abrir este endereço no browser?\n\n${url}`, { title: "Abrir ligação", kind: "warning", okLabel: "Abrir", cancelLabel: "Cancelar" }))) return;
+  if (!url) return void showNotice(P.terminal.linkRefused(raw.slice(0, 80)));
+  if (confirmFirst && !(await ask(P.terminal.linkAsk(url), { title: P.terminal.linkTitle, kind: "warning", okLabel: P.terminal.open, cancelLabel: P.terminal.cancel }))) return;
   void openUrl(url).catch(() => 0);
 }
 
@@ -28,7 +29,7 @@ export async function openPathLink(link: PathLink) {
   const wt = selectedWorktree();
   if (!wt) return;
   const r = resolvePathLink(link.path, wt);
-  if ("outside" in r) return void showNotice(`O caminho ${r.outside} está fora desta worktree e não é aberto a partir do terminal.`);
+  if ("outside" in r) return void showNotice(P.terminal.outside(r.outside));
   try {
     await fsStat(wt, r.rel); // throws when the file does not exist
   } catch {
