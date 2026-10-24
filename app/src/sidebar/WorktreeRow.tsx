@@ -19,6 +19,7 @@ import {
   wtStatus,
 } from "../store";
 import { AgentList } from "./AgentList";
+import { PendingIntegration, pendingFor } from "./PendingIntegration";
 
 const T = P.sidebar;
 
@@ -240,13 +241,21 @@ export function WorktreeRow(props: {
           </Button>
         </Show>
       </div>
+      <PendingIntegration
+        projectId={props.project.id}
+        path={w().path}
+        name={label()}
+        into={mainBranch()}
+        onStartLead={props.onStartLead}
+        onDrop={() => props.onDrop(label())}
+      />
       <AgentList
         path={w().path}
         depth={props.depth}
         hidden={props.agentsHidden}
         onToggle={props.onToggleAgents}
         isMain={w().is_main}
-        onStartLead={props.onStartLead}
+        onStartLead={pendingFor(props.project.id, w().path) ? undefined : props.onStartLead}
       />
     </>
   );

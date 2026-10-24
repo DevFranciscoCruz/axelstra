@@ -1,4 +1,5 @@
 import type { SessionInfo } from "./api";
+import { norm } from "./paths";
 
 /** One agent in the status bar's popover. */
 export type AgentEntry = { id: number; name: string; worktree: string; path: string };
@@ -25,7 +26,18 @@ export const groupAgents = (list: SessionInfo[], stateOf: (s: SessionInfo) => St
 /** What `worktree.overview` returns per project. */
 export type WtCounts = { total: number; dirty: number; ahead: number; behind: number; merged: number; no_agent: number };
 export type MergedWt = { path: string; branch: string; why: string };
-export type OverviewProject = { id: string; name: string; counts: WtCounts; merged: MergedWt[] };
+/** A worktree of an `ax/*` branch with no running agent and work that is not in the default branch yet. */
+export type PendingWt = { path: string; branch: string; ahead: number; dirty: boolean; attention?: { code: string; params?: Record<string, unknown>; text: string } };
+export type OverviewProject = { id: string; name: string; counts: WtCounts; merged: MergedWt[]; /** absent on an older daemon */ pending?: PendingWt[] };
+
+const same = (a: string, b: string) => norm(a) === norm(b);
+
+/** The pending entry of a worktree, if the project's overview lists it. */
+export const pendingOf = (projects: OverviewProject[], projectId: string, path: string): PendingWt | undefined =>
+  projects.find((p) => p.id === projectId)?.pending?.find((x) => same(x.path, path));
+
+/** "attention" when the daemon flagged the worktree, else "pending". */
+export const pendingState = (p: PendingWt): "attention" | "pending" => (p.attention ? "attention" : "pending");
 
 const ZERO: WtCounts = { total: 0, dirty: 0, ahead: 0, behind: 0, merged: 0, no_agent: 0 };
 

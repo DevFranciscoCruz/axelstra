@@ -33,6 +33,10 @@ export type Project = { id: string; name: string; path: string; worktrees: Workt
   remote?: string | null;
   /** id of the remote host the project lives on; absent = this machine */
   host?: string;
+  /** absent = on: finished ax/* work is integrated into the default branch by itself */
+  auto_integrate?: boolean;
+  /** absent = off: never pushes unless set */
+  push_after_integrate?: boolean;
 };
 
 /** A call that gets no answer in this long fails (a stuck daemon must not leave the UI waiting for ever). */
@@ -434,6 +438,11 @@ const nativePick = <T>(method: string, cmd: string, title: string) => invoke<T>(
  *  The webview never supplies the path (`project.add` is not in the host's allow-list). */
 export const pickAndAddProject = (title: string) => nativePick<Project | null>("project.add", "project_add_pick", title);
 export const projectLogo = (id: string) => call<{ data_url: string | null }>("project.logo", { id }).then((r) => r.data_url);
+/** per-project integration settings; send only what changed */
+export const setProjectIntegrate = (id: string, s: { auto?: boolean; push?: boolean }) => call("project.integrate", { id, ...s });
+export type IntegrateResult = { integrated: boolean; into: string; how: "ff" | "merge" | "none"; removed: boolean; pushed: boolean | null };
+/** integrates a worktree's branch into the default branch; fails with a coded error when it cannot */
+export const integrateWorktree = (project: string, path: string) => call<IntegrateResult>("worktree.integrate", { project, path });
 export const setProjectSetup = (id: string, setup: string) => call("project.setup", { id, setup });
 export const detectPackageManagers = (id: string) => call<{ installed: string[]; suggested: string | null; package_json?: boolean }>("pm.detect", { id });
 export type DispatchMeta = Record<string, { title?: string; archived?: boolean; requests?: string[]; updated?: number }>;
@@ -773,7 +782,21 @@ export const applyWorkspaceImport = (mode: WorkspaceMode, conflicts: WorkspaceCo
 /** The dialog was closed: the host forgets the picked file. */
 export const cancelWorkspaceImport = () => hostCmd<void>("workspace.import", "workspace_import_cancel").catch((e) => console.debug("workspace_import_cancel", e));
 
-export type JanitorEvent = { project: string; path: string; branch: string; into: string; why: string; at: number };
+export type JanitorEvent = {
+  project: string;
+  path: string;
+  branch: string;
+  into: string;
+  why: string;
+  at: number;
+  /** absent = "removed" (an older daemon) */
+  kind?: "removed" | "integrated" | "empty" | "attention";
+  how?: "ff" | "merge";
+  pushed?: boolean | null;
+  code?: string;
+  params?: Record<string, unknown>;
+  text?: string;
+};
 /** Worktrees the automatic sweep removed since the last call (take semantics); an older daemon has none. */
 export const janitorEvents = () => callOr<{ events: JanitorEvent[] }>("janitor.events", {}, { events: [] }).then((r) => r.events ?? []);
 

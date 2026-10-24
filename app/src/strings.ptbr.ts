@@ -137,6 +137,7 @@ export const ptBRS: Widen<typeof ptS> = {
     merged: "Integrado",
     error: "Erro",
     budget: "Orçamento",
+    attention: "Atenção",
   },
 
   versionSkew: {

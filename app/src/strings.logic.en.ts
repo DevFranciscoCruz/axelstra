@@ -149,6 +149,8 @@ export const enL: Widen<typeof ptL> = {
       ciPass: (pr: string, wt: string) => `CI passing: ${pr} (${wt})`,
     },
     janitor: (branch: string, into: string) => `worktree ${branch} removed (merged into ${into})`,
+    integrated: (branch: string, into: string) => `worktree ${branch} integrated into ${into} and removed`,
+    emptyRemoved: (branch: string) => `empty worktree ${branch} removed`,
   },
   restore: {
     restored: (n: number) => count(n, "session restored", "sessions restored"),

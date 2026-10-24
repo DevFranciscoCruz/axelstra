@@ -156,6 +156,8 @@ export const ptBRL: Widen<typeof ptL> = {
       ciPass: (pr: string, wt: string) => `CI passando: ${pr} (${wt})`,
     },
     janitor: (branch: string, into: string) => `worktree ${branch} removido (integrado em ${into})`,
+    integrated: (branch: string, into: string) => `worktree ${branch} integrado em ${into} e removido`,
+    emptyRemoved: (branch: string) => `worktree vazio ${branch} removido`,
   },
   restore: {
     restored: (n: number) => count(n, "sessão restaurada", "sessões restauradas"),

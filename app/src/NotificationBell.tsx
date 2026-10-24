@@ -26,6 +26,7 @@ const KIND: Record<NotifKind, [string, string]> = {
   merged: lazyPair("⇄", () => S.notif.merged),
   error: lazyPair("!", () => S.notif.error),
   budget: lazyPair("Σ", () => S.notif.budget),
+  attention: lazyPair("⚠", () => S.notif.attention),
 };
 
 const FOCUSABLE = "button:not(:disabled)";

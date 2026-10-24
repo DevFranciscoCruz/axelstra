@@ -135,6 +135,7 @@ export const enS: Widen<typeof ptS> = {
     merged: "Merged",
     error: "Error",
     budget: "Budget",
+    attention: "Attention",
   },
 
   versionSkew: {
