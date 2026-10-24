@@ -72,4 +72,13 @@ export const S = {
   findNext: "Seguinte",
   findClose: "Fechar pesquisa",
   fileMissing: (p: string) => `O ficheiro ${p} não existe nesta worktree.`,
+
+  // deletions: the notice names what went away; a failure names it too
+  fileDeleted: (n: string) => `Ficheiro apagado: ${n}`,
+  folderDeleted: (n: string) => `Pasta apagada: ${n}`,
+  cardDeleted: (n: string) => `Cartão apagado: ${n}`,
+  automationDeleted: (n: string) => `Automatização apagada: ${n}`,
+  worktreeRemoved: (n: string) => `Worktree removido: ${n}`,
+  projectRemoved: (n: string) => `Projeto tirado da lista: ${n}`,
+  deleteFailed: (n: string, e: unknown) => `Não foi possível apagar "${n}": ${String(e).replace(/^Error: /, "")}`,
 } as const;

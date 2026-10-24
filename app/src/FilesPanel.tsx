@@ -9,7 +9,8 @@ import { press } from "./a11y";
 import { FsEntry, GrepHit, fsCreate, fsDelete, fsGrep, fsList, fsRename, fsSearch } from "./api";
 import { MenuItem, showMenu } from "./ContextMenu";
 import { RightTabs } from "./RightTabs";
-import { changes, findWorktree, fsTick, guarded, openFile, selectedWorktree, setError, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban, rightTab } from "./store";
+import { changes, findWorktree, fsTick, guarded, openFile, selectedWorktree, setError, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban, rightTab, showNotice } from "./store";
+import { S } from "./strings";
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf("/")));
@@ -209,8 +210,9 @@ function fileMenu(wt: string, path: string, dir: boolean): MenuItem[] {
           await fsDelete(wt, path);
           if (openFile() === path || (dir && openFile()?.startsWith(path + "/"))) setOpenFile(null);
           setGen(gen() + 1);
+          showNotice(dir ? S.folderDeleted(baseOf(path)) : S.fileDeleted(baseOf(path)));
         } catch (e) {
-          setError(String(e));
+          setError(S.deleteFailed(baseOf(path), e));
         }
       },
     },
