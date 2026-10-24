@@ -1,40 +1,41 @@
 import type { CheckItem, ShipStatus } from "./api";
+import { P } from "./strings.panels";
 
 /** how often the PR state is read while the panel is on screen and the window has focus */
 export const SHIP_POLL_MS = 20_000;
 
 /** [icon, word]: the word is the cue that does not depend on colour */
 export const CI_LABEL: Record<ShipStatus["ci"], [string, string]> = {
-  pass: ["check", "CI a passar"],
-  fail: ["x", "CI a falhar"],
-  pending: ["ellipsis", "CI a correr"],
-  none: ["", "Sem CI"],
+  pass: ["check", P.ship.ci.pass],
+  fail: ["x", P.ship.ci.fail],
+  pending: ["ellipsis", P.ship.ci.pending],
+  none: ["", P.ship.ci.none],
 };
 export const CHECK_LABEL: Record<CheckItem["state"], [string, string]> = {
-  pass: ["check", "passou"],
-  fail: ["x", "falhou"],
-  pending: ["ellipsis", "a correr"],
-  skipped: ["", "ignorado"],
+  pass: ["check", P.ship.check.pass],
+  fail: ["x", P.ship.check.fail],
+  pending: ["ellipsis", P.ship.check.pending],
+  skipped: ["", P.ship.check.skipped],
 };
 export const REVIEW_LABEL: Record<ShipStatus["review"], string> = {
-  approved: "Aprovado",
-  changes: "Alterações pedidas",
-  review: "Falta revisão",
-  "": "Sem revisão pedida",
+  approved: P.ship.review.approved,
+  changes: P.ship.review.changes,
+  review: P.ship.review.review,
+  "": P.ship.review.none,
 };
 
 /** one phrase for "can this be merged": what blocks it, or that nothing does */
 export const mergeLabel = (s: ShipStatus): string => {
-  if (s.pr_state === "merged") return "Merge feito";
-  if (s.pr_state === "closed") return "Fechado sem merge";
-  if (s.draft) return "Rascunho";
-  if (s.mergeable === "no" || s.merge_state === "dirty") return "Com conflitos";
-  if (s.can_merge) return "Pronto para merge";
-  if (s.merge_state === "behind") return "Branch desatualizado";
-  if (s.ci === "fail") return "Bloqueado pelos checks";
-  if (s.ci === "pending") return "À espera dos checks";
-  if (s.merge_state === "blocked") return "Bloqueado (revisão ou regras do repositório)";
-  return "A calcular…";
+  if (s.pr_state === "merged") return P.ship.merged;
+  if (s.pr_state === "closed") return P.ship.closed;
+  if (s.draft) return P.ship.draft;
+  if (s.mergeable === "no" || s.merge_state === "dirty") return P.ship.conflicts;
+  if (s.can_merge) return P.ship.ready;
+  if (s.merge_state === "behind") return P.ship.behind;
+  if (s.ci === "fail") return P.ship.blockedChecks;
+  if (s.ci === "pending") return P.ship.waitingChecks;
+  if (s.merge_state === "blocked") return P.ship.blocked;
+  return P.ship.computing;
 };
 
 /** auto-merge makes sense while the PR is open and not yet mergeable: GitHub merges it when the checks pass */
@@ -43,13 +44,13 @@ export const canAutoMerge = (s: ShipStatus): boolean => s.pr_state === "open" &&
 export const problemText = (s: Pick<ShipStatus, "problem" | "detail">): { text: string; fix: string } => {
   switch (s.problem) {
     case "missing":
-      return { text: "O GitHub CLI (gh) não está instalado.", fix: "Instala o gh (https://cli.github.com) e corre `gh auth login` num terminal." };
+      return P.ship.missing;
     case "auth":
-      return { text: "O gh não tem sessão iniciada no GitHub.", fix: "Corre `gh auth login` num terminal e depois atualiza." };
+      return P.ship.auth;
     case "nopr":
-      return { text: "Ainda não há PR para este branch.", fix: "Faz push e cria o PR com “Criar PR” acima." };
+      return P.ship.nopr;
     default:
-      return { text: s.detail || "Não foi possível ler o estado do PR.", fix: "Atualiza daqui a pouco; se persistir, confirma que `gh pr view` funciona neste worktree." };
+      return { text: s.detail || P.ship.unreadable.text, fix: P.ship.unreadable.fix };
   }
 };
 
@@ -57,7 +58,7 @@ export const problemText = (s: Pick<ShipStatus, "problem" | "detail">): { text: 
 export const shouldPoll = (hidden: boolean, focused: boolean) => !hidden && focused;
 
 export const mergeQuestion = (s: Pick<ShipStatus, "number" | "title">, branch: string, deleteBranch: boolean) =>
-  `Fazer merge (squash) do PR #${s.number}?\n\n${s.title}\n\nO branch "${branch}" entra no branch principal.${deleteBranch ? " O branch remoto será apagado." : ""} Isto não se desfaz.`;
+  P.ship.mergeAsk(s.number, s.title, branch, deleteBranch);
 
 export const autoMergeQuestion = (s: Pick<ShipStatus, "number" | "title">) =>
-  `Ativar o auto-merge (squash) do PR #${s.number}?\n\n${s.title}\n\nO GitHub faz o merge sozinho quando os checks passarem e as revisões estiverem cumpridas.`;
+  P.ship.autoAsk(s.number, s.title);

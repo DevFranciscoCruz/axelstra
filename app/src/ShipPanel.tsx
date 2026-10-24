@@ -10,6 +10,7 @@ import { CHECK_LABEL, CI_LABEL, REVIEW_LABEL, SHIP_POLL_MS, autoMergeQuestion, c
 import { findWorktree, selectedWorktree } from "./store";
 import "./ship.css";
 import { createPoller } from "./poller";
+import { P } from "./strings.panels";
 
 /** last state read per worktree, so a change is noticed even after looking at another worktree in between */
 const lastSeen = new Map<string, ShipStatus>();
@@ -95,15 +96,15 @@ export function ShipPanel() {
     if (!s || !path || busy()) return;
     const q = auto ? autoMergeQuestion(s) : mergeQuestion(s, branch(), delBranch());
     // merging publishes to the remote and cannot be undone: always confirm, with the PR title in the question
-    if (!(await ask(q, { title: auto ? "Auto-merge" : "Fazer merge", kind: "warning", okLabel: auto ? "Ativar auto-merge" : "Fazer merge" }))) return;
+    if (!(await ask(q, { title: auto ? P.ship.autoTitle : P.ship.mergeTitle, kind: "warning", okLabel: auto ? P.ship.autoOk : P.ship.mergeTitle }))) return;
     setBusy(true);
     setNote(null);
     try {
       await gitMerge(path, auto, !auto && delBranch());
-      setNote({ ok: true, text: auto ? "Auto-merge ativado" : "Merge feito" });
+      setNote({ ok: true, text: auto ? P.ship.autoOn : P.ship.mergeDone });
     } catch (e) {
       setNote({ ok: false, text: String(e) });
-      push({ kind: "error", worktree: path, text: `Falhou o ${auto ? "auto-merge" : "merge"} de #${s.number}: ${String(e).slice(0, 160)}` });
+      push({ kind: "error", worktree: path, text: P.ship.failedNote(auto, s.number, String(e).slice(0, 160)) });
     } finally {
       setBusy(false);
       void load();
@@ -112,8 +113,8 @@ export function ShipPanel() {
 
   return (
     <Show when={cur() && !cur()!.wt.is_main}>
-      <section class="ship" aria-label="Estado do PR">
-        <Show when={st()} fallback={<div class="ship-line muted">A ver o PR…</div>}>
+      <section class="ship" aria-label={P.ship.region}>
+        <Show when={st()} fallback={<div class="ship-line muted">{P.ship.looking}</div>}>
           {(s) => (
             <Show
               when={!s().problem}
@@ -131,7 +132,7 @@ export function ShipPanel() {
             >
               <div class="sc-title" {...press(() => setOpen(!open()))} aria-expanded={open()}>
                 <span class="chev"><Icon name={open() ? "chevDown" : "chevRight"} /></span>
-                <span>PULL REQUEST #{s().number}</span>
+                <span>{P.ship.head(s().number)}</span>
                 <span class="grow" />
                 <span class={`ship-ci ${s().ci}`}>
                   <Show when={CI_LABEL[s().ci][0]}>
@@ -146,7 +147,7 @@ export function ShipPanel() {
                 <Badge variant={s().mergeable === "no" ? "bad" : "default"}>{mergeLabel(s())}</Badge>
               </div>
               <Show when={open() && s().checks.length}>
-                <ul class="ship-checks" aria-label="Checks">
+                <ul class="ship-checks" aria-label={P.ship.checks}>
                   <For each={s().checks}>
                     {(c: CheckItem) => (
                       <li class={`ship-check ${c.state}`}>
@@ -156,7 +157,7 @@ export function ShipPanel() {
                           </Show>
                         </span>
                         <Show when={c.link} fallback={<span class="ship-name" title={c.name}>{c.name}</span>}>
-                          <Button variant="row" size="bare" class="ship-name block truncate" title={`Abrir ${c.name} no browser`} onClick={() => void openLink(c.link)}>{c.name}</Button>
+                          <Button variant="row" size="bare" class="ship-name block truncate" title={P.ship.openCheck(c.name)} onClick={() => void openLink(c.link)}>{c.name}</Button>
                         </Show>
                         <span class="ship-state">{CHECK_LABEL[c.state][1]}</span>
                       </li>
@@ -165,19 +166,19 @@ export function ShipPanel() {
                 </ul>
               </Show>
               <Show when={s().pr_state === "merged"}>
-                <div class="ship-line">Este worktree já foi integrado: o janitor pode removê-lo.</div>
+                <div class="ship-line">{P.ship.alreadyMerged}</div>
               </Show>
               <div class="ship-actions">
-                <Button size="sm" disabled={!s().url} onClick={() => void openLink(s().url)}>Abrir no browser</Button>
+                <Button size="sm" disabled={!s().url} onClick={() => void openLink(s().url)}>{P.ship.openBrowser}</Button>
                 <Show when={canAutoMerge(s())}>
-                  <Button size="sm" disabled={busy()} onClick={() => void merge(true)}>Ativar auto-merge</Button>
+                  <Button size="sm" disabled={busy()} onClick={() => void merge(true)}>{P.ship.autoOk}</Button>
                 </Show>
                 <Show when={s().can_merge}>
-                  <Button variant="default" size="sm" disabled={busy()} onClick={() => void merge(false)}>Fazer merge</Button>
+                  <Button variant="default" size="sm" disabled={busy()} onClick={() => void merge(false)}>{P.ship.mergeTitle}</Button>
                 </Show>
               </div>
               <Show when={s().can_merge}>
-                <Checkbox labelClass="ship-opt" checked={delBranch()} onChange={(e) => setDelBranch(e.currentTarget.checked)} label="Apagar o branch depois do merge" />
+                <Checkbox labelClass="ship-opt" checked={delBranch()} onChange={(e) => setDelBranch(e.currentTarget.checked)} label={P.ship.deleteBranch} />
               </Show>
             </Show>
           )}
