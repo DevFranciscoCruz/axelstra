@@ -149,6 +149,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "budget.check" => Ok(json!({"budgets": tokio::task::block_in_place(|| budget_check(reg))})),
         // the level crossings since the last call (the app turns them into a toast and a notification)
         "budget.events" => Ok(json!({"events": crate::budget::take_events()})),
+        // what this machine is and which folders it has, for the app's "add remote project" picker (app only)
+        "host.info" => Ok(crate::hosts::info()),
+        "host.browse" => tokio::task::block_in_place(|| crate::hosts::browse(p["path"].as_str())),
         "hooks.status" => Ok(crate::hooks::status()?),
         "hooks.install" => tokio::task::block_in_place(crate::hooks::install),
         "ping" => Ok(hello_info()),

@@ -4,6 +4,7 @@ use crate::remote::{check_bin, RemoteSpec};
 use anyhow::{bail, Result};
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 /// Most hosts the registry holds.
 pub const MAX_HOSTS: usize = 16;
@@ -71,9 +72,113 @@ pub fn validate(v: &Value) -> Result<Value> {
     Ok(Value::Array(out))
 }
 
+/// Most directories `host.browse` lists.
+pub const MAX_ENTRIES: usize = 500;
+
+fn home() -> Option<PathBuf> {
+    ["USERPROFILE", "HOME"].iter().filter_map(std::env::var_os).find(|h| !h.is_empty()).map(PathBuf::from)
+}
+
+/// A path as shown to the user: no `\\?\` prefix, and `\\?\UNC\` turned back into `\\`.
+fn display(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\UNC\") {
+        Some(r) => format!(r"\\{r}"),
+        None => s.strip_prefix(r"\\?\").unwrap_or(&s).to_string(),
+    }
+}
+
+fn hostname() -> String {
+    ["HOSTNAME", "COMPUTERNAME"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .find(|h| !h.is_empty())
+        .or_else(|| std::fs::read_to_string("/etc/hostname").ok().map(|h| h.trim().to_string()).filter(|h| !h.is_empty()))
+        .unwrap_or_default()
+}
+
+/// What `host.info` answers.
+pub fn info() -> Value {
+    let os = if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    };
+    let shell = if cfg!(windows) { None } else { std::env::var("SHELL").ok().filter(|s| !s.is_empty()) };
+    let user = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default();
+    json!({"os": os, "home": home().map(|h| display(&h)), "user": user, "hostname": hostname(), "shell": shell,
+        "sep": std::path::MAIN_SEPARATOR.to_string(), "proto": crate::proto::PROTO, "build": crate::proto::BUILD_ID})
+}
+
+/// What `host.browse` answers: the directories under `path` (default: home), sorted without regard to case.
+pub fn browse(path: Option<&str>) -> Result<Value> {
+    let home = home().map(|h| display(&h));
+    let asked = match path.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => PathBuf::from(p),
+        None => PathBuf::from(home.clone().ok_or_else(|| anyhow::anyhow!("no home directory on this machine"))?),
+    };
+    if !asked.is_absolute() {
+        bail!("{} is not an absolute path", asked.display());
+    }
+    let dir = match std::fs::canonicalize(&asked) {
+        Ok(d) => d,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => bail!("{} does not exist", asked.display()),
+        Err(e) => bail!("cannot open {}: {e}", asked.display()),
+    };
+    if !dir.is_dir() {
+        bail!("{} is not a directory", display(&dir));
+    }
+    let mut names: Vec<(String, bool)> = std::fs::read_dir(&dir)
+        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", display(&dir)))?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path().join(".git").exists()))
+        .collect();
+    names.sort_by_key(|(n, _)| (n.to_lowercase(), n.clone()));
+    let truncated = names.len() > MAX_ENTRIES;
+    names.truncate(MAX_ENTRIES);
+    let entries: Vec<Value> = names.into_iter().map(|(name, git)| json!({"name": name, "git": git})).collect();
+    let mut out = json!({"path": display(&dir), "parent": dir.parent().map(display), "home": home, "entries": entries});
+    if truncated {
+        out["truncated"] = json!(true);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browse_rejects_relative_and_missing() {
+        assert!(browse(Some("rel/dir")).unwrap_err().to_string().contains("not an absolute"));
+        let missing = std::env::temp_dir().join("axelstra-no-such-dir-xyz");
+        assert!(browse(Some(&missing.to_string_lossy())).unwrap_err().to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn browse_truncates_and_sorts_without_case() {
+        let d = std::env::temp_dir().join(format!("axelstra-browse-unit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for n in ["b", "A", "c"] {
+            std::fs::create_dir_all(d.join(n)).unwrap();
+        }
+        std::fs::write(d.join("file.txt"), "x").unwrap();
+        let r = browse(Some(&d.to_string_lossy())).unwrap();
+        let names: Vec<&str> = r["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["A", "b", "c"]);
+        assert!(r.get("truncated").is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn display_drops_the_verbatim_prefix() {
+        assert_eq!(display(Path::new(r"\\?\C:\a")), r"C:\a");
+        assert_eq!(display(Path::new(r"\\?\UNC\srv\sh")), r"\\srv\sh");
+        assert_eq!(display(Path::new("/a/b")), "/a/b");
+    }
 
     fn h(id: &str, slot: u64) -> Value {
         json!({"id": id, "name": "Box", "spec": "ssh:me@box:2222", "slot": slot})
