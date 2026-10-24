@@ -195,6 +195,17 @@ export const S = {
     sectionRight: "painel direito",
   },
 
+  palette: {
+    hideProjects: "Ocultar projetos",
+    showProjects: "Mostrar projetos",
+    hideRight: "Ocultar painel direito",
+    showRight: "Mostrar painel direito",
+    theme: (now: string) => `Mudar o tema (agora: ${now})`,
+    stopVoice: "Parar o ditado por voz",
+    computerOn: "Controlo do ecrã pelos agentes: ligar",
+    computerOff: "Controlo do ecrã pelos agentes: desligar",
+  },
+
   // command palette
   paletteTitle: "Paleta de comandos",
   palettePlaceholder: "Ir para worktree ou executar ação…",
