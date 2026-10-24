@@ -890,23 +890,27 @@ fn note_path(reg: &Registry, id: u32) -> Option<std::path::PathBuf> {
 
 /// What `session.list` answers. Takes sessions, labels, metas in the registry's lock order.
 fn session_list(reg: &Registry) -> Vec<Value> {
-    let l = reg.sessions.lock_recover();
-    let labels = reg.labels.lock_recover();
-    let metas = reg.metas.lock_recover();
-    let mut v: Vec<Value> = l
-        .iter()
-        .map(|(id, s)| {
+    // the locks only pick the sessions (cheap views and clones); screen rendering and the waiting heuristics run after
+    let picked: Vec<_> = {
+        let l = reg.sessions.lock_recover();
+        let labels = reg.labels.lock_recover();
+        let metas = reg.metas.lock_recover();
+        l.iter().map(|(id, s)| (*id, s.clone(), s.view(), labels.get(id).cloned(), metas.get(id).cloned())).collect()
+    };
+    let mut v: Vec<Value> = picked
+        .into_iter()
+        .map(|(id, s, view, label, meta)| {
             let running = s.try_wait().is_none();
-            let idle = s.idle_ms();
+            let idle = view.idle_ms();
             // quiet for a moment and the screen ends in a question: the agent waits for the user
-            let agent = metas.get(id).map(|m| m["kind"] == "agent").unwrap_or(false);
+            let agent = meta.as_ref().map(|m| m["kind"] == "agent").unwrap_or(false);
             let waiting = running
-                && (reg.bus.is_escalated(*id)
+                && (reg.bus.is_escalated(id)
                     || (idle >= 1500
-                        && (axelstra_core::waiting::needs_input(&s.tail(4096))
-                            || (agent && axelstra_core::waiting::asks_question(&s.screen_lines(12)))))
-                    || reg.hints.waiting(*id, s.since_input_ms(), idle));
-            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "escalated": reg.bus.is_escalated(*id), "unread": reg.bus.unread(*id), "finished": reg.bus.finished(*id).is_some(), "label": labels.get(id), "meta": metas.get(id)})
+                        && (axelstra_core::waiting::needs_input(&view.tail(4096))
+                            || (agent && axelstra_core::waiting::asks_question(&view.screen_tail(12)))))
+                    || reg.hints.waiting(id, view.since_input_ms(), idle));
+            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
         })
         .collect();
     v.sort_by_key(|x| x["id"].as_u64());
@@ -1447,7 +1451,8 @@ fn dispatch(
                 .filter(|(_, s)| s.try_wait().is_none())
                 .map(|(id, s)| (*id, s.clone()))
                 .collect::<Vec<_>>();
-            let v: Vec<Value> = l.iter().map(|(id, s)| json!({"id": id, "mem": s.memory_now(), "cpu_100ns": s.job_usage().1})).collect();
+            let snap = axelstra_core::procs::snapshot_cached(Duration::from_millis(800));
+            let v: Vec<Value> = l.iter().map(|(id, s)| json!({"id": id, "mem": s.memory_now_in(&snap), "cpu_100ns": s.job_usage_in(&snap).1})).collect();
             Ok(json!({"sessions": v, "cores": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)}))
         }
         "session.usage" => {
