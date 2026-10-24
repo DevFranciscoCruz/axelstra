@@ -1,6 +1,5 @@
 import { Icon, hasIcon } from "./Icon";
 import { createPoller } from "./poller";
-import { Select } from "./Select";
 import { needsTypedName, removeRisks } from "./removeRisk";
 import { ask, askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
@@ -19,7 +18,7 @@ import { press } from "./a11y";
 import { S } from "./strings";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import logo from "./assets/logo.png";
-import { Badge, Button, Field, Input, cn } from "./ui";
+import { Badge, Button, Field, Input, Select, cn } from "./ui";
 import { errorText } from "./appError";
 import { waitShellReady } from "./shellReady";
 import {

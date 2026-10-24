@@ -13,13 +13,13 @@ import { downloadErrorText, micErrorText, transcribeErrorText } from "./voiceErr
 // the speech and the text goes straight to the terminal that was active when recording began. With
 // auto-send off (or no terminal), the text lands in an editable draft and waits for confirmation.
 export const voiceSupported = !!navigator.mediaDevices?.getUserMedia;
-export const [voiceState, setVoiceState] = createSignal<"idle" | "recording" | "transcribing">("idle");
+const [voiceState, setVoiceState] = createSignal<"idle" | "recording" | "transcribing">("idle");
 export const listening = () => voiceState() === "recording";
 export const [draft, setDraft] = createSignal<string | null>(null);
-export const [voiceError, setVoiceError] = createSignal("");
+const [voiceError, setVoiceError] = createSignal("");
 /** null: model is installed; otherwise download progress in [0,1] (0 before it starts) */
-export const [needModel, setNeedModel] = createSignal(false);
-export const [dlProgress, setDlProgress] = createSignal<number | null>(null);
+const [needModel, setNeedModel] = createSignal(false);
+const [dlProgress, setDlProgress] = createSignal<number | null>(null);
 
 const AUTO_KEY = "axelstra.voice.autosend";
 const readAuto = () => {
@@ -29,8 +29,8 @@ const readAuto = () => {
     return true;
   }
 };
-export const [autoSend, setAutoSendSig] = createSignal(readAuto());
-export const setAutoSend = (on: boolean) => {
+const [autoSend, setAutoSendSig] = createSignal(readAuto());
+const setAutoSend = (on: boolean) => {
   setAutoSendSig(on);
   try {
     localStorage.setItem(AUTO_KEY, on ? "1" : "0");
@@ -89,7 +89,7 @@ async function transcribe() {
   }
 }
 
-export async function stopVoice() {
+async function stopVoice() {
   if (voiceState() !== "recording") return;
   release();
   setVoiceState("transcribing");
@@ -98,14 +98,14 @@ export async function stopVoice() {
 }
 
 /** drops the recording without transcribing it */
-export function cancelVoice() {
+function cancelVoice() {
   if (voiceState() === "recording") release();
   chunks = [];
   setVoiceState("idle");
   setDraft((d) => (d && d.trim() ? d : null));
 }
 
-export async function downloadModel() {
+async function downloadModel() {
   setDlProgress(0);
   setVoiceError("");
   const un = await listen<{ done: number; total: number }>("voice-progress", (e) => setDlProgress(e.payload.total ? e.payload.done / e.payload.total : 0));

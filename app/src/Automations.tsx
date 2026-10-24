@@ -1,12 +1,11 @@
 import { For, Show, createResource, createSignal } from "solid-js";
 import { Icon } from "./Icon";
 import { Automation, agentOptions, agentWarning, agentsList, deleteAutomation, listAutomations, runAutomation, saveAutomation } from "./api";
-import { Select } from "./Select";
 import { Modal } from "./Modal";
 import { ask, askDiscard } from "./Confirm";
 import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations, showNotice, toast } from "./store";
 import { S } from "./strings";
-import { Button, Field, Input, Textarea } from "./ui";
+import { Button, Field, Input, Select, Textarea } from "./ui";
 
 const DAYS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
 
