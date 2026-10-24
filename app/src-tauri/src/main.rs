@@ -217,6 +217,8 @@ const ALLOWED_METHODS: &[&str] = &[
     "dispatch.overlap_files",
     "worktree.rebase",
     "notes.read",
+    "dispatch.overlap_files",
+    "worktree.rebase",
     "notes.export",
     "worktree.overview",
     "worktree.sweep",
