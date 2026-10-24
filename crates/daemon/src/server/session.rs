@@ -140,12 +140,23 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({"id": id}))
         }
         "session.list" => Ok(Value::Array(session_list(reg))),
-        // an agent's hook (`axelstra hook`) says what it is doing: waiting, idle or working
+        // an agent's hook (`axelstra hook`) says what it is doing: waiting, idle or working. A wait carries its kind
+        // (permission, question, idle_input) and the agent's own text; without a kind it is not a wait.
         "session.hint" => {
             let state = axelstra_core::waiting::HintState::parse(p["state"].as_str().unwrap_or_default())
                 .ok_or_else(|| axelstra_core::coded!("session.bad_state", "state must be waiting, idle or working"))?;
             session()?;
-            reg.hints.set(sid()?, state);
+            let id = sid()?;
+            // only the agent itself says it waits
+            if c.agent.is_some_and(|me| me != id) {
+                return Err(axelstra_core::coded!("rpc.agent_own_session", "{method} is only allowed for the agent's own session", method = req.method));
+            }
+            let wait = p["kind"].as_str().and_then(axelstra_core::waiting::WaitKind::parse).map(|kind| axelstra_core::waiting::Wait {
+                kind,
+                text: axelstra_core::waiting::clean_text(p["text"].as_str().unwrap_or_default()),
+            });
+            reg.hints.set(id, state, wait);
+            reg.tell_parent_waiting(id);
             Ok(json!({}))
         }
         "session.subscribe" => {
