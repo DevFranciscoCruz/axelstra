@@ -44,6 +44,7 @@ fn env() -> &'static Env {
         // the daemon and be taken for an orphaned agent; a real bridge is never below the daemon.
         #[cfg(unix)]
         let daemon = {
+            #[cfg(target_os = "linux")]
             use std::os::unix::process::CommandExt;
             let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_axelstra"));
             cmd.arg("daemon").env("AXELSTRA_IDLE_EXIT_SECS", "120").stdin(std::process::Stdio::null());

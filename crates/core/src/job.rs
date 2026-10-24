@@ -391,7 +391,9 @@ mod imp {
         fn kill_and_forget_clears_stragglers_of_a_reaped_leader() {
             let job = Job::new().unwrap();
             // the leader exits at once and leaves a background sleeper in its group
-            let mut c = job.spawn(Command::new("sh").args(["-c", "sleep 60 >/dev/null 2>&1 & echo $!"]).stdout(std::process::Stdio::piped())).unwrap();
+            let mut c = job
+                .spawn(Command::new("sh").args(["-c", "sleep 60 >/dev/null 2>&1 & echo $!"]).stdout(std::process::Stdio::piped()))
+                .unwrap();
             let mut out = String::new();
             std::io::Read::read_to_string(c.stdout.as_mut().unwrap(), &mut out).unwrap();
             let kid: i32 = out.trim().parse().unwrap();
