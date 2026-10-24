@@ -1,4 +1,5 @@
-import { For, Show } from "solid-js";
+import { For, Show, createResource } from "solid-js";
+import { envTools, type EnvTool } from "./api";
 import { Button } from "./ui";
 import { Icon } from "./Icon";
 import { K } from "./keyboard";
@@ -7,6 +8,13 @@ import { W } from "./strings.welcome";
 import logo from "./assets/logo.png";
 
 const needs = [W.needGit, W.needAgent, W.needGh];
+const toolsNow = (): Promise<EnvTool[] | null> => {
+  try {
+    return envTools().catch(() => null);
+  } catch {
+    return Promise.resolve(null);
+  }
+};
 type Wt = { path: string; branch: string | null; is_main: boolean };
 
 const Kbd = (props: { children: string }) => <kbd class="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-xs text-foreground">{props.children}</kbd>;
@@ -17,6 +25,9 @@ const Kbd = (props: { children: string }) => <kbd class="rounded-sm border borde
  */
 export function Welcome(props: { onAddProject: () => void; worktrees?: Wt[]; projectName?: string; onPick?: (path: string) => void; onNewWorktree?: () => void }) {
   const paletteKeys = () => K(commandById("palette")?.keys ?? "Ctrl+K");
+  // what the daemon finds installed; without an answer (old daemon, no host) the hints stay as plain advice
+  const [tools] = createResource(toolsNow);
+  const toolOf = (id: string) => tools()?.find((t) => t.id === id);
   const shortcutKeys = () => commandById("shortcuts")?.keys ?? "?";
   return (
     <section class="mx-auto flex h-full w-full max-w-[420px] flex-col items-center justify-center gap-5 p-8 text-center" aria-labelledby="welcome-title">
@@ -65,7 +76,16 @@ export function Welcome(props: { onAddProject: () => void; worktrees?: Wt[]; pro
         <div class="text-left text-sm text-muted-foreground">
           <div class="mb-1 font-semibold text-foreground">{W.needs}</div>
           <ul class="flex flex-col gap-1">
-            <For each={needs}>{(n) => <li><code class="text-foreground">{n.name}</code>: {n.why}</li>}</For>
+            <For each={needs}>
+              {(n) => (
+                <li data-tool-state={toolOf(n.name) ? (toolOf(n.name)!.found ? "found" : "missing") : "unknown"}>
+                  <code class="text-foreground">{n.name}</code>:{" "}
+                  <Show when={toolOf(n.name)} fallback={n.why}>
+                    {(t) => (t().found ? `${W.toolFound}${t().version ? ` ${t().version}` : ""}` : `${W.toolMissing}, ${n.why}`)}
+                  </Show>
+                </li>
+              )}
+            </For>
           </ul>
         </div>
       </Show>

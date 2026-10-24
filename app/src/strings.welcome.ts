@@ -13,5 +13,7 @@ export const W = {
   needs: "Para começar",
   needGit: { name: "git", why: "obrigatório, sem ele não há worktrees" },
   needAgent: { name: "claude", why: "ou outro agente (por exemplo codex)" },
+  toolFound: "instalado",
+  toolMissing: "não encontrado",
   needGh: { name: "gh", why: "só é preciso para PRs" },
 } as const;

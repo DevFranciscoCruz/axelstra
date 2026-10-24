@@ -654,9 +654,13 @@ export const hooksStatus = () => call<HooksStatus>("hooks.status");
 export const hooksInstall = () => call<HooksInstall>("hooks.install");
 
 // ---- daemon methods newer than some running daemons: each degrades (null / empty) on "unknown method" ----
-/** Messages the daemon's store recorded at startup (a corrupt file it recovered from, ...). Empty on an older daemon. */
-export const storeNotices = () => callOr<{ notices: string[] }>("store.notices", {}, { notices: [] }).then((r) => r.notices);
-/** Writes the daemon's state files (settings, projects, sessions) into one backup file; null on a daemon without it. */
+/** Messages the daemon's store recorded (a corrupt file it recovered from, ...), taken once. Empty on an older daemon. */
+export const storeNotices = () => callOr<{ notices: string[] }>("notices.take", {}, { notices: [] }).then((r) => r.notices);
+/** One command line tool Axelstra uses, as the daemon finds it on its PATH. */
+export type EnvTool = { id: string; found: boolean; path: string | null; version: string | null };
+/** git, claude and gh with their versions; null on a daemon without `env.tools`. */
+export const envTools = () => callOr<{ tools: EnvTool[] } | null>("env.tools", {}, null).then((r) => r?.tools ?? null);
+/** Copies the daemon's state files (settings, projects, sessions, automations; never the token) into a new backup folder; null on a daemon without it. */
 export const backupExport = () => callOr<{ path: string } | null>("backup.export", {}, null);
-/** Restores a backup written by backupExport; null on a daemon without it. */
+/** Restores the backup folder `path` written by backupExport; null on a daemon without it. */
 export const backupRestore = (path: string) => callOr<{ restored: string[] } | null>("backup.restore", { path }, null);

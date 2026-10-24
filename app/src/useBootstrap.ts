@@ -47,7 +47,7 @@ export function useBootstrap() {
     () =>
       void storeNotices()
         .then((ns) => ns.forEach((text) => toast({ text, kind: "warn", key: `store:${text}` })))
-        .catch((e) => console.debug("store.notices", e)),
+        .catch((e) => console.debug("notices.take", e)),
   );
 
   // a missing git, or no agent CLI at all, is explained once at startup instead of surfacing as a cryptic failure later
