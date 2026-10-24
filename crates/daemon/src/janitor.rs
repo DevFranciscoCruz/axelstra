@@ -97,6 +97,11 @@ pub fn take_events() -> Vec<Value> {
     std::mem::take(&mut *EVENTS.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+/// Whether the app has events to take (it is told over the watch stream, see `Registry::announce_events`).
+pub fn has_events() -> bool {
+    !EVENTS.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+}
+
 fn push_event(e: Value) {
     let mut q = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
     q.push(e);

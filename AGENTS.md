@@ -53,9 +53,9 @@ Verified: Claude Code 2.1.310 Notification types (`permission_prompt`, `idle_pro
 `PROTO` in `crates/daemon/src/proto.rs` is the app <-> daemon contract version. A daemon outlives
 app updates, and the app only restarts a daemon older than `PROTO`. Bump it (and add the new method
 to the doc comment above it) whenever the app starts calling a daemon method an old daemon lacks.
-Do not bump it for changes an old daemon already tolerates. Current: 20 (notices.take, audit.list, backup.export,
+Do not bump it for changes an old daemon already tolerates. Current: 21 (notices.take, audit.list, backup.export,
 backup.restore, orch.trust_info, env.tools, janitor.events, workspace.export, workspace.import_preview,
-workspace.import, host.info, host.browse, stalled in session.list, stall_minutes).
+workspace.import, host.info, host.browse, stalled in session.list, stall_minutes, and the watch-stream events janitor.events, triggers.events, budget.events, dispatch.changed).
 
 ## Worktree and agent lifecycle
 

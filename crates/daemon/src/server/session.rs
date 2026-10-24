@@ -175,14 +175,14 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     if !snap.is_empty() {
                         let _ = tx.blocking_send(session_frame(OUTPUT, id, &snap));
                     }
-                    let mut quiet_ticks = 0u32;
                     loop {
                         if stop.load(Ordering::SeqCst) {
                             return;
                         }
-                        match rx.recv_timeout(Duration::from_millis(200)) {
+                        // blocks until the session prints or its stream ends (`watch_exit` ends it when the program
+                        // is gone, even if ConPTY keeps the pipe open); the 5 s wake-up is the heartbeat below
+                        match rx.recv_timeout(STREAM_HEARTBEAT) {
                             Ok(d) => {
-                                quiet_ticks = 0;
                                 if tx.blocking_send(session_frame(OUTPUT, id, &d)).is_err() {
                                     return;
                                 }
@@ -190,14 +190,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                             Err(RecvTimeoutError::Timeout) => {
                                 // an empty frame every 5 quiet seconds: a client that stopped listening (its tab closed) wakes up,
                                 // sees it is detached and hangs up, instead of staying blocked until this session prints again
-                                quiet_ticks += 1;
-                                if quiet_ticks >= 25 {
-                                    quiet_ticks = 0;
-                                    if tx.blocking_send(session_frame(OUTPUT, id, &[])).is_err() {
-                                        return;
-                                    }
+                                if tx.blocking_send(session_frame(OUTPUT, id, &[])).is_err() {
+                                    return;
                                 }
-                                // ConPTY may keep the output pipe open after the process is gone
                                 if s.try_wait().is_some() {
                                     while let Ok(d) = rx.recv_timeout(Duration::from_millis(150)) {
                                         let _ = tx.blocking_send(session_frame(OUTPUT, id, &d));
@@ -288,7 +283,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "session.pending" => {
             let sid_dir = reg.saved.with_file_name("sid");
-            let mut v = reg.pending.lock_recover().clone();
+            // entries whose worktree was deleted meanwhile are dropped; at most RESTORE_BATCH are handed out
+            let mut v: Vec<Value> = reg.pending.lock_recover().clone();
+            let before = v.len();
+            v.retain(rec_alive);
+            if v.len() != before {
+                *reg.pending.lock_recover() = v.clone();
+                reg.persist();
+            }
+            v.truncate(RESTORE_BATCH);
             for rec in v.iter_mut() {
                 // the agent may have started a new conversation (/clear) since: resume the latest one
                 let Some(key) = rec["meta"]["key"].as_str().map(String::from) else { continue };

@@ -1,12 +1,11 @@
 import { createMemo, createRoot, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { coded } from "../msg";
-import { DispatchMeta, SessionInfo, callBg, flowTasks, listSessions } from "../api";
+import { DispatchMeta, SessionInfo, callBg, flowTasks, listSessions, onDaemonEvent } from "../api";
 import { errorText } from "../appError";
 import { pushNotification } from "../notifications";
 import { norm } from "../paths";
 import { readString, writeString } from "../persist";
-import { createPoller, type Poller } from "../poller";
 import { clearError, setError } from "./notify";
 import { pruneTabState } from "./tabs";
 import { guarded, keepSame, setSplitSession, showView } from "./ui";
@@ -198,17 +197,17 @@ export const refreshSessions = (): Promise<void> => {
   }));
 };
 
-/** titles the dispatcher gave each worktree, polled once for everyone who shows them */
+/** titles the dispatcher gave each worktree, read once for everyone who shows them and again when the daemon says the file changed */
 export const [dispatchTopics, setDispatchTopics] = createSignal<DispatchMeta>({});
 const pollDispatch = () => callBg<DispatchMeta>("dispatch.meta").then(setDispatchTopics, () => {});
 let dispUsers = 0;
-let dispPoll: Poller | undefined;
-/** call from a component that shows `dispatchTopics`; returns the function that stops watching (the poll ends with the last one) */
+let dispOff: (() => void) | undefined;
+/** call from a component that shows `dispatchTopics`; returns the function that stops watching (the subscription ends with the last one) */
 export const watchDispatch = () => {
   void pollDispatch();
-  if (dispUsers++ === 0) dispPoll = createPoller(pollDispatch, 4000);
+  if (dispUsers++ === 0) dispOff = onDaemonEvent("dispatch.changed", () => void pollDispatch());
   return () => {
-    if (--dispUsers === 0) dispPoll?.stop();
+    if (--dispUsers === 0) dispOff?.();
   };
 };
 

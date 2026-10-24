@@ -269,6 +269,11 @@ pub fn example_prompt() -> String {
 
 static EVENTS: Mutex<Vec<Value>> = Mutex::new(Vec::new());
 
+/// Whether there is something the app has not taken yet.
+pub fn has_events() -> bool {
+    !EVENTS.lock_recover().is_empty()
+}
+
 /// Takes (and clears) what the trigger did since the last call, for the app's toast and notification center.
 pub fn take_events() -> Vec<Value> {
     std::mem::take(&mut *EVENTS.lock_recover())

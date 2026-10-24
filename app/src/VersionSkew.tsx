@@ -1,13 +1,11 @@
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { diagnostics } from "./api";
 import { restartDaemonFlow } from "./daemonActions";
-import { createPoller } from "./poller";
 import { onTauriEvent } from "./tauriEvents";
 import { Button } from "./ui";
 import { S } from "./strings";
 import { daemonOlderThanApp } from "./skewLogic";
 
-const CHECK_MS = 60_000;
 // the banner lives inside the shared toast stack (ErrorToast), so it flows there instead of floating on its own
 /**
  * "Daemon older than the app": shown while the running daemon is of an older release than this app. Restarting is safe,
@@ -24,12 +22,10 @@ export function VersionSkew() {
       () => undefined,
     );
   onMount(() => {
-    const poll = createPoller(check, CHECK_MS);
+    // the daemon only changes when it restarts: look when the app opens and when the host says it restarted
+    void check();
     const off = onTauriEvent("daemon-restarted", () => void check());
-    onCleanup(() => {
-      poll.stop();
-      off();
-    });
+    onCleanup(off);
   });
   return (
     <Show when={old() && !dismissed()}>

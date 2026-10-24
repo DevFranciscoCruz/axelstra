@@ -85,8 +85,13 @@ pub fn deliver(target: std::sync::Arc<axelstra_core::pty::Session>, data: Vec<u8
     std::thread::spawn(move || {
         let _turn = ORDER.lock().unwrap_or_else(|e| e.into_inner());
         let start = std::time::Instant::now();
-        while target.since_input_ms() < QUIET_MS && start.elapsed().as_secs() < 30 {
-            std::thread::sleep(std::time::Duration::from_millis(250));
+        // sleeps exactly until the pause would be long enough; typing in between moves that moment, so it looks again
+        loop {
+            let left = QUIET_MS.saturating_sub(target.since_input_ms());
+            if left == 0 || start.elapsed().as_secs() >= 30 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(left));
         }
         let _ = target.write_system(&data);
         DEFERRED.fetch_sub(1, Ordering::SeqCst);

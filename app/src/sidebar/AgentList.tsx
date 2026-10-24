@@ -8,6 +8,9 @@ import { DOT_LABEL, dotOfSession } from "../agentState";
 import { agentRowInfo, agentRowLabel } from "../agentRow";
 import { isLead, lacksLead, leadFirst } from "../leadRole";
 import { P } from "../strings.panels";
+import { MenuItem, isMenuKey, showMenu, showMenuAt } from "../ContextMenu";
+import { createSidebarActions } from "./actions";
+import { agentMenu } from "./menus";
 import {
   activeSession,
   closeSessionTab,
@@ -18,6 +21,7 @@ import {
   sessionsOf,
   tabLabel,
 } from "../store";
+import type { SessionInfo } from "../api";
 
 const T = P.sidebar;
 
@@ -34,6 +38,15 @@ export function AgentList(props: {
   onStartLead?: () => void;
 }) {
   const [renaming, setRenaming] = createSignal<number | null>(null);
+  const actions = createSidebarActions();
+  const menuOf = (a: SessionInfo): MenuItem[] => {
+    const wt = a.meta?.worktree ?? props.path;
+    return agentMenu(
+      { run: actions.run, copy: actions.copy, open: () => openSession(wt, a.id), end: () => void closeSessionTab(a) },
+      a.id,
+      wt,
+    );
+  };
   // agents of this worktree; workers that an agent of another worktree started show in their own worktree
   // the lead first, its tasks after it
   const agents = () => leadFirst(sessionsOf(props.path).filter((x) => x.meta?.kind === "agent"));
@@ -79,7 +92,13 @@ export function AgentList(props: {
               const state = () => DOT_LABEL[dotOfSession(a)];
               const active = () => activeSession() === a.id && norm(selectedWorktree()) === norm(props.path);
               return (
-                <div class="wt-agent" classList={{ active: active(), lead: isLead(a), task: !isLead(a) && hasLead() }}>
+                <div
+                  class="wt-agent"
+                  classList={{ active: active(), lead: isLead(a), task: !isLead(a) && hasLead() }}
+                  onContextMenu={(e) => {
+                    if (renaming() !== a.id) showMenu(e, menuOf(a));
+                  }}
+                >
                   <Show
                     when={renaming() !== a.id}
                     fallback={
@@ -118,6 +137,13 @@ export function AgentList(props: {
                         void closeSessionTab(a);
                       }}
                       onKeyDown={(e) => {
+                        if (isMenuKey(e)) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const r = e.currentTarget.getBoundingClientRect();
+                          showMenuAt(r.left + 24, r.bottom, menuOf(a));
+                          return;
+                        }
                         if (e.key === "F2") {
                           e.preventDefault();
                           setRenaming(a.id);
