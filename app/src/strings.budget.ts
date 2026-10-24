@@ -1,5 +1,6 @@
 import { dict } from "./i18n";
 import { enB } from "./strings.budget.en";
+import { ptBRB } from "./strings.budget.ptbr";
 /** pt-PT texts of the token budgets (Settings section, status bar, popover, alerts). */
 import { count } from "./i18n";
 
@@ -42,4 +43,4 @@ export const ptB = {
   paused: (n: number) => ` · ${count(n, "agente interrompido", "agentes interrompidos")}`,
 };
 
-export const B = dict(ptB, enB);
+export const B = dict<typeof ptB>(ptB, enB, ptBRB);

@@ -1,5 +1,6 @@
 import { dict } from "./i18n";
 import { enWS } from "./strings.workspace.en";
+import { ptBRWS } from "./strings.workspace.ptbr";
 import { count, plural } from "./i18n";
 
 /** pt-PT texts of the workspace export / import section of Settings. */
@@ -69,4 +70,4 @@ export const ptWS = {
   restartHint: " Reinicia o Axelstra para aplicar as definições.",
 };
 
-export const WS = dict(ptWS, enWS);
+export const WS = dict<typeof ptWS>(ptWS, enWS, ptBRWS);

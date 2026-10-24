@@ -1,5 +1,6 @@
 import { dict } from "./i18n";
 import { enW } from "./strings.welcome.en";
+import { ptBRW } from "./strings.welcome.ptbr";
 /** pt-PT texts of the empty main-area screen (no project, or no worktree chosen). */
 export const ptW = {
   title: "Bem-vindo ao Axelstra",
@@ -23,4 +24,4 @@ export const ptW = {
   needGh: { name: "gh", why: "só é preciso para PRs" },
 } as const;
 
-export const W = dict(ptW, enW);
+export const W = dict<typeof ptW>(ptW, enW, ptBRW);
