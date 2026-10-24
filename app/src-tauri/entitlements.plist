@@ -2,14 +2,20 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- hardened runtime (needed for notarization) blocks the microphone and the webview's JIT unless allowed -->
+  <!-- Hardened runtime (needed for notarization) blocks the microphone and the webview's JIT unless allowed. -->
+  <!-- Voice dictation records from the microphone; Info.plist carries the usage text. -->
   <key>com.apple.security.device.audio-input</key>
   <true/>
+  <!-- JavaScriptCore/WebKit JIT. Kept: dropping it would need a signed test on real macOS, none exists yet. -->
   <key>com.apple.security.cs.allow-jit</key>
   <true/>
+  <!-- Kept with allow-jit for the same reason (WebKit maps executable memory). Try removing it first once a
+       signed build can be smoke-tested on macOS: it is the weaker of the two. -->
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
   <true/>
-  <key>com.apple.security.cs.disable-library-validation</key>
-  <true/>
+  <!-- com.apple.security.cs.disable-library-validation was removed on purpose. The sherpa speech engine is
+       linked statically (sherpa-rs "static" feature), so the bundle loads no third-party dylib. If a loose
+       dylib ever ships, sign it with the same Developer ID team as the app; the release workflow verifies
+       it (see "Verify the macOS signature" in release.yml and docs/RELEASING.md). -->
 </dict>
 </plist>
