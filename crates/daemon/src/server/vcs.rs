@@ -92,19 +92,23 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let dry = p["dry_run"].as_bool() == Some(true);
             let lead = find_lead(reg, &wt.to_string_lossy());
             if lead.is_none() && !dry {
-                anyhow::bail!("no live lead in this worktree: start its main agent first");
+                return Err(no_lead());
             }
             // the text is built here from what GitHub says now; nothing the client sent is forwarded
             let c = tokio::task::block_in_place(|| crate::gh::fetch_comment(&wt, n, id))?;
             let text = crate::gh::comment_task(n, &c);
             let Some(lead) = lead.filter(|_| !dry) else { return Ok(json!({"text": text, "sent": false})) };
-            let target = reg.get(lead).ok_or_else(|| anyhow::anyhow!("no live lead in this worktree: start its main agent first"))?;
+            let target = reg.get(lead).ok_or_else(no_lead)?;
             let m = reg.bus.send(None, lead, "message", &text, None, None);
             reg.deliver_untrusted(lead, target, &crate::msgbus::notice(&m, "o utilizador (comentário de review)"));
             Ok(json!({"text": text, "sent": true, "session": lead, "message": m.id}))
         }
         m => anyhow::bail!("unknown method {m}"),
     }
+}
+
+fn no_lead() -> anyhow::Error {
+    axelstra_core::coded!("worktree.no_lead", "no live lead in this worktree: start its main agent first")
 }
 
 /// The running lead session (meta `lead: true`) of the worktree at `path`.

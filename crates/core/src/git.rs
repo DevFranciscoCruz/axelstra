@@ -1,6 +1,6 @@
 use crate::coded;
 use crate::sync::LockRecover;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread::sleep;
@@ -54,7 +54,9 @@ pub fn run_timeout(cwd: &Path, args: &[&str], limit: Duration) -> Result<Out> {
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "never")
         .args(args);
-    let o = crate::exec::run_capped(&mut cmd, limit, RUN_MAX_BYTES).with_context(|| format!("spawn git {args:?}"))?;
+    let o = crate::exec::run_capped(&mut cmd, limit, RUN_MAX_BYTES).map_err(|e| {
+        coded!("git.spawn", "could not start git {cmd}: {detail}", cmd = args.first().unwrap_or(&""), detail = format!("{e:#}"))
+    })?;
     if o.timed_out {
         return Err(coded!("git.timeout", "git {cmd} timed out after {secs}s", cmd = args.first().unwrap_or(&""), secs = limit.as_secs()));
     }
@@ -185,7 +187,8 @@ pub fn worktree_remove(repo: &Path, path: &Path) -> Result<()> {
     }
     if path.exists() {
         let trash = path.with_file_name(format!(".axelstra-trash-{}", path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()));
-        std::fs::rename(path, &trash).with_context(|| format!("park {}", path.display()))?;
+        std::fs::rename(path, &trash)
+            .map_err(|e| coded!("worktree.park", "could not park {path}: {detail}", path = path.display(), detail = e))?;
         // the parked folder (node_modules and all) is deleted in the background once whatever held it lets go
         if let Some(dir) = trash.parent().map(Path::to_path_buf) {
             std::thread::spawn(move || {

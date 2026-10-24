@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { setLocale } from "./i18n";
-import { ciLine, stamp, toMarkdown, tokenLine, type Timeline } from "./timelineLogic";
+import { ciLine, eventTitle, stamp, toMarkdown, tokenLine, type Timeline } from "./timelineLogic";
 
 const t: Timeline = {
   branch: "ax/feat",
@@ -54,4 +54,22 @@ describe("timeline export", () => {
     expect(toMarkdown({ ...t, events: [], tokens: null, ci: null }, "x")).toContain("Sem eventos");
   });
   it("shows the time in the UI language", () => expect(stamp(0)).toMatch(/^\d\d\/\d\d\/\d{4}, \d\d:\d\d$/));
+});
+
+describe("eventTitle", () => {
+  afterEach(() => setLocale("pt-PT"));
+  it("reads the daemon's coded titles in the UI language and leaves commit subjects alone", () => {
+    const e = {
+      at: 1,
+      kind: "integrated" as const,
+      detail: "",
+      title: "Integrated into main",
+      title_code: "timeline.integrated",
+      title_params: { base: "main" },
+    };
+    expect(eventTitle(e)).toBe("Integrado em main");
+    setLocale("en");
+    expect(eventTitle(e)).toBe("Integrated into main");
+    expect(eventTitle({ at: 1, kind: "commit", detail: "", title: "fix: a" })).toBe("fix: a");
+  });
 });

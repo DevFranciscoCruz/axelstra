@@ -1,8 +1,8 @@
 //! CI state of the pull request behind a worktree's branch, and merging it, through the GitHub CLI.
 //! Every argv is fixed: nothing from the client reaches a command line, gh finds the PR from the branch checked out.
 
-use anyhow::{bail, Result};
-use axelstra_core::git;
+use anyhow::Result;
+use axelstra_core::{coded, git, msg};
 use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
@@ -25,6 +25,11 @@ pub struct Status {
     /// "" when a PR was read; "nopr" | "missing" (no gh) | "auth" (not logged in) | "error" otherwise
     pub problem: String,
     pub detail: String,
+    /// message code and params of `detail` when the daemon wrote it (not for gh's own words); the UI shows it in its language
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub detail_code: String,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub detail_params: std::collections::BTreeMap<String, String>,
     pub number: u64,
     pub title: String,
     pub url: String,
@@ -66,8 +71,8 @@ fn classify(status: &str, conclusion: &str, state: &str) -> &'static str {
 
 /// Checks from `gh pr checks --json name,state,link,bucket`.
 pub fn parse_checks(json: &str) -> Result<Vec<Check>> {
-    let v: Value = serde_json::from_str(json)?;
-    let list = v.as_array().ok_or_else(|| anyhow::anyhow!("gh returned something other than a list"))?;
+    let v: Value = serde_json::from_str(json).map_err(|_| coded!("gh.bad_json", "gh returned invalid JSON"))?;
+    let list = v.as_array().ok_or_else(|| coded!("gh.not_list", "gh returned something other than a list"))?;
     Ok(list
         .iter()
         .map(|c| {
@@ -116,9 +121,9 @@ pub fn overall(checks: &[Check]) -> &'static str {
 /// Fills a Status from `gh pr view --json number,title,url,headRefOid,state,isDraft,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus`.
 /// `checks` is the list from `gh pr checks` when that worked.
 pub fn parse_view(json: &str, checks: Option<Vec<Check>>) -> Result<Status> {
-    let v: Value = serde_json::from_str(json)?;
+    let v: Value = serde_json::from_str(json).map_err(|_| coded!("gh.bad_json", "gh returned invalid JSON"))?;
     if !v.is_object() {
-        bail!("gh returned something other than an object");
+        return Err(coded!("gh.not_object", "gh returned something other than an object"));
     }
     let s = |k: &str| v[k].as_str().unwrap_or("");
     let checks = match checks {
@@ -146,6 +151,8 @@ pub fn parse_view(json: &str, checks: Option<Vec<Check>>) -> Result<Status> {
     Ok(Status {
         problem: String::new(),
         detail: String::new(),
+        detail_code: String::new(),
+        detail_params: Default::default(),
         number: v["number"].as_u64().unwrap_or(0),
         title: s("title").to_string(),
         url: s("url").to_string(),
@@ -212,6 +219,18 @@ fn problem(kind: &str, detail: impl Into<String>) -> Status {
     Status { problem: kind.to_string(), detail: detail.into(), ci: "none".into(), mergeable: "unknown".into(), ..Status::default() }
 }
 
+/// A problem whose detail is a message of ours (it carries its code, so the UI can translate it).
+fn problem_coded(kind: &str, c: &msg::Coded) -> Status {
+    Status { detail_code: c.code.clone(), detail_params: c.params.clone(), ..problem(kind, c.text.clone()) }
+}
+
+fn problem_err(kind: &str, e: &anyhow::Error) -> Status {
+    match msg::find(e) {
+        Some(c) => problem_coded(kind, c),
+        None => problem(kind, format!("{e:#}")),
+    }
+}
+
 const VIEW_FIELDS: &str = "number,title,url,headRefOid,state,isDraft,statusCheckRollup,reviewDecision,mergeable,mergeStateStatus";
 
 /// State of the PR for the branch checked out in `wt`. A missing PR, a missing gh or a missing login are answers
@@ -219,8 +238,8 @@ const VIEW_FIELDS: &str = "number,title,url,headRefOid,state,isDraft,statusCheck
 pub fn status(wt: &Path) -> Status {
     let view = match gh(wt, &["pr", "view", "--json", VIEW_FIELDS], READ_TIMEOUT) {
         Ok(o) => o,
-        Err(RunError::Missing) => return problem("missing", "gh not found"),
-        Err(RunError::Timeout) => return problem("error", "gh took too long"),
+        Err(RunError::Missing) => return problem_err("missing", &crate::gh::missing()),
+        Err(RunError::Timeout) => return problem_err("error", &crate::gh::timeout("pr view", READ_TIMEOUT.as_secs())),
         Err(RunError::Other(e)) => return problem("error", e),
     };
     if !view.ok {
@@ -231,7 +250,7 @@ pub fn status(wt: &Path) -> Status {
         gh(wt, &["pr", "checks", "--json", "name,state,link,bucket"], READ_TIMEOUT).ok().and_then(|o| parse_checks(&o.stdout).ok());
     match parse_view(&view.stdout, checks) {
         Ok(s) => s,
-        Err(e) => problem("error", e.to_string()),
+        Err(e) => problem_err("error", &e),
     }
 }
 
@@ -270,21 +289,28 @@ fn delete_remote_args(branch: &str) -> Option<Vec<&str>> {
 pub fn merge(wt: &Path, auto: bool, delete_branch: bool) -> Result<String> {
     let st = status(wt);
     if !st.problem.is_empty() {
-        bail!("no pull request to merge: {}", st.detail);
+        return Err(coded!("checks.no_pr", "no pull request to merge: {detail}", detail = st.detail));
     }
     if st.pr_state != "open" {
-        bail!("pull request #{} is already {}", st.number, st.pr_state);
+        return Err(coded!("checks.not_open", "pull request #{number} is already {state}", number = st.number, state = st.pr_state));
     }
     if !auto && !st.can_merge {
-        bail!("pull request #{} cannot be merged yet (checks {}, mergeable {}, state {})", st.number, st.ci, st.mergeable, st.merge_state);
+        return Err(coded!(
+            "checks.not_mergeable",
+            "pull request #{number} cannot be merged yet (checks {ci}, mergeable {mergeable}, state {state})",
+            number = st.number,
+            ci = st.ci,
+            mergeable = st.mergeable,
+            state = st.merge_state
+        ));
     }
     let o = gh(wt, &merge_args(auto), MERGE_TIMEOUT).map_err(|e| match e {
-        RunError::Missing => anyhow::anyhow!("could not start gh. Install the GitHub CLI and run `gh auth login`."),
-        RunError::Timeout => anyhow::anyhow!("gh pr merge took too long"),
+        RunError::Missing => crate::gh::missing(),
+        RunError::Timeout => crate::gh::timeout("pr merge", MERGE_TIMEOUT.as_secs()),
         RunError::Other(e) => anyhow::anyhow!(e),
     })?;
     if !o.ok {
-        bail!("gh pr merge failed: {}", o.stderr.trim());
+        return Err(crate::gh::failure("pr merge", &o.stderr));
     }
     let mut out = o.stdout.trim().to_string();
     // armed auto-merge has not merged anything yet: the branch must stay until it does
@@ -438,5 +464,20 @@ mod tests {
     fn bad_view_json_is_an_error() {
         assert!(parse_view("[]", None).is_err());
         assert!(parse_view("nope", None).is_err());
+    }
+
+    #[test]
+    fn errors_and_problem_details_carry_message_codes() {
+        let code = |e: &anyhow::Error| msg::find(e).map(|c| c.code.clone()).unwrap_or_default();
+        assert_eq!(code(&parse_view("[]", None).unwrap_err()), "gh.not_object");
+        assert_eq!(code(&parse_view("nope", None).unwrap_err()), "gh.bad_json");
+        assert_eq!(code(&parse_checks("{}").unwrap_err()), "gh.not_list");
+        // a problem written by us carries its code; gh's own stderr stays plain
+        let s = problem_err("missing", &crate::gh::missing());
+        assert_eq!((s.problem.as_str(), s.detail_code.as_str()), ("missing", "gh.missing"));
+        let s = problem("error", "HTTP 502");
+        assert!(s.detail_code.is_empty() && s.detail == "HTTP 502");
+        let json = serde_json::to_value(&s).unwrap();
+        assert!(json.get("detail_code").is_none(), "old payload shape is unchanged when there is no code");
     }
 }

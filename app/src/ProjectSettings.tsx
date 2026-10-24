@@ -1,10 +1,15 @@
 import { For, Show, createResource, createSignal } from "solid-js";
-import { projectEnvPreview, setProjectSetup } from "./api";
+import { EnvSkip, projectEnvPreview, setProjectSetup } from "./api";
+import { coded } from "./msg";
 import { Modal } from "./Modal";
 import { TriggerSettings } from "./TriggerSettings";
 import { projects, refreshProjects, setError } from "./store";
 import { Button, Field, Textarea } from "./ui";
 import { P } from "./strings.panels";
+
+/** why a file is left out of the next worktree: the daemon's message in the UI language, else its English text */
+const skipReason = (s: EnvSkip & { reason_code?: string; reason_params?: Record<string, string> }) =>
+  coded(s.reason_code, s.reason_params, s.reason);
 
 /** Per-project settings: the setup command of new worktrees, and a preview of the files `.worktreeinclude` copies. */
 export function ProjectSettings(props: { projectId: string; onClose: () => void }) {
@@ -76,7 +81,7 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
               <For each={preview()!.skipped}>
                 {(s) => (
                   <li>
-                    {s.path} <span class="auto-note">— {s.reason}</span>
+                    {s.path} <span class="auto-note">— {skipReason(s)}</span>
                   </li>
                 )}
               </For>

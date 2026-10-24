@@ -10,7 +10,7 @@ import {
   DockerVolume,
 } from "../api";
 import { Badge, Button } from "../ui";
-import { ago, imageUsers, isRunning, parseCreated, portChips, stateInfo } from "../dockerLogic";
+import { ago, dockerError, imageUsers, isRunning, parseCreated, portChips, stateInfo } from "../dockerLogic";
 import { DIcon } from "./shared";
 import { P } from "../strings.panels";
 import { fmtFixed } from "../i18n";
@@ -45,8 +45,8 @@ export function Unavailable(props: { status: DockerStatus | null; err: string; l
         >
           <strong>{P.docker.engineDown}</strong>
           <span class="auto-note">{P.docker.engineHint}</span>
-          <Show when={props.status?.error || props.err}>
-            <code class="dk-code">{props.status?.error || props.err}</code>
+          <Show when={dockerError(props.status) || props.err}>
+            <code class="dk-code">{dockerError(props.status) || props.err}</code>
           </Show>
           <Button size="sm" onClick={props.retry}>
             {P.docker.retry}

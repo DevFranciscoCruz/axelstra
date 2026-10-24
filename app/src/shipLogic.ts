@@ -1,6 +1,7 @@
 import type { CheckItem, ShipStatus } from "./api";
 import { P } from "./strings.panels";
 import { lazy, lazyPair } from "./i18n";
+import { coded } from "./msg";
 
 /** how often the PR state is read while the panel is on screen and the window has focus */
 export const SHIP_POLL_MS = 20_000;
@@ -43,7 +44,10 @@ export const mergeLabel = (s: ShipStatus): string => {
 export const canAutoMerge = (s: ShipStatus): boolean =>
   s.pr_state === "open" && !s.draft && !s.can_merge && s.mergeable !== "no";
 
-export const problemText = (s: Pick<ShipStatus, "problem" | "detail">): { text: string; fix: string } => {
+/** `detail` is gh's own words, or a message of the daemon that comes with its code (`detail_code`) to read in the UI language */
+export const problemText = (
+  s: Pick<ShipStatus, "problem" | "detail"> & { detail_code?: string; detail_params?: Record<string, string> },
+): { text: string; fix: string } => {
   switch (s.problem) {
     case "missing":
       return P.ship.missing;
@@ -52,7 +56,10 @@ export const problemText = (s: Pick<ShipStatus, "problem" | "detail">): { text: 
     case "nopr":
       return P.ship.nopr;
     default:
-      return { text: s.detail || P.ship.unreadable.text, fix: P.ship.unreadable.fix };
+      return {
+        text: coded(s.detail_code, s.detail_params, s.detail) || P.ship.unreadable.text,
+        fix: P.ship.unreadable.fix,
+      };
   }
 };
 

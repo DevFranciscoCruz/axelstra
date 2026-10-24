@@ -2,9 +2,85 @@ import type { Widen } from "../i18n";
 
 /** Texts of the message codes raised by the daemon (see crates/core/src/msg.rs). `{name}` is filled from the call's params.
  *  pt-PT is the source; `en` and `ptBR` must have exactly the same keys (compile error otherwise, `msg.test.ts` repeats it). */
-export const pt = {} as const satisfies Record<string, string>;
+export const pt = {
+  "docker.not_installed": "O Docker não está instalado. Instala o Docker Desktop e volta a tentar.",
+  "docker.not_running": "O Docker não está a correr. Abre o Docker Desktop e volta a tentar.\n({detail})",
+  "docker.spawn": "Não foi possível iniciar o docker.\n({detail})",
+  "docker.timeout": "O docker {what} demorou mais de {secs} s e foi interrompido.",
+  "docker.failed": "O docker {what} falhou.\n({detail})",
+  "docker.failed_silent": "O docker {what} falhou.",
+  "docker.not_found": "O docker não encontrou o que pediste (já foi removido?).\n({detail})",
+  "docker.in_use":
+    "Isto está a ser usado por outro container ou imagem. Pára ou remove primeiro quem o usa.\n({detail})",
+  "docker.port_busy": "A porta já está ocupada. Escolhe outra ou pára o que a usa.\n({detail})",
+  "docker.bad_name": "{kind} inválido {name}: só são permitidas letras, dígitos e _ . -",
+  "docker.bad_path": "Caminho inválido {path}: tem de ser absoluto.",
+  "docker.bad_reference": "Referência de imagem inválida {reference}.",
+  "docker.unknown_action": "Ação do docker desconhecida: {action}.",
+  "docker.inspect_bad_json": "O docker inspect devolveu uma resposta inválida (JSON).",
+  "docker.inspect_empty": "O docker inspect não devolveu nada.",
+  "docker.nothing_copied": "Não foi copiado nada.",
+  "docker.is_folder": "Isto é uma pasta, não um ficheiro.",
+  "docker.binary_file": "Ficheiro binário, não é mostrado.",
+  "docker.compose_no_worktree": "O compose precisa de um worktree.",
+  "docker.compose_no_file": "Este worktree não tem ficheiro compose.",
+  "docker.compose_refused": "O compose up foi recusado:\n- {detail}",
+  "port.table_failed": "A leitura das portas abertas falhou (GetExtendedTcpTable, erro {code}).",
+  "port.table_growing": "A tabela de portas abertas continuou a crescer (GetExtendedTcpTable).",
+  "port.tool_failed": "Não foi possível correr o {tool} para ler as portas abertas.\n({detail})",
+} as const satisfies Record<string, string>;
 
-export const en: Widen<typeof pt> = {};
+export const en: Widen<typeof pt> = {
+  "docker.not_installed": "Docker is not installed. Install Docker Desktop and try again.",
+  "docker.not_running": "Docker is not running. Start Docker Desktop and try again.\n({detail})",
+  "docker.spawn": "Could not start docker.\n({detail})",
+  "docker.timeout": "docker {what} took more than {secs} s and was stopped.",
+  "docker.failed": "docker {what} failed.\n({detail})",
+  "docker.failed_silent": "docker {what} failed.",
+  "docker.not_found": "docker could not find what you asked for (was it already removed?).\n({detail})",
+  "docker.in_use": "This is in use by another container or image. Stop or remove whatever uses it first.\n({detail})",
+  "docker.port_busy": "The port is already taken. Pick another one or stop whatever uses it.\n({detail})",
+  "docker.bad_name": "Invalid {kind} {name}: only letters, digits and _ . - are allowed.",
+  "docker.bad_path": "Invalid path {path}: it must be absolute.",
+  "docker.bad_reference": "Invalid image reference {reference}.",
+  "docker.unknown_action": "Unknown docker action: {action}.",
+  "docker.inspect_bad_json": "docker inspect returned an invalid response (JSON).",
+  "docker.inspect_empty": "docker inspect returned nothing.",
+  "docker.nothing_copied": "Nothing was copied.",
+  "docker.is_folder": "That is a folder, not a file.",
+  "docker.binary_file": "Binary file, not shown.",
+  "docker.compose_no_worktree": "Compose needs a worktree.",
+  "docker.compose_no_file": "This worktree has no compose file.",
+  "docker.compose_refused": "compose up was refused:\n- {detail}",
+  "port.table_failed": "Reading the open ports failed (GetExtendedTcpTable, error {code}).",
+  "port.table_growing": "The open-ports table kept growing (GetExtendedTcpTable).",
+  "port.tool_failed": "Could not run {tool} to read the open ports.\n({detail})",
+};
 
 /** Brazilian wording: written out in full, not a fallback to pt-PT. */
-export const ptBR: Widen<typeof pt> = {};
+export const ptBR: Widen<typeof pt> = {
+  "docker.not_installed": "O Docker não está instalado. Instale o Docker Desktop e tente novamente.",
+  "docker.not_running": "O Docker não está em execução. Abra o Docker Desktop e tente novamente.\n({detail})",
+  "docker.spawn": "Não foi possível iniciar o docker.\n({detail})",
+  "docker.timeout": "O docker {what} demorou mais de {secs} s e foi interrompido.",
+  "docker.failed": "O docker {what} falhou.\n({detail})",
+  "docker.failed_silent": "O docker {what} falhou.",
+  "docker.not_found": "O docker não encontrou o que você pediu (já foi removido?).\n({detail})",
+  "docker.in_use": "Isto está em uso por outro container ou imagem. Pare ou remova primeiro quem o usa.\n({detail})",
+  "docker.port_busy": "A porta já está ocupada. Escolha outra ou pare quem a usa.\n({detail})",
+  "docker.bad_name": "{kind} inválido {name}: só são permitidos letras, dígitos e _ . -",
+  "docker.bad_path": "Caminho inválido {path}: precisa ser absoluto.",
+  "docker.bad_reference": "Referência de imagem inválida {reference}.",
+  "docker.unknown_action": "Ação do docker desconhecida: {action}.",
+  "docker.inspect_bad_json": "O docker inspect devolveu uma resposta inválida (JSON).",
+  "docker.inspect_empty": "O docker inspect não devolveu nada.",
+  "docker.nothing_copied": "Nada foi copiado.",
+  "docker.is_folder": "Isto é uma pasta, não um arquivo.",
+  "docker.binary_file": "Arquivo binário, não é exibido.",
+  "docker.compose_no_worktree": "O compose precisa de um worktree.",
+  "docker.compose_no_file": "Este worktree não tem arquivo compose.",
+  "docker.compose_refused": "O compose up foi recusado:\n- {detail}",
+  "port.table_failed": "A leitura das portas abertas falhou (GetExtendedTcpTable, erro {code}).",
+  "port.table_growing": "A tabela de portas abertas continuou crescendo (GetExtendedTcpTable).",
+  "port.tool_failed": "Não foi possível executar o {tool} para ler as portas abertas.\n({detail})",
+};

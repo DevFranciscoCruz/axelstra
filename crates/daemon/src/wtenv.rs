@@ -5,7 +5,7 @@
 //! out is reported, never dropped silently.
 
 use anyhow::Result;
-use axelstra_core::git;
+use axelstra_core::{git, msg::Coded};
 use ignore::gitignore::GitignoreBuilder;
 use serde::Serialize;
 use std::path::{Component, Path};
@@ -17,7 +17,13 @@ pub const MAX_FILES: usize = 50;
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Skip {
     pub path: String,
+    /// English text of the reason (old frontends show it)
     pub reason: String,
+    /// message code and params of the reason, empty for a system error text; the UI shows it in its language
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub reason_code: String,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub reason_params: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -36,7 +42,12 @@ pub struct Report {
 }
 
 fn skip(path: &str, reason: &str) -> Skip {
-    Skip { path: path.to_string(), reason: reason.to_string() }
+    Skip { path: path.to_string(), reason: reason.to_string(), reason_code: String::new(), reason_params: Default::default() }
+}
+
+/// A skip whose reason is a message of ours.
+fn skip_coded(path: &str, c: Coded) -> Skip {
+    Skip { path: path.to_string(), reason: c.text, reason_code: c.code, reason_params: c.params }
 }
 
 /// A relative path made only of plain names, none of them `.git`.
@@ -58,7 +69,7 @@ fn clean_patterns(text: &str, skipped: &mut Vec<Skip>) -> Vec<String> {
         let body = l.trim_start_matches('!');
         let bad = body.split(['/', '\\']).any(|s| s == "..") || body.contains(':') || body.starts_with('\\');
         if bad {
-            skipped.push(skip(l, "padrão fora do projeto"));
+            skipped.push(skip_coded(l, Coded::new("wtenv.pattern_outside", "pattern outside the project".into(), &[])));
         } else {
             out.push(l.to_string());
         }
@@ -93,13 +104,13 @@ pub fn plan(repo: &Path) -> Result<Plan> {
             continue;
         }
         if !safe_rel(rel) {
-            plan.skipped.push(skip(rel, "caminho não permitido"));
+            plan.skipped.push(skip_coded(rel, Coded::new("wtenv.path_not_allowed", "path not allowed".into(), &[])));
             continue;
         }
         let full = repo.join(rel);
         let Ok(md) = std::fs::symlink_metadata(&full) else { continue };
         if md.file_type().is_symlink() {
-            plan.skipped.push(skip(rel, "ligação simbólica"));
+            plan.skipped.push(skip_coded(rel, Coded::new("wtenv.symlink", "symbolic link".into(), &[])));
             continue;
         }
         if !md.is_file() {
@@ -107,15 +118,25 @@ pub fn plan(repo: &Path) -> Result<Plan> {
         }
         // a symlinked folder in the middle of the path would lead out of the checkout
         if !std::fs::canonicalize(&full).map(|c| c.starts_with(&root)).unwrap_or(false) {
-            plan.skipped.push(skip(rel, "fora do projeto"));
+            plan.skipped.push(skip_coded(rel, Coded::new("wtenv.outside_project", "outside the project".into(), &[])));
             continue;
         }
         if md.len() > MAX_FILE_BYTES {
-            plan.skipped.push(skip(rel, "maior que 5 MB"));
+            plan.skipped.push(skip_coded(
+                rel,
+                Coded::new(
+                    "wtenv.too_big",
+                    format!("larger than {} MB", MAX_FILE_BYTES >> 20),
+                    &[("mb", (MAX_FILE_BYTES >> 20).to_string())],
+                ),
+            ));
             continue;
         }
         if plan.files.len() >= MAX_FILES {
-            plan.skipped.push(skip(rel, "limite de 50 ficheiros"));
+            plan.skipped.push(skip_coded(
+                rel,
+                Coded::new("wtenv.too_many", format!("limit of {MAX_FILES} files"), &[("max", MAX_FILES.to_string())]),
+            ));
             continue;
         }
         plan.files.push(rel.to_string());
@@ -139,7 +160,7 @@ pub fn copy_into(repo: &Path, wt: &Path) -> Report {
     for rel in plan.files {
         let to = wt.join(&rel);
         if to.symlink_metadata().is_ok() {
-            report.skipped.push(skip(&rel, "já existe no worktree"));
+            report.skipped.push(skip_coded(&rel, Coded::new("wtenv.exists", "already exists in the worktree".into(), &[])));
             continue;
         }
         let done = (|| -> Result<bool> {
@@ -154,7 +175,7 @@ pub fn copy_into(repo: &Path, wt: &Path) -> Report {
         })();
         match done {
             Ok(true) => report.copied.push(rel),
-            Ok(false) => report.skipped.push(skip(&rel, "fora do worktree")),
+            Ok(false) => report.skipped.push(skip_coded(&rel, Coded::new("wtenv.outside_worktree", "outside the worktree".into(), &[]))),
             Err(e) => report.skipped.push(skip(&rel, &format!("{e:#}"))),
         }
     }
@@ -283,7 +304,23 @@ mod tests {
         let p = plan(&r).unwrap();
         assert_eq!(p.files.len(), MAX_FILES);
         assert!(p.skipped.iter().any(|s| s.path == "huge.cfg" && s.reason.contains("5 MB")));
-        assert_eq!(p.skipped.iter().filter(|s| s.reason.contains("limite")).count(), 3);
+        assert_eq!(p.skipped.iter().filter(|s| s.reason.contains("limit of")).count(), 3);
+        let _ = std::fs::remove_dir_all(&r);
+    }
+
+    #[test]
+    fn skip_reasons_carry_message_codes() {
+        let mut skipped = vec![];
+        clean_patterns("../secret\n", &mut skipped);
+        assert_eq!(skipped[0].reason_code, "wtenv.pattern_outside");
+        assert_eq!(skipped[0].reason, "pattern outside the project");
+        let r = repo("codes");
+        put(&r, ".gitignore", "*.cfg\n");
+        put(&r, INCLUDE_FILE, "*.cfg\n");
+        std::fs::write(r.join("huge.cfg"), vec![0u8; (MAX_FILE_BYTES + 1) as usize]).unwrap();
+        let p = plan(&r).unwrap();
+        let big = p.skipped.iter().find(|s| s.path == "huge.cfg").unwrap();
+        assert_eq!((big.reason_code.as_str(), big.reason_params["mb"].as_str()), ("wtenv.too_big", "5"));
         let _ = std::fs::remove_dir_all(&r);
     }
 }

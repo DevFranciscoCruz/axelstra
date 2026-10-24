@@ -2,7 +2,8 @@
 //! identity and hooks (unlike orchestrator commits). Nothing here runs unless
 //! the UI user asks for it explicitly.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
+use axelstra_core::{coded, git, msg};
 use serde::Serialize;
 use std::path::Path;
 use std::process::Command;
@@ -21,9 +22,16 @@ fn exec(cwd: &Path, prog: &str, args: &[&str]) -> Result<(bool, String)> {
     let mut cmd = Command::new(prog);
     // never block waiting for a credential prompt nobody can see
     no_cwd_lookup(&mut cmd).current_dir(cwd).env("GIT_TERMINAL_PROMPT", "0").env("GH_PROMPT_DISABLED", "1").args(args);
-    let o = axelstra_core::exec::run_capped(&mut cmd, EXEC_TIMEOUT, EXEC_MAX_OUT).with_context(|| format!("could not start {prog}"))?;
+    let o = axelstra_core::exec::run_capped(&mut cmd, EXEC_TIMEOUT, EXEC_MAX_OUT)
+        .map_err(|e| coded!("publish.spawn", "could not start {prog}: {detail}", prog = prog, detail = format!("{e:#}")))?;
     if o.timed_out {
-        bail!("{prog} {} took longer than {}s", args.first().unwrap_or(&""), EXEC_TIMEOUT.as_secs());
+        return Err(coded!(
+            "publish.timeout",
+            "{prog} {cmd} took longer than {secs}s",
+            prog = prog,
+            cmd = args.first().unwrap_or(&""),
+            secs = EXEC_TIMEOUT.as_secs()
+        ));
     }
     let mut text = o.stdout_lossy().trim().to_string();
     let err = o.stderr_lossy().trim().to_string();
@@ -39,7 +47,7 @@ fn exec(cwd: &Path, prog: &str, args: &[&str]) -> Result<(bool, String)> {
 fn branch(wt: &Path) -> Result<String> {
     let (ok, b) = exec(wt, "git", &["symbolic-ref", "--short", "-q", "HEAD"])?;
     if !ok || b.is_empty() {
-        bail!("detached HEAD: switch to a branch first");
+        return Err(coded!("publish.detached", "detached HEAD: switch to a branch first"));
     }
     Ok(b)
 }
@@ -53,19 +61,19 @@ pub struct Committed {
 pub fn commit(wt: &Path, message: &str) -> Result<Committed> {
     let message = message.trim();
     if message.is_empty() {
-        bail!("commit message is empty");
+        return Err(coded!("publish.empty_message", "commit message is empty"));
     }
     let (ok, out) = exec(wt, "git", &["add", "-A"])?;
     if !ok {
-        bail!("git add failed: {out}");
+        return Err(git::failure(&["add"], &out));
     }
     let (staged_none, _) = exec(wt, "git", &["diff", "--cached", "--quiet"])?;
     if staged_none {
-        bail!("nothing to commit");
+        return Err(coded!("publish.nothing_to_commit", "nothing to commit"));
     }
     let (ok, out) = exec(wt, "git", &["commit", "-m", message])?;
     if !ok {
-        bail!("git commit failed: {out}");
+        return Err(git::failure(&["commit"], &out));
     }
     let (_, sha) = exec(wt, "git", &["rev-parse", "--short", "HEAD"])?;
     Ok(Committed { sha })
@@ -76,7 +84,7 @@ pub fn push(wt: &Path) -> Result<String> {
     let b = branch(wt)?;
     let (ok, out) = exec(wt, "git", &["push", "-u", "origin", &b])?;
     if !ok {
-        bail!("git push failed: {out}");
+        return Err(git::failure(&["push"], &out));
     }
     Ok(out)
 }
@@ -85,16 +93,19 @@ pub fn push(wt: &Path) -> Result<String> {
 pub fn pull_request(wt: &Path, title: &str, body: &str, base: Option<&str>) -> Result<String> {
     let title = title.trim();
     if title.is_empty() {
-        bail!("pull request title is empty");
+        return Err(coded!("publish.empty_title", "pull request title is empty"));
     }
     let b = branch(wt)?;
     let mut args = vec!["pr", "create", "--head", b.as_str(), "--title", title, "--body", body];
     if let Some(base) = base.filter(|s| !s.is_empty()) {
         args.extend(["--base", base]);
     }
-    let (ok, out) = exec(wt, "gh", &args).map_err(|e| anyhow::anyhow!("{e}. Install the GitHub CLI (gh) and run `gh auth login`."))?;
+    let (ok, out) = exec(wt, "gh", &args).map_err(|e| match msg::find(&e) {
+        Some(c) if c.code == "publish.spawn" => crate::gh::missing(),
+        _ => e,
+    })?;
     if !ok {
-        bail!("gh pr create failed: {out}");
+        return Err(crate::gh::failure("pr create", &out));
     }
     // gh prints the URL as the last line
     Ok(out.lines().last().unwrap_or_default().trim().to_string())
@@ -153,7 +164,7 @@ fn run_agent(prompt: &str) -> Result<String> {
     // worktree is never picked; the prompt goes through stdin, never the command line
     let exe = axelstra_core::agents::get("claude")
         .and_then(|a| a.locate())
-        .ok_or_else(|| anyhow::anyhow!("the `claude` CLI was not found on PATH"))?;
+        .ok_or_else(|| coded!("publish.no_claude", "the `claude` CLI was not found on PATH"))?;
     let mut cmd = Command::new(exe);
     cmd.args(agent_args());
     no_cwd_lookup(&mut cmd);
@@ -165,7 +176,7 @@ fn run_agent(prompt: &str) -> Result<String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("could not start the `claude` CLI")?;
+        .map_err(|e| coded!("publish.claude_spawn", "could not start the `claude` CLI: {detail}", detail = e))?;
     let mut stdin = child.stdin.take().context("no stdin")?;
     let text = prompt.to_string();
     std::thread::spawn(move || {
@@ -189,7 +200,7 @@ fn run_agent(prompt: &str) -> Result<String> {
         if std::time::Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            bail!("the agent took longer than {}s", SUGGEST_TIMEOUT.as_secs());
+            return Err(coded!("publish.agent_timeout", "the agent took longer than {secs}s", secs = SUGGEST_TIMEOUT.as_secs()));
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     };
@@ -207,7 +218,7 @@ fn run_agent(prompt: &str) -> Result<String> {
     };
     let (out, err) = (join(out_t), join(err_t));
     if !status.success() {
-        bail!("claude failed: {}", cap_chars(err.trim(), 300));
+        return Err(coded!("publish.agent_failed", "claude failed: {detail}", detail = cap_chars(err.trim(), 300)));
     }
     Ok(out)
 }
@@ -222,7 +233,7 @@ fn neutral_cwd() -> std::path::PathBuf {
 pub fn suggest_message(wt: &Path) -> Result<String> {
     let (_, status) = exec(wt, "git", &["status", "--short"])?;
     if status.trim().is_empty() {
-        bail!("nothing to commit");
+        return Err(coded!("publish.nothing_to_commit", "nothing to commit"));
     }
     let (ok, diff) = exec(wt, "git", &["diff", "HEAD"])?;
     // no commits yet: fall back to what is staged
@@ -230,7 +241,7 @@ pub fn suggest_message(wt: &Path) -> Result<String> {
     let (_, subjects) = exec(wt, "git", &["log", "-n", "10", "--format=%s"])?;
     let msg = clean_message(&run_agent(&suggest_prompt(subjects.trim(), status.trim(), &diff))?);
     if msg.is_empty() {
-        bail!("the agent returned no message");
+        return Err(coded!("publish.agent_no_message", "the agent returned no message"));
     }
     Ok(msg)
 }
@@ -286,22 +297,22 @@ pub fn suggest_pr(wt: &Path, base: Option<&str>) -> Result<PrText> {
     };
     // a ref that could be read as an option never reaches git
     if base.starts_with('-') || base.contains(char::is_whitespace) {
-        bail!("invalid base ref '{base}'");
+        return Err(coded!("publish.bad_base", "invalid base ref '{base}'", base = base));
     }
     let range = format!("{base}..HEAD");
     let (ok, subjects) = exec(wt, "git", &["log", "-n", "30", "--format=%s%n%b", "--end-of-options", &range])?;
     if !ok {
-        bail!("unknown base branch '{base}'");
+        return Err(coded!("publish.unknown_base", "unknown base branch '{base}'", base = base));
     }
     if subjects.trim().is_empty() {
-        bail!("no commits on this branch compared with {base}");
+        return Err(coded!("publish.no_commits", "no commits on this branch compared with {base}", base = base));
     }
     let tri = format!("{base}...HEAD");
     let (_, stat) = exec(wt, "git", &["diff", "--stat", "--end-of-options", &tri])?;
     let (_, diff) = exec(wt, "git", &["diff", "--end-of-options", &tri])?;
     let out = parse_pr_text(&run_agent(&pr_prompt(&base, subjects.trim(), stat.trim(), &diff))?);
     if out.title.is_empty() {
-        bail!("the agent returned no title");
+        return Err(coded!("publish.agent_no_title", "the agent returned no title"));
     }
     Ok(out)
 }
@@ -351,6 +362,16 @@ mod pr_tests {
             let e = suggest_pr(&here, Some(bad)).unwrap_err().to_string();
             assert!(e.contains("invalid base ref"), "{bad}: {e}");
         }
+    }
+
+    #[test]
+    fn errors_carry_message_codes() {
+        let code = |e: anyhow::Error| axelstra_core::msg::find(&e).map(|c| c.code.clone()).unwrap_or_default();
+        let dir = std::env::temp_dir();
+        assert_eq!(code(commit(&dir, "  ").err().unwrap()), "publish.empty_message");
+        assert_eq!(code(pull_request(&dir, " ", "", None).unwrap_err()), "publish.empty_title");
+        let e = suggest_pr(&dir, Some("--evil")).unwrap_err();
+        assert_eq!(code(e), "publish.bad_base");
     }
 }
 

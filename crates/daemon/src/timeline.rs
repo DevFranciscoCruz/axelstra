@@ -6,7 +6,7 @@ use crate::agentlog::WorktreeUsage;
 use crate::checks::Status;
 use crate::notes::NoteInfo;
 use anyhow::Result;
-use axelstra_core::git;
+use axelstra_core::{git, msg::Coded};
 use serde::Serialize;
 use std::path::Path;
 
@@ -21,6 +21,11 @@ pub struct Event {
     pub kind: String,
     pub title: String,
     pub detail: String,
+    /// message code and params of `title` when it is a text of ours (not a commit subject); the UI shows it in its language
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub title_code: String,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub title_params: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Serialize, Debug, Clone, Default)]
@@ -47,6 +52,8 @@ pub fn parse_log(text: &str) -> Vec<Event> {
                 kind: if merge { "merge" } else { "commit" }.into(),
                 title: subject.trim().to_string(),
                 detail: format!("{} · {}", sha.chars().take(7).collect::<String>(), author.trim()),
+                title_code: String::new(),
+                title_params: Default::default(),
             })
         })
         .collect()
@@ -75,8 +82,16 @@ fn merged_into_base(wt: &Path, base: &str) -> Option<(Event, String)> {
     let o = git::run(wt, &["log", "--ancestry-path", "--merges", "--reverse", "--format=%H", &range]).ok().filter(|o| o.ok)?;
     let sha = o.stdout.lines().next()?.trim().to_string();
     let e = log(wt, &sha, &["--max-count=1"]).into_iter().next()?;
+    let t = Coded::new("timeline.integrated", format!("Integrated into {base}"), &[("base", base.to_string())]);
     Some((
-        Event { kind: "integrated".into(), title: format!("Integrado em {base}"), detail: format!("{} · {}", e.detail, e.title), ..e },
+        Event {
+            kind: "integrated".into(),
+            title: t.text,
+            title_code: t.code,
+            title_params: t.params,
+            detail: format!("{} · {}", e.detail, e.title),
+            ..e
+        },
         sha,
     ))
 }
@@ -89,6 +104,8 @@ pub fn assemble(mut events: Vec<Event>, notes: &[NoteInfo]) -> Vec<Event> {
             kind: "report".into(),
             title: n.name.clone(),
             detail: if n.excerpt.is_empty() { n.status.clone() } else { format!("{} · {}", n.status, n.excerpt) },
+            title_code: String::new(),
+            title_params: Default::default(),
         });
     }
     events.sort_by(|a, b| b.at.cmp(&a.at).then_with(|| a.title.cmp(&b.title)));
@@ -124,7 +141,14 @@ mod tests {
     use super::*;
 
     fn ev(at: i64, kind: &str, title: &str) -> Event {
-        Event { at, kind: kind.into(), title: title.into(), detail: String::new() }
+        Event {
+            at,
+            kind: kind.into(),
+            title: title.into(),
+            detail: String::new(),
+            title_code: String::new(),
+            title_params: Default::default(),
+        }
     }
 
     #[test]
@@ -179,8 +203,19 @@ mod tests {
         git_in(&r, &["checkout", "-q", "topic"]);
         let t = build(&r, &[], false).unwrap();
         assert!(t.events.iter().any(|e| e.kind == "integrated" && e.detail.contains("Merge topic")), "{:?}", t.events);
+        let int = t.events.iter().find(|e| e.kind == "integrated").unwrap();
+        assert_eq!((int.title_code.as_str(), int.title.as_str()), ("timeline.integrated", "Integrated into main"));
+        assert_eq!(int.title_params["base"], "main");
         assert!(t.events.iter().any(|e| e.title == "add b"), "the merged branch still lists its commits");
         assert!(t.tokens.is_none() && t.ci.is_none());
         let _ = std::fs::remove_dir_all(&r);
+    }
+
+    #[test]
+    fn our_titles_carry_message_codes() {
+        let e = parse_log(&format!("abcdef123{SEP}100{SEP}Ana{SEP}p1{SEP}fix: a"));
+        assert!(e[0].title_code.is_empty(), "a commit subject is the user's text");
+        let json = serde_json::to_value(&e[0]).unwrap();
+        assert!(json.get("title_code").is_none());
     }
 }

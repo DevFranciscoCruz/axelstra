@@ -7,7 +7,7 @@ import { Loading } from "./Loading";
 import { RightTabs } from "./RightTabs";
 import { findWorktree, rightTab, selectedWorktree, setError, showNotice } from "./store";
 import { P } from "./strings.panels";
-import { ciLine, stamp, toMarkdown, tokenLine } from "./timelineLogic";
+import { ciLine, eventTitle, stamp, toMarkdown, tokenLine } from "./timelineLogic";
 import { Badge, Button } from "./ui";
 
 const T = P.timeline;
@@ -86,8 +86,8 @@ export function TimelinePanel() {
                         <div class="pr">
                           <div class="pr-title">
                             <Badge>{T.kinds[e.kind] ?? e.kind}</Badge>
-                            <span class="pr-text" title={e.title}>
-                              {e.title}
+                            <span class="pr-text" title={eventTitle(e)}>
+                              {eventTitle(e)}
                             </span>
                           </div>
                           <div class="pr-meta">

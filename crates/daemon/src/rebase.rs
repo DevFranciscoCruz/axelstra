@@ -1,8 +1,8 @@
 //! `worktree.rebase`: rebase a worktree's branch onto the default branch in one step, only when nothing can be lost.
 //! A conflict is never left for the user to untangle: the rebase is aborted and the branch is back where it was.
 
-use anyhow::{bail, Context, Result};
-use axelstra_core::git;
+use anyhow::Result;
+use axelstra_core::{coded, git};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -16,27 +16,27 @@ pub fn rebase(repo: &Path, path: &str, busy: bool) -> Result<Value> {
     let wt = git::worktree_list(repo)?
         .into_iter()
         .find(|w| axelstra_core::paths::same(&w.path, path))
-        .context("not a worktree of this project")?;
+        .ok_or_else(|| coded!("worktree.not_found", "not a worktree of this project"))?;
     if wt.is_main {
-        bail!("cannot rebase the main worktree");
+        return Err(coded!("rebase.main", "cannot rebase the main worktree"));
     }
-    let branch = wt.branch.clone().context("o worktree não tem ramo (detached HEAD)")?;
+    let branch = wt.branch.clone().ok_or_else(|| coded!("rebase.detached", "the worktree has no branch (detached HEAD)"))?;
     if busy {
-        bail!("há uma sessão ativa neste worktree: espera que fique inativa antes de fazer rebase");
+        return Err(coded!("rebase.busy", "an agent session is active in this worktree: wait until it is idle before rebasing"));
     }
     let dir = Path::new(&wt.path);
     // a rebase or merge left half-way by hand is not ours to continue
     let gitdir = git::must(dir, &["rev-parse", "--path-format=absolute", "--git-dir"])?;
     if ["rebase-merge", "rebase-apply", "MERGE_HEAD"].iter().any(|n| Path::new(&gitdir).join(n).exists()) {
-        bail!("há um rebase ou merge por acabar neste worktree");
+        return Err(coded!("rebase.unfinished", "a rebase or merge is unfinished in this worktree"));
     }
     let dirty = git::must(dir, &["status", "--porcelain", "--untracked-files=all"])?;
     if !dirty.is_empty() {
-        bail!("o worktree tem alterações por guardar: faz commit ou stash antes do rebase");
+        return Err(coded!("rebase.dirty", "the worktree has uncommitted changes: commit or stash them before rebasing"));
     }
     let base = git::default_branch(repo);
     if branch == base {
-        bail!("o worktree já está no ramo {base}");
+        return Err(coded!("rebase.on_base", "the worktree is already on branch {base}", base = base));
     }
     let from = git::head(dir)?;
     let out = git::run(dir, &["rebase", &base])?;
@@ -59,7 +59,7 @@ pub fn rebase(repo: &Path, path: &str, busy: bool) -> Result<Value> {
     }
     git::forget_worktree_lists();
     if conflicted.is_empty() {
-        bail!("o rebase falhou: {}", out.stderr.lines().last().unwrap_or("erro desconhecido"));
+        return Err(coded!("rebase.failed", "the rebase failed: {detail}", detail = out.stderr.lines().last().unwrap_or("unknown error")));
     }
     Ok(json!({"ok": false, "conflicted": conflicted, "restored": restored, "from": from, "base": base}))
 }
@@ -111,13 +111,13 @@ mod tests {
     fn dirty_busy_main_and_untracked_are_refused() {
         let (repo, wt) = setup("refuse");
         let w = Path::new(&wt);
-        assert!(rebase(&repo, &wt, true).unwrap_err().to_string().contains("sessão ativa"));
+        assert!(rebase(&repo, &wt, true).unwrap_err().to_string().contains("session is active"));
         assert!(rebase(&repo, &repo.to_string_lossy(), false).unwrap_err().to_string().contains("main worktree"));
         std::fs::write(w.join("new.txt"), "x").unwrap();
-        assert!(rebase(&repo, &wt, false).unwrap_err().to_string().contains("alterações"), "untracked file must refuse");
+        assert!(rebase(&repo, &wt, false).unwrap_err().to_string().contains("uncommitted changes"), "untracked file must refuse");
         std::fs::remove_file(w.join("new.txt")).unwrap();
         std::fs::write(w.join("a.txt"), "edited\n").unwrap();
-        assert!(rebase(&repo, &wt, false).unwrap_err().to_string().contains("alterações"));
+        assert!(rebase(&repo, &wt, false).unwrap_err().to_string().contains("uncommitted changes"));
         g(w, &["checkout", "--", "a.txt"]);
         g(w, &["checkout", "-q", "--detach"]);
         assert!(rebase(&repo, &wt, false).unwrap_err().to_string().contains("detached"));
@@ -139,5 +139,16 @@ mod tests {
         assert_eq!(git::head(w).unwrap(), before);
         assert!(git::must(w, &["status", "--porcelain"]).unwrap().is_empty());
         assert_eq!(std::fs::read_to_string(w.join("a.txt")).unwrap().trim(), "topic");
+    }
+
+    #[test]
+    fn refusals_carry_message_codes() {
+        let code = |e: anyhow::Error| axelstra_core::msg::find(&e).map(|c| c.code.clone()).unwrap_or_default();
+        let (repo, wt) = setup("codes");
+        assert_eq!(code(rebase(&repo, &wt, true).unwrap_err()), "rebase.busy");
+        assert_eq!(code(rebase(&repo, &repo.to_string_lossy(), false).unwrap_err()), "rebase.main");
+        assert_eq!(code(rebase(&repo, "/nowhere/else", false).unwrap_err()), "worktree.not_found");
+        std::fs::write(Path::new(&wt).join("new.txt"), "x").unwrap();
+        assert_eq!(code(rebase(&repo, &wt, false).unwrap_err()), "rebase.dirty");
     }
 }

@@ -1,5 +1,6 @@
 import { fmtTokens } from "./usageFormat";
 import { P } from "./strings.panels";
+import { coded } from "./msg";
 import { stampIso, stampLocal } from "./time";
 
 export type TimelineEvent = {
@@ -7,6 +8,9 @@ export type TimelineEvent = {
   kind: "commit" | "merge" | "integrated" | "report";
   title: string;
   detail: string;
+  /** set when the daemon wrote the title (not a commit subject): read it in the UI language */
+  title_code?: string;
+  title_params?: Record<string, string>;
 };
 export type TimelineTokens = { input: number; output: number; cache_read: number; cache_write: number };
 export type TimelineCheck = { name: string; state: string; link: string };
@@ -20,6 +24,8 @@ export type Timeline = {
 };
 
 const T = P.timeline;
+
+export const eventTitle = (e: TimelineEvent): string => coded(e.title_code, e.title_params, e.title);
 
 /** the panel writes dates in the UI language; the exported markdown keeps ISO (`stampIso`) so it reads the same everywhere */
 export const stamp = stampLocal;
@@ -45,7 +51,7 @@ export function toMarkdown(t: Timeline, worktree: string): string {
   if (!t.events.length) out.push(`_${T.empty}_`);
   for (const e of [...t.events].reverse()) {
     out.push(
-      `- **${stampIso(e.at)}** · ${T.kinds[e.kind] ?? e.kind}: ${md(e.title)}${e.detail ? ` — ${md(e.detail)}` : ""}`,
+      `- **${stampIso(e.at)}** · ${T.kinds[e.kind] ?? e.kind}: ${md(eventTitle(e))}${e.detail ? ` — ${md(e.detail)}` : ""}`,
     );
   }
   return out.join("\n") + "\n";

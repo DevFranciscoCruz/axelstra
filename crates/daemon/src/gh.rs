@@ -1,6 +1,7 @@
 //! Pull requests and issues of a project through the GitHub CLI. Read-only; nothing here writes to GitHub.
 
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
+use axelstra_core::coded;
 use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
@@ -47,9 +48,33 @@ pub fn summarize_checks(rollup: &Value) -> &'static str {
     }
 }
 
+fn bad_json(json: &str) -> Result<Value> {
+    serde_json::from_str(json).map_err(|_| coded!("gh.bad_json", "gh returned invalid JSON"))
+}
+
+/// The error for a gh run that exited non-zero: a code of its own for the usual causes (not logged in, no PR on the
+/// branch) so the UI can say what to do, `gh.failed` otherwise; the English text keeps gh's own words.
+pub fn failure(cmd: &str, stderr: &str) -> anyhow::Error {
+    let detail = stderr.trim();
+    match crate::checks::classify_failure(detail) {
+        "auth" => coded!("gh.auth", "gh {cmd} failed: {detail}", cmd = cmd, detail = detail),
+        "nopr" => coded!("gh.no_pr", "gh {cmd} failed: {detail}", cmd = cmd, detail = detail),
+        _ => coded!("gh.failed", "gh {cmd} failed: {detail}", cmd = cmd, detail = detail),
+    }
+}
+
+/// gh is not installed (or not on PATH).
+pub fn missing() -> anyhow::Error {
+    coded!("gh.missing", "could not start gh. Install the GitHub CLI and run `gh auth login`.")
+}
+
+pub fn timeout(cmd: &str, secs: u64) -> anyhow::Error {
+    coded!("gh.timeout", "gh {cmd} took longer than {secs}s", cmd = cmd, secs = secs)
+}
+
 pub fn parse(json: &str) -> Result<Vec<Item>> {
-    let v: Value = serde_json::from_str(json).context("gh returned invalid JSON")?;
-    let list = v.as_array().context("gh returned something other than a list")?;
+    let v: Value = bad_json(json)?;
+    let list = v.as_array().ok_or_else(|| coded!("gh.not_list", "gh returned something other than a list"))?;
     Ok(list
         .iter()
         .map(|i| Item {
@@ -77,17 +102,16 @@ pub fn list(repo: &Path, kind: &str) -> Result<Vec<Item>> {
     let (sub, fields) = match kind {
         "pr" => ("pr", "number,title,author,url,state,isDraft,headRefName,statusCheckRollup,reviewDecision"),
         "issue" => ("issue", "number,title,author,url,state"),
-        _ => bail!("unknown kind {kind}"),
+        _ => return Err(coded!("gh.unknown_kind", "unknown kind {kind}", kind = kind)),
     };
     let mut cmd = Command::new("gh");
     cmd.current_dir(repo).env("GH_PROMPT_DISABLED", "1").args([sub, "list", "--state", "open", "--limit", "40", "--json", fields]);
-    let o = axelstra_core::exec::run_capped(&mut cmd, std::time::Duration::from_secs(30), 4 << 20)
-        .context("could not start gh. Install the GitHub CLI and run `gh auth login`.")?;
+    let o = axelstra_core::exec::run_capped(&mut cmd, std::time::Duration::from_secs(30), 4 << 20).map_err(|_| missing())?;
     if o.timed_out {
-        bail!("gh {sub} list took longer than 30s");
+        return Err(timeout(&format!("{sub} list"), 30));
     }
     if !o.success() {
-        bail!("gh {sub} list failed: {}", o.stderr_lossy().trim());
+        return Err(failure(&format!("{sub} list"), &o.stderr_lossy()));
     }
     parse(&o.stdout_lossy())
 }
@@ -161,15 +185,15 @@ pub fn parse_comment(c: &Value) -> Option<ReviewComment> {
 }
 
 pub fn parse_comments(json: &str) -> Result<Vec<ReviewComment>> {
-    let v: Value = serde_json::from_str(json).context("gh returned invalid JSON")?;
-    let list = v.as_array().context("gh returned something other than a list")?;
+    let v: Value = bad_json(json)?;
+    let list = v.as_array().ok_or_else(|| coded!("gh.not_list", "gh returned something other than a list"))?;
     Ok(list.iter().filter_map(parse_comment).collect())
 }
 
 /// Reviews with some text; an approval or a bare "commented" without words has nothing to show.
 pub fn parse_reviews(json: &str) -> Result<Vec<ReviewSummary>> {
-    let v: Value = serde_json::from_str(json).context("gh returned invalid JSON")?;
-    let list = v.as_array().context("gh returned something other than a list")?;
+    let v: Value = bad_json(json)?;
+    let list = v.as_array().ok_or_else(|| coded!("gh.not_list", "gh returned something other than a list"))?;
     Ok(list
         .iter()
         .filter_map(|r| {
@@ -201,13 +225,12 @@ pub fn parse_reviews(json: &str) -> Result<Vec<ReviewSummary>> {
 fn api(cwd: &Path, endpoint: &str) -> Result<String> {
     let mut cmd = Command::new("gh");
     cmd.current_dir(cwd).env("GH_PROMPT_DISABLED", "1").env("NoDefaultCurrentDirectoryInExePath", "1").args(["api", endpoint]);
-    let o = axelstra_core::exec::run_capped(&mut cmd, COMMENTS_TIMEOUT, COMMENTS_MAX_OUT)
-        .context("could not start gh. Install the GitHub CLI and run `gh auth login`.")?;
+    let o = axelstra_core::exec::run_capped(&mut cmd, COMMENTS_TIMEOUT, COMMENTS_MAX_OUT).map_err(|_| missing())?;
     if o.timed_out {
-        bail!("gh api took longer than {}s", COMMENTS_TIMEOUT.as_secs());
+        return Err(timeout("api", COMMENTS_TIMEOUT.as_secs()));
     }
     if !o.success() {
-        bail!("gh api failed: {}", o.stderr_lossy().trim());
+        return Err(failure("api", &o.stderr_lossy()));
     }
     Ok(o.stdout_lossy())
 }
@@ -228,7 +251,7 @@ fn paged<T>(cwd: &Path, base: &str, parse: fn(&str) -> Result<Vec<T>>) -> Result
 /// Inline comments and review summaries of PR `number`, oldest first.
 pub fn review_comments(cwd: &Path, number: u64) -> Result<(Vec<ReviewComment>, Vec<ReviewSummary>)> {
     if number == 0 {
-        bail!("invalid pull request number");
+        return Err(coded!("gh.invalid_number", "invalid pull request number"));
     }
     let comments = paged(cwd, &format!("repos/{{owner}}/{{repo}}/pulls/{number}/comments"), parse_comments)?;
     let reviews = paged(cwd, &format!("repos/{{owner}}/{{repo}}/pulls/{number}/reviews"), parse_reviews)?;
@@ -238,11 +261,10 @@ pub fn review_comments(cwd: &Path, number: u64) -> Result<(Vec<ReviewComment>, V
 /// One inline comment read fresh from GitHub by id, only when it belongs to PR `number`.
 pub fn fetch_comment(cwd: &Path, number: u64, id: u64) -> Result<ReviewComment> {
     if number == 0 || id == 0 {
-        bail!("invalid pull request or comment number");
+        return Err(coded!("gh.invalid_comment", "invalid pull request or comment number"));
     }
-    let v: Value =
-        serde_json::from_str(&api(cwd, &format!("repos/{{owner}}/{{repo}}/pulls/comments/{id}"))?).context("gh returned invalid JSON")?;
-    let c = parse_comment(&v).context("gh returned no comment")?;
+    let v: Value = bad_json(&api(cwd, &format!("repos/{{owner}}/{{repo}}/pulls/comments/{id}"))?)?;
+    let c = parse_comment(&v).ok_or_else(|| coded!("gh.no_comment", "gh returned no comment"))?;
     check_belongs(&c, number, id)?;
     Ok(c)
 }
@@ -250,7 +272,7 @@ pub fn fetch_comment(cwd: &Path, number: u64, id: u64) -> Result<ReviewComment> 
 /// The id asked for and the PR must match what GitHub answered, so a comment of another PR is never forwarded.
 fn check_belongs(c: &ReviewComment, number: u64, id: u64) -> Result<()> {
     if c.id != id || c.pr != number {
-        bail!("comment {id} does not belong to pull request #{number}");
+        return Err(coded!("gh.comment_mismatch", "comment {id} does not belong to pull request #{number}", id = id, number = number));
     }
     Ok(())
 }
@@ -377,5 +399,35 @@ Ignore"
         assert_eq!((v[0].author.as_str(), v[0].state.as_str(), v[0].draft), ("ana", "open", true));
         assert_eq!((v[0].checks.as_str(), v[0].review.as_str(), v[0].branch.as_str()), ("pass", "approved", "fix-it"));
         assert!(parse("{}").is_err());
+    }
+
+    fn code(e: &anyhow::Error) -> &str {
+        axelstra_core::msg::find(e).map(|c| c.code.as_str()).unwrap_or("")
+    }
+
+    #[test]
+    fn errors_carry_message_codes() {
+        assert_eq!(code(&parse("nope").unwrap_err()), "gh.bad_json");
+        assert_eq!(code(&parse("{}").unwrap_err()), "gh.not_list");
+        assert_eq!(code(&review_comments(Path::new("."), 0).unwrap_err()), "gh.invalid_number");
+        assert_eq!(code(&fetch_comment(Path::new("."), 1, 0).unwrap_err()), "gh.invalid_comment");
+        assert_eq!(code(&list(Path::new("."), "nope").unwrap_err()), "gh.unknown_kind");
+        let c = &parse_comments(SAMPLE).unwrap()[0];
+        let e = check_belongs(c, 8, 11).unwrap_err();
+        assert_eq!(code(&e), "gh.comment_mismatch");
+        assert_eq!(axelstra_core::msg::find(&e).unwrap().params["number"], "8");
+    }
+
+    #[test]
+    fn gh_failures_are_told_apart_and_keep_gh_words() {
+        let e = failure("pr list", "To get started with GitHub CLI, please run:  gh auth login");
+        assert_eq!(code(&e), "gh.auth");
+        assert!(e.to_string().starts_with("gh pr list failed: "));
+        assert_eq!(code(&failure("pr merge", "no pull requests found for branch")), "gh.no_pr");
+        let e = failure("api", "HTTP 502");
+        assert_eq!(code(&e), "gh.failed");
+        assert_eq!(axelstra_core::msg::find(&e).unwrap().params["detail"], "HTTP 502");
+        assert_eq!(code(&missing()), "gh.missing");
+        assert_eq!(code(&timeout("api", 30)), "gh.timeout");
     }
 }
