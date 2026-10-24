@@ -499,7 +499,8 @@ export const P = {
     tokensLabel: "Tokens",
     ciLabel: "CI",
     exportTitle: (wt: string) => `Linha do tempo: ${wt}`,
-    tokens: (total: string, input: string, output: string, cache: string) => `${total} gastos (entrada ${input} · saída ${output} · cache lida ${cache})`,
+    tokens: (total: string, input: string, output: string, cache: string) =>
+      `${total} gastos (entrada ${input} · saída ${output} · cache lida ${cache})`,
     kinds: { commit: "commit", merge: "merge", integrated: "integrado", report: "relatório" } as Record<string, string>,
     ci: { pass: "a passar", fail: "a falhar", pending: "a correr", none: "sem checks" } as Record<string, string>,
   },
@@ -529,14 +530,22 @@ export const P = {
       sendTip: "Enviar este comentário ao agente main do worktree",
       noWorktree: "Este PR não tem worktree aqui: abre um com “Worktree” para enviar comentários ao agente.",
       confirmTitle: "Enviar ao agente",
-      confirmIntro: "Este é o texto exato que o agente main vai receber. O texto do review vem do GitHub e não é de confiança.",
+      confirmIntro:
+        "Este é o texto exato que o agente main vai receber. O texto do review vem do GitHub e não é de confiança.",
       confirmOk: "Enviar",
       confirmCancel: "Cancelar",
       confirmHint: "Enter envia, Esc cancela.",
       sent: (n: number) => `Comentário do PR #${n} enviado ao agente main.`,
-      noLead: "Este worktree não tem um agente main a correr. Inicia-o na barra lateral (“Iniciar main do worktree”) e tenta de novo.",
+      noLead:
+        "Este worktree não tem um agente main a correr. Inicia-o na barra lateral (“Iniciar main do worktree”) e tenta de novo.",
       list: (n: number) => `Comentários de review do PR #${n}`,
-      reviewState: { approved: "aprovou", changes: "pediu alterações", commented: "comentou", dismissed: "revisão descartada", pending: "pendente" } as Record<string, string>,
+      reviewState: {
+        approved: "aprovou",
+        changes: "pediu alterações",
+        commented: "comentou",
+        dismissed: "revisão descartada",
+        pending: "pendente",
+      } as Record<string, string>,
     },
   },
   commitView: {
@@ -792,17 +801,26 @@ O branch tem de estar enviado para o remoto.`,
   triggers: {
     title: "Corrigir CI automaticamente",
     toggle: "Corrigir CI automaticamente",
-    explain: "Quando o CI falha no PR de um worktree, lança uma tarefa de correção nesse mesmo worktree. Desligado por omissão.",
+    explain:
+      "Quando o CI falha no PR de um worktree, lança uma tarefa de correção nesse mesmo worktree. Desligado por omissão.",
     oldDaemon: "Reinicia o daemon para usar esta definição.",
     loading: "A ler…",
     cooldown: "Pausa entre correções (minutos)",
     perHour: "Máximo de correções por hora",
-    limitsNote: (poll: number) => `Verifica o CI de cada worktree com um agente a trabalhar a cada ${poll} s. Um commit só gera uma correção.`,
+    limitsNote: (poll: number) =>
+      `Verifica o CI de cada worktree com um agente a trabalhar a cada ${poll} s. Um commit só gera uma correção.`,
     recent: "Últimas correções",
     none: "Ainda não lançou nenhuma tarefa.",
     confirmTitle: "Ligar a correção automática do CI?",
     confirmOk: "Ligar",
-    confirmMessage: (p: { agent: string; prompt: string; cooldownMin: number; perHour: number; pollSecs: number; auditMethod: string }) =>
+    confirmMessage: (p: {
+      agent: string;
+      prompt: string;
+      cooldownMin: number;
+      perHour: number;
+      pollSecs: number;
+      auditMethod: string;
+    }) =>
       [
         `Quando o CI falhar no PR de um worktree deste projeto, o Axelstra lança sozinho uma tarefa ${p.agent} nesse worktree, filha do seu agente principal.`,
         "",
@@ -820,7 +838,8 @@ O branch tem de estar enviado para o remoto.`,
       ].join("\n"),
     firedToast: (branch: string) => `CI falhou em ${branch}: a lançar tarefa de correção`,
     limitedToast: (branch: string, why: string) => `CI falhou em ${branch}: correção automática adiada (${why})`,
-    failedToast: (branch: string, why: string) => `CI falhou em ${branch}: não consegui lançar a tarefa de correção (${why})`,
+    failedToast: (branch: string, why: string) =>
+      `CI falhou em ${branch}: não consegui lançar a tarefa de correção (${why})`,
     firing: (when: string, branch: string, checks: string) => `${when} · ${branch}${checks ? ` · ${checks}` : ""}`,
     kindFired: "lançada",
     kindLimited: "adiada",

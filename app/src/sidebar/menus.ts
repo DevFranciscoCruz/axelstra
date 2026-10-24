@@ -24,7 +24,10 @@ const T = P.sidebar.menu;
 type Wt = { path: string; branch: string | null; is_main: boolean; parent?: string | null };
 type Proj = { id: string; name: string; setup?: string | null; worktrees?: Wt[]; default_branch?: string | null };
 
-export type MenuDeps = Pick<SidebarActions, "run" | "copy" | "sleepWorktree" | "dropWorktree" | "dropProject" | "rebaseWorktree"> & {
+export type MenuDeps = Pick<
+  SidebarActions,
+  "run" | "copy" | "sleepWorktree" | "dropWorktree" | "dropProject" | "rebaseWorktree"
+> & {
   /** reloads what the rebase badge shows */
   afterRebase: () => void;
   /** asks for the worktree-rename dialog */

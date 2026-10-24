@@ -1,9 +1,29 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewComment } from "./api";
-import { commentHints, confirmKey, displayBody, isNoLeadError, locationLabel, reviewLine, threads, worktreeForPr } from "./prComments";
+import {
+  commentHints,
+  confirmKey,
+  displayBody,
+  isNoLeadError,
+  locationLabel,
+  reviewLine,
+  threads,
+  worktreeForPr,
+} from "./prComments";
 
 const c = (id: number, over: Partial<ReviewComment> = {}): ReviewComment => ({
-  id, path: "src/a.rs", line: 3, body: "b", author: "bob", diff_hunk: "", created: "", url: "", in_reply_to: 0, outdated: false, pr: 7, ...over,
+  id,
+  path: "src/a.rs",
+  line: 3,
+  body: "b",
+  author: "bob",
+  diff_hunk: "",
+  created: "",
+  url: "",
+  in_reply_to: 0,
+  outdated: false,
+  pr: 7,
+  ...over,
 });
 
 describe("locationLabel", () => {
@@ -31,7 +51,11 @@ describe("hints and threads", () => {
   it("groups replies under their root, also through a chain, and keeps orphans apart", () => {
     const list = [c(1), c(2, { in_reply_to: 1 }), c(3), c(4, { in_reply_to: 2 }), c(9, { in_reply_to: 99 })];
     const t = threads(list);
-    expect(t.map((x) => [x.root.id, x.replies.map((r) => r.id)])).toEqual([[1, [2, 4]], [3, []], [9, []]]);
+    expect(t.map((x) => [x.root.id, x.replies.map((r) => r.id)])).toEqual([
+      [1, [2, 4]],
+      [3, []],
+      [9, []],
+    ]);
   });
   it("does not loop on a reply cycle", () => {
     expect(threads([c(1, { in_reply_to: 2 }), c(2, { in_reply_to: 1 })]).length).toBeGreaterThan(0);
@@ -47,7 +71,10 @@ describe("errors, worktrees and keys", () => {
     expect(isNoLeadError("gh api failed: 404")).toBe(false);
   });
   it("finds the worktree of a PR by branch", () => {
-    const wts = [{ path: "/r", branch: "main" }, { path: "/r/wt", branch: "ax/fix" }];
+    const wts = [
+      { path: "/r", branch: "main" },
+      { path: "/r/wt", branch: "ax/fix" },
+    ];
     expect(worktreeForPr({ branch: "ax/fix" }, wts)).toBe("/r/wt");
     expect(worktreeForPr({ branch: "other" }, wts)).toBeNull();
     expect(worktreeForPr({ branch: "" }, wts)).toBeNull();

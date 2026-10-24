@@ -48,22 +48,29 @@ export function AgentList(props: {
     <Show when={agents().length > 0 || missingLead()}>
       <div class="wt-agents" style={props.depth > 0 ? { "margin-left": `${14 + props.depth * 14}px` } : undefined}>
         <Show when={missingLead()}>
-          <Button type="button" variant="link" size="bare" class="w-full justify-start gap-1.5 px-1.5 py-0.5 text-xs" title={T.startLeadTip} onClick={() => props.onStartLead?.()}>
+          <Button
+            type="button"
+            variant="link"
+            size="bare"
+            class="w-full justify-start gap-1.5 px-1.5 py-0.5 text-xs"
+            title={T.startLeadTip}
+            onClick={() => props.onStartLead?.()}
+          >
             <Icon name="plus" size={11} />
             {T.startLead}
           </Button>
         </Show>
         <Show when={agents().length > 0}>
-        <Button
-          variant="link"
-          size="bare"
-          class="w-full justify-between px-1.5 pb-1 pt-0.5 text-xs"
-          onClick={props.onToggle}
-          aria-expanded={!props.hidden}
-        >
-          <span>{T.agentsCount(agents().length)}</span>
-          <Icon name={props.hidden ? "chevRight" : "chevDown"} size={11} />
-        </Button>
+          <Button
+            variant="link"
+            size="bare"
+            class="w-full justify-between px-1.5 pb-1 pt-0.5 text-xs"
+            onClick={props.onToggle}
+            aria-expanded={!props.hidden}
+          >
+            <span>{T.agentsCount(agents().length)}</span>
+            <Icon name={props.hidden ? "chevRight" : "chevDown"} size={11} />
+          </Button>
         </Show>
         <Show when={agents().length > 0 && !props.hidden}>
           <For each={agents()}>

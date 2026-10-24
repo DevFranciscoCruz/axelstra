@@ -32,7 +32,11 @@ describe("lead of a worktree in the sidebar", () => {
   });
   it("lets the lead speak for the worktree dot; a waiting task still shows", () => {
     // tasks working, lead idle: the worktree is not "working"
-    expect(worktreeSignals([a(1, { lead: true }), a(2, { state: "working" })], stateOf)).toEqual({ live: 2, waiting: false, working: false });
+    expect(worktreeSignals([a(1, { lead: true }), a(2, { state: "working" })], stateOf)).toEqual({
+      live: 2,
+      waiting: false,
+      working: false,
+    });
     // lead working
     expect(worktreeSignals([a(1, { lead: true, state: "working" }), a(2)], stateOf).working).toBe(true);
     // a task asks something
