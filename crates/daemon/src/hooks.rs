@@ -395,7 +395,8 @@ mod tests {
     #[test]
     fn an_older_quoted_gemini_command_is_rewritten_not_duplicated() {
         let f = tmp("gemini-old");
-        let old = r#"{"hooks":{"AfterAgent":[{"hooks":[{"type":"command","command":"\"C:\\old\\axelstra.exe\" hook gemini AfterAgent"}]}]}}"#;
+        let old =
+            r#"{"hooks":{"AfterAgent":[{"hooks":[{"type":"command","command":"\"C:\\old\\axelstra.exe\" hook gemini AfterAgent"}]}]}}"#;
         std::fs::write(&f, old).unwrap();
         let r = install_at_of("gemini", &f).unwrap();
         assert_eq!(r["changed"], true);
