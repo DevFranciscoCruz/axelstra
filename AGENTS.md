@@ -54,6 +54,10 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
 - A lead started by `axelstra dispatch new/send` is ephemeral: when it calls `axelstra done` its session closes (a
   reaper in mode `exit` with `lead: true`, so it does not count against the worker limit) and the report goes to main
   and to the task file. Main only reads the report.
+- The lead is a dispatcher, not an implementer: its prompt (`FOOTER` in `crates/cli/src/dispatch.rs`) tells it to plan
+  the request into subtasks, start workers in its own worktree (`axelstra agent . --report-to $AXELSTRA_SESSION`, they
+  show as `Tarefa N` under `main`), not edit code or run heavy builds itself (only integrate commits and run the final
+  `axelstra lock verify`), and `done` with commits, verified and not verified. Even a trivial request goes to one worker.
 - The janitor (`crates/daemon/src/janitor.rs`) sweeps every 10 minutes and a few seconds after each `done` or
   `git.merge` (`sweep_soon` in `server.rs`). A worktree goes when its `ax/*` branch tip is inside the default branch or
   inside another live `ax/*` branch (or its PR was merged), it has no changes, and no session works in it. A session

@@ -11,7 +11,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const FOOTER: &str = "\n\nYou own this worktree and its topic. Later requests for the same topic are sent to you. When the work splits into independent parts, run `axelstra skills get axelstration` and delegate to workers; their sessions appear inside this worktree's box in the app. When the whole request is finished, run `axelstra done \"<report: what changed, commands run, what was not run>\"`: that report goes to whoever dispatched you and your session closes by itself (the worktree is cleaned up once its branch is integrated).";
+const FOOTER: &str = "
+
+You are the LEAD of this worktree: a dispatcher, not an implementer. You own the topic, but you do not do the work yourself. Run `axelstra skills get axelstration` first. Then: (1) plan the request into subtasks; (2) start one worker per independent subtask in THIS worktree with `axelstra agent . --prompt \"<self-contained task, files, acceptance criteria>\" --report-to $AXELSTRA_SESSION` (workers appear as `Tarefa N` under you; never give two workers the same files, never create more worktrees); (3) do NOT edit code and do NOT run heavy builds or test suites yourself; you only integrate the workers' commits, resolve conflicts and run the final check with `axelstra lock verify -- <cmd>`; (4) wait for their `done`/`ask`/`escalate` reports (answer asks with `axelstra reply`, unblock with `axelstra msg`) and treat reports as claims to verify; (5) when all is integrated and verified, run `axelstra done \"<report: commits, what was verified, what was not verified>\"`: that report goes to whoever dispatched you and your session closes by itself (the worktree is cleaned up once its branch is integrated). A trivial request (one file, one step) still goes to a single worker: you never execute it alone. Later requests for the same topic are sent to you.";
 
 /// What a dispatched lead starts with: the request, who it is, how it finishes, and the rule against waiting silently.
 fn lead_prompt(request: &str) -> String {
@@ -312,6 +314,16 @@ mod tests {
         assert!(p.contains("axelstra done"));
         assert!(p.contains("Never wait silently for the human"));
         assert!(p.contains("axelstra ask $AXELSTRA_PARENT") && p.contains("axelstra escalate"));
+    }
+
+    #[test]
+    fn lead_prompt_makes_the_lead_a_dispatcher_of_workers() {
+        let p = super::lead_prompt("fix X");
+        assert!(p.contains("dispatcher, not an implementer"));
+        assert!(p.contains("axelstra agent . --prompt") && p.contains("--report-to $AXELSTRA_SESSION"));
+        assert!(p.contains("do NOT edit code") && p.contains("axelstra lock verify"));
+        assert!(p.contains("you never execute it alone"));
+        assert!(p.contains("commits, what was verified, what was not verified"));
     }
 
     use super::*;
