@@ -49,9 +49,20 @@ pub fn split_session(payload: &[u8]) -> Option<(u32, &[u8])> {
     Some((u32::from_le_bytes(payload[..4].try_into().ok()?), &payload[4..]))
 }
 
-/// Where the daemon listens: a named pipe on Windows, a Unix socket elsewhere.
+/// Where the daemon listens: a named pipe on Windows, a Unix socket elsewhere. The Windows name carries the user's SID,
+/// not a name taken from the environment: `%USERNAME%` is anyone's to set, a SID is not.
 #[cfg(windows)]
 pub fn pipe_name() -> String {
+    match crate::pipesec::current_user_sid() {
+        Ok(sid) => format!(r"\\.\pipe\axelstra-{sid}"),
+        Err(_) => legacy_pipe_name(),
+    }
+}
+
+/// The pipe name older releases used (`%USERNAME%`). A client falls back to it so an update does not strand the
+/// sessions of a daemon that is still running; the owner check applies to it all the same.
+#[cfg(windows)]
+pub fn legacy_pipe_name() -> String {
     let user = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default();
     format!(r"\\.\pipe\axelstra-{user}")
 }
