@@ -12,7 +12,6 @@ use serde_json::json;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 struct Fake {
     now: Cell<u64>,
