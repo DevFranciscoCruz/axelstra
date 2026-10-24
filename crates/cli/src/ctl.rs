@@ -104,7 +104,11 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             if std::env::var("AXELSTRA_SESSION").is_ok() {
                 let projects = c.call("project.list", json!({}))?;
                 if let Ok((p, wt)) = find_worktree(&projects, &worktree) {
-                    let in_main = p["worktrees"].as_array().into_iter().flatten().any(|w| w["path"].as_str() == Some(wt.as_str()) && w["is_main"] == json!(true));
+                    let in_main = p["worktrees"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|w| w["path"].as_str() == Some(wt.as_str()) && w["is_main"] == json!(true));
                     if in_main {
                         eprintln!("warning: {wt} is the project's main checkout. The main session only dispatches: it never runs workers there. Use `axelstra dispatch new <project> <name> \"<request>\"` to give the theme its own worktree and lead agent.");
                     }

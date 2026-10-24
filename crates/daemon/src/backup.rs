@@ -84,7 +84,8 @@ mod tests {
         std::fs::write(d.join("token"), "secret").unwrap();
         std::fs::write(d.join("crash.log"), "x").unwrap();
         let out = export(&d).unwrap();
-        let mut names: Vec<String> = std::fs::read_dir(&out).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        let mut names: Vec<String> =
+            std::fs::read_dir(&out).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         names.sort();
         assert_eq!(names, ["projects.json", "settings.json"]);
         assert!(out.starts_with(d.join("backups")));
