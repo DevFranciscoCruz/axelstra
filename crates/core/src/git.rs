@@ -1,3 +1,4 @@
+use crate::sync::LockRecover;
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -14,6 +15,7 @@ pub fn canon(p: &Path) -> Result<PathBuf> {
     })
 }
 
+#[derive(Debug)]
 pub struct Out {
     pub ok: bool,
     pub stdout: String,
@@ -31,19 +33,34 @@ pub fn quiet(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// Default deadline of `run`: generous for a big fetch or checkout, finite so a stuck git cannot block the caller forever.
+pub const RUN_TIMEOUT: Duration = Duration::from_secs(120);
+/// Most output of one git command that is kept; more is an error rather than a silently cut answer.
+const RUN_MAX_BYTES: usize = 64 << 20;
+
 pub fn run(cwd: &Path, args: &[&str]) -> Result<Out> {
-    let o = quiet(&mut Command::new("git"))
-        .current_dir(cwd)
+    run_timeout(cwd, args, RUN_TIMEOUT)
+}
+
+/// `run` with an explicit deadline. git never prompts (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`): a missing
+/// credential fails the command instead of waiting for a terminal or credential-manager dialog nobody will answer.
+/// On timeout the whole git process tree is killed and an error is returned.
+pub fn run_timeout(cwd: &Path, args: &[&str], limit: Duration) -> Result<Out> {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(cwd)
         // read-only queries must not rewrite .git/index: the watcher would see it and loop
         .env("GIT_OPTIONAL_LOCKS", "0")
-        .args(args)
-        .output()
-        .with_context(|| format!("spawn git {args:?}"))?;
-    Ok(Out {
-        ok: o.status.success(),
-        stdout: String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        stderr: String::from_utf8_lossy(&o.stderr).trim().to_string(),
-    })
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .args(args);
+    let o = crate::exec::run_capped(&mut cmd, limit, RUN_MAX_BYTES).with_context(|| format!("spawn git {args:?}"))?;
+    if o.timed_out {
+        bail!("git {} timed out after {}s", args.first().unwrap_or(&""), limit.as_secs());
+    }
+    if o.truncated {
+        bail!("git {} printed more than {} MiB", args.first().unwrap_or(&""), RUN_MAX_BYTES >> 20);
+    }
+    Ok(Out { ok: o.success(), stdout: o.stdout_lossy().trim().to_string(), stderr: o.stderr_lossy().trim().to_string() })
 }
 
 pub fn must(cwd: &Path, args: &[&str]) -> Result<String> {
@@ -72,9 +89,12 @@ pub fn current_branch(repo: &Path) -> Result<String> {
 /// the answer is reused for a moment and dropped whenever a worktree is added or removed here.
 type WtCache = std::collections::HashMap<String, (std::time::Instant, Vec<Worktree>)>;
 static WT_CACHE: std::sync::Mutex<Option<WtCache>> = std::sync::Mutex::new(None);
+/// Bumped by every `forget_worktree_lists`: a list computed before the bump may be stale and must not be cached.
+static WT_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 pub fn forget_worktree_lists() {
-    *WT_CACHE.lock().unwrap() = None;
+    WT_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    *WT_CACHE.lock_recover() = None;
 }
 
 pub fn worktree_add(repo: &Path, path: &Path, branch: &str, base: &str) -> Result<()> {
@@ -202,14 +222,20 @@ pub fn repo_root(path: &Path) -> Result<PathBuf> {
 }
 
 pub fn worktree_list(repo: &Path) -> Result<Vec<Worktree>> {
+    use std::sync::atomic::Ordering;
     let key = repo.to_string_lossy().to_string();
-    if let Some((at, v)) = WT_CACHE.lock().unwrap().as_ref().and_then(|m| m.get(&key)) {
+    if let Some((at, v)) = WT_CACHE.lock_recover().as_ref().and_then(|m| m.get(&key)) {
         if at.elapsed() < Duration::from_secs(3) {
             return Ok(v.clone());
         }
     }
+    let generation = WT_GEN.load(Ordering::SeqCst);
     let v = worktree_list_uncached(repo)?;
-    WT_CACHE.lock().unwrap().get_or_insert_with(Default::default).insert(key, (std::time::Instant::now(), v.clone()));
+    let mut cache = WT_CACHE.lock_recover();
+    // a worktree was added or removed while git ran: this answer may predate it, so it is returned but not kept
+    if WT_GEN.load(Ordering::SeqCst) == generation {
+        cache.get_or_insert_with(Default::default).insert(key, (std::time::Instant::now(), v.clone()));
+    }
     Ok(v)
 }
 
@@ -338,5 +364,43 @@ mod identity_tests {
         assert_eq!(parse_github("https://gitlab.com/a/b.git"), None);
         assert_eq!(parse_github("https://github.com/onlyowner"), None);
         assert_eq!(parse_github("/local/path/repo"), None);
+    }
+}
+
+#[cfg(test)]
+mod run_tests {
+    use super::*;
+
+    #[test]
+    fn git_runs_with_prompts_disabled_and_a_deadline() {
+        let o = run(Path::new("."), &["--version"]).unwrap();
+        assert!(o.ok && o.stdout.starts_with("git version"));
+        // an alias that never ends stands in for a fetch stuck on a credential prompt
+        let sleeper = "!sleep 60"; // aliases run in git's own sh (Git for Windows ships sleep)
+        let t = std::time::Instant::now();
+        let e = run_timeout(Path::new("."), &["-c", &format!("alias.hang={sleeper}"), "hang"], Duration::from_millis(500)).unwrap_err();
+        assert!(e.to_string().contains("timed out"), "{e}");
+        assert!(t.elapsed() < Duration::from_secs(15));
+    }
+
+    #[test]
+    fn prompt_env_is_set() {
+        let sh = "!echo $GIT_TERMINAL_PROMPT/$GCM_INTERACTIVE"; // aliases run in git's own sh
+        let o = run(Path::new("."), &["-c", &format!("alias.axenv={sh}"), "axenv"]).unwrap();
+        assert!(o.stdout.contains("0/never"), "{}", o.stdout);
+    }
+
+    #[test]
+    fn forgetting_during_a_listing_does_not_cache_the_old_answer() {
+        let dir = std::env::temp_dir().join(format!("axelstra-wtcache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let _ = must(&dir, &["init", "-q"]);
+        let a = worktree_list(&dir).unwrap();
+        forget_worktree_lists();
+        // after a forget the next call must ask git again, not serve the cached list
+        let key = dir.to_string_lossy().to_string();
+        assert!(WT_CACHE.lock_recover().as_ref().is_none_or(|m| !m.contains_key(&key)));
+        assert_eq!(a.len(), worktree_list(&dir).unwrap().len());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
