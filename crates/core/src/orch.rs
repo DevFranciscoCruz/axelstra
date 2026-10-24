@@ -1,6 +1,7 @@
 use crate::agents;
 use crate::card::{self, Card};
 use crate::git::{self, Merge};
+use crate::msg::Coded;
 use crate::runner::{AgentSpawn, Handle, ProcessRunner, Runner};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
@@ -94,6 +95,8 @@ pub struct Report {
     pub failed: Vec<(String, String)>,
     pub needs_review: Vec<(String, String)>,
     pub blocked: Vec<String>,
+    /// The message code of the reason in `failed` / `needs_review`, by card id, for the UI to translate.
+    pub reason_codes: std::collections::BTreeMap<String, Coded>,
     pub integ_branch: String,
     pub integ_wt: PathBuf,
     /// Problems that did not stop the run (a log line that could not be written, a card status that could not be
@@ -177,14 +180,14 @@ fn run_guarded(o: &Options, trust: Trust) -> Result<Report> {
         Ok(r) => r,
         Err(p) => {
             let msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
-            bail!("orchestrator panicked: {msg}")
+            Err(crate::coded!("orch.panicked", "orchestrator panicked: {detail}", detail = msg))
         }
     }
 }
 
 fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
     if !card::valid_slug(&o.name) {
-        bail!("invalid run name {:?}: use letters, digits, '.', '_' or '-'", o.name);
+        return Err(crate::coded!("orch.bad_run_name", "invalid run name {name:?}: use letters, digits, '.', '_' or '-'", name = o.name));
     }
     let repo = git::canon(&o.repo)?;
     let common = git::common_dir(&repo)?;
@@ -194,7 +197,7 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
 
     let cards: Vec<Card> = todo_cards(&repo)?;
     if cards.is_empty() {
-        bail!("no cards with status: todo in {}", repo.join(".kanban").display());
+        return Err(crate::coded!("orch.no_todo", "no cards with status: todo in {path}", path = repo.join(".kanban").display()));
     }
     // deps on cards outside `todo` (already done) are dropped, unknown ones are errors
     check_trust(&cards, trust)?;
@@ -235,6 +238,7 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
     );
     let mut failures: Vec<(String, String)> = Vec::new();
     let mut reviews: Vec<(String, String)> = Vec::new();
+    let mut reason_codes: std::collections::BTreeMap<String, Coded> = std::collections::BTreeMap::new();
     // Anything that goes wrong while driving the run lands here (or fails the one task it belongs to) instead of
     // aborting the whole run: an early `?` would leave the other cards "in-progress" with their agents running.
     let mut errors: Vec<String> = Vec::new();
@@ -265,12 +269,26 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
             let sentinel = read_sentinel(&live.wt);
             let timeout = timeout_of(t.card.meta.timeout_min);
             let outcome = if let Some(r) = sentinel {
-                Some(if r.status == "done" { Ok(r.summary) } else { Err(format!("agent reported {}: {}", r.status, r.summary)) })
+                Some(if r.status == "done" {
+                    Ok(r.summary)
+                } else {
+                    Err(Coded::new(
+                        "orch.agent_reported",
+                        format!("agent reported {}: {}", r.status, r.summary),
+                        &[("status", r.status.clone()), ("summary", r.summary.clone())],
+                    ))
+                })
             } else {
                 match polled {
-                    Err(e) => Some(Err(format!("could not poll the agent: {e:#}"))),
-                    Ok(Some(s)) => Some(Err(format!("{s} without result.json"))),
-                    Ok(None) if live.started.elapsed() > timeout => Some(Err(format!("timeout after {} min", t.card.meta.timeout_min))),
+                    Err(e) => {
+                        Some(Err(reason("orch.poll_failed", format!("could not poll the agent: {e:#}"), &[("detail", format!("{e:#}"))])))
+                    }
+                    Ok(Some(s)) => Some(Err(reason("orch.no_result", format!("{s} without result.json"), &[("status", s.to_string())]))),
+                    Ok(None) if live.started.elapsed() > timeout => Some(Err(reason(
+                        "orch.timeout",
+                        format!("timeout after {} min", t.card.meta.timeout_min),
+                        &[("min", t.card.meta.timeout_min.to_string())],
+                    ))),
                     Ok(None) => None,
                 }
             };
@@ -282,15 +300,19 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
             match outcome {
                 Ok(summary) => match finish_task(&repo, &integ_wt, &integ_branch, &o.name, t, &live.wt, &live.branch, &summary, &mut log) {
                     Ok(why) => {
-                        if t.st == St::NeedsReview {
-                            reviews.push((id.clone(), why));
+                        if let (St::NeedsReview, Some(why)) = (t.st, why) {
+                            reviews.push((id.clone(), why.text.clone()));
+                            reason_codes.insert(id.clone(), why);
+                        } else if t.st == St::NeedsReview {
+                            reviews.push((id.clone(), String::new()));
                         } else if let Err(e) = card::set_status(&t.card.path, "done") {
                             errors.push(format!("{id}: could not mark the card done: {e:#}"));
                         }
                     }
                     Err(e) => {
                         // the agent finished, so its worktree and branch stay for a person to look at
-                        let reason = format!("finishing failed: {e:#}");
+                        let why = reason("orch.finish_failed", format!("finishing failed: {e:#}"), &[("detail", format!("{e:#}"))]);
+                        let reason = why.text.clone();
                         errors.push(format!("{id}: {reason}"));
                         if git::merge_in_progress(&integ_wt) {
                             let _ = git::run(&integ_wt, &["merge", "--abort"]);
@@ -298,9 +320,11 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
                         log_ev(&mut log, Ev::NeedsReview { task: id.clone(), reason: reason.clone() }, &mut errors);
                         t.st = St::NeedsReview;
                         reviews.push((id.clone(), reason));
+                        reason_codes.insert(id.clone(), why);
                     }
                 },
-                Err(reason) => {
+                Err(why) => {
+                    let reason = why.text.clone();
                     log_ev(&mut log, Ev::Failed { task: id.clone(), reason: reason.clone() }, &mut errors);
                     let _ = git::worktree_remove(&repo, &live.wt);
                     let _ = git::branch_delete(&repo, &live.branch);
@@ -309,6 +333,7 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
                     } else {
                         t.st = St::Failed;
                         failures.push((id.clone(), reason));
+                        reason_codes.insert(id.clone(), why);
                     }
                 }
             }
@@ -335,7 +360,8 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
                     running_n += 1;
                 }
                 Err(e) => {
-                    let reason = format!("spawn: {e:#}");
+                    let why = reason("orch.spawn_failed", format!("spawn: {e:#}"), &[("detail", format!("{e:#}"))]);
+                    let reason = why.text.clone();
                     // spawn may have gotten as far as creating the worktree
                     let wt = o.wt_root.join(format!("{}-{}", o.name, id));
                     if wt.exists() {
@@ -345,6 +371,7 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
                     log_ev(&mut log, Ev::Failed { task: id.clone(), reason: reason.clone() }, &mut errors);
                     t.st = St::Failed;
                     failures.push((id.clone(), reason));
+                    reason_codes.insert(id.clone(), why);
                 }
             }
         }
@@ -368,7 +395,16 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
         v
     };
     // the cards' statuses are settled when `tasks` goes out of scope
-    Ok(Report { merged: by(St::Merged), failed: failures, needs_review: reviews, blocked: by(St::Blocked), integ_branch, integ_wt, errors })
+    Ok(Report {
+        merged: by(St::Merged),
+        failed: failures,
+        needs_review: reviews,
+        blocked: by(St::Blocked),
+        reason_codes,
+        integ_branch,
+        integ_wt,
+        errors,
+    })
 }
 
 /// The run's tasks. Dropping them (normal end, early error or panic alike) kills any agent still running and puts
@@ -424,7 +460,7 @@ fn check_trust(cards: &[Card], trust: &Trust) -> Result<()> {
     let pin_ok = matches!(trust, Trust::Pinned(p) if *p == card::fingerprint(cards));
     if let Trust::Pinned(_) = trust {
         if !pin_ok {
-            bail!("the cards changed after they were confirmed; review them again");
+            return Err(crate::coded!("orch.cards_changed", "the cards changed after they were confirmed; review them again"));
         }
     }
     let trusted = !matches!(trust, Trust::None);
@@ -434,33 +470,35 @@ fn check_trust(cards: &[Card], trust: &Trust) -> Result<()> {
         .map(|c| format!("{}: permission_mode {}", c.meta.id, c.meta.permission_mode))
         .collect();
     if !pin_ok && !bypass.is_empty() {
-        bail!(
+        return Err(crate::coded!(
+            "orch.bypass_untrusted",
             "cards with a bypass permission_mode run the agent with no permission checks and need an explicit, pinned confirmation:
-{}",
-            bypass.join(
+{cards}",
+            cards = bypass.join(
                 "
 "
             )
-        );
+        ));
     }
     let cmds: Vec<String> = cards.iter().filter_map(|c| c.meta.acceptance.as_ref().map(|a| format!("{}: {a}", c.meta.id))).collect();
     if !trusted && !cmds.is_empty() {
         let modes: Vec<String> = cards.iter().map(|c| format!("{}: permission_mode {}", c.meta.id, c.meta.permission_mode)).collect();
-        bail!(
+        return Err(crate::coded!(
+            "orch.acceptance_untrusted",
             "acceptance commands run through the shell and were not trusted; confirm them first:
-{}
-{}
-pin: {}",
-            cmds.join(
+{commands}
+{modes}
+pin: {pin}",
+            commands = cmds.join(
                 "
 "
             ),
-            modes.join(
+            modes = modes.join(
                 "
 "
             ),
-            card::fingerprint(cards)
-        );
+            pin = card::fingerprint(cards)
+        ));
     }
     Ok(())
 }
@@ -484,7 +522,7 @@ fn read_sentinel(wt: &Path) -> Option<Result_> {
 fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task) -> Result<Live> {
     let id = &t.card.meta.id;
     if !card::valid_slug(id) || !card::valid_slug(&o.name) {
-        bail!("invalid card id or run name");
+        return Err(crate::coded!("orch.bad_id", "invalid card id or run name"));
     }
     let wt = o.wt_root.join(format!("{}-{}", o.name, id));
     let branch = task_branch(&o.name, id);
@@ -522,7 +560,10 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
     let pf = prompt.to_string_lossy().to_string();
     let spec: Vec<String> = spec.into_iter().map(|a| a.replace("{prompt_file}", &pf)).collect();
     if spec.first().is_none_or(|p| p.trim().is_empty()) {
-        bail!("empty agent command (an `agent` override needs at least the program to run)");
+        return Err(crate::coded!(
+            "orch.empty_agent_command",
+            "empty agent command (an `agent` override needs at least the program to run)"
+        ));
     }
 
     let handle = runner.spawn(&AgentSpawn {
@@ -540,7 +581,7 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
 /// runs one-shot even under an interactive runner.
 fn agent_command(agent: &str, permission_mode: &str, interactive: bool) -> Result<Vec<String>> {
     if !card::PERMISSION_MODES.contains(&permission_mode) {
-        bail!("unknown permission_mode '{permission_mode}'");
+        return Err(crate::coded!("orch.bad_permission", "unknown permission_mode '{mode}'", mode = permission_mode));
     }
     let a = agents::require(agent)?;
     let ask = "Read .axelstra/prompt.md and do the task described there.";
@@ -569,7 +610,7 @@ fn finish_task(
     branch: &str,
     summary: &str,
     log: &mut Log,
-) -> Result<String> {
+) -> Result<Option<Coded>> {
     let id = t.card.meta.id.clone();
     git::commit_all(wt, &format!("{id}: {}", first_line(summary, &t.card.meta.title)))?;
     let before = git::head(integ_wt)?;
@@ -579,15 +620,15 @@ fn finish_task(
             git::reset_hard(integ_wt, &before)?;
             log.append(Ev::NeedsReview { task: id.clone(), reason: "merge conflict".into() })?;
             t.st = St::NeedsReview; // worktree + branch stay for inspection
-            return Ok("merge conflict".into());
+            return Ok(Some(reason("orch.merge_conflict", "merge conflict".into(), &[])));
         }
         Merge::Clean => {
             if let Some(cmd) = &t.card.meta.acceptance {
-                if let Some(why) = acceptance_failure(integ_wt, cmd, ACCEPTANCE_TIMEOUT) {
+                if let Some(why) = acceptance_coded(integ_wt, cmd, ACCEPTANCE_TIMEOUT) {
                     git::reset_hard(integ_wt, &before)?;
-                    log.append(Ev::NeedsReview { task: id.clone(), reason: why.clone() })?;
+                    log.append(Ev::NeedsReview { task: id.clone(), reason: why.text.clone() })?;
                     t.st = St::NeedsReview;
-                    return Ok(why);
+                    return Ok(Some(why));
                 }
             }
             log.append(Ev::Merged { task: id.clone() })?;
@@ -597,32 +638,32 @@ fn finish_task(
             let _ = integ_branch;
         }
     }
-    Ok(String::new())
+    Ok(None)
 }
 
 /// Merges a `needs-review` task again after the user fixed its branch (resolved the
 /// conflict or the failing acceptance) in the task worktree. Cleans up on success.
 pub fn retry_merge(repo: &Path, wt_root: &Path, name: &str, id: &str, trust_acceptance: bool) -> Result<()> {
     if !card::valid_slug(name) || !card::valid_slug(id) {
-        bail!("invalid card id or run name");
+        return Err(crate::coded!("orch.bad_id", "invalid card id or run name"));
     }
     let repo = git::canon(repo)?;
     let card = card::load_dir(&repo.join(".kanban"))?
         .cards
         .into_iter()
         .find(|c| c.meta.id == id)
-        .ok_or_else(|| anyhow::anyhow!("card {id} not found"))?;
+        .ok_or_else(|| crate::coded!("card.not_found", "card {id} not found", id = id))?;
     if card.meta.status != "needs-review" {
-        bail!("card {id} is not waiting for review");
+        return Err(crate::coded!("orch.not_in_review", "card {id} is not waiting for review", id = id));
     }
     check_trust(std::slice::from_ref(&card), &if trust_acceptance { Trust::Acceptance } else { Trust::None })?;
     let wt = wt_root.join(format!("{name}-{id}"));
     let integ_wt = wt_root.join(format!("{name}-integ"));
     if !wt.exists() || !integ_wt.exists() {
-        bail!("worktrees of run {name} are gone");
+        return Err(crate::coded!("orch.worktrees_gone", "worktrees of run {name} are gone", name = name));
     }
     if git::has_changes(&integ_wt)? {
-        bail!("integration worktree has uncommitted changes");
+        return Err(crate::coded!("orch.integ_dirty", "integration worktree has uncommitted changes"));
     }
     let common = git::common_dir(&repo)?;
     let events = common.join("axelstra").join("orch").join(name).join("events.jsonl");
@@ -634,13 +675,19 @@ pub fn retry_merge(repo: &Path, wt_root: &Path, name: &str, id: &str, trust_acce
     if let Merge::Conflict = git::merge(&integ_wt, &branch, &format!("merge {id}"))? {
         git::reset_hard(&integ_wt, &before)?;
         log.append(Ev::NeedsReview { task: id.into(), reason: "merge conflict".into() })?;
-        bail!("still conflicts with the integration branch; resolve it in {}", wt.display());
+        return Err(crate::coded!(
+            "orch.still_conflicts",
+            "still conflicts with the integration branch; resolve it in {path}",
+            path = wt.display()
+        ));
     }
     if let Some(cmd) = &card.meta.acceptance {
-        if let Some(why) = acceptance_failure(&integ_wt, cmd, ACCEPTANCE_TIMEOUT) {
+        if let Some(why) = acceptance_coded(&integ_wt, cmd, ACCEPTANCE_TIMEOUT) {
             git::reset_hard(&integ_wt, &before)?;
-            log.append(Ev::NeedsReview { task: id.into(), reason: why.clone() })?;
-            bail!("{why} after merging");
+            log.append(Ev::NeedsReview { task: id.into(), reason: why.text.clone() })?;
+            // same code and params as in the report: the UI says what failed, the English text adds where it happened
+            let text = format!("{} after merging", why.text);
+            return Err(why.with_text(text).into_error());
         }
     }
     log.append(Ev::Merged { task: id.into() })?;
@@ -648,6 +695,11 @@ pub fn retry_merge(repo: &Path, wt_root: &Path, name: &str, id: &str, trust_acce
     let _ = git::worktree_remove(&repo, &wt);
     let _ = git::branch_delete(&repo, &branch);
     Ok(())
+}
+
+/// A failure reason with its message code (see `Report::reason_codes`).
+fn reason(code: &str, text: String, params: &[(&str, String)]) -> Coded {
+    Coded::new(code, text, params)
 }
 
 fn first_line(summary: &str, fallback: &str) -> String {
@@ -667,7 +719,13 @@ const ACCEPTANCE_MAX_BYTES: usize = 1 << 20;
 
 /// Runs the card's acceptance command in `wt`. `None` when it passed; otherwise why the task needs review.
 /// A command that cannot even start counts as failed: the merge is rolled back either way.
+#[cfg(test)]
 fn acceptance_failure(wt: &Path, cmd: &str, limit: Duration) -> Option<String> {
+    acceptance_coded(wt, cmd, limit).map(|c| c.text)
+}
+
+/// The same with a message code (`orch.acceptance_*`) for the UI.
+fn acceptance_coded(wt: &Path, cmd: &str, limit: Duration) -> Option<Coded> {
     let mut c = if cfg!(windows) {
         let mut c = Command::new("cmd");
         c.args(["/d", "/c", cmd]);
@@ -679,10 +737,14 @@ fn acceptance_failure(wt: &Path, cmd: &str, limit: Duration) -> Option<String> {
     };
     c.current_dir(wt);
     match crate::exec::run_capped(&mut c, limit, ACCEPTANCE_MAX_BYTES) {
-        Ok(o) if o.timed_out => Some(format!("acceptance timed out after {} s", limit.as_secs())),
+        Ok(o) if o.timed_out => Some(reason(
+            "orch.acceptance_timeout",
+            format!("acceptance timed out after {} s", limit.as_secs()),
+            &[("secs", limit.as_secs().to_string())],
+        )),
         Ok(o) if o.success() => None,
-        Ok(_) => Some("acceptance failed".into()),
-        Err(e) => Some(format!("acceptance could not run: {e:#}")),
+        Ok(_) => Some(reason("orch.acceptance_failed", "acceptance failed".into(), &[])),
+        Err(e) => Some(reason("orch.acceptance_error", format!("acceptance could not run: {e:#}"), &[("detail", format!("{e:#}"))])),
     }
 }
 
@@ -708,7 +770,7 @@ fn recover(repo: &Path, integ_wt: &Path, events: &Path) -> Result<()> {
         }
     }
     if !integ_wt.exists() {
-        bail!("run exists but integration worktree {} is gone", integ_wt.display());
+        return Err(crate::coded!("orch.integ_gone", "run exists but integration worktree {path} is gone", path = integ_wt.display()));
     }
     if let Some(sha) = pending {
         if git::merge_in_progress(integ_wt) {
@@ -723,6 +785,21 @@ fn recover(repo: &Path, integ_wt: &Path, events: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_and_reasons_carry_message_codes() {
+        let c = |e: anyhow::Error| crate::msg::find(&e).map(|c| c.code.clone()).unwrap_or_default();
+        assert_eq!(c(agent_command("claude", "nope", false).unwrap_err()), "orch.bad_permission");
+        assert_eq!(c(retry_merge(Path::new("."), Path::new("."), "../x", "a", false).unwrap_err()), "orch.bad_id");
+        let tmp = std::env::temp_dir();
+        let why = acceptance_coded(&tmp, "exit 1", Duration::from_secs(30)).unwrap();
+        assert_eq!(why.code, "orch.acceptance_failed");
+        assert!(acceptance_coded(&tmp, "exit 0", Duration::from_secs(30)).is_none());
+        let slow = if cfg!(windows) { "ping -n 20 127.0.0.1 > nul" } else { "sleep 20" };
+        let why = acceptance_coded(&tmp, slow, Duration::from_millis(300)).unwrap();
+        assert_eq!(why.code, "orch.acceptance_timeout");
+        assert_eq!(why.params["secs"], "0");
+    }
 
     #[test]
     fn agent_command_follows_the_agents_table() {

@@ -534,7 +534,10 @@ export type KCard = {
   meta: { id: string; title: string; status: string; agent: string; depends_on: string[]; priority: number; acceptance?: string | null };
   body: string;
 };
-export type Board = { cards: KCard[]; broken: { file: string; error: string }[] };
+export type Board = {
+  cards: KCard[];
+  broken: { file: string; error: string; error_code?: string; error_params?: Record<string, string> }[];
+};
 
 export const kanbanList = (project: string) => call<Board>("kanban.list", { project });
 export const kanbanSave = (project: string, card: Record<string, unknown>) => call<KCard>("kanban.save", { project, ...card });
@@ -551,6 +554,10 @@ export type OrchRun = {
   needs_review?: [string, string][];
   blocked?: string[];
   error?: string;
+  /** message code of `error` (src/msg), and of each failed / needs-review reason by card id */
+  error_code?: string;
+  error_params?: Record<string, string>;
+  reason_codes?: Record<string, { code: string; params: Record<string, string> }>;
 };
 /** `pin` (from orchTrustInfo) lets `bypass*` cards run, but only if the todo cards still hash to what the user confirmed */
 export const orchStart = (project: string, max = 3, trustAcceptance = false, pin?: string) =>

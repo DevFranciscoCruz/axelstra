@@ -1,5 +1,15 @@
 use super::*;
 
+/// The `error` state of a run: English text plus, when the error has a message code, `error_code`/`error_params` for the UI.
+fn run_error(name: &str, e: &anyhow::Error) -> Value {
+    let mut v = json!({"state": "error", "name": name, "error": format!("{e:#}")});
+    if let Some(c) = axelstra_core::msg::find(e) {
+        v["error_code"] = json!(c.code);
+        v["error_params"] = c.params_json();
+    }
+    v
+}
+
 pub(super) fn call(c: &mut Ctx) -> Result<Value> {
     let req = c.req;
     let (p, reg) = (c.p, c.reg);
@@ -24,13 +34,13 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             {
                 let mut runs = reg.runs.lock_recover();
                 if runs.get(&pr.id).is_some_and(|r| r["state"] == "running") {
-                    anyhow::bail!("an orchestration is already running for this project");
+                    return Err(axelstra_core::coded!("orch.already_running", "an orchestration is already running for this project"));
                 }
                 runs.insert(pr.id.clone(), started.clone());
             }
             // a failure before the run thread exists gives the claim back
             let release = |e: anyhow::Error| {
-                reg.runs.lock_recover().insert(pr.id.clone(), json!({"state": "error", "name": name, "error": format!("{e:#}")}));
+                reg.runs.lock_recover().insert(pr.id.clone(), run_error(&name, &e));
                 e
             };
             let repo = axelstra_core::git::canon(std::path::Path::new(&pr.path)).map_err(release)?;
@@ -63,8 +73,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 let v = match res {
                     Ok(r) => json!({"state": "done", "name": n2, "integ_branch": r.integ_branch,
                         "integ_wt": r.integ_wt, "merged": r.merged, "failed": r.failed,
-                        "needs_review": r.needs_review, "blocked": r.blocked}),
-                    Err(e) => json!({"state": "error", "name": n2, "error": format!("{e:#}")}),
+                        "needs_review": r.needs_review, "blocked": r.blocked,
+                        "reason_codes": r.reason_codes.iter().map(|(id, c)| (id.clone(), c.fields())).collect::<serde_json::Map<_, _>>()}),
+                    Err(e) => run_error(&n2, &e),
                 };
                 reg2.runs.lock_recover().insert(pid, v);
             });
@@ -74,7 +85,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let id = p["id"].as_str().unwrap_or_default().to_string();
             let name = reg.runs.lock_recover().get(&pr.id).and_then(|r| r["name"].as_str().map(String::from));
-            let name = name.ok_or_else(|| anyhow::anyhow!("no orchestration run to retry"))?;
+            let name = name.ok_or_else(|| axelstra_core::coded!("orch.no_run", "no orchestration run to retry"))?;
             let trust = p["trust_acceptance"].as_bool().unwrap_or(false);
             let repo = axelstra_core::git::canon(std::path::Path::new(&pr.path))?;
             let wt_root = repo.parent().unwrap_or(&repo).join(".axelstra-wt");
@@ -119,8 +130,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "automation.save" => {
             let _g = reg.auto_lock.lock_recover();
             let path = crate::automations::store_path(&reg.store);
-            let mut a: crate::automations::Automation =
-                serde_json::from_value(p.clone()).map_err(|e| anyhow::anyhow!("invalid automation: {e}"))?;
+            let mut a: crate::automations::Automation = serde_json::from_value(p.clone())
+                .map_err(|e| axelstra_core::coded!("automation.invalid", "invalid automation: {detail}", detail = e))?;
             crate::automations::validate(&a)?;
             crate::projects::find(&reg.store, &a.project)?;
             let mut list = crate::automations::load(&path);

@@ -6,7 +6,8 @@
 //! it replaces stay recoverable as `<name>.1`.
 
 use crate::store::{validate_state, write_backed_up};
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
+use axelstra_core::coded;
 use std::path::{Path, PathBuf};
 
 /// The files a backup holds: the whole of the state that is not derived from git or from the agents' own logs.
@@ -28,11 +29,13 @@ pub fn export(data_dir: &Path) -> Result<PathBuf> {
     }
     let present: Vec<&str> = FILES.into_iter().filter(|f| regular(&data_dir.join(f))).collect();
     if present.is_empty() {
-        bail!("there is no saved state to back up yet");
+        return Err(coded!("backup.nothing", "there is no saved state to back up yet"));
     }
-    std::fs::create_dir_all(&dest).with_context(|| format!("could not create {}", dest.display()))?;
+    std::fs::create_dir_all(&dest)
+        .map_err(|e| coded!("backup.create_failed", "could not create {path}: {detail}", path = dest.display(), detail = e))?;
     for f in present {
-        std::fs::copy(data_dir.join(f), dest.join(f)).with_context(|| format!("could not copy {f}"))?;
+        std::fs::copy(data_dir.join(f), dest.join(f))
+            .map_err(|e| coded!("backup.copy_failed", "could not copy {file}: {detail}", file = f, detail = e))?;
     }
     Ok(dest)
 }
@@ -41,7 +44,7 @@ pub fn export(data_dir: &Path) -> Result<PathBuf> {
 /// written unless every file in the folder parses as a state file of this version or older.
 pub fn restore(data_dir: &Path, src: &Path) -> Result<Vec<String>> {
     if !src.is_dir() {
-        bail!("{} is not a backup folder", src.display());
+        return Err(coded!("backup.not_folder", "{path} is not a backup folder", path = src.display()));
     }
     let mut found: Vec<(&str, Vec<u8>)> = vec![];
     for f in FILES {
@@ -49,17 +52,19 @@ pub fn restore(data_dir: &Path, src: &Path) -> Result<Vec<String>> {
         if !regular(&p) {
             continue;
         }
-        let bytes = std::fs::read(&p).with_context(|| format!("could not read {}", p.display()))?;
-        let text = std::str::from_utf8(&bytes).map_err(|_| anyhow::anyhow!("{f} is not text"))?;
-        validate_state(text).map_err(|e| anyhow::anyhow!("{f} in the backup is unusable: {e}"))?;
+        let bytes = std::fs::read(&p)
+            .map_err(|e| coded!("backup.read_failed", "could not read {path}: {detail}", path = p.display(), detail = e))?;
+        let text = std::str::from_utf8(&bytes).map_err(|_| coded!("backup.not_text", "{file} is not text", file = f))?;
+        validate_state(text).map_err(|e| coded!("backup.unusable", "{file} in the backup is unusable: {detail}", file = f, detail = e))?;
         found.push((f, bytes));
     }
     if found.is_empty() {
-        bail!("{} has none of {}", src.display(), FILES.join(", "));
+        return Err(coded!("backup.none_found", "{path} has none of {files}", path = src.display(), files = FILES.join(", ")));
     }
     let mut restored = vec![];
     for (f, bytes) in found {
-        write_backed_up(&data_dir.join(f), &bytes).with_context(|| format!("could not write {f}"))?;
+        write_backed_up(&data_dir.join(f), &bytes)
+            .map_err(|e| coded!("backup.write_failed", "could not write {file}: {detail}", file = f, detail = e))?;
         restored.push(f.to_string());
     }
     Ok(restored)
@@ -68,6 +73,21 @@ pub fn restore(data_dir: &Path, src: &Path) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_carry_message_codes() {
+        let d = dir("codes");
+        let c = |e: anyhow::Error| axelstra_core::msg::find(&e).map(|c| c.code.clone()).unwrap_or_default();
+        assert_eq!(c(export(&d).unwrap_err()), "backup.nothing");
+        assert_eq!(c(restore(&d, &d.join("missing")).unwrap_err()), "backup.not_folder");
+        assert_eq!(c(restore(&d, &d).unwrap_err()), "backup.none_found");
+        std::fs::write(d.join("projects.json"), "not json").unwrap();
+        let src = d.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("projects.json"), "not json").unwrap();
+        assert_eq!(c(restore(&d, &src).unwrap_err()), "backup.unusable");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     fn dir(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("axl-backup-{tag}-{}", std::process::id()));

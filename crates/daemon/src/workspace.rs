@@ -13,7 +13,8 @@
 use crate::automations::{self, Automation};
 use crate::projects::{self, Project};
 use crate::store::{read_json, write_atomic, write_backed_up, write_json, LockRecover};
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
+use axelstra_core::coded;
 use axelstra_core::{card, paths};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -124,19 +125,22 @@ pub fn build(store: &Path) -> Result<(Value, Summary)> {
 /// Writes the workspace to `path`. Refuses the daemon's own data folder (the token and the state files live there) and
 /// a folder that does not exist.
 pub fn export_to(store: &Path, path: &Path) -> Result<Summary> {
-    let Some(parent) = path.parent().filter(|d| !d.as_os_str().is_empty()) else { bail!("{} has no folder to write into", path.display()) };
+    let Some(parent) = path.parent().filter(|d| !d.as_os_str().is_empty()) else {
+        return Err(coded!("workspace.no_folder", "{path} has no folder to write into", path = path.display()));
+    };
     if !parent.is_dir() {
-        bail!("{} is not a folder", parent.display());
+        return Err(coded!("workspace.not_folder", "{path} is not a folder", path = parent.display()));
     }
     if path.is_dir() {
-        bail!("{} is a folder", path.display());
+        return Err(coded!("workspace.is_folder", "{path} is a folder", path = path.display()));
     }
     let parent_s = parent.to_string_lossy();
     if paths::same(&parent_s, &data_dir(store).to_string_lossy()) {
-        bail!("choose a file outside the Axelstra data folder");
+        return Err(coded!("workspace.in_data_dir", "choose a file outside the Axelstra data folder"));
     }
     let (doc, summary) = build(store)?;
-    write_atomic(path, &serde_json::to_vec_pretty(&doc)?).with_context(|| format!("could not write {}", path.display()))?;
+    write_atomic(path, &serde_json::to_vec_pretty(&doc)?)
+        .map_err(|e| coded!("workspace.write_failed", "could not write {path}: {detail}", path = path.display(), detail = e))?;
     Ok(summary)
 }
 
@@ -162,7 +166,7 @@ fn text_ok(s: &str, max: usize) -> bool {
 }
 
 fn parse_settings(v: &Value) -> Result<Map<String, Value>> {
-    let Some(raw) = v.as_object() else { bail!("settings must be an object") };
+    let Some(raw) = v.as_object() else { return Err(coded!("workspace.settings_not_object", "settings must be an object")) };
     let mut out = Map::new();
     for k in SETTINGS_KEYS {
         let Some(v) = raw.get(k) else { continue };
@@ -175,14 +179,15 @@ fn parse_settings(v: &Value) -> Result<Map<String, Value>> {
             _ => v.is_object(),
         };
         if !ok {
-            bail!("setting {k} has an invalid value");
+            return Err(coded!("workspace.bad_setting", "setting {name} has an invalid value", name = k));
         }
         if k == "ui" {
             // the daemon's own rules for UI choices (key names, sizes), applied to an empty settings value
             let ui: Map<String, Value> =
                 v.as_object().into_iter().flatten().filter(|(n, _)| !sensitive(n)).map(|(n, v)| (n.clone(), v.clone())).collect();
             let mut probe = json!({});
-            crate::server::apply_ui_settings(&mut probe, &json!({"ui": ui})).map_err(|e| anyhow::anyhow!("setting ui is invalid: {e}"))?;
+            crate::server::apply_ui_settings(&mut probe, &json!({"ui": ui}))
+                .map_err(|e| coded!("workspace.bad_ui", "setting ui is invalid: {detail}", detail = e))?;
             out.insert(k.into(), probe["ui"].clone());
         } else {
             out.insert(k.into(), v.clone());
@@ -192,20 +197,31 @@ fn parse_settings(v: &Value) -> Result<Map<String, Value>> {
 }
 
 fn parse_cards(raw: &Value, project_ids: &HashSet<&str>) -> Result<Vec<(String, Vec<InCard>)>> {
-    let Some(raw) = raw.as_object() else { bail!("kanban must be an object") };
+    let Some(raw) = raw.as_object() else { return Err(coded!("workspace.kanban_not_object", "kanban must be an object")) };
     let mut out = vec![];
     let mut total = 0;
     for (pid, list) in raw {
         if !project_ids.contains(pid.as_str()) {
-            bail!("kanban has cards for project {pid:?}, which is not in the file");
+            return Err(coded!(
+                "workspace.kanban_unknown_project",
+                "kanban has cards for project {project:?}, which is not in the file",
+                project = pid
+            ));
         }
-        let Some(list) = list.as_array() else { bail!("kanban.{pid} must be a list") };
+        let Some(list) = list.as_array() else {
+            return Err(coded!("workspace.kanban_not_list", "kanban.{project} must be a list", project = pid));
+        };
         if list.len() > MAX_CARDS_PER_PROJECT {
-            bail!("project {pid} has more than {MAX_CARDS_PER_PROJECT} cards");
+            return Err(coded!(
+                "workspace.too_many_cards_project",
+                "project {project} has more than {max} cards",
+                project = pid,
+                max = MAX_CARDS_PER_PROJECT
+            ));
         }
         total += list.len();
         if total > MAX_CARDS {
-            bail!("the file has more than {MAX_CARDS} cards");
+            return Err(coded!("workspace.too_many_cards", "the file has more than {max} cards", max = MAX_CARDS));
         }
         let mut seen = HashSet::new();
         let mut cards = vec![];
@@ -215,17 +231,30 @@ fn parse_cards(raw: &Value, project_ids: &HashSet<&str>) -> Result<Vec<(String, 
             // the name is only checked, never used to write: a card goes to `<id>.md`
             let stem = file.strip_suffix(".md").unwrap_or_default();
             if !crate::kanban::valid_id(stem) {
-                bail!("card file name {file:?} is not allowed");
+                return Err(coded!("workspace.bad_card_file", "card file name {file:?} is not allowed", file = file));
             }
             if text.len() > MAX_CARD_BYTES {
-                bail!("card {file} is larger than {MAX_CARD_BYTES} bytes");
+                return Err(coded!("workspace.card_too_big", "card {file} is larger than {max} bytes", file = file, max = MAX_CARD_BYTES));
             }
-            let parsed = card::parse(text, Path::new(file)).map_err(|e| anyhow::anyhow!("card {file} of {pid} is invalid: {e:#}"))?;
+            let parsed = card::parse(text, Path::new(file)).map_err(|e| {
+                coded!(
+                    "workspace.card_invalid",
+                    "card {file} of {project} is invalid: {detail}",
+                    file = file,
+                    project = pid,
+                    detail = format!("{e:#}")
+                )
+            })?;
             if !crate::kanban::valid_id(&parsed.meta.id) {
-                bail!("card id {:?} in {file} is not allowed", parsed.meta.id);
+                return Err(coded!("workspace.bad_card_id", "card id {id:?} in {file} is not allowed", id = parsed.meta.id, file = file));
             }
             if !seen.insert(parsed.meta.id.clone()) {
-                bail!("project {pid} has two cards with id {}", parsed.meta.id);
+                return Err(coded!(
+                    "workspace.duplicate_card",
+                    "project {project} has two cards with id {id}",
+                    project = pid,
+                    id = parsed.meta.id
+                ));
             }
             cards.push(InCard { id: parsed.meta.id, text: text.to_string() });
         }
@@ -236,37 +265,46 @@ fn parse_cards(raw: &Value, project_ids: &HashSet<&str>) -> Result<Vec<(String, 
 
 fn parse(bytes: &[u8]) -> Result<Parsed> {
     if bytes.len() as u64 > MAX_FILE {
-        bail!("the file is larger than {} MiB", MAX_FILE >> 20);
+        return Err(coded!("workspace.file_too_big", "the file is larger than {mib} MiB", mib = MAX_FILE >> 20));
     }
-    let doc: Value = serde_json::from_slice(bytes).map_err(|e| anyhow::anyhow!("not a valid workspace file: {e}"))?;
+    let doc: Value =
+        serde_json::from_slice(bytes).map_err(|e| coded!("workspace.not_valid", "not a valid workspace file: {detail}", detail = e))?;
     if doc["kind"].as_str() != Some(KIND) {
-        bail!("not an Axelstra workspace file");
+        return Err(coded!("workspace.not_workspace", "not an Axelstra workspace file"));
     }
     match doc["version"].as_u64() {
         Some(VERSION) => {}
-        Some(v) if v > VERSION => bail!("written by a newer version of Axelstra (file v{v}, this one reads v{VERSION})"),
-        _ => bail!("the file has no usable version"),
+        Some(v) if v > VERSION => {
+            return Err(coded!(
+                "workspace.newer",
+                "written by a newer version of Axelstra (file v{file}, this one reads v{current})",
+                file = v,
+                current = VERSION
+            ))
+        }
+        _ => return Err(coded!("workspace.no_version", "the file has no usable version")),
     }
     let exported_at = doc["exported_at"].as_str().unwrap_or_default().chars().take(40).collect();
 
     let raw_projects = doc["projects"].as_array().map_or(&[][..], Vec::as_slice);
     if raw_projects.len() > MAX_PROJECTS {
-        bail!("the file has more than {MAX_PROJECTS} projects");
+        return Err(coded!("workspace.too_many_projects", "the file has more than {max} projects", max = MAX_PROJECTS));
     }
     let mut projects: Vec<Project> = vec![];
     for v in raw_projects {
-        let p: Project = serde_json::from_value(v.clone()).map_err(|e| anyhow::anyhow!("invalid project: {e}"))?;
+        let p: Project =
+            serde_json::from_value(v.clone()).map_err(|e| coded!("workspace.invalid_project", "invalid project: {detail}", detail = e))?;
         if !crate::kanban::valid_id(&p.id) {
-            bail!("project id {:?} is not allowed", p.id);
+            return Err(coded!("workspace.bad_project_id", "project id {id:?} is not allowed", id = p.id));
         }
         if projects.iter().any(|x| x.id == p.id) {
-            bail!("two projects have the id {}", p.id);
+            return Err(coded!("workspace.duplicate_project", "two projects have the id {id}", id = p.id));
         }
         if !text_ok(&p.name, 200) || !text_ok(&p.path, MAX_PATH) || p.setup.as_ref().is_some_and(|s| s.len() > 4096 || s.contains('\0')) {
-            bail!("project {} has an invalid name, path or setup", p.id);
+            return Err(coded!("workspace.bad_project", "project {id} has an invalid name, path or setup", id = p.id));
         }
         if p.parents.len() > MAX_PARENTS || p.parents.iter().any(|(k, v)| !text_ok(k, MAX_PATH) || !text_ok(v, MAX_PATH)) {
-            bail!("project {} has invalid worktree parents", p.id);
+            return Err(coded!("workspace.bad_parents", "project {id} has invalid worktree parents", id = p.id));
         }
         projects.push(p);
     }
@@ -274,23 +312,31 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
 
     let raw_autos = doc["automations"].as_array().map_or(&[][..], Vec::as_slice);
     if raw_autos.len() > MAX_AUTOMATIONS {
-        bail!("the file has more than {MAX_AUTOMATIONS} automations");
+        return Err(coded!("workspace.too_many_automations", "the file has more than {max} automations", max = MAX_AUTOMATIONS));
     }
     let mut autos: Vec<Automation> = vec![];
     for v in raw_autos {
-        let a: Automation = serde_json::from_value(v.clone()).map_err(|e| anyhow::anyhow!("invalid automation: {e}"))?;
-        automations::validate(&a).map_err(|e| anyhow::anyhow!("automation {:?} is invalid: {e:#}", a.id))?;
+        let a: Automation =
+            serde_json::from_value(v.clone()).map_err(|e| coded!("automation.invalid", "invalid automation: {detail}", detail = e))?;
+        automations::validate(&a).map_err(|e| {
+            coded!("workspace.automation_invalid", "automation {id:?} is invalid: {detail}", id = a.id, detail = format!("{e:#}"))
+        })?;
         if !crate::kanban::valid_id(&a.id) {
-            bail!("automation id {:?} is not allowed", a.id);
+            return Err(coded!("workspace.bad_automation_id", "automation id {id:?} is not allowed", id = a.id));
         }
         if autos.iter().any(|x| x.id == a.id) {
-            bail!("two automations have the id {}", a.id);
+            return Err(coded!("workspace.duplicate_automation", "two automations have the id {id}", id = a.id));
         }
         if !ids.contains(a.project.as_str()) {
-            bail!("automation {} belongs to project {:?}, which is not in the file", a.id, a.project);
+            return Err(coded!(
+                "workspace.automation_unknown_project",
+                "automation {id} belongs to project {project:?}, which is not in the file",
+                id = a.id,
+                project = a.project
+            ));
         }
         if a.prompt.len() > 64 * 1024 || a.name.len() > 200 {
-            bail!("automation {} is too large", a.id);
+            return Err(coded!("workspace.automation_too_big", "automation {id} is too large", id = a.id));
         }
         autos.push(a);
     }
@@ -596,16 +642,17 @@ fn plan(store: &Path, p: Parsed, map: &[(String, String)]) -> Result<Plan> {
 
 fn read_file(path: &str) -> Result<Vec<u8>> {
     if path.is_empty() || path.contains('\0') {
-        bail!("path is required");
+        return Err(coded!("workspace.path_required", "path is required"));
     }
-    let meta = std::fs::metadata(path).with_context(|| format!("could not read {path}"))?;
+    let meta =
+        std::fs::metadata(path).map_err(|e| coded!("workspace.read_failed", "could not read {path}: {detail}", path = path, detail = e))?;
     if !meta.is_file() {
-        bail!("{path} is not a file");
+        return Err(coded!("workspace.not_file", "{path} is not a file", path = path));
     }
     if meta.len() > MAX_FILE {
-        bail!("{path} is larger than {} MiB", MAX_FILE >> 20);
+        return Err(coded!("workspace.path_too_big", "{path} is larger than {mib} MiB", path = path, mib = MAX_FILE >> 20));
     }
-    std::fs::read(path).with_context(|| format!("could not read {path}"))
+    std::fs::read(path).map_err(|e| coded!("workspace.read_failed", "could not read {path}: {detail}", path = path, detail = e))
 }
 
 /// Parses `map` from a request: a list of `[old, new]` pairs.
@@ -613,15 +660,17 @@ pub fn parse_map(v: &Value) -> Result<Vec<(String, String)>> {
     if v.is_null() {
         return Ok(vec![]);
     }
-    let Some(list) = v.as_array() else { bail!("map must be a list of [old, new] pairs") };
+    let Some(list) = v.as_array() else { return Err(coded!("workspace.bad_map", "map must be a list of [old, new] pairs")) };
     if list.len() > MAX_MAP {
-        bail!("map has more than {MAX_MAP} pairs");
+        return Err(coded!("workspace.map_too_big", "map has more than {max} pairs", max = MAX_MAP));
     }
     list.iter()
         .map(|pair| {
-            let (Some(old), Some(new)) = (pair[0].as_str(), pair[1].as_str()) else { bail!("map must be a list of [old, new] pairs") };
+            let (Some(old), Some(new)) = (pair[0].as_str(), pair[1].as_str()) else {
+                return Err(coded!("workspace.bad_map", "map must be a list of [old, new] pairs"));
+            };
             if !text_ok(old, MAX_PATH) || !text_ok(new, MAX_PATH) {
-                bail!("map paths must be 1 to {MAX_PATH} characters");
+                return Err(coded!("workspace.bad_map_path", "map paths must be 1 to {max} characters", max = MAX_PATH));
             }
             Ok((old.to_string(), new.to_string()))
         })
@@ -778,7 +827,8 @@ pub fn import(store: &Path, path: &str, o: &Options) -> Result<Outcome> {
         }
         let _ = crate::kanban::exclude_kanban(root);
         // the previous card, when there is one, stays as `<card>.md.1`
-        write_backed_up(&c.target, c.text.as_bytes()).with_context(|| format!("could not write card {}", c.id))?;
+        write_backed_up(&c.target, c.text.as_bytes())
+            .map_err(|e| coded!("workspace.card_write_failed", "could not write card {id}: {detail}", id = c.id, detail = e))?;
         out.cards_written += 1;
     }
     Ok(out)
@@ -789,6 +839,20 @@ pub fn import(store: &Path, path: &str, o: &Options) -> Result<Outcome> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_carry_message_codes() {
+        let c = |e: anyhow::Error| axelstra_core::msg::find(&e).map(|c| c.code.clone()).unwrap_or_default();
+        assert_eq!(c(parse(b"not json").map(|_| ()).unwrap_err()), "workspace.not_valid");
+        assert_eq!(c(parse(b"{}").map(|_| ()).unwrap_err()), "workspace.not_workspace");
+        let doc = json!({"kind": KIND, "version": VERSION + 1});
+        let e = parse(doc.to_string().as_bytes()).map(|_| ()).unwrap_err();
+        assert_eq!(c(e), "workspace.newer");
+        let doc = json!({"kind": KIND, "version": VERSION, "settings": []});
+        assert_eq!(c(parse(doc.to_string().as_bytes()).map(|_| ()).unwrap_err()), "workspace.settings_not_object");
+        assert_eq!(c(read_file("").unwrap_err()), "workspace.path_required");
+        assert_eq!(c(parse_map(&json!("x")).unwrap_err()), "workspace.bad_map");
+    }
 
     fn dir(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("axl-ws-{tag}-{}", std::process::id()));

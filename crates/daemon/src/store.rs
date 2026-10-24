@@ -207,24 +207,53 @@ pub fn read_json<T: DeserializeOwned>(path: &Path) -> io::Result<Option<T>> {
         Err(e) => e,
     };
     let bad = bad_path(path);
-    let kept =
-        if rename_retry(path, &bad).is_ok() { format!("moved to {}", bad.display()) } else { "could not be moved aside".to_string() };
+    let moved = rename_retry(path, &bad).is_ok();
+    let kept = if moved { format!("moved to {}", bad.display()) } else { "could not be moved aside".to_string() };
+    // `store.*`: the UI says the same with the copy's path (`bad`) or, when it could not be moved, without it
+    let params = |extra: Option<&Path>| {
+        let mut v = vec![("path", path.display().to_string()), ("detail", err.clone()), ("bad", bad.display().to_string())];
+        if let Some(b) = extra {
+            v.push(("backup", b.display().to_string()));
+        }
+        v
+    };
     for n in 1..=BACKUPS {
         let bp = backup_path(path, n);
         let Ok(btext) = std::fs::read_to_string(&bp) else { continue };
         if let Ok(v) = parse_state::<T>(&btext) {
             let _ = write_atomic(path, btext.as_bytes());
-            notice(format!("{} is unusable ({err}); {kept}; restored from backup {}", path.display(), bp.display()));
+            let code = if moved { "store.restored" } else { "store.restored_unmoved" };
+            let text = format!("{} is unusable ({err}); {kept}; restored from backup {}", path.display(), bp.display());
+            notice_coded(axelstra_core::msg::Coded::new(code, text, &params(Some(&bp))));
             return Ok(Some(v));
         }
     }
-    notice(format!("{} is unusable ({err}); {kept}; starting empty", path.display()));
+    let code = if moved { "store.empty" } else { "store.empty_unmoved" };
+    notice_coded(axelstra_core::msg::Coded::new(
+        code,
+        format!("{} is unusable ({err}); {kept}; starting empty", path.display()),
+        &params(None),
+    ));
     Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notices_carry_message_codes() {
+        let d = dir("codes");
+        let p = d.join("projects.json");
+        std::fs::write(&p, "not json").unwrap();
+        let _ = take_notice_items();
+        assert!(read_json::<Value>(&p).unwrap().is_none());
+        let items = take_notice_items();
+        let c = items.iter().find_map(|(_, c)| c.as_ref().filter(|c| c.code.starts_with("store."))).expect("a coded notice");
+        assert_eq!(c.code, "store.empty");
+        assert!(c.params["path"].contains("projects.json") && c.params["bad"].contains(".bad."));
+        let _ = std::fs::remove_dir_all(&d);
+    }
     use serde_json::json;
 
     fn dir(tag: &str) -> PathBuf {
@@ -270,7 +299,15 @@ mod tests {
         let b = bads(&d, "projects.json");
         assert_eq!(b.len(), 1);
         assert_eq!(std::fs::read_to_string(&b[0]).unwrap(), "{ not json");
-        assert!(take_notices().iter().any(|n| n.contains("projects.json") && n.contains("starting empty")));
+        let items = take_notice_items();
+        assert!(items.iter().any(|(n, _)| n.contains("projects.json") && n.contains("starting empty")));
+        // the notice carries a message code and params for the UI
+        let c = items
+            .iter()
+            .find_map(|(_, c)| c.as_ref().filter(|c| c.params.get("path").is_some_and(|p| p.contains("projects.json"))))
+            .expect("coded");
+        assert_eq!(c.code, "store.empty");
+        assert!(c.params["bad"].contains(".bad."), "{:?}", c.params);
         // a later save starts a fresh file and the broken one is still there
         write_atomic(&f, b"[]").unwrap();
         assert_eq!(bads(&d, "projects.json").len(), 1);

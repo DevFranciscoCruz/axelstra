@@ -2,7 +2,8 @@
 //! an interactive agent session started with the prompt, so the result waits in the sidebar like any other agent.
 //! Runs missed while the daemon was off are skipped, not replayed.
 
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
+use axelstra_core::coded;
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDateTime, NaiveTime, TimeZone};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -52,27 +53,31 @@ pub fn save_all(store: &Path, v: &[Automation]) -> Result<()> {
 }
 
 fn parse_time(t: &str) -> Result<NaiveTime> {
-    NaiveTime::parse_from_str(t.trim(), "%H:%M").with_context(|| format!("time must be HH:MM, got {t:?}"))
+    NaiveTime::parse_from_str(t.trim(), "%H:%M").map_err(|_| coded!("automation.bad_time", "time must be HH:MM, got {time:?}", time = t))
 }
 
 pub fn validate(a: &Automation) -> Result<()> {
     if a.name.trim().is_empty() {
-        bail!("name is empty");
+        return Err(coded!("automation.name_empty", "name is empty"));
     }
     if a.prompt.trim().is_empty() {
-        bail!("prompt is empty");
+        return Err(coded!("automation.prompt_empty", "prompt is empty"));
     }
     axelstra_core::agents::require(&a.agent)?;
     match &a.schedule {
-        Schedule::Interval { minutes } if *minutes < 5 => bail!("interval must be at least 5 minutes"),
-        Schedule::Interval { minutes } if *minutes > MAX_INTERVAL_MINUTES => bail!("interval must be at most a year"),
+        Schedule::Interval { minutes } if *minutes < 5 => {
+            return Err(coded!("automation.interval_min", "interval must be at least {min} minutes", min = 5))
+        }
+        Schedule::Interval { minutes } if *minutes > MAX_INTERVAL_MINUTES => {
+            return Err(coded!("automation.interval_max", "interval must be at most a year"))
+        }
         Schedule::Interval { .. } => {}
         Schedule::Daily { time } => {
             parse_time(time)?;
         }
         Schedule::Weekly { day, time } => {
             if *day > 6 {
-                bail!("day must be 0 (Monday) to 6 (Sunday)");
+                return Err(coded!("automation.bad_day", "day must be 0 (Monday) to 6 (Sunday)"));
             }
             parse_time(time)?;
         }
@@ -176,6 +181,21 @@ fn shell_command(argv: &[String]) -> (String, Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_carry_message_codes() {
+        let c = |a: &Automation| axelstra_core::msg::find(&validate(a).unwrap_err()).map(|c| c.code.clone()).unwrap_or_default();
+        assert_eq!(c(&auto(Schedule::Interval { minutes: 1 })), "automation.interval_min");
+        assert_eq!(c(&auto(Schedule::Interval { minutes: u32::MAX })), "automation.interval_max");
+        assert_eq!(c(&auto(Schedule::Weekly { day: 7, time: "09:00".into() })), "automation.bad_day");
+        assert_eq!(c(&auto(Schedule::Daily { time: "9h".into() })), "automation.bad_time");
+        let mut a = auto(Schedule::Interval { minutes: 10 });
+        a.name = " ".into();
+        assert_eq!(c(&a), "automation.name_empty");
+        a.name = "n".into();
+        a.prompt = "".into();
+        assert_eq!(c(&a), "automation.prompt_empty");
+    }
     use chrono::NaiveDate;
 
     fn at(y: i32, m: u32, d: u32, h: u32, mi: u32) -> NaiveDateTime {

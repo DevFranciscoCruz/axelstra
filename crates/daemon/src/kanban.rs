@@ -2,9 +2,10 @@
 //! git through `.git/info/exclude` (local, so the user's tracked files are not
 //! touched) because cards are working notes, not project history.
 
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
 use axelstra_core::agents;
 use axelstra_core::card::{self, Card, Meta};
+use axelstra_core::coded;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -21,6 +22,11 @@ pub struct Board {
 pub struct Broken {
     pub file: String,
     pub error: String,
+    /// message code of `error` and its params, for the UI to translate (absent when the error has none)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_params: Option<std::collections::BTreeMap<String, String>>,
 }
 
 fn dir(repo: &Path) -> PathBuf {
@@ -59,7 +65,15 @@ pub fn list(repo: &Path) -> Result<Board> {
                 let parsed = std::fs::read_to_string(&p).map_err(anyhow::Error::from).and_then(|t| card::parse(&t, &p));
                 match parsed {
                     Ok(c) => cards.push(c),
-                    Err(e) => broken.push(Broken { file, error: format!("{e:#}") }),
+                    Err(e) => {
+                        let c = axelstra_core::msg::find(&e);
+                        broken.push(Broken {
+                            file,
+                            error: format!("{e:#}"),
+                            error_code: c.map(|c| c.code.clone()),
+                            error_params: c.map(|c| c.params.clone()),
+                        })
+                    }
                 }
             }
         }
@@ -99,13 +113,18 @@ fn atomic_write(path: &Path, text: &str) -> Result<()> {
 pub fn save(repo: &Path, id: Option<&str>, title: &str, body: &str, status: Option<&str>, extra: &serde_json::Value) -> Result<Card> {
     if let Some(s) = status {
         if !STATUSES.contains(&s) {
-            bail!("unknown status {s:?}");
+            return Err(coded!("card.unknown_status", "unknown status {status:?}", status = s));
         }
     }
     // checked before anything is written: a bad agent must not leave a card file that no longer parses
     if let Some(a) = extra["agent"].as_str() {
         if !agents::ids().contains(&a) {
-            bail!("unknown agent {a:?} (expected one of: {})", agents::ids().join(", "));
+            return Err(coded!(
+                "card.unknown_agent",
+                "unknown agent {agent:?} (expected one of: {expected})",
+                agent = a,
+                expected = agents::ids().join(", ")
+            ));
         }
     }
     let d = dir(repo);
@@ -114,7 +133,11 @@ pub fn save(repo: &Path, id: Option<&str>, title: &str, body: &str, status: Opti
 
     let (mut meta, path) = match id {
         Some(id) => {
-            let c = list(repo)?.cards.into_iter().find(|c| c.meta.id == id).with_context(|| format!("card {id} not found"))?;
+            let c = list(repo)?
+                .cards
+                .into_iter()
+                .find(|c| c.meta.id == id)
+                .ok_or_else(|| coded!("card.not_found", "card {id} not found", id = id))?;
             (c.meta, c.path)
         }
         None => {
@@ -143,7 +166,7 @@ pub fn save(repo: &Path, id: Option<&str>, title: &str, body: &str, status: Opti
     if let Some(deps) = extra["depends_on"].as_array() {
         let deps: Vec<String> = deps.iter().filter_map(|v| v.as_str().map(String::from)).collect();
         if deps.iter().any(|x| !valid_id(x) || *x == meta.id) {
-            bail!("invalid dependency list");
+            return Err(coded!("card.bad_deps", "invalid dependency list"));
         }
         meta.depends_on = deps;
     }
@@ -156,17 +179,19 @@ pub fn save(repo: &Path, id: Option<&str>, title: &str, body: &str, status: Opti
 /// Status-only change: leaves the rest of the file byte-identical.
 pub fn set_status(repo: &Path, id: &str, status: &str) -> Result<()> {
     if !STATUSES.contains(&status) {
-        bail!("unknown status {status:?}");
+        return Err(coded!("card.unknown_status", "unknown status {status:?}", status = status));
     }
-    let c = list(repo)?.cards.into_iter().find(|c| c.meta.id == id).with_context(|| format!("card {id} not found"))?;
+    let c =
+        list(repo)?.cards.into_iter().find(|c| c.meta.id == id).ok_or_else(|| coded!("card.not_found", "card {id} not found", id = id))?;
     card::set_status(&c.path, status)
 }
 
 pub fn delete(repo: &Path, id: &str) -> Result<()> {
     if !valid_id(id) {
-        bail!("invalid card id");
+        return Err(coded!("card.bad_id", "invalid card id"));
     }
-    let c = list(repo)?.cards.into_iter().find(|c| c.meta.id == id).with_context(|| format!("card {id} not found"))?;
+    let c =
+        list(repo)?.cards.into_iter().find(|c| c.meta.id == id).ok_or_else(|| coded!("card.not_found", "card {id} not found", id = id))?;
     std::fs::remove_file(c.path)?;
     Ok(())
 }
@@ -174,6 +199,25 @@ pub fn delete(repo: &Path, id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_carry_message_codes() {
+        let repo = std::env::temp_dir().join(format!("axl-kanban-codes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&repo);
+        std::fs::create_dir_all(&repo).unwrap();
+        axelstra_core::git::must(&repo, &["init", "-q"]).unwrap();
+        let c = |e: anyhow::Error| axelstra_core::msg::find(&e).map(|c| c.code.clone()).unwrap_or_default();
+        assert_eq!(c(save(&repo, None, "T", "b", Some("nope"), &serde_json::json!({})).unwrap_err()), "card.unknown_status");
+        assert_eq!(c(save(&repo, None, "T", "b", None, &serde_json::json!({"agent": "rm -rf"})).unwrap_err()), "card.unknown_agent");
+        assert_eq!(c(set_status(&repo, "ghost", "done").unwrap_err()), "card.not_found");
+        assert_eq!(c(delete(&repo, "../x").unwrap_err()), "card.bad_id");
+        // a broken file is listed with the code of its error
+        std::fs::create_dir_all(repo.join(".kanban")).unwrap();
+        std::fs::write(repo.join(".kanban/x.md"), "no frontmatter").unwrap();
+        let b = list(&repo).unwrap().broken;
+        assert_eq!(b[0].error_code.as_deref(), Some("card.no_frontmatter"));
+        let _ = std::fs::remove_dir_all(&repo);
+    }
 
     #[test]
     fn save_rejects_an_unknown_agent_and_writes_nothing() {

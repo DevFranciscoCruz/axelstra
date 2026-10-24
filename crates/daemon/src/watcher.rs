@@ -175,11 +175,11 @@ pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'sta
         // the OS dropped events (inotify queue overflow, ReadDirectoryChanges buffer): rescan on the client side
         Err(_) => of.store(true, Ordering::SeqCst),
     })
-    .context("create watcher")?;
+    .map_err(|e| axelstra_core::coded!("watch.create_failed", "create watcher: {detail}", detail = e))?;
     let mut watched = std::collections::HashSet::new();
     let dirs = watch_dirs(&root);
     if dirs.is_empty() {
-        anyhow::bail!("nothing to watch in {}", root.display());
+        return Err(axelstra_core::coded!("watch.nothing", "nothing to watch in {path}", path = root.display()));
     }
     for d in dirs {
         if w.watch(&d, RecursiveMode::NonRecursive).is_ok() {
@@ -187,7 +187,7 @@ pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'sta
         }
     }
     if !watched.contains(&root) {
-        anyhow::bail!("could not watch the worktree");
+        return Err(axelstra_core::coded!("watch.failed", "could not watch the worktree"));
     }
     // HEAD/index live in the git directory, which for a linked worktree is outside its own folder
     for d in git_watch_dirs(&gdir) {

@@ -2,7 +2,8 @@
 //! relative paths only, symlinks must not leave it, and writes are atomic and
 //! refuse to overwrite a file that changed on disk since it was read.
 
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
+use axelstra_core::coded;
 use serde::Serialize;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -43,7 +44,7 @@ pub fn hash(bytes: &[u8]) -> String {
 fn rel_ok(rel: &str) -> Result<()> {
     let p = Path::new(rel);
     if p.is_absolute() || p.components().any(|c| !matches!(c, Component::Normal(_) | Component::CurDir)) {
-        bail!("invalid path");
+        return Err(coded!("fs.invalid_path", "invalid path"));
     }
     Ok(())
 }
@@ -54,10 +55,11 @@ fn resolve(wt: &Path, rel: &str) -> Result<PathBuf> {
     rel_ok(rel)?;
     let root = axelstra_core::git::canon(wt)?;
     let full = root.join(rel);
-    let probe = if full.exists() { full.clone() } else { full.parent().context("no parent")?.to_path_buf() };
+    let probe =
+        if full.exists() { full.clone() } else { full.parent().ok_or_else(|| coded!("fs.invalid_path", "no parent"))?.to_path_buf() };
     let real = axelstra_core::git::canon(&probe)?;
     if !real.starts_with(&root) {
-        bail!("path escapes the worktree");
+        return Err(coded!("fs.outside_worktree", "path escapes the worktree"));
     }
     Ok(full)
 }
@@ -66,7 +68,7 @@ fn resolve(wt: &Path, rel: &str) -> Result<PathBuf> {
 pub fn list(wt: &Path, rel: &str) -> Result<Vec<Entry>> {
     let dir = resolve(wt, rel)?;
     if !dir.is_dir() {
-        bail!("not a directory");
+        return Err(coded!("fs.not_dir", "not a directory"));
     }
     let mut out = Vec::new();
     for e in ignore::WalkBuilder::new(&dir).max_depth(Some(1)).hidden(false).build() {
@@ -166,7 +168,7 @@ pub fn code_launch(wt: &Path) -> Result<(PathBuf, Vec<String>)> {
         return Ok((exe, vec![path]));
     }
     if path.chars().any(|c| matches!(c, '&' | '|' | '<' | '>' | '^' | '%' | '"' | '!' | '(' | ')') || c.is_control()) {
-        bail!("could not find Code.exe, and the path has characters the command shell would misread");
+        return Err(coded!("fs.no_code_exe", "could not find Code.exe, and the path has characters the command shell would misread"));
     }
     Ok((PathBuf::from("cmd"), vec!["/d".into(), "/c".into(), "code".into(), path]))
 }
@@ -179,7 +181,7 @@ fn is_git_name(c: &str) -> bool {
 
 fn not_git(rel: &str) -> Result<()> {
     if rel.is_empty() || rel.split(['/', '\\']).any(is_git_name) {
-        bail!("not allowed");
+        return Err(coded!("fs.not_allowed", "not allowed"));
     }
     Ok(())
 }
@@ -202,10 +204,10 @@ fn norm_rel(rel: &str) -> Result<String> {
         })
         .collect();
     if parts.is_empty() {
-        bail!("invalid path");
+        return Err(coded!("fs.invalid_path", "invalid path"));
     }
     if cfg!(windows) && parts.iter().any(|c| win_name_bad(c)) {
-        bail!("not allowed");
+        return Err(coded!("fs.not_allowed", "not allowed"));
     }
     let n = parts.join("/");
     not_git(&n)?;
@@ -250,16 +252,17 @@ fn mutable(wt: &Path, rel: &str) -> Result<PathBuf> {
     for part in &parts[..parts.len() - 1] {
         cur.push(part);
         match std::fs::symlink_metadata(&cur) {
-            Ok(md) if is_link(&md) => bail!("path goes through a link"),
+            Ok(md) if is_link(&md) => return Err(coded!("fs.through_link", "path goes through a link")),
             Ok(_) => {}
             Err(_) => break,
         }
     }
-    let parent = full.parent().context("no parent")?;
+    let parent = full.parent().ok_or_else(|| coded!("fs.invalid_path", "no parent"))?;
     // a parent that does not exist yet (`create` makes it) is checked from its nearest existing ancestor
     let probe = parent.ancestors().find(|a| a.exists()).unwrap_or(&root);
     let real = axelstra_core::git::canon(probe)?;
-    let inner = real.strip_prefix(&root).context("path escapes the worktree")?.to_string_lossy().into_owned();
+    let inner =
+        real.strip_prefix(&root).map_err(|_| coded!("fs.outside_worktree", "path escapes the worktree"))?.to_string_lossy().into_owned();
     if !inner.is_empty() {
         not_git(&inner)?;
     }
@@ -271,7 +274,7 @@ pub fn create(wt: &Path, rel: &str, dir: bool) -> Result<()> {
     let p = mutable(wt, rel)?;
     // a dangling link is "there" too: creating through it would write wherever it points
     if std::fs::symlink_metadata(&p).is_ok() {
-        bail!("already exists");
+        return Err(coded!("fs.exists", "already exists"));
     }
     if dir {
         std::fs::create_dir_all(&p)?;
@@ -288,10 +291,10 @@ pub fn rename(wt: &Path, from: &str, to: &str) -> Result<()> {
     let a = mutable(wt, from)?;
     let b = mutable(wt, to)?;
     if std::fs::symlink_metadata(&a).is_err() {
-        bail!("not found");
+        return Err(coded!("fs.not_found", "not found"));
     }
     if std::fs::symlink_metadata(&b).is_ok() {
-        bail!("already exists");
+        return Err(coded!("fs.exists", "already exists"));
     }
     std::fs::rename(a, b)?;
     Ok(())
@@ -300,7 +303,7 @@ pub fn rename(wt: &Path, from: &str, to: &str) -> Result<()> {
 /// Permanent delete of a file or folder inside the worktree (symlinks are unlinked, not followed).
 pub fn delete(wt: &Path, rel: &str) -> Result<()> {
     let p = mutable(wt, rel)?;
-    let md = std::fs::symlink_metadata(&p).context("not found")?;
+    let md = std::fs::symlink_metadata(&p).map_err(|_| coded!("fs.not_found", "not found"))?;
     if is_link(&md) {
         unlink(&p, &md)?;
     } else if md.is_dir() {
@@ -313,19 +316,19 @@ pub fn delete(wt: &Path, rel: &str) -> Result<()> {
 
 pub fn read(wt: &Path, rel: &str) -> Result<Opened> {
     let p = resolve(wt, rel)?;
-    let md = std::fs::metadata(&p).context("file not found")?;
+    let md = std::fs::metadata(&p).map_err(|_| coded!("fs.not_found", "file not found"))?;
     if !md.is_file() {
-        bail!("not a file");
+        return Err(coded!("fs.not_file", "not a file"));
     }
     if md.len() > MAX_FILE_BYTES {
-        bail!("file is larger than {} MB", MAX_FILE_BYTES >> 20);
+        return Err(coded!("fs.too_big", "file is larger than {mb} MB", mb = MAX_FILE_BYTES >> 20));
     }
     let bytes = std::fs::read(&p)?;
     if bytes.contains(&0) {
-        bail!("binary file");
+        return Err(coded!("fs.binary", "binary file"));
     }
     let h = hash(&bytes);
-    let text = String::from_utf8(bytes).map_err(|_| anyhow::anyhow!("not valid UTF-8 text"))?;
+    let text = String::from_utf8(bytes).map_err(|_| coded!("fs.not_utf8", "not valid UTF-8 text"))?;
     let (text, bom) = match text.strip_prefix('\u{feff}') {
         Some(t) => (t.to_string(), true),
         None => (text, false),
@@ -345,7 +348,7 @@ pub fn stat_hash(wt: &Path, rel: &str) -> Result<Option<String>> {
 
 /// Fresh temp file next to `p`, created with `create_new` under a random name so a planted link is never followed.
 fn tmp_file(p: &Path) -> Result<(PathBuf, std::fs::File)> {
-    let dir = p.parent().context("no parent")?;
+    let dir = p.parent().ok_or_else(|| coded!("fs.invalid_path", "no parent"))?;
     for _ in 0..8 {
         let mut r = [0u8; 8];
         getrandom::getrandom(&mut r).map_err(|e| anyhow::anyhow!("no randomness: {e}"))?;
@@ -357,7 +360,7 @@ fn tmp_file(p: &Path) -> Result<(PathBuf, std::fs::File)> {
             Err(e) => return Err(e.into()),
         }
     }
-    bail!("could not create a temporary file")
+    Err(coded!("fs.tmp_failed", "could not create a temporary file"))
 }
 
 pub fn write(wt: &Path, rel: &str, text: &str, eol: &str, bom: bool, base_hash: Option<&str>) -> Result<Saved> {
@@ -367,14 +370,16 @@ pub fn write(wt: &Path, rel: &str, text: &str, eol: &str, bom: bool, base_hash: 
     if std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink()) {
         p = axelstra_core::git::canon(&p)?;
     }
-    let real = axelstra_core::git::canon(if p.exists() { &p } else { p.parent().context("no parent")? })?;
-    let inner = real.strip_prefix(&root).context("path escapes the worktree")?.to_string_lossy().into_owned();
+    let real =
+        axelstra_core::git::canon(if p.exists() { &p } else { p.parent().ok_or_else(|| coded!("fs.invalid_path", "no parent"))? })?;
+    let inner =
+        real.strip_prefix(&root).map_err(|_| coded!("fs.outside_worktree", "path escapes the worktree"))?.to_string_lossy().into_owned();
     if !inner.is_empty() {
         not_git(&inner)?;
     }
     let mode = std::fs::metadata(&p).ok().map(|m| m.permissions());
     if text.len() as u64 > MAX_FILE_BYTES {
-        bail!("file is larger than {} MB", MAX_FILE_BYTES >> 20);
+        return Err(coded!("fs.too_big", "file is larger than {mb} MB", mb = MAX_FILE_BYTES >> 20));
     }
     // someone (often an agent) changed it since we read it: do not clobber
     if let (Some(base), Ok(disk)) = (base_hash, std::fs::read(&p)) {
@@ -421,6 +426,27 @@ pub fn write(wt: &Path, rel: &str, text: &str, eol: &str, bom: bool, base_hash: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// the errors the editor shows carry message codes (the English text is unchanged)
+    #[test]
+    fn errors_carry_message_codes() {
+        let code = |e: anyhow::Error| axelstra_core::msg::find(&e).map(|c| c.code.clone()).unwrap_or_default();
+        let d = tmpdir("codes");
+        std::fs::write(d.join("a.txt"), "x").unwrap();
+        std::fs::write(d.join("bin.dat"), [0u8, 1, 2]).unwrap();
+        assert_eq!(code(list(&d, "../x").unwrap_err()), "fs.invalid_path");
+        assert_eq!(code(list(&d, "a.txt").unwrap_err()), "fs.not_dir");
+        assert_eq!(code(create(&d, "a.txt", false).unwrap_err()), "fs.exists");
+        assert_eq!(code(create(&d, ".git/x", false).unwrap_err()), "fs.not_allowed");
+        assert_eq!(code(rename(&d, "nope.txt", "b.txt").unwrap_err()), "fs.not_found");
+        assert_eq!(code(delete(&d, "nope.txt").unwrap_err()), "fs.not_found");
+        assert_eq!(code(read(&d, "bin.dat").map(|_| ()).unwrap_err()), "fs.binary");
+        assert_eq!(code(read(&d, "nope.txt").map(|_| ()).unwrap_err()), "fs.not_found");
+        let big = "x".repeat(MAX_FILE_BYTES as usize + 1);
+        let e = write(&d, "big.txt", &big, "lf", false, None).map(|_| ()).unwrap_err();
+        assert_eq!(code(e), "fs.too_big");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     fn tmpdir(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("axl-fsops-{name}-{}", std::process::id()));
