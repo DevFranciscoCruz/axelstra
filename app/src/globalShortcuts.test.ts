@@ -73,6 +73,10 @@ describe("global shortcuts", () => {
     const { press, store, reopenClosed } = await setup();
     press({ key: ",", ctrlKey: true });
     expect(store.showSettings()).toBe(true);
+    // with a dialog open the page shortcuts leave the keys alone
+    press({ key: "T", ctrlKey: true, shiftKey: true });
+    expect(reopenClosed).not.toHaveBeenCalled();
+    store.setShowSettings(false);
     press({ key: "T", ctrlKey: true, shiftKey: true });
     expect(reopenClosed).toHaveBeenCalledTimes(1);
     press({ key: "F", ctrlKey: true, shiftKey: true });
