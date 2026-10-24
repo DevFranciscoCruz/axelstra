@@ -61,7 +61,8 @@ fn orphan_of_ours(_pid: u32) -> bool {
 /// "descends from the daemon" covers what left its session's process group.
 #[cfg(unix)]
 fn orphan_of_ours(pid: u32) -> bool {
-    axelstra_core::procs::snapshot().descendants(&[std::process::id()]).contains(&pid)
+    // the daemon itself is the root of that tree, not an orphan of it (an in-process client is not an agent)
+    pid != std::process::id() && axelstra_core::procs::snapshot().descendants(&[std::process::id()]).contains(&pid)
 }
 
 /// Makes the daemon the adopter of orphaned descendants (Linux), so a process that double-forks out of its session's

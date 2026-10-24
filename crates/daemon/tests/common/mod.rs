@@ -15,11 +15,8 @@ static SEQ: AtomicU32 = AtomicU32::new(0);
 /// The temp data dir of this test binary (created, env set).
 pub fn data_dir() -> PathBuf {
     DIR.get_or_init(|| {
-        let d = std::env::temp_dir().join(format!(
-            "axelstra-test-{}-{}",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("t").replace(':', "")
-        ));
+        // short: a Unix socket path is limited to ~104 bytes (SUN_LEN) and the tests append their own suffix
+        let d = std::env::temp_dir().join(format!("ax-{}", std::process::id()));
         std::fs::create_dir_all(&d).expect("create test data dir");
         std::env::set_var("AXELSTRA_DATA_DIR", &d);
         std::env::set_var("AXELSTRA_TESTING", "1");
