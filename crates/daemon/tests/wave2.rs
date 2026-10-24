@@ -26,7 +26,7 @@ const NEW_METHODS: &[&str] = &[
 ];
 
 #[test]
-fn one_daemon_serves_every_new_method_and_reports_proto_19() {
+fn one_daemon_serves_every_new_method_and_reports_proto_20() {
     let pipe = format!("{}-wave2-{}", common::base_pipe(), std::process::id());
     let token = "d".repeat(32);
     let (p, t) = (pipe.clone(), token.clone());
@@ -42,7 +42,7 @@ fn one_daemon_serves_every_new_method_and_reports_proto_19() {
     common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();
     assert_eq!(PROTO, 20, "wave 2 merged as 18; 19 added host.info, host.browse, hosts and agent-aware hooks.*; the stall watchdog (stalled, stall_minutes) makes 20");
-    assert_eq!(c.proto, 19);
+    assert_eq!(c.proto, 20);
     // bogus arguments: any answer is fine except "unknown method" (the daemon lacks it) or an agent refusal
     for m in NEW_METHODS {
         if let Err(e) = c.call(m, json!({"project": "x", "worktree": "x", "path": "x"})) {
