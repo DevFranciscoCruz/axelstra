@@ -159,14 +159,16 @@ impl Registry {
         let mut v = pending.clone();
         let mut ids: Vec<_> = specs.keys().copied().collect();
         ids.sort();
-        v.extend(ids.iter().map(|i| specs[i].clone()));
+        // a session that reported with `axelstra done` is finished: restoring it would only start an agent with nothing to do
+        v.extend(ids.iter().filter(|i| self.bus.finished(**i).is_none()).map(|i| specs[i].clone()));
         let _ = write_json(&self.saved, &v);
     }
 
     fn new(store: std::path::PathBuf, pipe: String, token: String) -> Registry {
         let saved = store.with_file_name("sessions.json");
         // a corrupt sessions.json is moved to sessions.json.bad, so the first persist cannot wipe it
-        let pending = read_json::<Vec<Value>>(&saved).ok().flatten().unwrap_or_default();
+        let mut pending = read_json::<Vec<Value>>(&saved).ok().flatten().unwrap_or_default();
+        prune_dead_pending(&saved, &mut pending);
         let audit = crate::audit::Audit::new(Some(saved.with_file_name("audit.log")));
         Registry {
             next: AtomicU32::new(0),
@@ -389,6 +391,33 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
 
 /// True when `path` is `root` or lies below it, comparing whole path components (`/a/wt-2` is not inside `/a/wt`).
 /// Both are already normalized (forward slashes, lowercase).
+/// False when a saved session points at folders that are all gone (a deleted worktree): it cannot be restored.
+/// A record with no folder at all (a plain shell) counts as alive.
+fn rec_alive(rec: &Value) -> bool {
+    let dirs: Vec<&str> = [rec["meta"]["worktree"].as_str(), rec["cwd"].as_str()].into_iter().flatten().filter(|d| !d.is_empty()).collect();
+    dirs.is_empty() || dirs.iter().any(|d| std::path::Path::new(d).exists())
+}
+
+/// One-off clean-up at start: sessions saved for worktrees that no longer exist are dropped, so a restart does not
+/// try to bring back dozens of dead agents. The file as it was is copied to `backups/` first.
+fn prune_dead_pending(saved: &std::path::Path, pending: &mut Vec<Value>) {
+    if pending.iter().all(rec_alive) {
+        return;
+    }
+    if let (Some(dir), Ok(ts)) = (saved.parent(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)) {
+        let backups = dir.join("backups");
+        if std::fs::create_dir_all(&backups).is_ok() {
+            let _ = std::fs::copy(saved, backups.join(format!("sessions-before-prune-{}.json", ts.as_secs())));
+        }
+    }
+    pending.retain(rec_alive);
+    let _ = write_json(saved, &*pending);
+}
+
+/// The most agents a single `session.pending` hands out; the rest wait for the next restore, so a restart never
+/// starts dozens of agents at once.
+const RESTORE_BATCH: usize = 8;
+
 fn within(path: &str, root: &str) -> bool {
     std::path::Path::new(path).starts_with(root)
 }
@@ -721,7 +750,8 @@ fn spawn_data_watch(reg: Arc<Registry>) {
             let hit = |ev: &notify::Result<notify::Event>| {
                 ev.as_ref().is_ok_and(|e| {
                     // reading the file (inotify reports it) is not a change
-                    !matches!(e.kind, notify::EventKind::Access(_)) && e.paths.iter().any(|p| p.file_name().is_some_and(|n| n == "dispatch.json"))
+                    !matches!(e.kind, notify::EventKind::Access(_))
+                        && e.paths.iter().any(|p| p.file_name().is_some_and(|n| n == "dispatch.json"))
                 })
             };
             if !hit(&ev) {
@@ -1621,6 +1651,23 @@ mod registry_tests {
         assert_eq!(std::fs::read_to_string(bad).unwrap(), "[{ broken");
         let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("sessions.json")).unwrap()).unwrap();
         assert_eq!(saved, json!({"v": 1, "data": []}));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sessions_of_deleted_worktrees_are_pruned_at_start_after_a_backup() {
+        let dir = std::env::temp_dir().join(format!("axl-reg-prune-{}", std::process::id()));
+        let alive = dir.join("wt-alive");
+        std::fs::create_dir_all(&alive).unwrap();
+        let rec = |w: &std::path::Path| json!({"program": "x", "cwd": w.to_string_lossy(), "meta": {"worktree": w.to_string_lossy()}});
+        let gone = dir.join("wt-gone");
+        write_json(&dir.join("sessions.json"), &vec![rec(&alive), rec(&gone), rec(&gone)]).unwrap();
+        let reg = Registry::new(dir.join("projects.json"), "p".into(), "t".into());
+        assert_eq!(reg.pending.lock_recover().len(), 1);
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("sessions.json")).unwrap()).unwrap();
+        assert_eq!(saved["data"].as_array().unwrap().len(), 1);
+        let kept = std::fs::read_dir(dir.join("backups")).unwrap().count();
+        assert_eq!(kept, 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

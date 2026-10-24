@@ -272,7 +272,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "session.pending" => {
             let sid_dir = reg.saved.with_file_name("sid");
-            let mut v = reg.pending.lock_recover().clone();
+            // entries whose worktree was deleted meanwhile are dropped; at most RESTORE_BATCH are handed out
+            let mut v: Vec<Value> = reg.pending.lock_recover().clone();
+            let before = v.len();
+            v.retain(rec_alive);
+            if v.len() != before {
+                *reg.pending.lock_recover() = v.clone();
+                reg.persist();
+            }
+            v.truncate(RESTORE_BATCH);
             for rec in v.iter_mut() {
                 // the agent may have started a new conversation (/clear) since: resume the latest one
                 let Some(key) = rec["meta"]["key"].as_str().map(String::from) else { continue };
