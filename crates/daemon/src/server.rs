@@ -16,6 +16,7 @@ mod files;
 mod messaging;
 mod misc;
 mod orchestration;
+mod origin;
 mod session;
 mod vcs;
 mod worktrees;
@@ -534,6 +535,7 @@ pub async fn serve(pipe: String, token: String) -> Result<()> {
 
 /// Same as `serve`, with an explicit projects file (tests must not touch the user's).
 pub async fn serve_with_store(pipe: String, token: String, store: std::path::PathBuf) -> Result<()> {
+    origin::adopt_orphans();
     let reg = Arc::new(Registry::new(store, pipe.clone(), token.clone()));
     // Claude Code hook: records the agent's current conversation id (it changes on /clear), keyed by AXELSTRA_KEY
     let dir = reg.saved.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
@@ -577,7 +579,8 @@ async fn accept_loop(pipe: &str, reg: Arc<Registry>, token: String) -> Result<()
         }
         let conn = server;
         server = next_instance(&make).await;
-        tokio::spawn(handle(conn, reg.clone(), token.clone()));
+        let peer = origin::pipe_peer(&conn);
+        tokio::spawn(handle(conn, reg.clone(), token.clone(), peer));
     }
 }
 
@@ -617,7 +620,8 @@ async fn accept_loop(path: &str, reg: Arc<Registry>, token: String) -> Result<()
     loop {
         match listener.accept().await {
             Ok((conn, _)) => {
-                tokio::spawn(handle(conn, reg.clone(), token.clone()));
+                let peer = origin::socket_peer(&conn);
+                tokio::spawn(handle(conn, reg.clone(), token.clone(), peer));
             }
             Err(e) => {
                 eprintln!("accept failed: {e}");
@@ -689,6 +693,8 @@ struct ConnState {
     cli: bool,
     /// set by a `hello` that presented a session's capability token: such a connection has role=agent, and is that session
     agent: Option<u32>,
+    /// process id of the client end, where the OS tells it: `hello` classifies the connection by it (see `origin`)
+    peer: Option<u32>,
     subs: HashMap<u32, Arc<AtomicBool>>,
 }
 
@@ -713,6 +719,7 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
                 authed: &mut c.authed,
                 cli: &mut c.cli,
                 agent: &mut c.agent,
+                peer: c.peer,
                 token: &token2,
                 after: &mut after,
             })
@@ -756,7 +763,7 @@ fn write_input(s: &Session, data: &[u8]) -> bool {
     }
 }
 
-async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Registry>, token: String) {
+async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Registry>, token: String, peer: Option<u32>) {
     reg.clients.fetch_add(1, Ordering::SeqCst);
     let _guard = ClientGuard(reg.clone());
     let (mut rd, mut wr) = tokio::io::split(pipe);
@@ -769,7 +776,7 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
         }
     });
 
-    let st = Arc::new(Mutex::new(ConnState::default()));
+    let st = Arc::new(Mutex::new(ConnState { peer, ..Default::default() }));
     let mut authed = false;
     // calls run in order on one worker (a client may pipeline `spawn` then `attach`), but off the reader
     let (call_tx, mut call_rx) = mpsc::channel::<Req>(CALL_QUEUE);
@@ -997,6 +1004,7 @@ struct Ctx<'a> {
     authed: &'a mut bool,
     cli: &'a mut bool,
     agent: &'a mut Option<u32>,
+    peer: Option<u32>,
     token: &'a str,
     after: &'a mut Vec<Box<dyn FnOnce() + Send>>,
 }

@@ -14,7 +14,9 @@ pub const PROTO: u64 = 15;
 
 /// Oldest daemon the app accepts for security reasons, whatever its `PROTO`: bump it when a release fixes something in
 /// the daemon that must not keep running after an update. The app restarts a daemon that reports less (or nothing).
-pub const SECURITY_MIN: u64 = 1;
+/// 2: roles come from the process on the other end of a connection (S3b), not from the token it presents; a daemon
+/// below this still trusts any holder of the token file as the user.
+pub const SECURITY_MIN: u64 = 2;
 
 /// Identifies this build. `hello` and `ping` report it, so an app can tell a daemon left over from an older release.
 pub const BUILD_ID: &str = concat!(env!("CARGO_PKG_VERSION"), "+", env!("CARGO_PKG_NAME"));
