@@ -79,6 +79,8 @@ export const S = {
   diagNoneMissing: "Nenhuma",
 
   cancel: "Cancelar",
+  /** names of the known agent CLIs, by key; the others show their key */
+  agentNames: { claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI" } as Record<string, string>,
   toolFailed: "Uma ferramenta externa (git, gh ou docker) falhou. Mensagem original:",
 
   status: {
@@ -166,7 +168,7 @@ export const S = {
     rightWidth: "Largura do painel direito",
     splitWidth: "Largura do terminal dividido",
     newAgent: "Novo agente",
-    newAgentOf: (agent: string) => `Novo agente (${agent})`,
+    newAgentOf: (agent: string) => `Novo agente (${S.agentNames[agent] ?? agent})`,
     agent: "Agente",
     open: "Abrir",
     showProjects: "Mostrar projetos (Ctrl+B)",

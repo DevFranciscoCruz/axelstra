@@ -158,6 +158,11 @@ export function Sidebar() {
       let w;
       try {
         w = await createWorktree(projectId, name);
+      } catch (e) {
+        // a failed create gives the dialog back with the name still typed; run() shows the error
+        setNewName(name);
+        setCreating(projectId);
+        throw e;
       } finally {
         setPendingWt(null);
       }

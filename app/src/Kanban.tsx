@@ -359,8 +359,7 @@ export function Kanban(props: { project: string }) {
                 <Field label={P.kanban.agent} hint={agentWarning(agents(), d().agent) || undefined}>
                   <Select
                     value={d().agent}
-                    iconOnly
-                  options={agentOptions(agents(), d().agent)}
+                    options={agentOptions(agents(), d().agent)}
                     onChange={(v) => setDraft({ ...d(), agent: v })}
                   />
                 </Field>
