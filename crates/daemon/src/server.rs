@@ -235,8 +235,8 @@ fn new_agent_token() -> Option<String> {
 fn agent_forbidden(method: &str, p: &Value) -> bool {
     match method {
         "computer.enable" => p["on"].as_bool() == Some(true),
-        "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" | "notices.take" | "audit.list" | "backup.export"
-        | "backup.restore" => true,
+        "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" | "notices.take" | "audit.list"
+        | "backup.export" | "backup.restore" => true,
         _ => false,
     }
 }
@@ -292,7 +292,8 @@ fn apply_ui_state(saved: &mut Value, patch: &Value) -> Result<()> {
     let patch = patch.as_object().ok_or_else(|| anyhow::anyhow!("ui must be an object of strings"))?;
     let mut ui = saved["ui"].as_object().cloned().unwrap_or_default();
     for (k, v) in patch {
-        let key_ok = k.len() <= 64 && k.starts_with("axelstra.") && k.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+        let key_ok =
+            k.len() <= 64 && k.starts_with("axelstra.") && k.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
         if !key_ok {
             anyhow::bail!("ui key {k:?} is not allowed");
         }
