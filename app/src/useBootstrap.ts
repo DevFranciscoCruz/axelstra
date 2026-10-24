@@ -1,7 +1,8 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { createEffect, on, onCleanup, onMount } from "solid-js";
-import { agentsList, computerStatus, listPorts, restoreSessions, stopWatch, storeNotices, watchWorktree } from "./api";
+import { agentsList, computerStatus, janitorEvents, listPorts, restoreSessions, stopWatch, storeNotices, watchWorktree } from "./api";
 import { errorText } from "./appError";
+import { handleJanitorEvents } from "./janitorEvents";
 import { createPoller } from "./poller";
 import { S, count } from "./strings";
 import { onTauriEvent } from "./tauriEvents";
@@ -125,6 +126,14 @@ export function useBootstrap() {
     // safety net only: real changes arrive as daemon events (see watchWorktree below)
     const mid = createPoller(refreshChanges, 60000);
     const slow = createPoller(refreshProjects, 60000);
+    // worktrees the daemon's automatic sweep removed: tell the user and drop them from the sidebar
+    const janitor = createPoller(
+      () =>
+        janitorEvents()
+          .then((ev) => (handleJanitorEvents(ev) > 0 ? refreshProjects() : undefined))
+          .catch((e) => console.debug("janitor.events", e)),
+      15000,
+    );
     const onFocus = () => {
       void refreshChanges();
       void refreshProjects();
@@ -134,6 +143,7 @@ export function useBootstrap() {
       fast.stop();
       mid.stop();
       slow.stop();
+      janitor.stop();
       stopWatch();
       window.removeEventListener("focus", onFocus);
       unlisten.forEach((u) => u());

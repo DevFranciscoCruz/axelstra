@@ -667,3 +667,7 @@ export const envTools = () => callOr<{ tools: EnvTool[] } | null>("env.tools", {
 export const backupExport = () => callOr<{ path: string } | null>("backup.export", {}, null);
 /** Restores the backup folder `path` written by backupExport; null on a daemon without it. */
 export const backupRestore = (path: string) => callOr<{ restored: string[] } | null>("backup.restore", { path }, null);
+
+export type JanitorEvent = { project: string; path: string; branch: string; into: string; why: string; at: number };
+/** Worktrees the automatic sweep removed since the last call (take semantics); an older daemon has none. */
+export const janitorEvents = () => callOr<{ events: JanitorEvent[] }>("janitor.events", {}, { events: [] }).then((r) => r.events ?? []);
