@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn call(c: &mut Ctx) -> Result<Value> {
     let req = c.req;
     let (p, reg) = (c.p, c.reg);
-    let (authed, cli, agent) = (&mut *c.authed, &mut *c.cli, &mut *c.agent);
+    let (authed, cli, agent, peer) = (&mut *c.authed, &mut *c.cli, &mut *c.agent, c.peer);
     let token = c.token;
     match req.method.as_str() {
         "hello" => {
@@ -19,8 +19,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             }
             reg.bad_hellos.store(0, Ordering::SeqCst);
             *authed = true;
-            *agent = agent_session;
-            *cli = agent_session.is_some() || p.get("client").and_then(Value::as_str) == Some("cli");
+            // the token proves the caller may use the daemon; what the caller is comes from the process on the other end.
+            // A process inside an agent's tree is that agent however it said hello: the master token it read from
+            // the data dir (or its env) buys it nothing. The credential only names the session for a caller the OS
+            // cannot examine, and never overrides what the OS says.
+            *agent = reg.origin_of(peer).or(agent_session);
+            *cli = agent.is_some() || p.get("client").and_then(Value::as_str) == Some("cli");
             Ok(hello_info())
         }
         "agent.status" => {
