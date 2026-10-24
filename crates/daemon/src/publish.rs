@@ -199,7 +199,11 @@ fn run_agent(prompt: &str) -> Result<String> {
         while !t.is_finished() && std::time::Instant::now() < end {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        if t.is_finished() { String::from_utf8_lossy(&t.join().unwrap_or_default()).into_owned() } else { String::new() }
+        if t.is_finished() {
+            String::from_utf8_lossy(&t.join().unwrap_or_default()).into_owned()
+        } else {
+            String::new()
+        }
     };
     let (out, err) = (join(out_t), join(err_t));
     if !status.success() {

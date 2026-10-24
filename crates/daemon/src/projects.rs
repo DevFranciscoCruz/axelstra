@@ -272,7 +272,10 @@ pub fn worktree_rename(p: &Project, path: &str, name: &str, busy: bool) -> Resul
     if !axelstra_core::card::valid_slug(name) {
         bail!("nome inválido: usa só letras, números, ponto, _ e - (sem começar por ponto)");
     }
-    let wt = git::worktree_list(repo)?.into_iter().find(|w| axelstra_core::paths::same(&w.path, path)).context("not a worktree of this project")?;
+    let wt = git::worktree_list(repo)?
+        .into_iter()
+        .find(|w| axelstra_core::paths::same(&w.path, path))
+        .context("not a worktree of this project")?;
     if wt.is_main {
         bail!("cannot rename the main worktree");
     }
@@ -302,7 +305,10 @@ pub fn worktree_rename(p: &Project, path: &str, name: &str, busy: bool) -> Resul
 
 pub fn worktree_remove(p: &Project, path: &str) -> Result<()> {
     let repo = Path::new(&p.path);
-    let wt = git::worktree_list(repo)?.into_iter().find(|w| axelstra_core::paths::same(&w.path, path)).context("not a worktree of this project")?;
+    let wt = git::worktree_list(repo)?
+        .into_iter()
+        .find(|w| axelstra_core::paths::same(&w.path, path))
+        .context("not a worktree of this project")?;
     if wt.is_main {
         bail!("cannot remove the main worktree");
     }
@@ -656,11 +662,19 @@ mod rename_tests {
     fn a_pull_request_worktree_gets_no_ignored_files_and_a_warning() {
         let (root, p) = setup("pr-env");
         let repo = Path::new(&p.path);
-        std::fs::write(repo.join(".gitignore"), ".env
-").unwrap();
+        std::fs::write(
+            repo.join(".gitignore"),
+            ".env
+",
+        )
+        .unwrap();
         std::fs::write(repo.join(".env"), "SECRET=1").unwrap();
-        std::fs::write(repo.join(crate::wtenv::INCLUDE_FILE), ".env
-").unwrap();
+        std::fs::write(
+            repo.join(crate::wtenv::INCLUDE_FILE),
+            ".env
+",
+        )
+        .unwrap();
         git::must(repo, &["add", ".gitignore", ".worktreeinclude"]).unwrap();
         git::must(repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "env"]).unwrap();
         // the repository is its own "origin" and has a pull request ref

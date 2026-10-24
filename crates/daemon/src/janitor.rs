@@ -4,12 +4,12 @@
 
 use crate::projects::{self, Project};
 use anyhow::Result;
+use axelstra_core::exec::Captured;
 use axelstra_core::git;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
-use axelstra_core::exec::Captured;
 
 /// Longest a network call (`git fetch`, `gh`) of the sweep may take; the scheduler loop must not wait on a hung one.
 const NET_TIMEOUT: Duration = Duration::from_secs(30);
