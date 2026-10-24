@@ -92,6 +92,13 @@ fn agent_role_cannot_use_app_only_calls() {
         ("triggers.events", json!({})),
         // it types text into other agents
         ("gh.send_comment", json!({"worktree": "x", "project": "x", "number": 1, "comment_id": 1})),
+        ("budget.check", json!({})),
+        ("budget.events", json!({})),
+        ("settings.set", json!({"budgets": {}})),
+        ("worktree.rebase", json!({"worktree": "x"})),
+        ("workspace.export", json!({"path": "x"})),
+        ("workspace.import_preview", json!({"path": "x"})),
+        ("workspace.import", json!({"path": "x", "mode": "replace"})),
     ] {
         let e = agent.call(m, p).unwrap_err().to_string();
         assert!(e.contains("not allowed to agents"), "{m}: {e}");

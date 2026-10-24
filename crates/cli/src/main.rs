@@ -6,6 +6,9 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "axelstra", about = "Lightweight parallel-agent orchestrator")]
 struct Cli {
+    /// Talk to the daemon of another machine: `wsl:<distro>` or `ssh:[user@]host[:port]` (default: $AXELSTRA_HOST)
+    #[arg(long, global = true)]
+    host: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -14,6 +17,9 @@ struct Cli {
 enum Cmd {
     /// Run the background daemon that owns terminal sessions
     Daemon,
+    /// Relay a client on stdin/stdout to this machine's daemon (what `--host` runs over ssh/wsl; not for typing)
+    #[command(hide = true)]
+    Bridge,
     /// List sessions: id, label, state (working/idle/done), worktree
     Ls {
         #[arg(long)]
@@ -115,6 +121,11 @@ enum Cmd {
     Computer {
         #[command(subcommand)]
         cmd: CompCmd,
+    },
+    /// Export or import the workspace configuration: projects, automations, settings, kanban cards
+    Workspace {
+        #[command(subcommand)]
+        cmd: workspace::WsCmd,
     },
     /// Show or set the maximum number of workers running at once
     Limit { n: Option<usize> },
@@ -380,12 +391,16 @@ mod dispatch;
 mod hook;
 mod lock;
 mod orchcmd;
+mod remote;
 mod startconfirm;
 mod statusline;
+mod workspace;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let host = cli.host;
     match cli.cmd {
+        Cmd::Bridge => remote::bridge()?,
         Cmd::Daemon => {
             use axelstra_daemon::{proto, server};
             #[cfg(target_os = "macos")]
@@ -445,15 +460,14 @@ fn main() -> Result<()> {
         | Cmd::Read { .. }
         | Cmd::Wait { .. }
         | Cmd::Search { .. }) => {
-            use axelstra_daemon::{client::Client, proto};
-            let c = Client::connect_cli(&proto::pipe_name(), &proto::load_or_create_token()?)?;
+            let c = remote::connect(host.as_deref())?;
             ctl::run(cmd, c)?;
         }
         Cmd::Dispatch { cmd } => {
-            use axelstra_daemon::{client::Client, proto};
-            let c = Client::connect_cli(&proto::pipe_name(), &proto::load_or_create_token()?)?;
+            let c = remote::connect(host.as_deref())?;
             dispatch::run(cmd, c)?;
         }
+        Cmd::Workspace { cmd } => workspace::run(cmd, host.as_deref())?,
         Cmd::Lock { name, slots, timeout, command } => std::process::exit(lock::run(&name, slots, timeout, &command)?),
         Cmd::StatuslineTee => statusline::tee()?,
         Cmd::Hook { agent, event } => hook::dispatch(&agent, &event)?,

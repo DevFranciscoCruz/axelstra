@@ -68,7 +68,7 @@ pub fn list(repo: &Path) -> Result<Board> {
     Ok(Board { cards, broken })
 }
 
-fn exclude_kanban(repo: &Path) -> Result<()> {
+pub(crate) fn exclude_kanban(repo: &Path) -> Result<()> {
     let common = axelstra_core::git::common_dir(repo)?;
     let f = common.join("info").join("exclude");
     let cur = std::fs::read_to_string(&f).unwrap_or_default();

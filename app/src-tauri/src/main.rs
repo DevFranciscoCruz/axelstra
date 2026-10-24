@@ -457,6 +457,135 @@ async fn backup_restore_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<
     .map_err(|e| e.to_string())?
 }
 
+/// The workspace file picked for an import and the folder map chosen so far. They live here and not in the webview: the
+/// file and the folders come from the native dialogs, so a compromised page cannot name a file to read or a folder to
+/// register as a project (S4b); the page only chooses mode and conflict handling.
+type WorkspacePick = (Option<String>, Vec<(String, String)>);
+static WORKSPACE_PICK: Mutex<WorkspacePick> = Mutex::new((None, Vec::new()));
+
+/// `workspace.import_preview` of the picked file with the folder map so far, plus the map and the file name for the page.
+fn workspace_preview(st: &State) -> Result<Value, String> {
+    let (file, map) = {
+        let g = WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner());
+        (g.0.clone(), g.1.clone())
+    };
+    let Some(file) = file else { return Err("nenhum ficheiro escolhido".into()) };
+    let pairs: Vec<Value> = map.iter().map(|(o, n)| json!([o, n])).collect();
+    let mut v = with_client(&st.control, false, |c| c.call("workspace.import_preview", json!({"path": file, "map": pairs})))
+        .map_err(|e| format!("{e:#}"))?;
+    v["map"] = Value::Array(pairs);
+    v["file"] = json!(std::path::Path::new(&file).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+    Ok(v)
+}
+
+/// Native "save as" dialog, then `workspace.export` to that file. Returns the daemon's answer, or null when cancelled.
+#[tauri::command]
+async fn workspace_export_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .set_title(&title)
+            .set_file_name("axelstra-workspace.json")
+            .add_filter("Axelstra", &["json"])
+            .blocking_save_file();
+        let Some(path) = picked else { return Ok(Value::Null) };
+        let path = path.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned();
+        with_client(&st.control, false, |c| c.call("workspace.export", json!({"path": path}))).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Native "open" dialog for a workspace file; remembers it and returns its preview (null when cancelled).
+#[tauri::command]
+async fn workspace_import_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = app.dialog().file().set_title(&title).add_filter("Axelstra", &["json"]).blocking_pick_file() else {
+            return Ok(Value::Null);
+        };
+        let path = path.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned();
+        *WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner()) = (Some(path), Vec::new());
+        workspace_preview(&st).inspect_err(|_| *WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner()) = (None, Vec::new()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Native folder pick for the new place of the projects under `old` (a path from the file), then the preview again.
+#[tauri::command]
+async fn workspace_map_pick(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<State>>,
+    title: String,
+    old: String,
+) -> Result<Value, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if old.is_empty() || old.len() > 1024 || WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner()).0.is_none() {
+            return Err("pedido inválido".to_string());
+        }
+        let Some(new) = pick_folder(&app, &title, None)? else { return Ok(Value::Null) };
+        {
+            let mut g = WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner());
+            g.1.retain(|(o, _)| *o != old);
+            if g.1.len() >= 32 {
+                return Err("demasiados mapeamentos".to_string());
+            }
+            g.1.push((old, new));
+        }
+        workspace_preview(&st)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Forgets the folder map and previews the picked file again.
+#[tauri::command]
+async fn workspace_map_clear(state: tauri::State<'_, Arc<State>>) -> Result<Value, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner()).1.clear();
+        workspace_preview(&st)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// `workspace.import` of the picked file with the folder map; the page only says how (`mode`, `conflicts`).
+#[tauri::command]
+async fn workspace_import_apply(state: tauri::State<'_, Arc<State>>, mode: String, conflicts: String) -> Result<Value, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (file, map) = {
+            let g = WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner());
+            (g.0.clone(), g.1.clone())
+        };
+        let Some(file) = file else { return Err("nenhum ficheiro escolhido".to_string()) };
+        let pairs: Vec<Value> = map.iter().map(|(o, n)| json!([o, n])).collect();
+        let r = with_client(&st.control, false, |c| {
+            c.call("workspace.import", json!({"path": file, "mode": mode, "conflicts": conflicts, "map": pairs}))
+        })
+        .map_err(|e| format!("{e:#}"));
+        if r.is_ok() {
+            *WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner()) = (None, Vec::new());
+        }
+        r
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The page closed the import dialog: forget the picked file.
+#[tauri::command]
+fn workspace_import_cancel() {
+    *WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner()) = (None, Vec::new());
+}
+
 /// Typing lag diagnosis: slow steps go to `<data dir>/lag.log` (shared with the daemon's own slow calls).
 fn lag_note(what: &str, took: std::time::Duration) {
     axelstra_daemon::lag::note(what, took, 40);
@@ -903,6 +1032,12 @@ fn main() {
             daemon_call_bg,
             project_add_pick,
             backup_restore_pick,
+            workspace_export_pick,
+            workspace_import_pick,
+            workspace_map_pick,
+            workspace_map_clear,
+            workspace_import_apply,
+            workspace_import_cancel,
             session_write,
             lag_log,
             session_attach,
@@ -1072,6 +1207,11 @@ mod tests {
         assert!(!ALLOWED_METHODS.contains(&"backup.restore"));
         assert!(check_call("project.add", &json!({"path": "/home/x/proj"})).is_err());
         assert!(check_call("backup.restore", &json!({"path": "/tmp/evil"})).is_err());
+        // the workspace file and the folder map come from native dialogs held by the host: the page cannot name them
+        for m in ["workspace.export", "workspace.import_preview", "workspace.import"] {
+            assert!(!ALLOWED_METHODS.contains(&m), "{m}");
+            assert!(check_call(m, &json!({"path": "/tmp/evil"})).is_err(), "{m}");
+        }
         assert!(check_call("project.list", &json!({})).is_ok());
         assert!(check_call("backup.export", &json!({})).is_ok());
     }
