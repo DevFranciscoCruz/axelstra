@@ -3,8 +3,12 @@ import { createPoller } from "./poller";
 import { TokenUsage, agentUsage, worktreeUsage } from "./api";
 import { activeSession, projects, sessions } from "./store";
 import { WtUsage, fmtTokens as fmt, ranked, spentOf, totalOf, usageTip } from "./usageFormat";
-import { Button } from "./ui";
+import { Button, cn } from "./ui";
 import { P } from "./strings.panels";
+import { B } from "./strings.budget";
+import { BudgetMeter } from "./BudgetMeter";
+import { budgetRows, loadBudgets } from "./budgetStore";
+import { rowsFor, worstLevel } from "./budgetLogic";
 
 const [wtUsage, setWtUsage] = createSignal<WtUsage[]>([]);
 let lastLoad = 0;
@@ -15,6 +19,7 @@ export const loadWtUsage = () => {
   const paths = projects().flatMap((p) => p.worktrees.map((w) => w.path));
   if (!paths.length) return;
   lastLoad = Date.now();
+  void loadBudgets(paths);
   void worktreeUsage(paths)
     .then(setWtUsage)
     .catch(() => {
@@ -46,6 +51,9 @@ function WorktreeUsageList() {
   const [open, setOpen] = createSignal(false);
   const rows = createMemo(() => ranked(list()));
   const total = createMemo(() => totalOf(rows()));
+  // the worst budget level anywhere, so the chip shows it without opening the list
+  const level = createMemo(() => worstLevel(budgetRows()));
+  const chipNote = () => (level() === "over" ? B.chipOver : level() === "warn" ? B.chipWarn : "");
   const close = (e: Event) => {
     if (!(e.target as HTMLElement | null)?.closest?.(".wt-usage")) setOpen(false);
   };
@@ -69,7 +77,7 @@ function WorktreeUsageList() {
   return (
     <Show when={rows().length}>
       <span class="wt-usage self-center">
-        <Button ref={btn} variant="link" size="bare" class="cursor-default self-center px-2 text-xs hover:text-muted-foreground" title={wtUsageTip(list())} aria-label={P.usage.perWtTotal(fmt(spentOf(total())))} aria-haspopup="dialog" aria-expanded={open()} onClick={() => setOpen(!open())}>
+        <Button ref={btn} variant="link" size="bare" class={cn("cursor-default self-center px-2 text-xs hover:text-muted-foreground", level() === "over" && "text-[var(--err)]", level() === "warn" && "text-[var(--warn)]")} title={[wtUsageTip(list()), chipNote()].filter(Boolean).join("\n")} aria-label={[P.usage.perWtTotal(fmt(spentOf(total()))), chipNote()].filter(Boolean).join(". ")} aria-haspopup="dialog" aria-expanded={open()} onClick={() => setOpen(!open())}>
           Σ {fmt(spentOf(total()))}
         </Button>
         <Show when={open()}>
@@ -77,10 +85,17 @@ function WorktreeUsageList() {
             <div class="wup-note">{P.usage.note}</div>
             <For each={rows()}>
               {(u) => (
+                <>
                 <div class="wup-row" title={P.usage.rowTip(u.worktree, u.input.toLocaleString(), u.output.toLocaleString(), u.cache_write.toLocaleString(), u.cache_read.toLocaleString(), u.claude_sessions, u.codex_sessions)}>
                   <span class="wup-name">{wtName(u.worktree)}</span>
                   <span>{fmt(spentOf(u))}</span>
                 </div>
+                <Show when={rowsFor(budgetRows(), u.worktree).length}>
+                  <div class="wup-bud">
+                    <For each={rowsFor(budgetRows(), u.worktree)}>{(r) => <BudgetMeter row={r} name={wtName(u.worktree)} />}</For>
+                  </div>
+                </Show>
+                </>
               )}
             </For>
             <div class="wup-row wup-total">

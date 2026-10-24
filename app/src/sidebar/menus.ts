@@ -22,9 +22,11 @@ import type { SidebarActions } from "./actions";
 const T = P.sidebar.menu;
 
 type Wt = { path: string; branch: string | null; is_main: boolean; parent?: string | null };
-type Proj = { id: string; name: string; setup?: string | null; worktrees?: Wt[] };
+type Proj = { id: string; name: string; setup?: string | null; worktrees?: Wt[]; default_branch?: string | null };
 
-export type MenuDeps = Pick<SidebarActions, "run" | "copy" | "sleepWorktree" | "dropWorktree" | "dropProject"> & {
+export type MenuDeps = Pick<SidebarActions, "run" | "copy" | "sleepWorktree" | "dropWorktree" | "dropProject" | "rebaseWorktree"> & {
+  /** reloads what the rebase badge shows */
+  afterRebase: () => void;
   /** asks for the worktree-rename dialog */
   rename: (path: string, current: string, label: string) => void;
   newWorktree: (projectId: string) => void;
@@ -90,6 +92,12 @@ export const worktreeMenu = (d: MenuDeps, p: Proj, w: Wt, label: string, below: 
   { separator: true },
   { label: isPinned(w.path) ? T.unpin : T.pin, icon: "pin", run: () => togglePin(w.path) },
   { label: T.markUnread, icon: "circleHalf", run: () => setAttention((cur) => new Set(cur).add(norm(w.path))) },
+  {
+    label: P.sidebar.rebase.menu(p.default_branch ?? "main"),
+    icon: "branch",
+    disabled: w.is_main || !w.branch,
+    run: () => d.rebaseWorktree(p.id, w.path, label, p.default_branch ?? "main", d.afterRebase),
+  },
   { separator: true },
   { label: T.sleep, icon: "moon", run: () => d.sleepWorktree(w.path, label) },
   {

@@ -1,7 +1,7 @@
 import { createPoller } from "./poller";
 import { askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
-import { getSettings, detectPackageManagers, createWorktree, launchDefaultAgent, setProjectSetup, dispatchOverlaps, worktreeRename } from "./api";
+import { getSettings, detectPackageManagers, createWorktree, launchDefaultAgent, setProjectSetup, dispatchOverlapFiles, worktreeRename } from "./api";
 import { groupRunning, isFinished, layout, wtKey } from "./wtGroups";
 import { ProjectHead, SetupEditor } from "./sidebar/ProjectHead";
 import { CreateWorktree } from "./sidebar/CreateWorktree";
@@ -10,7 +10,7 @@ import { FinishedRow, WorktreeRow } from "./sidebar/WorktreeRow";
 import { createSidebarActions } from "./sidebar/actions";
 import { MenuDeps, projectMenu, worktreeMenu } from "./sidebar/menus";
 import { pickProject } from "./projectActions";
-import { overlapsOf, overlapTitle } from "./agentRow";
+import { overlapCount, overlapEntries, overlapTitle, type OverlapFiles } from "./rebase";
 import { NoteView } from "./NoteView";
 import { S } from "./strings";
 import { P } from "./strings.panels";
@@ -96,8 +96,8 @@ export function Sidebar() {
   const [doneOpen, setDoneOpen] = createSignal<ReadonlySet<string>>(new Set());
   const runningIn = (path: string) => sessionsOf(path).filter((s) => s.running).length;
   // worktrees that edit some of the same files (the daemon answers; until it can, the badge simply stays hidden)
-  const [overlaps, setOverlaps] = createSignal<Record<string, string[]> | null>(null);
-  const pollOverlaps = () => dispatchOverlaps().then(setOverlaps, () => setOverlaps(null));
+  const [overlaps, setOverlaps] = createSignal<OverlapFiles | null>(null);
+  const pollOverlaps = () => dispatchOverlapFiles().then(setOverlaps, () => setOverlaps(null));
   void pollOverlaps();
   const overlapPoller = createPoller(pollOverlaps, 20000);
   onCleanup(overlapPoller.stop);
@@ -231,6 +231,7 @@ export function Sidebar() {
       setWtRenameErr("");
       setRenamingWt({ path, name: label });
     },
+    afterRebase: () => void pollOverlaps(),
     newWorktree: (id) => setCreating(id),
     runSetup: (projectId, path, setup) =>
       run(async () => {
@@ -306,7 +307,8 @@ export function Sidebar() {
                       folded={kids() > 0 && folded().has(wtKey(w.path))}
                       groupLive={groupRunning(ri()?.members ?? [], runningIn)}
                       topic={topic(w.path)}
-                      overlap={overlapTitle(overlapsOf(overlaps(), w.path))}
+                      overlap={overlapTitle(overlapEntries(overlaps(), w.path))}
+                      overlapCount={overlapCount(overlapEntries(overlaps(), w.path))}
                       agentsHidden={agentsHidden().has(norm(w.path))}
                       menu={(label) => worktreeMenu(menuDeps, p, w, label, ri()?.members)}
                       onOpen={() => void openWorktree(w.path)}

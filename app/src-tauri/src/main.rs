@@ -217,15 +217,21 @@ const ALLOWED_METHODS: &[&str] = &[
     "docker.volumes",
     "agents.list",
     "git.checks",
+    "git.timeline",
     "git.merge",
     "project.env_preview",
     "worktree.rename",
     "dispatch.overlaps",
+    "dispatch.overlap_files",
+    "worktree.rebase",
     "notes.read",
     "notes.export",
     "worktree.overview",
     "worktree.sweep",
     "janitor.events",
+    "budget.status",
+    "budget.check",
+    "budget.events",
     "notes.read_file",
     "notes.worktree",
     "worktree.set_parent",
@@ -729,14 +735,17 @@ fn windows_shell(setting: &str, has_pwsh: bool) -> (String, Vec<String>) {
 async fn diagnostics(state: tauri::State<'_, Arc<State>>) -> Result<Value, String> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let daemon = with_client(&st.bg, true, |c| Ok((c.proto, c.instance))).ok();
+        let daemon = with_client(&st.bg, true, |c| Ok((c.proto, c.instance, c.build.clone(), c.security))).ok();
         let lag = proto::data_dir().join("lag.log");
         json!({
             "app_version": env!("CARGO_PKG_VERSION"),
             "app_proto": proto::PROTO,
             "daemon_connected": daemon.is_some(),
-            "daemon_proto": daemon.map(|d| d.0),
-            "daemon_instance": daemon.map(|d| d.1),
+            "daemon_proto": daemon.as_ref().map(|d| d.0),
+            "daemon_instance": daemon.as_ref().map(|d| d.1),
+            "daemon_build": daemon.as_ref().map(|d| d.2.clone()),
+            "daemon_security": daemon.as_ref().map(|d| d.3),
+            "app_security_min": proto::SECURITY_MIN,
             "data_dir": proto::data_dir().to_string_lossy(),
             "lag_log": lag.to_string_lossy(),
             "lag_log_bytes": std::fs::metadata(&lag).map(|m| m.len()).unwrap_or(0),

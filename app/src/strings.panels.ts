@@ -105,6 +105,24 @@ export const P = {
     removeLost: (risks: string[]) =>
       risks.length ? `\n\nVais perder: ${risks.join("; ")}.` : "\n\nNão há alterações nem commits por enviar.",
     removeTitle: "Remover worktree",
+    rebase: {
+      menu: (base: string) => `Rebase sobre ${base}…`,
+      title: "Rebase",
+      ok: "Fazer rebase",
+      ask: (name: string, base: string) =>
+        `Fazer rebase de "${name}" sobre ${base}?\n\nOs commits do worktree são reescritos por cima de ${base}. Se houver conflitos, o rebase é cancelado e o branch fica como estava.`,
+      busy: (name: string) => `"${name}" tem um agente ou terminal a trabalhar: espera que fique inativo.`,
+      dirty: (name: string) => `"${name}" tem alterações por guardar: faz commit antes do rebase.`,
+      running: (name: string, base: string) => `A fazer rebase de "${name}" sobre ${base}…`,
+      done: (name: string, base: string) => `"${name}" está agora por cima de ${base}.`,
+      upToDate: (name: string, base: string) => `"${name}" já estava por cima de ${base}.`,
+      conflict: (name: string, files: string[], restored: boolean) =>
+        `Conflitos no rebase de "${name}" (${files.join(", ")}). ${restored ? "O branch ficou como estava." : "Verifica o estado do branch: não foi possível repô-lo."}`,
+      failed: (name: string, e: string) => `Não foi possível fazer rebase de "${name}": ${e}`,
+      overlapWith: (name: string, files: string[], more: number) =>
+        `${name}: ${files.join(", ")}${more > 0 ? ` e mais ${more}` : ""}`,
+      overlapTip: (lines: string[]) => `Edita os mesmos ficheiros que:\n${lines.join("\n")}`,
+    },
     // menus
     menu: {
       refresh: "Atualizar",
@@ -465,6 +483,27 @@ export const P = {
     nothingAhead: (b: string) => `Nada à frente de ${b}`,
     noCommits: "Sem commits",
   },
+  timeline: {
+    tab: "Linha do tempo",
+    title: "Linha do tempo do worktree",
+    refresh: "Atualizar",
+    withCi: "Incluir CI",
+    withCiTip: "Pergunta ao GitHub pelo estado dos checks (pode demorar)",
+    copy: "Copiar markdown",
+    copied: "Linha do tempo copiada.",
+    nothing: "Escolhe um worktree.",
+    empty: "Sem eventos neste worktree.",
+    events: "Eventos",
+    branch: "Ramo",
+    base: "base",
+    tokensLabel: "Tokens",
+    ciLabel: "CI",
+    exportTitle: (wt: string) => `Linha do tempo: ${wt}`,
+    tokens: (total: string, input: string, output: string, cache: string) => `${total} gastos (entrada ${input} · saída ${output} · cache lida ${cache})`,
+    kinds: { commit: "commit", merge: "merge", integrated: "integrado", report: "relatório" } as Record<string, string>,
+    ci: { pass: "a passar", fail: "a falhar", pending: "a correr", none: "sem checks" } as Record<string, string>,
+  },
+
   pulls: {
     checks: { pass: "Checks a passar", fail: "Checks a falhar", pending: "Checks a correr" } as Record<string, string>,
     review: { approved: "aprovado", changes: "alterações pedidas", review: "falta revisão" } as Record<string, string>,

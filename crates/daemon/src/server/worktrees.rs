@@ -159,6 +159,16 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let f = reg.saved.with_file_name("dispatch.json");
             Ok(tokio::task::block_in_place(|| crate::overlaps::overlaps(&reg.store, &f)))
         }
+        "dispatch.overlap_files" => {
+            let f = reg.saved.with_file_name("dispatch.json");
+            Ok(tokio::task::block_in_place(|| crate::overlaps::overlap_files(&reg.store, &f)))
+        }
+        "worktree.rebase" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
+            let busy = reg.worktree_working(path);
+            tokio::task::block_in_place(|| crate::rebase::rebase(std::path::Path::new(&pr.path), path, busy))
+        }
         "ports.list" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             let norm = |s: &str| s.replace('\\', "/").to_ascii_lowercase();
