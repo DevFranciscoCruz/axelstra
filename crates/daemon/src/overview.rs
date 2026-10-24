@@ -54,7 +54,10 @@ fn rows(p: &Project, busy: &dyn Fn(&str) -> bool) -> Vec<Row> {
     let repo = Path::new(&p.path);
     let default = git::default_branch(repo);
     let mut out = vec![];
-    for w in git::worktree_list(repo).unwrap_or_default() {
+    let list = git::worktree_list(repo).unwrap_or_default();
+    // the live `ax/*` branches a stacked branch can be integrated into (same rule as the janitor)
+    let live: Vec<String> = list.iter().filter_map(|w| w.branch.clone()).filter(|b| b.starts_with("ax/")).collect();
+    for w in list {
         if w.is_main {
             continue;
         }
@@ -62,8 +65,11 @@ fn rows(p: &Project, busy: &dyn Fn(&str) -> bool) -> Vec<Row> {
         let branch = w.branch.clone().unwrap_or_default();
         let busy = busy(&w.path);
         // the same rule as the janitor: only Axelstra's own branches, and never one with changes or a session
-        let merged =
-            if branch.starts_with("ax/") && st.dirty == 0 && !busy { crate::janitor::merged_reason(repo, &branch, &default) } else { None };
+        let merged = if branch.starts_with("ax/") && st.dirty == 0 && !busy {
+            crate::janitor::merged_reason_in(repo, &branch, &default, &live)
+        } else {
+            None
+        };
         out.push(Row { path: w.path, branch, dirty: st.dirty > 0, ahead: st.ahead > 0, behind: st.behind > 0, merged, busy });
     }
     out
