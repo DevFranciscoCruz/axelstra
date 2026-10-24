@@ -158,14 +158,24 @@ async function until(label, fn, ms = 30000) {
 
 const clickText = (re) =>
   `(() => { const b = [...document.querySelectorAll('button')].find((e) => ${re}.test(e.innerText.trim())); if (!b) return false; b.click(); return true; })()`;
+let hasProject = false;
 const LOCALES = ["pt-PT", "en", "pt-BR"];
 const setLocale = async (page, l) => {
+  // the daemon's copy of the UI state wins over localStorage at startup, so the language goes there too
+  writeFileSync(
+    join(home, "axelstra", "settings.json"),
+    JSON.stringify({ stall_minutes: 1, ui: { "axelstra.locale": l } }),
+  );
   await page.evaluate(`localStorage.setItem('axelstra.locale', '${l}')`);
   await page.send("Page.reload");
   await until("the UI", () =>
     page.evaluate("document.getElementById('root')?.children.length > 0"),
   );
   await sleep(1200);
+  if (hasProject)
+    await until("the project", () =>
+      page.evaluate("document.body.innerText.includes('demo')"),
+    );
 };
 
 let failed = null;
@@ -237,20 +247,23 @@ try {
     cli("agent", wt2, "--agent", "fakeagent", "--prompt", "lead"),
     "lead agent 2",
   );
+  hasProject = true;
   await page.send("Page.reload");
   await until("the project", () =>
     page.evaluate("document.body.innerText.includes('demo')"),
   );
-  console.log("waiting for the stall watchdog (stall_minutes=1)...");
-  await until(
-    "a stalled agent",
-    () => JSON.parse(cli("ls", "--json").stdout).some((s) => s.stalled),
-    240000,
-  ).catch(() =>
-    console.log(
-      "no agent flagged as stalled within 4 minutes; the hourglass shot will not show it",
-    ),
-  );
+  if (!process.env.VISUAL_FAST)
+    console.log("waiting for the stall watchdog (stall_minutes=1)...");
+  if (!process.env.VISUAL_FAST)
+    await until(
+      "a stalled agent",
+      () => JSON.parse(cli("ls", "--json").stdout).some((s) => s.stalled),
+      240000,
+    ).catch(() =>
+      console.log(
+        "no agent flagged as stalled within 4 minutes; the hourglass shot will not show it",
+      ),
+    );
   await sleep(11000); // the sidebar polls every 10 s
 
   for (const l of LOCALES) {
@@ -259,6 +272,10 @@ try {
     await page.evaluate(clickText("/^(Definições|Settings|Configurações)$/"));
     await sleep(900);
     await page.shot(`settings-${l}`);
+    const over = await page.evaluate(
+      "(() => { const d = document.querySelector('[role=dialog]'); if (!d) return 'no dialog'; const out = []; const dr = d.getBoundingClientRect().right; for (const e of d.querySelectorAll('*')) { const r = e.getBoundingClientRect(); if (r.width && r.right > dr + 1) out.push('RIGHT ' + e.tagName + '.' + e.className + ' ' + Math.round(r.right - dr)); if (e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'visible') out.push(e.tagName + '.' + e.className + ' ' + e.scrollWidth + '>' + e.clientWidth); } return d.scrollWidth + '/' + d.clientWidth + ' ' + out.slice(0, 5).join(' | '); })()",
+    );
+    console.log(`overflow in settings-${l}: ${over}`);
     await page.send("Input.dispatchKeyEvent", {
       type: "keyDown",
       key: "Escape",

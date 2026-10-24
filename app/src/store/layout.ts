@@ -41,10 +41,13 @@ if (typeof window !== "undefined") {
   });
 }
 /** widths in use: what was saved, limited so the centre keeps a usable width */
-export const leftW = () => fitPanel(leftRaw(), LEFT, rightOn() ? rightRaw() : 0, winW());
+/** under this width the right panel is hidden by CSS (styles.css, `@media (max-width: 1000px)`): it takes no room */
+const RIGHT_HIDDEN_BELOW = 1000;
+const rightTakes = () => (rightOn() && winW() > RIGHT_HIDDEN_BELOW ? rightRaw() : 0);
+export const leftW = () => fitPanel(leftRaw(), LEFT, rightTakes(), winW());
 export const rightW = () => fitPanel(rightRaw(), RIGHT, leftOn() ? leftW() : 0, winW());
 export const setLeftW = (w: number) => {
-  const v = fitPanel(w, LEFT, rightOn() ? rightRaw() : 0, winW());
+  const v = fitPanel(w, LEFT, rightTakes(), winW());
   setLeftRaw(v);
   save("axelstra.leftW", String(v));
 };
