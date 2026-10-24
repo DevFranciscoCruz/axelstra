@@ -1,5 +1,5 @@
-import { Icon, hasIcon } from "./Icon";
-import { Button, Field, Input, Select, Tabs, TabsList, cn } from "./ui";
+import { Icon } from "./Icon";
+import { Button, Input, Tabs, TabsList, cn } from "./ui";
 import { For, Match, Show, Switch, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { SessionInfo, defaultShell, launchDefaultAgent, killSession, removeSession, spawnSession } from "./api";
 import { Section } from "./Boundary";
@@ -27,8 +27,10 @@ import { S } from "./strings";
 import { startDrag } from "./dragResize";
 import { basename } from "./paths";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
-import { LEFT, RIGHT, resizeTo, splitTo } from "./layout";
+import { LEFT, RIGHT, resizeTo } from "./layout";
 import { K } from "./keyboard";
+import { AgentPickerModal } from "./AgentPickerModal";
+import { SplitPane } from "./SplitPane";
 import { useBootstrap } from "./useBootstrap";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -44,7 +46,6 @@ import { ProjectSettings } from "./ProjectSettings";
 import { StatusBar } from "./StatusBar";
 import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
 import { ErrorToast } from "./ErrorToast";
-import { Modal } from "./Modal";
 import { Tab } from "./Tab";
 import { pickProject } from "./projectActions";
 import { StateDot } from "./StateDot";
@@ -55,12 +56,10 @@ import { TerminalView } from "./TerminalView";
 import {
   activeSession,
   AGENTS,
-  agentKeys,
   agentPrompt,
   pickAgent,
   fileLine,
   projectTerse,
-  setDefaultAgent,
   changesMode,
   showAutomations,
   setShowAutomations,
@@ -121,7 +120,6 @@ import {
 } from "./store";
 
 export function App() {
-  const [splitFrac, setSplitFrac] = createSignal(0.5);
   // under 1000px the right panel is hidden by CSS, so its toggles would do nothing
   const narrowQuery = typeof matchMedia === "function" ? matchMedia("(max-width: 1000px)") : null;
   const [narrow, setNarrow] = createSignal(narrowQuery?.matches ?? false);
@@ -412,37 +410,7 @@ export function App() {
           onMouseDown={(e) => drag(e, -1, rightW(), setRightW)}
         />
       </Show>
-      <Show when={agentPrompt()}>
-        {(done) => {
-          const [choice, setChoice] = createSignal(projectAgent(current()?.project.id));
-          const go = () => {
-            setDefaultAgent(choice());
-            done()(choice());
-          };
-          return (
-            <Modal label={S.app.newAgent} onClose={() => done()(null)}>
-              <div class="m-heading">{S.app.newAgent}</div>
-              <div class="m-full" onKeyDown={(e) => e.key === "Enter" && (e.ctrlKey || e.metaKey) && go()}>
-                <Field label={S.app.agent} full>
-                <Select
-                  value={choice()}
-                  label={S.app.agent}
-                  iconOnly
-                  options={[...agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))]}
-                  onChange={setChoice}
-                />
-                </Field>
-              </div>
-              <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-                <Button onClick={() => done()(null)}>{S.cancel}</Button>
-                <Button variant="default" onClick={go} ref={(el) => queueMicrotask(() => el.focus())}>
-                  {S.app.open}
-                </Button>
-              </div>
-            </Modal>
-          );
-        }}
-      </Show>
+      <Show when={agentPrompt()}>{(done) => <AgentPickerModal project={current()?.project.id} done={done()} />}</Show>
       <Palette actions={paletteActions} />
       <Show when={showShortcuts()}>
         <Shortcuts />
@@ -672,36 +640,7 @@ export function App() {
                   )}
                 </For>
                 <Show when={splitSession() !== null && splitSession() !== activeSession() && tabs().some((s) => s.id === splitSession())}>
-                  <div
-                    class="split-sep"
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label={S.app.splitWidth}
-                    aria-valuenow={Math.round(splitFrac() * 100)}
-                    aria-valuemin={20}
-                    aria-valuemax={80}
-                    tabindex="0"
-                    onKeyDown={(e) => {
-                      const to = splitTo(splitFrac(), e.key);
-                      if (to === null) return;
-                      e.preventDefault();
-                      setSplitFrac(to);
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const area = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
-                      stopDrag?.();
-                      stopDrag = startDrag((m) => setSplitFrac(Math.min(0.8, Math.max(0.2, (area.right - m.clientX) / area.width))));
-                    }}
-                  />
-                  <div class="split-pane group/split" style={{ flex: `0 0 ${splitFrac() * 100}%` }}>
-                    <Button variant="outline" size="bare" class="absolute right-2 top-1 z-[5] size-5 border-border/60 bg-popover leading-none text-muted-foreground opacity-0 transition-opacity focus-visible:opacity-100 group-hover/split:opacity-100" title={S.app.closeSplit} aria-label={S.app.closeSplit} onClick={() => setSplitSession(null)}>
-                      <Icon name="x" />
-                    </Button>
-                    <Show when={splitSession()} keyed>
-                      {(id) => <TerminalView id={id} focus={false} onExit={() => void refreshSessions()} />}
-                    </Show>
-                  </div>
+                  <SplitPane />
                 </Show>
               </Show>
               }
