@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { createPoller } from "./poller";
 import { TokenUsage, agentUsage, worktreeUsage } from "./api";
 import { activeSession, projects, sessions } from "./store";
 import { WtUsage, fmtTokens as fmt, ranked, spentOf, totalOf, usageTip } from "./usageFormat";
@@ -24,8 +25,8 @@ export const loadWtUsage = () => {
 export const pollWtUsage = () => {
   onMount(() => {
     loadWtUsage();
-    const t = setInterval(loadWtUsage, 30000);
-    onCleanup(() => clearInterval(t));
+    const t = createPoller(loadWtUsage, 30000);
+    onCleanup(t.stop);
   });
   return wtUsage;
 };
@@ -110,17 +111,15 @@ export function UsageChip() {
     setUsage(null);
     if (!cwd) return;
     let alive = true;
-    const load = () => {
-      if (document.hidden) return;
-      void agentUsage(cwd, conv)
+    const load = () =>
+      agentUsage(cwd, conv)
         .then((u) => alive && setUsage(u))
         .catch(() => alive && setUsage(null));
-    };
-    load();
-    const t = setInterval(load, 15000);
+    if (!document.hidden) void load();
+    const t = createPoller(load, 15000);
     onCleanup(() => {
       alive = false;
-      clearInterval(t);
+      t.stop();
     });
   });
   const spent = () => (usage() ? usage()!.input + usage()!.output + usage()!.cache_write : 0);

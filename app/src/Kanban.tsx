@@ -1,4 +1,5 @@
 import { Badge, Button, Field, Input, Textarea } from "./ui";
+import { createPoller } from "./poller";
 import { Select } from "./Select";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
@@ -82,8 +83,8 @@ export function Kanban(props: { project: string }) {
     void reload();
     void pollRun();
     // agents move cards while the orchestrator runs
-    const t = setInterval(() => !document.hidden && draft() === null && (void reload(), void pollRun()), 3000);
-    onCleanup(() => clearInterval(t));
+    const t = createPoller(() => draft() === null && Promise.all([reload(), pollRun()]), 3000);
+    onCleanup(t.stop);
   });
 
   const inCol = (id: string) => board().cards.filter((c) => c.meta.status === id);

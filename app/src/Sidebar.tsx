@@ -1,4 +1,5 @@
 import { Icon, hasIcon } from "./Icon";
+import { createPoller } from "./poller";
 import { Select } from "./Select";
 import { ask, askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
@@ -147,8 +148,8 @@ export function Sidebar() {
     projects();
     loadMerged();
   });
-  const overviewTimer = setInterval(() => !document.hidden && loadMerged(), 15000);
-  onCleanup(() => clearInterval(overviewTimer));
+  const overviewPoller = createPoller(loadMerged, 15000);
+  onCleanup(overviewPoller.stop);
   // parents whose children are folded away, and the projects whose "Concluídos" group is open
   const GROUPS_KEY = "axelstra.groupsFolded";
   const [folded, setFolded] = createSignal<ReadonlySet<string>>(
@@ -195,8 +196,8 @@ export function Sidebar() {
   const [overlaps, setOverlaps] = createSignal<Record<string, string[]> | null>(null);
   const pollOverlaps = () => dispatchOverlaps().then(setOverlaps, () => setOverlaps(null));
   void pollOverlaps();
-  const overlapTimer = setInterval(() => !document.hidden && void pollOverlaps(), 20000);
-  onCleanup(() => clearInterval(overlapTimer));
+  const overlapPoller = createPoller(pollOverlaps, 20000);
+  onCleanup(overlapPoller.stop);
   // agent being renamed in the list (F2 on its row), and the worktree being renamed
   const [renamingAgent, setRenamingAgent] = createSignal<number | null>(null);
   const [renamingWt, setRenamingWt] = createSignal<{ path: string; name: string } | null>(null);

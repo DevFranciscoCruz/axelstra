@@ -1,4 +1,5 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { createPoller } from "./poller";
 import { ClaudeStatus, CodexLimits, CodexWindow, agentStatus, codexLimits } from "./api";
 import { activeSession, sessions } from "./store";
 
@@ -61,24 +62,21 @@ export function LimitsBar() {
     const key = claudeKey();
     let alive = true;
     const load = () => {
-      if (document.hidden) return;
       setNow(Date.now() / 1000);
-      if (key) void agentStatus(key).then((v) => alive && v && setClaude(v)).catch(() => 0);
+      return key ? agentStatus(key).then((v) => alive && v && setClaude(v)).catch(() => 0) : undefined;
     };
     load();
-    const t = setInterval(load, 5000);
+    const t = createPoller(load, 5000);
     onCleanup(() => {
       alive = false;
-      clearInterval(t);
+      t.stop();
     });
   });
   createEffect(() => {
-    const load = () => {
-      if (!document.hidden) void codexLimits().then((v) => v && setCodex(v)).catch(() => 0);
-    };
-    load();
-    const t = setInterval(load, 30000);
-    onCleanup(() => clearInterval(t));
+    const load = () => codexLimits().then((v) => v && setCodex(v)).catch(() => 0);
+    void load();
+    const t = createPoller(load, 30000);
+    onCleanup(t.stop);
   });
 
   const five = () => claude()?.rate_limits?.five_hour;
