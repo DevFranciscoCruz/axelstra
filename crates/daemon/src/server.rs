@@ -156,7 +156,14 @@ impl Registry {
             return true;
         }
         // one lock at a time (the rest of the daemon takes sessions before metas)
-        let alive: Vec<u32> = self.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, _)| *id).collect();
+        // a session that reported with `axelstra done` and went quiet is finished, not busy: it only waits to be closed
+        let alive: Vec<u32> = self
+            .sessions
+            .lock_recover()
+            .iter()
+            .filter(|(id, s)| s.try_wait().is_none() && !(self.bus.finished(**id).is_some() && s.idle_ms() >= REPORTED_IDLE_MS))
+            .map(|(id, _)| *id)
+            .collect();
         let metas = self.metas.lock_recover();
         let in_meta = |id: &u32| metas.get(id).and_then(|m| m["worktree"].as_str()).map(|w| norm(w) == want).unwrap_or(false);
         let hit = alive.iter().any(in_meta);
@@ -323,6 +330,29 @@ fn read_settings(saved: &std::path::Path) -> Value {
 /// Ephemeral worker: when it finishes (process exit, or quiet for `idle_secs` in "idle" mode) its last
 /// output goes to the parent session as if typed, and the worker is closed so it stops using memory.
 /// Typical use: a test run or a helper agent that reports back to the main agent and disappears.
+/// How long a session that already called `axelstra done` must be quiet before it stops counting as busy.
+const REPORTED_IDLE_MS: u64 = 10_000;
+
+static SWEEP_QUEUED: AtomicBool = AtomicBool::new(false);
+
+/// Runs the worktree sweep a few seconds from now (once for a burst of events): after a `done` or a merge, so the
+/// finished worktree goes away without waiting for the 10-minute loop. The delay lets the reaper close the session.
+fn sweep_soon(reg: &Arc<Registry>) {
+    if reg.saved.with_file_name("janitor.off").exists() || SWEEP_QUEUED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let r = reg.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(4));
+        SWEEP_QUEUED.store(false, Ordering::SeqCst);
+        for s in crate::janitor::sweep(&r.store, &|path| r.worktree_busy(path), false) {
+            eprintln!("janitor: {s}");
+        }
+        crate::overview::invalidate();
+        r.wt_gen.fetch_add(1, Ordering::SeqCst);
+    });
+}
+
 fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: bool, idle_secs: u64, lines: usize) {
     std::thread::spawn(move || {
         let mut worked = false;

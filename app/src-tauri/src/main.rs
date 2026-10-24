@@ -219,6 +219,7 @@ const ALLOWED_METHODS: &[&str] = &[
     "notes.export",
     "worktree.overview",
     "worktree.sweep",
+    "janitor.events",
     "notes.read_file",
     "notes.worktree",
     "worktree.set_parent",
