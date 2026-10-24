@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { setLocale } from "./i18n";
 import { ciLine, stamp, toMarkdown, tokenLine, type Timeline } from "./timelineLogic";
 
 const t: Timeline = {
@@ -22,7 +23,15 @@ const t: Timeline = {
   },
 };
 
+afterEach(() => setLocale("pt-PT"));
+
 describe("timeline export", () => {
+  it("keeps ISO times in the file in every language", () => {
+    for (const l of ["pt-PT", "en", "pt-BR"] as const) {
+      setLocale(l);
+      expect(toMarkdown(t, "feat")).toMatch(/\*\*\d{4}-\d\d-\d\d \d\d:\d\d\*\*/);
+    }
+  });
   it("writes oldest first with escaped text", () => {
     const md = toMarkdown(t, "feat");
     const lines = md.split("\n");
@@ -44,5 +53,5 @@ describe("timeline export", () => {
   it("says so when nothing happened", () => {
     expect(toMarkdown({ ...t, events: [], tokens: null, ci: null }, "x")).toContain("Sem eventos");
   });
-  it("formats the time as local date and minutes", () => expect(stamp(0)).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d$/));
+  it("shows the time in the UI language", () => expect(stamp(0)).toMatch(/^\d\d\/\d\d\/\d{4}, \d\d:\d\d$/));
 });

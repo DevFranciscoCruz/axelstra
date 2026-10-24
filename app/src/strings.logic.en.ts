@@ -112,12 +112,6 @@ export const enL: Widen<typeof ptL> = {
     tooLarge: "File too large for the editor.",
   },
 
-  ago: {
-    now: "now",
-    min: (n: number) => `${n} min ago`,
-    hour: (n: number) => `${n} h ago`,
-    day: (n: number) => `${n} d ago`,
-  },
   usage: {
     none: "No agent used tokens in these worktrees",
     head: (spent: string, cache: string) => `Agent tokens (Claude and Codex): ${spent} spent · ${cache} of cache read`,
