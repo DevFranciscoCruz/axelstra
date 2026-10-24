@@ -79,7 +79,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let (shell, notify_sound, notify_mode) = ui_settings(&saved);
             Ok(
                 json!({"terse": terse, "rules": crate::skill::terse_rules(terse), "pm": pm, "installed": installed, "auto_install": saved["auto_install"] == json!(true),
-                "shell": shell, "notify_sound": notify_sound, "notify_mode": notify_mode, "ui": saved["ui"].as_object().cloned().unwrap_or_default()}),
+                "shell": shell, "notify_sound": notify_sound, "notify_mode": notify_mode, "ui": saved["ui"].as_object().cloned().unwrap_or_default(),
+                "budgets": crate::budget::validate(&saved["budgets"]).unwrap_or_else(|_| json!({}))}),
             )
         }
         "settings.set" => {
@@ -102,6 +103,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 saved["auto_install"] = json!(b);
             }
             apply_ui_settings(&mut saved, p)?;
+            // replaces the whole budgets setting; null removes it
+            if let Some(b) = p.get("budgets") {
+                saved["budgets"] = if b.is_null() { json!({}) } else { crate::budget::validate(b)? };
+            }
             write_json(&reg.saved.with_file_name("settings.json"), &saved)?;
             Ok(json!({}))
         }
@@ -122,6 +127,23 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let usage = tokio::task::block_in_place(|| crate::agentlog::worktree_usage(&paths));
             Ok(json!({"usage": usage}))
         }
+        // spending against the token limits (read only); `worktrees` limits it to those paths, else every project worktree
+        "budget.status" => {
+            let budgets = crate::budget::parse(&read_settings(&reg.saved));
+            let asked: Option<Vec<String>> =
+                p["worktrees"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+            let rows = tokio::task::block_in_place(|| {
+                let paths = asked.unwrap_or_else(|| budget_paths(reg, &budgets));
+                let totals = budget_totals(&paths);
+                let state = read_json::<crate::budget::State>(&budget_state_path(reg)).ok().flatten().unwrap_or_default();
+                crate::budget::status(&state, &budgets, &totals, chrono::Local::now().date_naive())
+            });
+            Ok(json!({"budgets": rows}))
+        }
+        // evaluates the limits now (the scheduler does it every two minutes), e.g. right after the user changed them
+        "budget.check" => Ok(json!({"budgets": tokio::task::block_in_place(|| budget_check(reg))})),
+        // the level crossings since the last call (the app turns them into a toast and a notification)
+        "budget.events" => Ok(json!({"events": crate::budget::take_events()})),
         "hooks.status" => Ok(crate::hooks::status()?),
         "hooks.install" => tokio::task::block_in_place(crate::hooks::install),
         "ping" => Ok(hello_info()),
@@ -208,4 +230,78 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         m => anyhow::bail!("unknown method {m}"),
     }
+}
+
+fn budget_state_path(reg: &Registry) -> std::path::PathBuf {
+    reg.saved.with_file_name("budget-state.json")
+}
+
+/// Worktrees a budget applies to: every linked worktree of the projects, plus those a budget names.
+fn budget_paths(reg: &Registry, budgets: &crate::budget::Budgets) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for pr in crate::projects::load(&reg.store) {
+        for w in axelstra_core::git::worktree_list(std::path::Path::new(&pr.path)).unwrap_or_default() {
+            if !w.is_main {
+                out.push(w.path);
+            }
+        }
+    }
+    out.extend(budgets.worktrees.iter().map(|(p, _)| p.clone()));
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|p| seen.insert(crate::budget::norm(p)));
+    out
+}
+
+/// Cumulative tokens paid for per worktree (input, output and cache writes, like the app's totals).
+fn budget_totals(paths: &[String]) -> Vec<(String, u64)> {
+    crate::agentlog::worktree_usage(paths).into_iter().map(|u| (u.worktree, u.input + u.output + u.cache_write)).collect()
+}
+
+/// Serializes the read-modify-write of the budget state (the scheduler and `budget.check` may overlap).
+static BUDGET_LOCK: Mutex<()> = Mutex::new(());
+
+/// Interrupts (Esc, which stops the turn but keeps the agent) the agents of a worktree that are working right now.
+/// Returns the sessions it wrote to.
+fn pause_agents(reg: &Registry, path: &str) -> Vec<u32> {
+    let want = crate::budget::norm(path);
+    let working: Vec<u32> =
+        reg.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none() && s.idle_ms() < 5000).map(|(id, _)| *id).collect();
+    let targets: Vec<u32> = {
+        let metas = reg.metas.lock_recover();
+        working
+            .into_iter()
+            .filter(|id| {
+                metas
+                    .get(id)
+                    .is_some_and(|m| m["kind"] == "agent" && m["worktree"].as_str().is_some_and(|w| crate::budget::norm(w) == want))
+            })
+            .collect()
+    };
+    targets.into_iter().filter(|id| reg.get(*id).is_some_and(|s| s.write(b"").is_ok())).collect()
+}
+
+/// Reads the spending, records it and reports every level crossing once per period. Only a budget the user opted
+/// into (`auto_pause`) interrupts agents, and only when its limit is passed. Returns the current rows.
+pub(super) fn budget_check(reg: &Arc<Registry>) -> Vec<crate::budget::Row> {
+    use crate::budget;
+    let budgets = budget::parse(&read_settings(&reg.saved));
+    if budgets.is_empty() {
+        return vec![];
+    }
+    let totals = budget_totals(&budget_paths(reg, &budgets));
+    let _guard = BUDGET_LOCK.lock_recover();
+    let path = budget_state_path(reg);
+    let mut state = read_json::<budget::State>(&path).ok().flatten().unwrap_or_default();
+    let before = state.clone();
+    let date = chrono::Local::now().date_naive();
+    let alerts = budget::tick(&mut state, &budgets, &totals, date);
+    for row in &alerts {
+        let paused = if budget::should_pause(row) { pause_agents(reg, &row.worktree) } else { vec![] };
+        let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        budget::push_event(row, &paused, at);
+    }
+    if state != before {
+        let _ = write_json(&path, &state);
+    }
+    budget::status(&state, &budgets, &totals, date)
 }

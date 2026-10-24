@@ -2,6 +2,7 @@ pub mod agentlog;
 pub mod audit;
 pub mod automations;
 pub mod backup;
+pub mod budget;
 pub mod changes;
 pub mod checks;
 pub mod client;
