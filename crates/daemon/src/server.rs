@@ -61,6 +61,8 @@ struct Registry {
     hints: axelstra_core::waiting::Hints,
     /// bumped when a request changed projects or worktrees; watchers hear it as `projects.changed`
     wt_gen: AtomicU64,
+    /// what agents asked the daemon to do (`audit.list`)
+    audit: crate::audit::Audit,
     /// `hello`s refused with a bad token since the last good one: each failure makes the next answer slower
     bad_hellos: AtomicU32,
 }
@@ -82,6 +84,7 @@ impl Registry {
         let saved = store.with_file_name("sessions.json");
         // a corrupt sessions.json is moved to sessions.json.bad, so the first persist cannot wipe it
         let pending = read_json::<Vec<Value>>(&saved).ok().flatten().unwrap_or_default();
+        let audit = crate::audit::Audit::new(Some(saved.with_file_name("audit.log")));
         Registry {
             next: AtomicU32::new(0),
             sessions: Default::default(),
@@ -103,6 +106,7 @@ impl Registry {
             computer: AtomicBool::new(false),
             hints: Default::default(),
             wt_gen: AtomicU64::new(0),
+            audit,
             bad_hellos: AtomicU32::new(0),
         }
     }
@@ -223,7 +227,7 @@ fn new_agent_token() -> Option<String> {
 fn agent_forbidden(method: &str, p: &Value) -> bool {
     match method {
         "computer.enable" => p["on"].as_bool() == Some(true),
-        "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" | "notices.take" => true,
+        "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" | "notices.take" | "audit.list" => true,
         _ => false,
     }
 }
@@ -361,6 +365,8 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
 fn spawn_scheduler(reg: Arc<Registry>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(30));
+        // after a hibernation or a long stall the missed ticks are dropped, not replayed one right after another
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut n = 0u32;
         loop {
             tick.tick().await;
@@ -397,12 +403,26 @@ fn spawn_scheduler(reg: Arc<Registry>) {
             }
             let r = reg.clone();
             let _ = tokio::task::spawn_blocking(move || {
-                let _g = r.auto_lock.lock_recover();
                 let path = crate::automations::store_path(&r.store);
-                let list = crate::automations::load(&path);
-                for id in crate::automations::due_now(&list, crate::automations::now_ts()) {
-                    if let Err(e) = run_automation(&r, &path, &id) {
-                        eprintln!("automation {id} failed: {e:#}");
+                // the file is claimed under the lock; the (slow) worktree and agent start run after it is released,
+                // so a UI save is never stuck behind a running automation
+                let claimed: Vec<_> = {
+                    let _g = r.auto_lock.lock_recover();
+                    let list = crate::automations::load(&path);
+                    crate::automations::due_now(&list, crate::automations::now_ts())
+                        .into_iter()
+                        .filter_map(|id| match claim_automation(&path, &id) {
+                            Ok(a) => Some(a),
+                            Err(e) => {
+                                eprintln!("automation {id} failed: {e:#}");
+                                None
+                            }
+                        })
+                        .collect()
+                };
+                for a in claimed {
+                    if let Err(e) = launch_automation(&r, &a) {
+                        eprintln!("automation {} failed: {e:#}", a.id);
                     }
                 }
             })
@@ -412,14 +432,26 @@ fn spawn_scheduler(reg: Arc<Registry>) {
 }
 
 /// Fresh worktree + agent session with the automation's prompt. Records the start first so a failure never loops.
-/// The caller holds `auto_lock`.
-fn run_automation(reg: &Registry, path: &std::path::Path, id: &str) -> Result<Value> {
+/// Marks the automation as started now and returns it. The caller holds `auto_lock`.
+fn claim_automation(path: &std::path::Path, id: &str) -> Result<crate::automations::Automation> {
     let mut list = crate::automations::load(path);
     let a = list.iter_mut().find(|a| a.id == id).ok_or_else(|| anyhow::anyhow!("unknown automation {id}"))?;
     a.last_run = crate::automations::now_ts();
     let a = a.clone();
     crate::automations::save_all(path, &list)?;
+    Ok(a)
+}
 
+fn run_automation(reg: &Registry, path: &std::path::Path, id: &str) -> Result<Value> {
+    let a = {
+        let _g = reg.auto_lock.lock_recover();
+        claim_automation(path, id)?
+    };
+    launch_automation(reg, &a)
+}
+
+/// Fresh worktree + agent session for a claimed automation. Takes no lock of its own.
+fn launch_automation(reg: &Registry, a: &crate::automations::Automation) -> Result<Value> {
     let pr = crate::projects::find(&reg.store, &a.project)?;
     let stamp = chrono::Local::now().format("%m%d-%H%M").to_string();
     let wt = crate::projects::worktree_create(&pr, &format!("auto-{}-{stamp}", a.name))?;
@@ -632,6 +664,11 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
     })
     .await;
     let Ok((req, res, after)) = joined else { return };
+    // what an agent connection asked for is kept for the user to review
+    let agent = st.lock_recover().agent;
+    if let Some(me) = agent {
+        reg.audit.record(me, &req.method, &req.params, &res.as_ref().map(|_| ()).map_err(|e| format!("{e:#}")));
+    }
     // calls that wait on purpose are not slow
     if !matches!(req.method.as_str(), "ask" | "msg.ask" | "session.wait" | "hello") {
         crate::lag::note(&format!("daemon {}", req.method), t0.elapsed(), 30);
@@ -1510,11 +1547,22 @@ fn dispatch(
         }
         "orch.start" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            if reg.runs.lock_recover().get(&pr.id).is_some_and(|r| r["state"] == "running") {
-                anyhow::bail!("an orchestration is already running for this project");
-            }
-            let repo = axelstra_core::git::canon(std::path::Path::new(&pr.path))?;
             let name = format!("ui-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs());
+            let started = json!({"state": "running", "name": name, "integ_branch": format!("orch/{name}")});
+            // check and claim in one step: two calls arriving together cannot both find the project idle
+            {
+                let mut runs = reg.runs.lock_recover();
+                if runs.get(&pr.id).is_some_and(|r| r["state"] == "running") {
+                    anyhow::bail!("an orchestration is already running for this project");
+                }
+                runs.insert(pr.id.clone(), started.clone());
+            }
+            // a failure before the run thread exists gives the claim back
+            let release = |e: anyhow::Error| {
+                reg.runs.lock_recover().insert(pr.id.clone(), json!({"state": "error", "name": name, "error": format!("{e:#}")}));
+                e
+            };
+            let repo = axelstra_core::git::canon(std::path::Path::new(&pr.path)).map_err(release)?;
             let max = p["max"].as_u64().unwrap_or(3).clamp(1, 8) as usize;
             let trust = p["trust_acceptance"].as_bool().unwrap_or(false);
             // `bypass*` cards run only against the fingerprint of the cards the user confirmed (orch::trust_info)
@@ -1523,9 +1571,7 @@ fn dispatch(
             // client can already spawn any process, so this grants nothing new
             let agent: Option<Vec<String>> = p["agent"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
             // connects back to this same daemon: must not hold an async worker
-            let runner = tokio::task::block_in_place(|| crate::runner::DaemonRunner::connect(&reg.pipe, &reg.token))?;
-            let started = json!({"state": "running", "name": name, "integ_branch": format!("orch/{name}")});
-            reg.runs.lock_recover().insert(pr.id.clone(), started.clone());
+            let runner = tokio::task::block_in_place(|| crate::runner::DaemonRunner::connect(&reg.pipe, &reg.token)).map_err(release)?;
             let (reg2, pid, n2) = (reg.clone(), pr.id.clone(), name.clone());
             std::thread::spawn(move || {
                 let opts = axelstra_core::orch::Options {
@@ -1556,13 +1602,13 @@ fn dispatch(
         "orch.retry" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let id = p["id"].as_str().unwrap_or_default().to_string();
-            let name = reg.runs.lock().unwrap().get(&pr.id).and_then(|r| r["name"].as_str().map(String::from));
+            let name = reg.runs.lock_recover().get(&pr.id).and_then(|r| r["name"].as_str().map(String::from));
             let name = name.ok_or_else(|| anyhow::anyhow!("no orchestration run to retry"))?;
             let trust = p["trust_acceptance"].as_bool().unwrap_or(false);
             let repo = axelstra_core::git::canon(std::path::Path::new(&pr.path))?;
             let wt_root = repo.parent().unwrap_or(&repo).join(".axelstra-wt");
             tokio::task::block_in_place(|| axelstra_core::orch::retry_merge(&repo, &wt_root, &name, &id, trust))?;
-            if let Some(r) = reg.runs.lock().unwrap().get_mut(&pr.id) {
+            if let Some(r) = reg.runs.lock_recover().get_mut(&pr.id) {
                 if let Some(v) = r["needs_review"].as_array_mut() {
                     v.retain(|e| e[0] != id.as_str());
                 }
@@ -1817,7 +1863,6 @@ fn dispatch(
             Ok(json!({}))
         }
         "automation.run" => {
-            let _g = reg.auto_lock.lock_recover();
             let path = crate::automations::store_path(&reg.store);
             tokio::task::block_in_place(|| run_automation(reg, &path, p["id"].as_str().unwrap_or_default()))
         }
@@ -1878,6 +1923,11 @@ fn dispatch(
         "hooks.install" => tokio::task::block_in_place(crate::hooks::install),
         "ping" => Ok(hello_info()),
         // what the daemon recovered or lost on its own (a state file moved aside, restored from a backup): shown once
+        "audit.list" => {
+            let limit = p["limit"].as_u64().map_or(100, |n| n.clamp(1, 500) as usize);
+            let session = p["session"].as_u64().and_then(|x| u32::try_from(x).ok());
+            Ok(json!({"entries": reg.audit.list(limit, session)}))
+        }
         "notices.take" => Ok(json!({"notices": crate::store::take_notices()})),
         // used by the app updater: the installer cannot replace a running axelstra.exe.
         // Sessions die with the daemon (Job Objects), so the UI warns before calling this.
