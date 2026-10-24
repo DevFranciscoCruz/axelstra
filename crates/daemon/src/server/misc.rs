@@ -152,8 +152,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         // what this machine is and which folders it has, for the app's "add remote project" picker (app only)
         "host.info" => Ok(crate::hosts::info()),
         "host.browse" => tokio::task::block_in_place(|| crate::hosts::browse(p["path"].as_str())),
-        "hooks.status" => Ok(crate::hooks::status()?),
-        "hooks.install" => tokio::task::block_in_place(crate::hooks::install),
+        // `agent` (claude by default, or gemini) picks whose settings file is read or written
+        "hooks.status" => Ok(crate::hooks::status_for(p["agent"].as_str().unwrap_or("claude"))?),
+        "hooks.install" => tokio::task::block_in_place(|| crate::hooks::install_for(p["agent"].as_str().unwrap_or("claude"))),
         "ping" => Ok(hello_info()),
         // what the daemon recovered or lost on its own (a state file moved aside, restored from a backup): shown once
         "audit.list" => {
