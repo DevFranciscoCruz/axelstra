@@ -263,8 +263,12 @@ mod tests {
         let g = |dir: &Path, args: &[&str]| assert!(git::run(dir, args).unwrap().ok, "git {args:?}");
         let done = projects::worktree_create(&p, "deep").unwrap();
         let wt = Path::new(&done.path);
-        std::fs::write(wt.join(".gitignore"), "node_modules/
-").unwrap();
+        std::fs::write(
+            wt.join(".gitignore"),
+            "node_modules/
+",
+        )
+        .unwrap();
         g(wt, &["add", ".gitignore"]);
         g(wt, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "ignore"]);
         g(&repo, &["merge", "-q", "--ff-only", "ax/deep"]);

@@ -554,7 +554,10 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
             if a.locate().is_none() {
                 return Err(a.missing_error());
             }
-            agents::resolve_argv(a, agent_command(a.id, &t.card.meta.permission_mode, runner.interactive(), !crate::git::is_pr_code(&o.repo))?)
+            agents::resolve_argv(
+                a,
+                agent_command(a.id, &t.card.meta.permission_mode, runner.interactive(), !crate::git::is_pr_code(&o.repo))?,
+            )
         }
     };
     let pf = prompt.to_string_lossy().to_string();
@@ -812,9 +815,15 @@ mod tests {
         let x = agent_command("chatgpt", "auto", false, true).unwrap();
         assert_eq!(x, ["codex", "exec", "--sandbox", "workspace-write", p]);
         assert_eq!(agent_command("codex", "auto", true, true).unwrap(), ["codex", "--sandbox", "workspace-write", p]);
-        assert_eq!(agent_command("gemini", "auto", false, true).unwrap(), ["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-p", p]);
+        assert_eq!(
+            agent_command("gemini", "auto", false, true).unwrap(),
+            ["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-p", p]
+        );
         assert_eq!(agent_command("gemini", "auto", false, false).unwrap(), ["gemini", "--approval-mode", "auto_edit", "-p", p]);
-        assert_eq!(agent_command("gemini", "auto", true, true).unwrap(), ["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-i", p]);
+        assert_eq!(
+            agent_command("gemini", "auto", true, true).unwrap(),
+            ["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-i", p]
+        );
         assert!(agent_command("rm", "auto", false, true).unwrap_err().to_string().contains("unknown agent"));
         assert!(agent_command("claude", "--evil", false, true).is_err());
     }
