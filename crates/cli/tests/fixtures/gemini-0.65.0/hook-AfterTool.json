@@ -1,0 +1,15 @@
+{
+ "session_id": "400f78d6-4be1-447f-841d-e883bd32e50f",
+ "transcript_path": "C:\\home\\.gemini\\tmp\\gem\\chats\\session-2026-10-24T15-18-400f78d6.jsonl",
+ "cwd": "C:\\wt\\gem",
+ "hook_event_name": "AfterTool",
+ "timestamp": "2026-10-24T15:18:24.899Z",
+ "tool_name": "run_shell_command",
+ "tool_input": {
+  "command": "mkdir newdir_stub",
+  "description": "say hi"
+ },
+ "tool_response": {
+  "llmContent": "<untrusted_context>\nOutput: mkdir : An item with the specified name C:\\wt\\gem\\newdir_stub already \nexists.\nAt line:1 char:19\n+ chcp 65001 >$null;mkdir newdir_stub\n+                   ~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : ResourceExists: (C:\\Users\\franc\\...oj2\\newdir_stub:String) [New-Item], IOExcepti \n   on\n    + FullyQualifiedErrorId : DirectoryExist,Microsoft.PowerShell.Commands.NewItemCommand\n \nExit Code: 1\nProcess Group PGID: 261556\n</untrusted_context>"
+ }
+}
