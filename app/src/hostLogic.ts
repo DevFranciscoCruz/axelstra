@@ -113,3 +113,22 @@ export const joinRemote = (dir: string, name: string, sep = "/"): string =>
 
 /** an absolute remote path: unix ("/x") or Windows ("C:\x") */
 export const isAbsRemote = (p: string): boolean => /^(\/|[A-Za-z]:[\\/])/.test(p.trim());
+
+export type PathProblem = "empty" | "relative";
+/** null when `p` can be sent to `project_add_remote` (the host still checks it exists there) */
+export const pathProblem = (p: string): PathProblem | null =>
+  !p.trim() ? "empty" : isAbsRemote(p) ? null : "relative";
+
+/** the separator a remote path uses */
+export const sepOf = (p: string): string =>
+  /^[A-Za-z]:/.test(p) || (p.includes("\\") && !p.includes("/")) ? "\\" : "/";
+
+/** Moves the highlighted row of the folder list; -1 = none yet. Wraps. */
+export const moveRow = (cur: number, n: number, key: string): number => {
+  if (n <= 0) return -1;
+  if (key === "ArrowDown") return cur < 0 ? 0 : (cur + 1) % n;
+  if (key === "ArrowUp") return cur < 0 ? n - 1 : (cur - 1 + n) % n;
+  if (key === "Home") return 0;
+  if (key === "End") return n - 1;
+  return cur;
+};

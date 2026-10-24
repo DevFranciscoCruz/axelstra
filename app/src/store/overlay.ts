@@ -8,6 +8,7 @@ export type Overlay =
   | { kind: "orchestra" }
   | { kind: "dispatcher" }
   | { kind: "automations" }
+  | { kind: "addRemote" }
   | { kind: "projectSettings"; project: string };
 
 type Kind = Overlay["kind"];
@@ -31,6 +32,8 @@ export const showDispatcher = () => isOpen("dispatcher");
 export const setShowDispatcher = set("dispatcher");
 export const showAutomations = () => isOpen("automations");
 export const setShowAutomations = set("automations");
+export const showAddRemote = () => isOpen("addRemote");
+export const setShowAddRemote = set("addRemote");
 
 /** project whose settings dialog (worktree env files, setup command) is open */
 export const showProjectSettings = (): string | null => {

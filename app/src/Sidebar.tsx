@@ -13,6 +13,7 @@ import { pickProject } from "./projectActions";
 import { overlapCount, overlapEntries, overlapTitle, type OverlapFiles } from "./rebase";
 import { NoteView } from "./NoteView";
 import { S } from "./strings";
+import { R } from "./strings.remote";
 import { P } from "./strings.panels";
 import logo from "./assets/logo.png";
 import { Button } from "./ui";
@@ -39,6 +40,7 @@ import {
   showNotice,
   setShowProjectSettings,
   setShowDispatcher,
+  setShowAddRemote,
   setShowSettings,
   projects,
   refreshProjects,
@@ -260,6 +262,10 @@ export function Sidebar() {
       </div>
       <Button variant="default" onClick={() => void pickProject()}>
         {T.addProject}
+      </Button>
+
+      <Button variant="link" size="bare" class="justify-start px-2.5 py-1 text-xs" onClick={() => setShowAddRemote(true)}>
+        {R.addRemote}
       </Button>
 
       <div class="section">{T.projects}</div>

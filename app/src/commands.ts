@@ -77,6 +77,7 @@ export const COMMANDS: Command[] = [
   { id: "voice", label: "Ditado por voz", keys: "Ctrl+Shift+M", group: "ferramentas" },
   { id: "orchestra", label: "Orquestração: agentes e workers", hint: "ferramenta", group: "ferramentas" },
   { id: "dispatcher", label: "Despachante", hint: "pedidos enviados a cada worktree", group: "ferramentas" },
+  { id: "addRemote", label: "Adicionar projeto remoto", hint: "anfitrião SSH ou WSL", group: "worktree" },
   { id: "automations", label: "Automatizações", hint: "agendamento", group: "ferramentas" },
   { id: "computer", label: "Controlo do ecrã pelos agentes", hint: "permissão", group: "ferramentas" },
   {
