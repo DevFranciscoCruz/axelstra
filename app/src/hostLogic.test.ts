@@ -7,6 +7,9 @@ import {
   classifyRemoteError,
   isAbsRemote,
   joinRemote,
+  moveRow,
+  pathProblem,
+  sepOf,
   specProblem,
 } from "./hostLogic";
 
@@ -124,5 +127,30 @@ describe("breadcrumbs", () => {
     expect(isAbsRemote("home/me")).toBe(false);
     expect(isAbsRemote("~/x")).toBe(false);
     expect(isAbsRemote("  ")).toBe(false);
+  });
+});
+
+describe("browse helpers", () => {
+  it("validates the typed path", () => {
+    expect(pathProblem("")).toBe("empty");
+    expect(pathProblem("  ")).toBe("empty");
+    expect(pathProblem("proj")).toBe("relative");
+    expect(pathProblem("/home/me/proj")).toBeNull();
+    expect(pathProblem("D:\\work")).toBeNull();
+  });
+  it("picks the separator of the remote", () => {
+    expect(sepOf("/home/me")).toBe("/");
+    expect(sepOf("C:\\Users")).toBe("\\");
+    expect(sepOf("")).toBe("/");
+  });
+  it("moves the highlighted row and wraps", () => {
+    expect(moveRow(-1, 3, "ArrowDown")).toBe(0);
+    expect(moveRow(2, 3, "ArrowDown")).toBe(0);
+    expect(moveRow(-1, 3, "ArrowUp")).toBe(2);
+    expect(moveRow(0, 3, "ArrowUp")).toBe(2);
+    expect(moveRow(1, 3, "End")).toBe(2);
+    expect(moveRow(1, 3, "Home")).toBe(0);
+    expect(moveRow(1, 3, "x")).toBe(1);
+    expect(moveRow(0, 0, "ArrowDown")).toBe(-1);
   });
 });
