@@ -275,6 +275,42 @@ fn apply_ui_settings(saved: &mut Value, p: &Value) -> Result<()> {
         }
         saved["notify_mode"] = json!(m);
     }
+    if let Some(patch) = p.get("ui").filter(|v| !v.is_null()) {
+        apply_ui_state(saved, patch)?;
+    }
+    Ok(())
+}
+
+const UI_MAX_KEYS: usize = 64;
+const UI_MAX_VALUE: usize = 128 * 1024;
+const UI_MAX_TOTAL: usize = 512 * 1024;
+
+/// Merges a `settings.set` `ui` patch (`{key: string | null}`) into `saved["ui"]`: the choices the webview used to keep only
+/// in its localStorage (pinned worktrees, folded groups, the notification list...), so they survive a changed WebView
+/// profile or a reinstall. A null value removes the key. Nothing is applied unless the whole patch is valid.
+fn apply_ui_state(saved: &mut Value, patch: &Value) -> Result<()> {
+    let patch = patch.as_object().ok_or_else(|| anyhow::anyhow!("ui must be an object of strings"))?;
+    let mut ui = saved["ui"].as_object().cloned().unwrap_or_default();
+    for (k, v) in patch {
+        let key_ok = k.len() <= 64 && k.starts_with("axelstra.") && k.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+        if !key_ok {
+            anyhow::bail!("ui key {k:?} is not allowed");
+        }
+        match v {
+            Value::Null => {
+                ui.remove(k);
+            }
+            Value::String(s) if s.len() <= UI_MAX_VALUE => {
+                ui.insert(k.clone(), v.clone());
+            }
+            _ => anyhow::bail!("ui value for {k:?} must be a string of at most {UI_MAX_VALUE} bytes"),
+        }
+    }
+    let total: usize = ui.values().filter_map(Value::as_str).map(str::len).sum();
+    if ui.len() > UI_MAX_KEYS || total > UI_MAX_TOTAL {
+        anyhow::bail!("ui state is too large ({} keys, {total} bytes)", ui.len());
+    }
+    saved["ui"] = Value::Object(ui);
     Ok(())
 }
 
@@ -1000,6 +1036,33 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
 #[cfg(test)]
 mod settings_tests {
     use super::*;
+
+    #[test]
+    fn ui_state_merges_removes_and_survives_other_patches() {
+        let mut saved = json!({});
+        apply_ui_settings(&mut saved, &json!({"ui": {"axelstra.pins": "[\"a\"]", "axelstra.groupsFolded": "[]"}})).unwrap();
+        apply_ui_settings(&mut saved, &json!({"ui": {"axelstra.groupsFolded": null}, "shell": "wsl"})).unwrap();
+        assert_eq!(saved["ui"], json!({"axelstra.pins": "[\"a\"]"}));
+        apply_ui_settings(&mut saved, &json!({"notify_mode": "off"})).unwrap();
+        assert_eq!(saved["ui"], json!({"axelstra.pins": "[\"a\"]"}));
+    }
+
+    #[test]
+    fn invalid_ui_state_changes_nothing() {
+        let mut saved = json!({"ui": {"axelstra.pins": "[]"}});
+        for bad in [
+            json!({"other.key": "x"}),
+            json!({"axelstra.a b": "x"}),
+            json!({"axelstra.pins": 5}),
+            json!({"axelstra.pins": "ok", "axelstra.big": "x".repeat(UI_MAX_VALUE + 1)}),
+        ] {
+            assert!(apply_ui_settings(&mut saved, &json!({ "ui": bad })).is_err());
+        }
+        assert!(apply_ui_settings(&mut saved, &json!({"ui": ["x"]})).is_err());
+        assert_eq!(saved["ui"], json!({"axelstra.pins": "[]"}));
+        let many: serde_json::Map<String, Value> = (0..=UI_MAX_KEYS).map(|i| (format!("axelstra.k{i}"), json!("v"))).collect();
+        assert!(apply_ui_settings(&mut saved, &json!({"ui": many})).is_err());
+    }
 
     #[test]
     fn ui_settings_default_when_missing_or_invalid() {

@@ -1,5 +1,21 @@
 import { Accessor, createSignal } from "solid-js";
 
+/**
+ * Where a saved value is also sent (the daemon's settings.json, see uiState.ts), so it outlives the WebView profile.
+ * localStorage stays the synchronous copy every signal reads at startup; `null` removes the key.
+ */
+let mirror: ((key: string, value: string | null) => void) | null = null;
+export const setMirror = (m: typeof mirror) => {
+  mirror = m;
+};
+const mirrored = (key: string, value: string) => {
+  try {
+    mirror?.(key, value);
+  } catch {
+    /* the mirror is best effort */
+  }
+};
+
 /** Reading what localStorage (or any saved JSON) holds without trusting its shape: a value that does not pass `ok` gives `fallback`. */
 export const parseJson = <T>(raw: string | null, ok: (v: unknown) => v is T, fallback: T): T => {
   if (raw === null) return fallback;
@@ -41,6 +57,7 @@ export const writeString = (key: string, v: string): void => {
   } catch {
     /* storage unavailable */
   }
+  mirrored(key, v);
 };
 
 /** saves `v` as JSON under `key`; storage that is missing, full or blocked is not an error (the value lasts until restart) */
@@ -50,6 +67,7 @@ export const writeJson = (key: string, v: unknown): void => {
   } catch {
     /* storage unavailable */
   }
+  mirrored(key, JSON.stringify(v));
 };
 
 /** A signal that remembers itself: starts from the validated saved value (or `fallback`) and saves on every set. */
@@ -85,6 +103,7 @@ export function createPersistedFlag(key: string, def: boolean): [Accessor<boolea
       } catch {
         /* storage unavailable: lasts until restart */
       }
+      mirrored(key, v ? "1" : "0");
     },
   ];
 }
