@@ -36,8 +36,23 @@ mod debugcrt;
 mod gpu;
 mod hosts;
 mod logging;
+mod native;
 mod stats;
 mod voice;
+
+/// A coded error of this host (`app.*`, see `axelstra_core::msg`): English text for logs, code and params for the UI.
+macro_rules! host_err {
+    ($($t:tt)*) => {
+        CallError::from(&axelstra_core::coded!($($t)*))
+    };
+}
+
+#[tauri::command]
+async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, CallError> {
+    check_call(&method, &params)?;
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || routed(&st, &method, params, true)).await.map_err(|e| e.to_string())?
+}
 
 fn connect() -> Result<Client> {
     let token = proto::load_or_create_token()?;
@@ -275,11 +290,11 @@ const ALLOWED_METHODS: &[&str] = &[
     "worktree.status",
 ];
 
-fn check_allowed(method: &str) -> Result<(), String> {
+fn check_allowed(method: &str) -> Result<(), CallError> {
     if ALLOWED_METHODS.contains(&method) {
         Ok(())
     } else {
-        Err(format!("método do daemon não permitido: {method}"))
+        Err(host_err!("app.method_not_allowed", "daemon method not allowed: {method}", method = method))
     }
 }
 
@@ -296,24 +311,26 @@ fn is_shell(program: &str) -> bool {
 
 /// Arguments of the calls that can run code or write files, beyond the method allow-list: `session.spawn` starts a
 /// shell only (and sets no environment but `AXELSTRA_*`), `fs.write` takes a relative path outside `.git`.
-fn check_params(method: &str, params: &Value) -> Result<(), String> {
+fn check_params(method: &str, params: &Value) -> Result<(), CallError> {
     match method {
         "session.spawn" => {
             let program = params["program"].as_str().unwrap_or_default();
             if !is_shell(program) {
-                return Err(format!("programa não permitido: {program}"));
+                return Err(host_err!("app.program_not_allowed", "program not allowed: {program}", program = program));
             }
             if let Some(env) = params["env"].as_object() {
                 if let Some(k) = env.keys().find(|k| !k.starts_with("AXELSTRA_")) {
-                    return Err(format!("variável de ambiente não permitida: {k}"));
+                    return Err(host_err!("app.env_not_allowed", "environment variable not allowed: {name}", name = k));
                 }
             }
             Ok(())
         }
         // the host registry changes only through `host_add` / `host_remove`, which confirm in a native dialog
-        "settings.set" if params.get("hosts").is_some() => Err("anfitriões só se alteram pelos comandos próprios".into()),
+        "settings.set" if params.get("hosts").is_some() => {
+            Err(host_err!("app.hosts_own_commands", "hosts can only be changed through their own commands"))
+        }
         // the UI never overrides the agent command: a page that did could run any program unsupervised
-        "orch.start" if !params["agent"].is_null() => Err("override de agente não permitido".into()),
+        "orch.start" if !params["agent"].is_null() => Err(host_err!("app.agent_override", "overriding the agent command is not allowed")),
         "fs.write" => {
             let path = params["path"].as_str().unwrap_or_default();
             let p = std::path::Path::new(path);
@@ -324,14 +341,14 @@ fn check_params(method: &str, params: &Value) -> Result<(), String> {
             if plain {
                 Ok(())
             } else {
-                Err(format!("caminho não permitido: {path}"))
+                Err(host_err!("app.path_not_allowed", "path not allowed: {path}", path = path))
             }
         }
         _ => Ok(()),
     }
 }
 
-fn check_call(method: &str, params: &Value) -> Result<(), String> {
+fn check_call(method: &str, params: &Value) -> Result<(), CallError> {
     check_allowed(method)?;
     check_params(method, params)
 }
@@ -364,7 +381,7 @@ fn reconnect_into(slot: &Mutex<Option<Client>>) -> Result<()> {
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {
-            anyhow::bail!("o daemon está a reiniciar; tenta outra vez dentro de instantes");
+            return Err(axelstra_core::coded!("app.daemon_restarting", "the daemon is restarting; try again in a moment"));
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -377,7 +394,7 @@ fn with_client<T>(slot: &Mutex<Option<Client>>, retry: bool, f: impl Fn(&mut Cli
         reconnect_into(slot)?;
         g = slot.lock().unwrap();
     }
-    let Some(c) = g.as_mut() else { anyhow::bail!("sem ligação ao daemon") };
+    let Some(c) = g.as_mut() else { return Err(axelstra_core::coded!("app.no_daemon", "no connection to the daemon")) };
     match f(c) {
         Ok(v) => Ok(v),
         // the daemon answered with an error: the connection is fine and the call must not run twice
@@ -395,7 +412,10 @@ fn with_client<T>(slot: &Mutex<Option<Client>>, retry: bool, f: impl Fn(&mut Cli
                     None => Err(e),
                 }
             } else {
-                Err(e.context("a ligação ao daemon caiu durante o pedido; confirma o estado antes de repetir"))
+                Err(e.context(axelstra_core::coded!(
+                    "app.daemon_dropped",
+                    "the connection to the daemon dropped during the request; check the state before repeating it"
+                )))
             }
         }
     }
@@ -433,22 +453,21 @@ impl From<&anyhow::Error> for CallError {
     }
 }
 
+impl From<&str> for CallError {
+    fn from(message: &str) -> Self {
+        CallError::from(message.to_string())
+    }
+}
+
 impl From<String> for CallError {
     fn from(message: String) -> Self {
         CallError { message, code: None, params: None }
     }
 }
 
-#[tauri::command]
-async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, params: Value) -> Result<Value, CallError> {
-    check_call(&method, &params)?;
-    let st = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || routed(&st, &method, params, true)).await.map_err(|e| e.to_string())?
-}
-
 /// Asks for a folder in the native dialog. The path never passes through the webview: a compromised page could
 /// otherwise name any folder for `project.add` or `backup.restore`. `None` = cancelled.
-fn pick_folder(app: &tauri::AppHandle, title: &str, start: Option<std::path::PathBuf>) -> Result<Option<String>, String> {
+fn pick_folder(app: &tauri::AppHandle, title: &str, start: Option<std::path::PathBuf>) -> Result<Option<String>, CallError> {
     use tauri_plugin_dialog::DialogExt;
     let mut d = app.dialog().file().set_title(title);
     if let Some(s) = start.filter(|s| s.is_dir()) {
@@ -456,7 +475,7 @@ fn pick_folder(app: &tauri::AppHandle, title: &str, start: Option<std::path::Pat
     }
     match d.blocking_pick_folder() {
         None => Ok(None),
-        Some(f) => f.into_path().map(|p| Some(p.to_string_lossy().into_owned())).map_err(|e| e.to_string()),
+        Some(f) => f.into_path().map(|p| Some(p.to_string_lossy().into_owned())).map_err(|e| CallError::from(e.to_string())),
     }
 }
 
@@ -494,15 +513,15 @@ type WorkspacePick = (Option<String>, Vec<(String, String)>);
 static WORKSPACE_PICK: Mutex<WorkspacePick> = Mutex::new((None, Vec::new()));
 
 /// `workspace.import_preview` of the picked file with the folder map so far, plus the map and the file name for the page.
-fn workspace_preview(st: &State) -> Result<Value, String> {
+fn workspace_preview(st: &State) -> Result<Value, CallError> {
     let (file, map) = {
         let g = WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner());
         (g.0.clone(), g.1.clone())
     };
-    let Some(file) = file else { return Err("nenhum ficheiro escolhido".into()) };
+    let Some(file) = file else { return Err(host_err!("app.no_file", "no file was chosen")) };
     let pairs: Vec<Value> = map.iter().map(|(o, n)| json!([o, n])).collect();
     let mut v = with_client(&st.control, false, |c| c.call("workspace.import_preview", json!({"path": file, "map": pairs})))
-        .map_err(|e| format!("{e:#}"))?;
+        .map_err(|e| CallError::from(&e))?;
     v["map"] = Value::Array(pairs);
     v["file"] = json!(std::path::Path::new(&file).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
     Ok(v)
@@ -510,7 +529,7 @@ fn workspace_preview(st: &State) -> Result<Value, String> {
 
 /// Native "save as" dialog, then `workspace.export` to that file. Returns the daemon's answer, or null when cancelled.
 #[tauri::command]
-async fn workspace_export_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, String> {
+async fn workspace_export_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, CallError> {
     use tauri_plugin_dialog::DialogExt;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -523,7 +542,7 @@ async fn workspace_export_pick(app: tauri::AppHandle, state: tauri::State<'_, Ar
             .blocking_save_file();
         let Some(path) = picked else { return Ok(Value::Null) };
         let path = path.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned();
-        with_client(&st.control, false, |c| c.call("workspace.export", json!({"path": path}))).map_err(|e| format!("{e:#}"))
+        with_client(&st.control, false, |c| c.call("workspace.export", json!({"path": path}))).map_err(|e| CallError::from(&e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -531,7 +550,7 @@ async fn workspace_export_pick(app: tauri::AppHandle, state: tauri::State<'_, Ar
 
 /// Native "open" dialog for a workspace file; remembers it and returns its preview (null when cancelled).
 #[tauri::command]
-async fn workspace_import_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, String> {
+async fn workspace_import_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, CallError> {
     use tauri_plugin_dialog::DialogExt;
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -553,18 +572,18 @@ async fn workspace_map_pick(
     state: tauri::State<'_, Arc<State>>,
     title: String,
     old: String,
-) -> Result<Value, String> {
+) -> Result<Value, CallError> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         if old.is_empty() || old.len() > 1024 || WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner()).0.is_none() {
-            return Err("pedido inválido".to_string());
+            return Err(host_err!("app.bad_request", "invalid request"));
         }
         let Some(new) = pick_folder(&app, &title, None)? else { return Ok(Value::Null) };
         {
             let mut g = WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner());
             g.1.retain(|(o, _)| *o != old);
             if g.1.len() >= 32 {
-                return Err("demasiados mapeamentos".to_string());
+                return Err(host_err!("app.too_many_mappings", "too many folder mappings"));
             }
             g.1.push((old, new));
         }
@@ -576,7 +595,7 @@ async fn workspace_map_pick(
 
 /// Forgets the folder map and previews the picked file again.
 #[tauri::command]
-async fn workspace_map_clear(state: tauri::State<'_, Arc<State>>) -> Result<Value, String> {
+async fn workspace_map_clear(state: tauri::State<'_, Arc<State>>) -> Result<Value, CallError> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner()).1.clear();
@@ -588,19 +607,19 @@ async fn workspace_map_clear(state: tauri::State<'_, Arc<State>>) -> Result<Valu
 
 /// `workspace.import` of the picked file with the folder map; the page only says how (`mode`, `conflicts`).
 #[tauri::command]
-async fn workspace_import_apply(state: tauri::State<'_, Arc<State>>, mode: String, conflicts: String) -> Result<Value, String> {
+async fn workspace_import_apply(state: tauri::State<'_, Arc<State>>, mode: String, conflicts: String) -> Result<Value, CallError> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let (file, map) = {
             let g = WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner());
             (g.0.clone(), g.1.clone())
         };
-        let Some(file) = file else { return Err("nenhum ficheiro escolhido".to_string()) };
+        let Some(file) = file else { return Err(host_err!("app.no_file", "no file was chosen")) };
         let pairs: Vec<Value> = map.iter().map(|(o, n)| json!([o, n])).collect();
         let r = with_client(&st.control, false, |c| {
             c.call("workspace.import", json!({"path": file, "mode": mode, "conflicts": conflicts, "map": pairs}))
         })
-        .map_err(|e| format!("{e:#}"));
+        .map_err(|e| CallError::from(&e));
         if r.is_ok() {
             *WORKSPACE_PICK.lock().unwrap_or_else(|e| e.into_inner()) = (None, Vec::new());
         }
@@ -617,9 +636,21 @@ fn workspace_import_cancel() {
 }
 
 /// A native yes/no the page cannot answer for the user (the registry and remote projects are the user's to decide).
-fn confirm_native(app: &tauri::AppHandle, title: &str, text: String) -> bool {
+fn confirm_native(app: &tauri::AppHandle, c: native::Confirm) -> bool {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-    app.dialog().message(text).title(title).kind(MessageDialogKind::Warning).buttons(MessageDialogButtons::OkCancel).blocking_show()
+    app.dialog()
+        .message(c.text)
+        .title(c.title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(c.ok.to_string(), c.cancel.to_string()))
+        .blocking_show()
+}
+
+/// The language the UI is set to, for the texts the host shows by itself (pt-PT while the daemon cannot say).
+fn ui_lang(st: &State) -> native::Lang {
+    with_client(&st.control, true, |c| c.call("settings.get", json!({})))
+        .map(|s| native::lang_from_settings(&s))
+        .unwrap_or(native::Lang::Pt)
 }
 
 /// The registered remote hosts and how each connection stands.
@@ -636,20 +667,14 @@ async fn host_add(
     name: String,
     spec: String,
     bin: Option<String>,
-) -> Result<Value, String> {
+) -> Result<Value, CallError> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        axelstra_daemon::remote::RemoteSpec::parse(&spec).map_err(|e| format!("{e:#}"))?;
-        let text = format!(
-            "Adicionar o anfitrião remoto \"{}\"?
-
-O Axelstra vai executar `ssh`/`wsl.exe` para {spec} e ligar-se ao daemon que lá corre.",
-            name.trim()
-        );
-        if !confirm_native(&app, "Adicionar anfitrião remoto", text) {
-            return Err("cancelado".to_string());
+        axelstra_daemon::remote::RemoteSpec::parse(&spec).map_err(|e| CallError::from(&e))?;
+        if !confirm_native(&app, native::add_host(ui_lang(&st), name.trim(), &spec)) {
+            return Err(host_err!("app.cancelled", "cancelled"));
         }
-        let h = with_client(&st.control, false, |c| hosts::add(c, &name, &spec, bin.as_deref())).map_err(|e| format!("{e:#}"))?;
+        let h = with_client(&st.control, false, |c| hosts::add(c, &name, &spec, bin.as_deref())).map_err(|e| CallError::from(&e))?;
         Ok(h)
     })
     .await
@@ -658,14 +683,13 @@ O Axelstra vai executar `ssh`/`wsl.exe` para {spec} e ligar-se ao daemon que lá
 
 /// Forgets a host and drops its connections (what runs there keeps running).
 #[tauri::command]
-async fn host_remove(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, id: String) -> Result<(), String> {
+async fn host_remove(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, id: String) -> Result<(), CallError> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        if !confirm_native(&app, "Remover anfitrião remoto", format!("Remover o anfitrião \"{id}\"? O que corre lá continua a correr."))
-        {
-            return Err("cancelado".to_string());
+        if !confirm_native(&app, native::remove_host(ui_lang(&st), &id)) {
+            return Err(host_err!("app.cancelled", "cancelled"));
         }
-        with_client(&st.control, false, |c| hosts::remove(c, &id)).map_err(|e| format!("{e:#}"))
+        with_client(&st.control, false, |c| hosts::remove(c, &id)).map_err(|e| CallError::from(&e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -673,9 +697,9 @@ async fn host_remove(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>,
 
 /// Tries the host again now (the keeper thread also does it by itself, after a wait).
 #[tauri::command]
-async fn host_reconnect(id: String) -> Result<Value, String> {
+async fn host_reconnect(id: String) -> Result<Value, CallError> {
     tauri::async_runtime::spawn_blocking(move || {
-        let h = hosts::get(&id).ok_or_else(|| format!("anfitrião desconhecido: {id}"))?;
+        let h = hosts::get(&id).ok_or_else(|| host_err!("app.host_unknown", "unknown host: {host}", host = id))?;
         let _ = h.connect_now();
         Ok(h.describe())
     })
@@ -685,20 +709,25 @@ async fn host_reconnect(id: String) -> Result<Value, String> {
 
 /// Adds a folder of a remote host as a project, after the user confirmed it in a native dialog.
 #[tauri::command]
-async fn project_add_remote(app: tauri::AppHandle, host: String, path: String) -> Result<Value, String> {
+async fn project_add_remote(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<State>>,
+    host: String,
+    path: String,
+) -> Result<Value, CallError> {
+    let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let h = hosts::get(&host).ok_or_else(|| format!("anfitrião desconhecido: {host}"))?;
+        let h = hosts::get(&host).ok_or_else(|| host_err!("app.host_unknown", "unknown host: {host}", host = host))?;
         let t = path.trim();
         let absolute = t.starts_with('/') || t.as_bytes().get(1) == Some(&b':');
         if t.is_empty() || t.len() > 1024 || t.chars().any(char::is_control) || !absolute {
-            return Err("caminho remoto inválido: tem de ser absoluto".to_string());
+            return Err(host_err!("app.remote_path_invalid", "invalid remote path: it must be absolute"));
         }
-        let text = format!("Adicionar {t} em {} como projeto?", h.def.name);
-        if !confirm_native(&app, "Adicionar projeto remoto", text) {
-            return Err("cancelado".to_string());
+        if !confirm_native(&app, native::add_remote_project(ui_lang(&st), t, &h.def.name)) {
+            return Err(host_err!("app.cancelled", "cancelled"));
         }
         let mut v = hosts::with_remote(&h, hosts::Which::Control, false, |c| c.call("project.add", json!({"path": t})))
-            .map_err(|e| format!("{e:#}"))?;
+            .map_err(|e| CallError::from(&e))?;
         hosts::tag_project(&h.def.id, h.def.slot, &mut v);
         Ok(v)
     })
@@ -759,23 +788,23 @@ fn input_sender(st: &Arc<State>, slot: u32) -> InputTx {
 }
 
 #[tauri::command]
-fn session_write(state: tauri::State<'_, Arc<State>>, id: u32, data: String) -> Result<(), String> {
+fn session_write(state: tauri::State<'_, Arc<State>>, id: u32, data: String) -> Result<(), CallError> {
     // keystrokes only go to a session this window has open (attached), not to any id a page can guess
     if !state.attachments.lock().unwrap().get(&id).is_some_and(|m| !m.is_empty()) {
-        return Err(format!("sessão {id} não está anexada"));
+        return Err(host_err!("app.session_not_attached", "session {id} is not attached", id = id));
     }
-    input_sender(state.inner(), hosts::split_gid(id).0).send((id, data.into_bytes())).map_err(|e| e.to_string())
+    input_sender(state.inner(), hosts::split_gid(id).0).send((id, data.into_bytes())).map_err(|e| CallError::from(e.to_string()))
 }
 
 /// Streams a session to the webview: raw bytes for output, a JSON string for events.
 #[tauri::command]
-async fn session_attach(state: tauri::State<'_, Arc<State>>, id: u32, on_data: Channel<InvokeResponseBody>) -> Result<u64, String> {
+async fn session_attach(state: tauri::State<'_, Arc<State>>, id: u32, on_data: Channel<InvokeResponseBody>) -> Result<u64, CallError> {
     static NEXT_TOKEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let token = NEXT_TOKEN.fetch_add(1, Ordering::SeqCst);
     let stop = Arc::new(AtomicBool::new(false));
     state.attachments.lock().unwrap().entry(id).or_default().insert(token, stop.clone());
     let st = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<u64, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<u64, CallError> {
         let forget = || {
             if let Some(m) = st.attachments.lock().unwrap().get_mut(&id) {
                 m.remove(&token);
@@ -785,7 +814,7 @@ async fn session_attach(state: tauri::State<'_, Arc<State>>, id: u32, on_data: C
         let remote = if slot == 0 { None } else { hosts::by_slot(slot) };
         if slot != 0 && remote.is_none() {
             forget();
-            return Err(format!("sessão {id} de um anfitrião que já não existe"));
+            return Err(host_err!("app.session_host_gone", "session {id} belongs to a host that no longer exists", id = id));
         }
         let mut c = match &remote {
             Some(h) => h.connect_stream(),
@@ -835,11 +864,11 @@ async fn watch_start(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<State>>,
     on_event: Channel<InvokeResponseBody>,
-) -> Result<(), String> {
+) -> Result<(), CallError> {
     let st = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let c = connect().map_err(|e| format!("{e:#}"))?;
-        let mut rd = c.try_clone().map_err(|e| format!("{e:#}"))?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), CallError> {
+        let c = connect().map_err(|e| CallError::from(&e))?;
+        let mut rd = c.try_clone().map_err(|e| CallError::from(&e))?;
         *st.watch.lock().unwrap() = Some(c);
         // remote hosts push their events into the same channel
         hosts::set_events(on_event.clone());
@@ -863,17 +892,17 @@ async fn watch_start(
 
 /// Watch this worktree (replacing the previous one), or nothing when `worktree` is null.
 #[tauri::command]
-async fn watch_set(state: tauri::State<'_, Arc<State>>, worktree: Option<String>) -> Result<(), String> {
+async fn watch_set(state: tauri::State<'_, Arc<State>>, worktree: Option<String>) -> Result<(), CallError> {
     let st = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), CallError> {
         let mut g = st.watch.lock().unwrap();
         let c = g.as_mut().ok_or("watch not started")?;
         // a remote worktree is watched by that host's daemon; this machine's one then watches nothing
-        match hosts::watch_target(worktree.as_deref()).map_err(|e| format!("{e:#}"))? {
+        match hosts::watch_target(worktree.as_deref()).map_err(|e| CallError::from(&e))? {
             Some(w) => c.send("watch.subscribe", json!({"worktree": w})),
             None => c.send("watch.unsubscribe", json!({})),
         }
-        .map_err(|e| format!("{e:#}"))
+        .map_err(|e| CallError::from(&e))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1009,7 +1038,7 @@ fn windows_shell(setting: &str, has_pwsh: bool) -> (String, Vec<String>) {
 
 /// What the UI shows in the diagnostics panel: versions, where the state lives, what is missing.
 #[tauri::command]
-async fn diagnostics(state: tauri::State<'_, Arc<State>>) -> Result<Value, String> {
+async fn diagnostics(state: tauri::State<'_, Arc<State>>) -> Result<Value, CallError> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let daemon = with_client(&st.bg, true, |c| Ok((c.proto, c.instance, c.build.clone(), c.security))).ok();
@@ -1030,13 +1059,13 @@ async fn diagnostics(state: tauri::State<'_, Arc<State>>) -> Result<Value, Strin
         })
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| CallError::from(e.to_string()))
 }
 
 /// Plain-text bundle for bug reports: version, OS, data dir, tail of the latest log and of crash.log.
 #[tauri::command]
-async fn diagnostics_bundle() -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(|| logging::bundle(&proto::data_dir())).await.map_err(|e| e.to_string())
+async fn diagnostics_bundle() -> Result<String, CallError> {
+    tauri::async_runtime::spawn_blocking(|| logging::bundle(&proto::data_dir())).await.map_err(|e| CallError::from(e.to_string()))
 }
 
 /// An error caught by the webview (window.onerror / unhandledrejection), written to the log file.
@@ -1060,11 +1089,11 @@ fn clean_pastes() {
 
 /// The terminal to start: this machine's, or (with `host`) the login shell of that remote host.
 #[tauri::command]
-async fn default_shell(host: Option<String>) -> Result<(String, Vec<String>), String> {
+async fn default_shell(host: Option<String>) -> Result<(String, Vec<String>), CallError> {
     let Some(host) = host.filter(|h| h != hosts::LOCAL) else { return Ok(local_shell()) };
     tauri::async_runtime::spawn_blocking(move || {
-        let h = hosts::get(&host).ok_or_else(|| format!("anfitrião desconhecido: {host}"))?;
-        let info = hosts::with_remote(&h, hosts::Which::Bg, true, |c| c.call("host.info", json!({}))).map_err(|e| format!("{e:#}"))?;
+        let h = hosts::get(&host).ok_or_else(|| host_err!("app.host_unknown", "unknown host: {host}", host = host))?;
+        let info = hosts::with_remote(&h, hosts::Which::Bg, true, |c| c.call("host.info", json!({}))).map_err(|e| CallError::from(&e))?;
         // only a shell the daemon would start for a terminal; anything else falls back to sh
         let shell = info["shell"].as_str().filter(|s| is_shell(s)).unwrap_or("/bin/sh").to_string();
         Ok((shell, vec!["-l".to_string()]))
@@ -1094,7 +1123,7 @@ struct UpdateInfo {
 /// Native clipboard: WebView2 gates `navigator.clipboard` behind a permission prompt.
 /// Images are saved as PNG in the temp dir and returned as a path to type into the terminal.
 #[tauri::command]
-fn clipboard_read() -> Result<Value, String> {
+fn clipboard_read() -> Result<Value, CallError> {
     let mut cb = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     if let Ok(img) = cb.get_image() {
         let dir = std::env::temp_dir().join("axelstra-paste");
@@ -1117,39 +1146,46 @@ fn clipboard_read() -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn clipboard_write(text: String) -> Result<(), String> {
-    arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).map_err(|e| e.to_string())
+fn clipboard_write(text: String) -> Result<(), CallError> {
+    arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).map_err(|e| CallError::from(e.to_string()))
 }
 
 /// `None` = this build is the latest. Errors become one fixed sentence: the plugin's own
 /// error can quote whatever the endpoint answered.
 #[tauri::command]
-async fn update_check(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+async fn update_check(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, CallError> {
     use tauri_plugin_updater::UpdaterExt;
-    let updater = app.updater().map_err(|_| "updater unavailable".to_string())?;
+    let updater = app.updater().map_err(|_| host_err!("app.updater_unavailable", "updater unavailable"))?;
     match updater.check().await {
         Ok(Some(u)) => Ok(Some(UpdateInfo { version: u.version, notes: u.body })),
         Ok(None) => Ok(None),
-        Err(_) => Err("update check failed".into()),
+        Err(_) => Err(host_err!("app.update_check_failed", "update check failed")),
     }
 }
 
 /// Downloads and verifies the update in the background and keeps it for later. `expected` is the
 /// version the user was told about: if a newer release landed since, nothing is kept.
 #[tauri::command]
-async fn update_download(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, expected: String) -> Result<(), String> {
+async fn update_download(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, expected: String) -> Result<(), CallError> {
     use tauri_plugin_updater::UpdaterExt;
     if let Some((u, _)) = state.pending.lock().unwrap().as_ref() {
         if u.version == expected {
             return Ok(());
         }
     }
-    let updater = app.updater().map_err(|_| "updater unavailable".to_string())?;
-    let update = updater.check().await.map_err(|_| "update check failed".to_string())?.ok_or("already up to date")?;
+    let updater = app.updater().map_err(|_| host_err!("app.updater_unavailable", "updater unavailable"))?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|_| host_err!("app.update_check_failed", "update check failed"))?
+        .ok_or_else(|| host_err!("app.up_to_date", "already up to date"))?;
     if update.version != expected {
-        return Err(format!("a newer release ({}) appeared; check again", update.version));
+        return Err(host_err!("app.update_newer", "a newer release ({version}) appeared; check again", version = update.version));
     }
-    let bytes = update.download(|_, _| {}, || {}).await.map_err(|_| "download or signature check failed".to_string())?;
+    let bytes = update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|_| host_err!("app.update_download_failed", "download or signature check failed"))?;
     *state.pending.lock().unwrap() = Some((update, bytes));
     Ok(())
 }
@@ -1157,7 +1193,7 @@ async fn update_download(app: tauri::AppHandle, state: tauri::State<'_, Arc<Stat
 /// Installs the downloaded update and restarts the window. The installer renames the running daemon
 /// instead of killing it, so terminals and agents keep running through the update.
 #[tauri::command]
-fn update_apply(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>) -> Result<(), String> {
+fn update_apply(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>) -> Result<(), CallError> {
     let (update, bytes) = state.pending.lock().unwrap().take().ok_or("no update downloaded")?;
     update.restart_after_install(true).install(bytes).map_err(|_| "install failed".to_string())?;
     app.restart();
@@ -1389,6 +1425,6 @@ mod tests {
         assert!(check_allowed("session.spawn").is_ok());
         assert!(check_allowed("session.pending_clear").is_err());
         assert!(check_allowed("").is_err());
-        assert!(check_allowed("flow.set").unwrap_err().contains("não permitido"));
+        assert!(check_allowed("flow.set").unwrap_err().message.contains("not allowed"));
     }
 }

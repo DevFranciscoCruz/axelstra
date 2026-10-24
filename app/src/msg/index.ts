@@ -5,9 +5,10 @@ import * as vcs from "./vcs";
 import * as containers from "./containers";
 import * as hosts from "./hosts";
 import * as agents from "./agents";
+import * as app from "./app";
 
 /** one file per group of code prefixes, so parallel changes never touch the same file */
-export const parts = { files, kanban, vcs, containers, hosts, agents };
+export const parts = { files, kanban, vcs, containers, hosts, agents, app };
 
 const merge = (k: "pt" | "en" | "ptBR"): Record<string, string> =>
   Object.assign({}, ...Object.values(parts).map((p) => p[k]));

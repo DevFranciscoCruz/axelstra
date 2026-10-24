@@ -3,6 +3,10 @@
 //! Frame: `[u32 LE len][u8 kind][payload]`, where `len = 1 + payload.len()`.
 //!   kind 0  JSON request  `{"id":n,"method":"..","params":{..}}`  (client -> daemon)
 //!           JSON response `{"id":n,"result":..}` or `{"id":n,"error":".."}` (daemon -> client)
+//!           An error may also carry `"code":"domain.name"` and `"params":{..}` (additive, so PROTO did not change): a stable
+//!           message code the UI translates (`app/src/msg/*.ts`); `error` stays the English text for the CLI, logs and old
+//!           frontends. Raise one with `axelstra_core::coded!`, see `crates/core/src/msg.rs`. Results and events that carry
+//!           text for the UI add `<field>_code` / `<field>_params` next to the string; `notices.take` adds `items`.
 //!   kind 1  PTY output    `[u32 LE session][bytes]`                 (daemon -> client)
 //!   kind 2  PTY input     `[u32 LE session][bytes]`                 (client -> daemon)
 //!   kind 3  JSON event    `{"event":"session.exit","id":n,"code":c}` (daemon -> client)

@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { errorText } from "./appError";
 import { Button, Input } from "./ui";
 import { Show, createEffect, onCleanup, onMount, untrack } from "solid-js";
 import { Icon } from "./Icon";
@@ -65,7 +66,7 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
     const detach = () => void invoke("session_detach", { id: props.id, token: token ?? undefined }).catch(() => 0);
     void attachWithRetry(() => invoke<unknown>("session_attach", { id: props.id, onData: channel }), 600, {
       gone: () => gone,
-      onFail: (e) => term.write(`\r\n\x1b[31m[axelstra] ${S.attachFailed}${String(e)}\x1b[0m\r\n`),
+      onFail: (e) => term.write(`\r\n\x1b[31m[axelstra] ${S.attachFailed}${errorText(e)}\x1b[0m\r\n`),
     }).then((r) => {
       // only a terminal that really attached tells the PTY its size
       if (!r.ok) return;
