@@ -246,7 +246,9 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         "computer.enable" => p["on"].as_bool() == Some(true),
         // an agent must not raise its own limit or switch the auto-pause off; the events are the user's to take
         "budget.check" | "budget.events" => true,
-        "settings.set" => p.get("budgets").is_some(),
+        // they list the file system outside any worktree
+        "host.info" | "host.browse" => true,
+        "settings.set" => p.get("budgets").is_some() || p.get("hosts").is_some(),
         "project.add"
         | "project.setup"
         | "hooks.install"
@@ -1110,7 +1112,7 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
         "orch" | "kanban" | "automation" => orchestration::call(c),
         "msg" | "notes" => messaging::call(c),
         "agent" | "agents" | "codex" | "computer" | "settings" | "flow" | "app" | "hooks" | "ping" | "audit" | "notices" | "daemon"
-        | "hello" | "backup" | "env" | "budget" | "workspace" => misc::call(c),
+        | "hello" | "backup" | "env" | "budget" | "workspace" | "host" => misc::call(c),
         _ => anyhow::bail!("unknown method {}", req.method),
     }
 }

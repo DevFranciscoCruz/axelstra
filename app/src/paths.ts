@@ -14,3 +14,16 @@ export const toggleIn = <T>(set: ReadonlySet<T>, v: T): Set<T> => {
   if (!next.delete(v)) next.add(v);
   return next;
 };
+
+/** A remote path is `@<hostid>:<remote absolute path>`; the Tauri host adds and strips the prefix, the page keeps it opaque. */
+const REMOTE_PATH = /^@([^:\s\\/]+):([\s\S]*)$/;
+/** the host id of a remote path, null for a local one */
+export const hostOf = (p: string | null | undefined): string | null => REMOTE_PATH.exec(p ?? "")?.[1] ?? null;
+/** the path on the remote machine ("@lab:/home/me" -> "/home/me"); a local path comes back unchanged */
+export const remotePathOf = (p: string): string => REMOTE_PATH.exec(p)?.[2] ?? p;
+export const isRemote = (p: string | null | undefined): boolean => hostOf(p) !== null;
+/** what the user reads: "lab:/home/me/proj" for a remote path (`hostName` replaces the id when known), the path itself for a local one */
+export const displayPath = (p: string, hostName?: string): string => {
+  const h = hostOf(p);
+  return h === null ? p : `${hostName || h}:${remotePathOf(p)}`;
+};

@@ -27,7 +27,7 @@ const NEW_METHODS: &[&str] = &[
 ];
 
 #[test]
-fn one_daemon_serves_every_new_method_and_reports_proto_18() {
+fn one_daemon_serves_every_new_method_and_reports_proto_19() {
     let pipe = format!("{}-wave2-{}", common::base_pipe(), std::process::id());
     let token = "d".repeat(32);
     let (p, t) = (pipe.clone(), token.clone());
@@ -42,8 +42,8 @@ fn one_daemon_serves_every_new_method_and_reports_proto_18() {
     });
     std::thread::sleep(Duration::from_millis(300));
     let mut c = Client::connect(&pipe, &token).unwrap();
-    assert_eq!(PROTO, 18, "three branches claimed 17; the merged contract is 18");
-    assert_eq!(c.proto, 18);
+    assert_eq!(PROTO, 19, "wave 2 merged as 18; host.info, host.browse and hosts in settings make 19");
+    assert_eq!(c.proto, 19);
     // bogus arguments: any answer is fine except "unknown method" (the daemon lacks it) or an agent refusal
     for m in NEW_METHODS {
         if let Err(e) = c.call(m, json!({"project": "x", "worktree": "x", "path": "x"})) {

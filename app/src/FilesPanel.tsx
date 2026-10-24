@@ -7,6 +7,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup } from "solid-js";
 import { PAGE, capList, sameListing } from "./listing";
 import { press } from "./a11y";
+import { isRemote, remotePathOf } from "./paths";
 import { FsEntry, GrepHit, fsCreate, fsDelete, fsGrep, fsList, fsRename, fsSearch } from "./api";
 import { MenuItem, menuKey, showMenu } from "./ContextMenu";
 import { RightTabs } from "./RightTabs";
@@ -186,6 +187,7 @@ function Dir(props: { wt: string; path: string; depth: number }) {
 /** actions shared by the tree rows and the search results */
 function fileMenu(wt: string, path: string, dir: boolean): MenuItem[] {
   const abs = `${wt.replace(/[\\/]$/, "")}/${path}`;
+  const remote = isRemote(wt);
   const copy = (text: string) => invoke("clipboard_write", { text }).catch((e) => setError(String(e)));
   const here = dir ? path : parentOf(path);
   return [
@@ -193,9 +195,10 @@ function fileMenu(wt: string, path: string, dir: boolean): MenuItem[] {
     { label: P.files.newFile, icon: "plus", run: () => (expand(here), setEditing({ mode: "file", parent: here })) },
     { label: P.files.newFolder, icon: "folder", run: () => (expand(here), setEditing({ mode: "dir", parent: here })) },
     { separator: true },
-    { label: P.files.copyPath, icon: "copy", run: () => copy(abs.replace(/\//g, "\\")) },
+    { label: P.files.copyPath, icon: "copy", run: () => copy(remote ? remotePathOf(abs) : abs.replace(/\//g, "\\")) },
     { label: P.files.copyRelative, icon: "copy", run: () => copy(path) },
-    { label: P.files.reveal, icon: "folder", run: () => revealItemInDir(abs.replace(/\//g, "\\")).catch((e) => setError(String(e))) },
+    // a remote folder has no Explorer on this machine
+    ...(remote ? [] : [{ label: P.files.reveal, icon: "folder", run: () => revealItemInDir(abs.replace(/\//g, "\\")).catch((e) => setError(String(e))) } as MenuItem]),
     { separator: true },
     { label: P.files.rename, icon: "pencil", run: () => setEditing({ mode: "rename", parent: parentOf(path), target: path }) },
     {

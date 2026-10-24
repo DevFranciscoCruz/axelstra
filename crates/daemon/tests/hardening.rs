@@ -95,6 +95,10 @@ fn agent_role_cannot_use_app_only_calls() {
         ("budget.check", json!({})),
         ("budget.events", json!({})),
         ("settings.set", json!({"budgets": {}})),
+        ("settings.set", json!({"hosts": []})),
+        // they list the file system outside any worktree
+        ("host.info", json!({})),
+        ("host.browse", json!({"path": std::env::temp_dir()})),
         ("worktree.rebase", json!({"worktree": "x"})),
         ("workspace.export", json!({"path": "x"})),
         ("workspace.import_preview", json!({"path": "x"})),
