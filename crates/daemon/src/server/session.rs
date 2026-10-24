@@ -25,7 +25,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let mut meta = if p["meta"].is_null() { None } else { Some(p["meta"].clone()) };
             // a session started on behalf of another one (a worker): remembered as its child
             let parent = p["parent"].as_u64().or_else(|| p["reap"]["parent"].as_u64()).map(|x| x as u32);
-            let is_worker = p["reap"].is_object() || p["worker"].as_bool() == Some(true);
+            // a dispatched lead is ephemeral like a worker but owns its worktree: it does not count against the worker limit
+            let is_worker = (p["reap"].is_object() && p["reap"]["lead"].as_bool() != Some(true)) || p["worker"].as_bool() == Some(true);
             if is_worker {
                 let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
                 let (live, max) = (reg.bus.live_workers(alive), reg.bus.limit());

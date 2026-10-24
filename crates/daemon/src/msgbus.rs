@@ -171,6 +171,8 @@ impl Bus {
             // any answer from the parent unblocks an escalated worker
             ("reply" | "message", _) => {
                 self.escalated.lock_recover().remove(&to);
+                // new work after a report: it is busy again until it reports again
+                self.finished.lock_recover().remove(&to);
             }
             _ => {}
         }
@@ -279,6 +281,15 @@ mod tests {
         assert!(b.is_escalated(3));
         b.send(Some(1), 3, "message", "try X", None, None);
         assert!(!b.is_escalated(3));
+    }
+
+    #[test]
+    fn a_new_message_makes_a_reported_session_busy_again() {
+        let b = Bus::default();
+        b.send(Some(4), 1, "done", "all green", None, None);
+        assert!(b.finished(4).is_some());
+        b.send(Some(1), 4, "message", "one more thing", None, None);
+        assert!(b.finished(4).is_none());
     }
 
     #[test]
