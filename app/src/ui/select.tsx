@@ -4,12 +4,27 @@ import { Icon, hasIcon } from "../Icon";
 import { holdLayer } from "../ContextMenu";
 import { cn } from "./cn";
 
-export type Option = { value: string; label: string; icon?: string };
+/** brand colour of the agent logos; other icons follow the text colour */
+const BRAND: Record<string, string> = { claude: "#d97757", codex: "#10a37f", gemini: "#4f8ff7" };
+
+export type Option = {
+  value: string;
+  label: string;
+  icon?: string;
+  /** second line under the label in the list */ desc?: string;
+};
 
 /** Dropdown that matches the app instead of the system list, on Kobalte's Select (listbox, roving focus, type-ahead).
  *  While it is open it holds a layer (ContextMenu's `menuOpen`), so Esc and Tab close it before they reach a dialog
  *  underneath. */
-export function Select(props: { value: string; options: Option[]; onChange: (v: string) => void; class?: string; label?: string; /** options that have an icon show only the icon (the name stays as tooltip and for screen readers) */ iconOnly?: boolean }) {
+export function Select(props: {
+  value: string;
+  options: Option[];
+  onChange: (v: string) => void;
+  class?: string;
+  label?: string;
+  /** options that have an icon show only the icon (the name stays as tooltip and for screen readers) */ iconOnly?: boolean;
+}) {
   const current = () => props.options.find((o) => o.value === props.value);
   const label = () => current()?.label ?? props.value;
   const logoOnly = () => !!props.iconOnly && !!current()?.icon;
@@ -54,10 +69,18 @@ export function Select(props: { value: string; options: Option[]; onChange: (v: 
             title={props.iconOnly && o().icon ? o().label : undefined}
             class="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-base text-popover-foreground outline-none data-[highlighted]:bg-accent"
           >
-            <span class="inline-flex w-4 flex-none items-center justify-center text-muted-foreground">
+            <span
+              class="inline-flex w-4 flex-none items-center justify-center text-muted-foreground"
+              style={{ color: BRAND[icon()] }}
+            >
               {hasIcon(icon()) ? <Icon name={icon()} size={13} /> : icon()}
             </span>
-            <K.ItemLabel class={cn("flex-1", props.iconOnly && o().icon && "sr-only")}>{o().label}</K.ItemLabel>
+            <span class="flex min-w-0 flex-1 flex-col">
+              <K.ItemLabel class={cn(props.iconOnly && o().icon && "sr-only")}>{o().label}</K.ItemLabel>
+              <Show when={o().desc}>
+                <K.ItemDescription class="text-xs text-muted-foreground">{o().desc}</K.ItemDescription>
+              </Show>
+            </span>
           </K.Item>
         );
       }}
@@ -75,15 +98,26 @@ export function Select(props: { value: string; options: Option[]; onChange: (v: 
           if (!e.currentTarget.dataset.pointerType) setOpen(!open());
         }}
       >
-        <Show when={current()?.icon}>{(n) => <Icon name={n()} size={logoOnly() ? 16 : 13} />}</Show>
-        <K.Value<Option> class={cn("select-label min-w-0 flex-1 truncate", logoOnly() && "sr-only")}>{() => label()}</K.Value>
+        <Show when={current()?.icon}>
+          {(n) => (
+            <span class="inline-flex" style={{ color: BRAND[n()] }}>
+              <Icon name={n()} size={logoOnly() ? 16 : 13} />
+            </span>
+          )}
+        </Show>
+        <K.Value<Option> class={cn("select-label min-w-0 flex-1 truncate", logoOnly() && "sr-only")}>
+          {() => label()}
+        </K.Value>
         <K.Icon class="chev text-muted-foreground">
           <Icon name="chevDown" size={11} />
         </K.Icon>
       </K.Trigger>
       <K.Portal>
-        <K.Content class="z-[70] min-w-[max(var(--kb-popper-anchor-width),8.75rem)] rounded-xl border border-border bg-popover p-1 shadow-lg" onContextMenu={(e: MouseEvent) => e.preventDefault()}>
-          <K.Listbox class="outline-none" />
+        <K.Content
+          class="z-[70] min-w-[max(var(--kb-popper-anchor-width),8.75rem)] rounded-xl border border-border bg-popover p-1 shadow-lg"
+          onContextMenu={(e: MouseEvent) => e.preventDefault()}
+        >
+          <K.Listbox class="m-0 list-none p-0 outline-none" />
         </K.Content>
       </K.Portal>
     </K>
