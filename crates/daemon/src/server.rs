@@ -265,6 +265,8 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         | "triggers.set"
         | "triggers.events"
         | "worktree.rebase"
+        | "worktree.integrate"
+        | "project.integrate"
         | "workspace.export"
         | "workspace.import_preview"
         | "workspace.import" => true,
@@ -386,12 +388,43 @@ fn sweep_soon(reg: &Arc<Registry>) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(4));
         SWEEP_QUEUED.store(false, Ordering::SeqCst);
-        for s in crate::janitor::sweep(&r.store, &|path| r.worktree_busy(path), false) {
-            eprintln!("janitor: {s}");
-        }
+        run_sweep(&r);
         crate::overview::invalidate();
         r.wt_gen.fetch_add(1, Ordering::SeqCst);
     });
+}
+
+/// One janitor pass; a worktree whose finished work could not be integrated is also reported to the project's main agent.
+fn run_sweep(reg: &Arc<Registry>) {
+    for s in crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path), false) {
+        eprintln!("janitor: {s}");
+        if s["code"].as_str().is_some_and(|c| c.starts_with("integrate.")) {
+            tell_main_not_integrated(reg, &s);
+        }
+    }
+}
+
+/// Tells the main agent of the project that `item` (a sweep result with an `integrate.*` code) was left for a human or
+/// for it. Typed into an agent, so it stays English.
+fn tell_main_not_integrated(reg: &Arc<Registry>, item: &Value) {
+    let Some(p) = crate::projects::load(&reg.store).into_iter().find(|p| item["project"].as_str() == Some(p.id.as_str())) else { return };
+    let main = crate::projects::norm_path(&p.path);
+    let target = {
+        let metas = reg.metas.lock_recover();
+        metas
+            .iter()
+            .find(|(_, m)| m["kind"] == "agent" && m["worktree"].as_str().is_some_and(|w| crate::projects::norm_path(w) == main))
+            .map(|(id, _)| *id)
+    };
+    let Some((id, s)) = target.and_then(|id| reg.get(id).map(|s| (id, s))) else { return };
+    let text = format!(
+        "worktree {} (branch {}) finished but was NOT integrated into the default branch: {} Open it, fix the cause and integrate (the user can also press Integrar in the sidebar).",
+        item["path"].as_str().unwrap_or_default(),
+        item["branch"].as_str().unwrap_or_default(),
+        item["why"].as_str().unwrap_or_default()
+    );
+    let m = reg.bus.send(None, id, "message", &text, None, None);
+    reg.deliver_untrusted(id, s, &crate::msgbus::notice(&m, "axelstra"));
 }
 
 fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: bool, idle_secs: u64, lines: usize) {
@@ -513,9 +546,7 @@ fn spawn_scheduler(reg: Arc<Registry>) {
             if n.is_multiple_of(20) && !reg.saved.with_file_name("janitor.off").exists() {
                 let r = reg.clone();
                 let _ = tokio::task::spawn_blocking(move || {
-                    for s in crate::janitor::sweep(&r.store, &|path| r.worktree_busy(path), false) {
-                        eprintln!("janitor: {s}");
-                    }
+                    run_sweep(&r);
                 })
                 .await;
             }

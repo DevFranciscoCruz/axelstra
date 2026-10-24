@@ -13,6 +13,7 @@ pub mod fsops;
 pub mod gh;
 pub mod hooks;
 pub mod hosts;
+pub mod integrate;
 pub mod janitor;
 pub mod kanban;
 pub mod lag;

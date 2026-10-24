@@ -244,6 +244,8 @@ const ALLOWED_METHODS: &[&str] = &[
     "notes.export",
     "worktree.overview",
     "worktree.sweep",
+    "worktree.integrate",
+    "project.integrate",
     "janitor.events",
     "budget.status",
     "budget.check",

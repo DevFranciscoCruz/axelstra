@@ -197,6 +197,47 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             }
             Ok(v)
         }
+        "project.integrate" => {
+            let id = p["id"].as_str().ok_or_else(|| missing("id"))?;
+            crate::projects::set_integrate(&reg.store, id, p["auto"].as_bool(), p["push"].as_bool())?;
+            Ok(json!({}))
+        }
+        // the user asks for the integration of a finished worktree by hand (also when the project's automatic one is off)
+        "worktree.integrate" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let path = p["path"].as_str().ok_or_else(|| missing("path"))?;
+            let out = tokio::task::block_in_place(|| {
+                let wt = axelstra_core::git::worktree_list(std::path::Path::new(&pr.path))?
+                    .into_iter()
+                    .find(|w| crate::projects::norm_path(&w.path) == crate::projects::norm_path(path))
+                    .ok_or_else(|| axelstra_core::coded!("worktree.not_found", "not a worktree of this project"))?;
+                let branch = wt.branch.clone().unwrap_or_default();
+                if reg.worktree_busy(&wt.path) {
+                    return Err(axelstra_core::coded!("integrate.busy", "an agent is still working in {branch}", branch = branch));
+                }
+                let r = crate::integrate::integrate(&pr, &wt);
+                match &r {
+                    Err(e) => crate::integrate::set_attention(&wt.path, crate::integrate::as_coded(e, &branch)),
+                    Ok(_) => crate::integrate::clear_attention(&wt.path),
+                }
+                r
+            })?;
+            forget_project_list(reg);
+            Ok(match out {
+                crate::integrate::Outcome::Nothing => {
+                    json!({"integrated": false, "into": "", "how": "none", "removed": false, "pushed": null})
+                }
+                crate::integrate::Outcome::Integrated { into, how, pushed, removed, push_error } => {
+                    let mut v = json!({"integrated": true, "into": into, "how": how, "removed": removed, "pushed": pushed});
+                    if let Some(c) = push_error {
+                        v["push_code"] = json!(c.code);
+                        v["push_params"] = c.params_json();
+                        v["push_text"] = json!(c.text);
+                    }
+                    v
+                }
+            })
+        }
         "worktree.remove" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let path = p["path"].as_str().ok_or_else(|| missing("path"))?;

@@ -25,6 +25,14 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     let (status, body) = crate::notes::split_status(text);
                     let _ = crate::notes::append(&note, status, body);
                 }
+                // a lead or `--report-to` worker finished: its worktree is integrated by the next sweep
+                let lead = reg.metas.lock_recover().get(&f).is_some_and(|m| m["lead"] == true);
+                if lead || reg.bus.is_reaped(f) {
+                    let wt = reg.metas.lock_recover().get(&f).and_then(|m| m["worktree"].as_str().map(String::from));
+                    if let Some(wt) = wt {
+                        crate::integrate::mark_done(&wt, crate::notes::split_status(text).0 == "ok");
+                    }
+                }
                 sweep_soon(reg);
             }
             // agents get a one-line notice; a worker with a reaper reports through it instead

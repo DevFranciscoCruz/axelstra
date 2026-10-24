@@ -43,7 +43,7 @@ export type Project = { id: string; name: string; path: string; worktrees: Workt
 export const CALL_TIMEOUT_MS = 30_000;
 /** Methods that legitimately run git, gh, docker or a whole agent run: they get longer. */
 export const SLOW_TIMEOUT_MS = 5 * 60_000;
-const SLOW = /^(git\.|gh\.|docker\.|pm\.|orch\.|worktree\.(create|from_pr|remove|sweep|rename)|project\.(add|remove)|agent\.|fs\.grep|automation\.run|diagnostics)/;
+const SLOW = /^(git\.|gh\.|docker\.|pm\.|orch\.|worktree\.(create|from_pr|remove|sweep|rename|integrate)|project\.(add|remove)|agent\.|fs\.grep|automation\.run|diagnostics)/;
 export const timeoutFor = (method: string) => (SLOW.test(method) ? SLOW_TIMEOUT_MS : CALL_TIMEOUT_MS);
 
 /** `p`, but failing with a readable AppError when it rejects or takes longer than the method's timeout. */

@@ -1,0 +1,376 @@
+//! Integrates finished agent work into the project's default branch, so a worktree whose lead said `axelstra done` does
+//! not stay behind as an empty row. `integrate` merges the `ax/*` branch (fast-forward when possible, else a clean
+//! `--no-ff` merge that is aborted on conflict), optionally pushes, then removes the worktree and its branch. Anything
+//! that cannot be done safely is an `Err` carrying an `integrate.*` code: nothing is changed, the worktree is flagged
+//! ("needs attention") and the project's main agent is told. The janitor calls this for worktrees whose session
+//! reported `done` (`mark_done`); the user can also ask for it by hand (`worktree.integrate`).
+
+use crate::projects::{self, Project};
+use anyhow::Result;
+use axelstra_core::msg::Coded;
+use axelstra_core::{coded, git};
+use std::collections::HashMap;
+use std::path::Path;
+use std::process::Command;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// How long a `done` mark waits for the worktree to stop being busy before it is forgotten.
+const MARK_TTL: Duration = Duration::from_secs(30 * 60);
+
+/// Worktree path (normalized) -> (the report was `ok`, when it arrived).
+static DONE: Mutex<Option<HashMap<String, (bool, Instant)>>> = Mutex::new(None);
+/// Worktree path (normalized) -> why it was not integrated.
+static ATTENTION: Mutex<Option<HashMap<String, Coded>>> = Mutex::new(None);
+
+fn key(path: &str) -> String {
+    projects::norm_path(path)
+}
+
+/// Remembers that a session reported in this worktree (`ok` is false for `--status failed|blocked`).
+pub fn mark_done(path: &str, ok: bool) {
+    DONE.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(key(path), (ok, Instant::now()));
+}
+
+/// The mark of this worktree, if any and not expired; `take` forgets it.
+pub fn done_mark(path: &str, take: bool) -> Option<bool> {
+    let mut g = DONE.lock().unwrap_or_else(|e| e.into_inner());
+    let m = g.get_or_insert_with(Default::default);
+    m.retain(|_, (_, at)| at.elapsed() < MARK_TTL);
+    if take {
+        m.remove(&key(path)).map(|x| x.0)
+    } else {
+        m.get(&key(path)).map(|x| x.0)
+    }
+}
+
+pub fn set_attention(path: &str, why: Coded) {
+    ATTENTION.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(key(path), why);
+}
+
+pub fn clear_attention(path: &str) {
+    if let Some(m) = ATTENTION.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        m.remove(&key(path));
+    }
+}
+
+/// Why this worktree was not integrated, until it is, or removed, or an agent works in it again.
+pub fn attention(path: &str) -> Option<Coded> {
+    ATTENTION.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&key(path)).cloned())
+}
+
+/// The first coded error in `e`, or a generic `integrate.failed` for anything else.
+pub fn as_coded(e: &anyhow::Error, branch: &str) -> Coded {
+    axelstra_core::msg::find(e).cloned().unwrap_or_else(|| {
+        let detail = format!("{e:#}");
+        Coded::new(
+            "integrate.failed",
+            format!("could not integrate {branch}: {detail}"),
+            &[("branch", branch.to_string()), ("detail", detail)],
+        )
+    })
+}
+
+/// Whether the project integrates finished `ax/*` work by itself (on unless the user turned it off).
+pub fn auto_on(p: &Project) -> bool {
+    p.auto_integrate.unwrap_or(true)
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Outcome {
+    /// The branch had no commits the default branch lacks: nothing to merge.
+    Nothing,
+    Integrated {
+        into: String,
+        /// `ff` or `merge`
+        how: &'static str,
+        /// `None` when the project does not push; `Some(false)` when the push failed (the work is integrated anyway)
+        pushed: Option<bool>,
+        /// the worktree and branch are gone
+        removed: bool,
+        push_error: Option<Coded>,
+    },
+}
+
+/// Commits on `branch` that `default` lacks.
+pub fn ahead_of(repo: &Path, branch: &str, default: &str) -> u32 {
+    git::run(repo, &["rev-list", "--count", &format!("{default}..{branch}")])
+        .ok()
+        .filter(|o| o.ok)
+        .and_then(|o| o.stdout.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// Seconds since the branch was created (the oldest entry of its reflog); `None` when unknown.
+pub fn branch_age_secs(repo: &Path, branch: &str) -> Option<u64> {
+    let o = git::run(repo, &["log", "-g", "--format=%ct", branch]).ok().filter(|o| o.ok)?;
+    let born: u64 = o.stdout.lines().last()?.trim().parse().ok()?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    Some(now.saturating_sub(born))
+}
+
+/// Tracked files changed (or a merge half done): untracked files do not stop a merge, git refuses by itself when one
+/// would be overwritten.
+fn tracked_dirty(dir: &Path) -> bool {
+    git::merge_in_progress(dir)
+        || git::run(dir, &["status", "--porcelain", "--untracked-files=no"]).map(|o| !o.ok || !o.stdout.trim().is_empty()).unwrap_or(true)
+}
+
+/// Integrates the work of worktree `wt` of project `p`. The caller has checked that no session works there.
+pub fn integrate(p: &Project, wt: &git::Worktree) -> Result<Outcome> {
+    let repo = Path::new(&p.path);
+    let dir = Path::new(&wt.path);
+    let branch = wt.branch.clone().filter(|b| b.starts_with("ax/")).ok_or_else(|| {
+        coded!(
+            "integrate.not_agent_branch",
+            "only ax/* branches are integrated, this one is {branch}",
+            branch = wt.branch.clone().unwrap_or_default()
+        )
+    })?;
+    if wt.is_main {
+        return Err(coded!("integrate.not_agent_branch", "only ax/* branches are integrated, this one is {branch}", branch = branch));
+    }
+    if git::is_pr_code(dir) {
+        return Err(coded!(
+            "integrate.untrusted",
+            "{branch} holds code that is not Axelstra's own and is never integrated by itself",
+            branch = branch
+        ));
+    }
+    if tracked_dirty(dir) || git::has_changes(dir).unwrap_or(true) {
+        return Err(coded!("integrate.dirty", "{branch} has uncommitted changes", branch = branch));
+    }
+    let default = git::default_branch(repo);
+    if ahead_of(repo, &branch, &default) == 0 {
+        return Ok(Outcome::Nothing);
+    }
+    // the default branch is checked out in the main checkout (or another worktree): merge there, never touching a dirty one
+    let host = git::worktree_list(repo)?
+        .into_iter()
+        .find(|w| w.branch.as_deref() == Some(default.as_str()))
+        .ok_or_else(|| coded!("integrate.default_elsewhere", "{into} is not checked out in any worktree", into = default))?;
+    let host_dir = Path::new(&host.path);
+    if tracked_dirty(host_dir) {
+        return Err(coded!("integrate.default_dirty", "{into} has uncommitted changes in its checkout", into = default));
+    }
+    let how = if git::run(host_dir, &["merge", "--ff-only", "--quiet", &branch]).map(|o| o.ok).unwrap_or(false) {
+        "ff"
+    } else {
+        let msg = format!("Merge {branch}");
+        match git::merge(host_dir, &branch, &msg) {
+            Ok(git::Merge::Clean) => "merge",
+            Ok(git::Merge::Conflict) => {
+                return Err(coded!(
+                    "integrate.conflict",
+                    "merging {branch} into {into} has conflicts; nothing was changed",
+                    branch = branch,
+                    into = default
+                ))
+            }
+            Err(e) => {
+                return Err(coded!(
+                    "integrate.failed",
+                    "could not integrate {branch}: {detail}",
+                    branch = branch,
+                    detail = format!("{e:#}")
+                ))
+            }
+        }
+    };
+    let (pushed, push_error) = if p.push_after_integrate {
+        match push(host_dir, &default) {
+            Ok(()) => (Some(true), None),
+            Err(c) => (Some(false), Some(c)),
+        }
+    } else {
+        (None, None)
+    };
+    // its commits are in the default branch now; a failure here only leaves the worktree for the next sweep
+    let removed = projects::worktree_remove(p, &wt.path).is_ok();
+    Ok(Outcome::Integrated { into: default, how, pushed, removed, push_error })
+}
+
+fn push(dir: &Path, default: &str) -> std::result::Result<(), Coded> {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(dir).env("GIT_TERMINAL_PROMPT", "0").args(["push", "origin", default]);
+    match crate::janitor::output_within(&mut cmd, Duration::from_secs(120)) {
+        Some(o) if o.success() => Ok(()),
+        other => {
+            let detail = other.map(|o| o.stderr_lossy().trim().to_string()).unwrap_or_else(|| "timeout".into());
+            Err(Coded::new(
+                "integrate.push_failed",
+                format!("{default} was integrated but the push failed: {detail}"),
+                &[("into", default.to_string()), ("detail", detail)],
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Fx {
+        root: std::path::PathBuf,
+        store: std::path::PathBuf,
+        p: Project,
+    }
+
+    impl Drop for Fx {
+        fn drop(&mut self) {
+            git::purge_trash(&self.root);
+            let _ = git::remove_tree(&self.root);
+        }
+    }
+
+    fn g(dir: &Path, args: &[&str]) {
+        let mut a = vec!["-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.autocrlf=false"];
+        a.extend_from_slice(args);
+        let o = git::run(dir, &a).unwrap();
+        assert!(o.ok, "git {args:?}: {}", o.stderr);
+    }
+
+    fn fx(tag: &str) -> Fx {
+        let root = std::env::temp_dir().join(format!("axl-int-{tag}-{}", std::process::id()));
+        let _ = git::remove_tree(&root);
+        let repo = root.join("proj");
+        std::fs::create_dir_all(&repo).unwrap();
+        g(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("base.txt"), "base\n").unwrap();
+        g(&repo, &["add", "base.txt"]);
+        g(&repo, &["commit", "-q", "-m", "base"]);
+        let store = root.join("projects.json");
+        let p = projects::add(&store, &repo.to_string_lossy()).unwrap();
+        Fx { root, store, p }
+    }
+
+    fn work(dir: &Path, file: &str, text: &str) {
+        std::fs::write(dir.join(file), text).unwrap();
+        g(dir, &["add", file]);
+        g(dir, &["commit", "-q", "-m", file]);
+    }
+
+    fn wt_of(p: &Project, w: &git::Worktree) -> git::Worktree {
+        git::worktree_list(Path::new(&p.path))
+            .unwrap()
+            .into_iter()
+            .find(|x| x.path == w.path || axelstra_core::paths::same(&x.path, &w.path))
+            .unwrap()
+    }
+
+    fn code(e: anyhow::Error) -> String {
+        axelstra_core::msg::find(&e).map(|c| c.code.clone()).unwrap_or_else(|| format!("{e:#}"))
+    }
+
+    #[test]
+    fn fast_forwards_and_removes_the_worktree_and_branch() {
+        let f = fx("ff");
+        let w = projects::worktree_create(&f.p, "ff").unwrap();
+        work(Path::new(&w.path), "a.txt", "a\n");
+        let out = integrate(&f.p, &wt_of(&f.p, &w)).unwrap();
+        match out {
+            Outcome::Integrated { into, how, pushed, removed, .. } => {
+                assert_eq!((into.as_str(), how, pushed, removed), ("main", "ff", None, true))
+            }
+            o => panic!("{o:?}"),
+        }
+        assert!(Path::new(&f.p.path).join("a.txt").exists());
+        assert!(!Path::new(&w.path).exists());
+        assert!(!git::run(Path::new(&f.p.path), &["rev-parse", "--verify", "ax/ff"]).unwrap().ok, "branch deleted");
+        let _ = &f.store;
+    }
+
+    #[test]
+    fn a_diverged_branch_gets_a_clean_merge_commit() {
+        let f = fx("merge");
+        let repo = Path::new(&f.p.path);
+        let w = projects::worktree_create(&f.p, "m").unwrap();
+        work(Path::new(&w.path), "a.txt", "a\n");
+        work(repo, "b.txt", "b\n");
+        let out = integrate(&f.p, &wt_of(&f.p, &w)).unwrap();
+        assert!(matches!(out, Outcome::Integrated { how: "merge", removed: true, .. }), "{out:?}");
+        assert!(repo.join("a.txt").exists() && repo.join("b.txt").exists());
+        let parents = git::run(repo, &["rev-list", "--parents", "-n", "1", "HEAD"]).unwrap().stdout;
+        assert_eq!(parents.split_whitespace().count(), 3, "a merge commit has two parents: {parents}");
+        assert!(!Path::new(&w.path).exists());
+    }
+
+    #[test]
+    fn a_conflict_changes_nothing() {
+        let f = fx("conflict");
+        let repo = Path::new(&f.p.path);
+        let w = projects::worktree_create(&f.p, "c").unwrap();
+        work(Path::new(&w.path), "base.txt", "theirs\n");
+        work(repo, "base.txt", "ours\n");
+        let before = git::head(repo).unwrap();
+        let e = integrate(&f.p, &wt_of(&f.p, &w)).unwrap_err();
+        assert_eq!(code(e), "integrate.conflict");
+        assert_eq!(git::head(repo).unwrap(), before);
+        assert!(!git::merge_in_progress(repo));
+        assert_eq!(std::fs::read_to_string(repo.join("base.txt")).unwrap().trim(), "ours");
+        assert!(Path::new(&w.path).exists());
+    }
+
+    #[test]
+    fn a_dirty_worktree_or_dirty_main_checkout_is_refused() {
+        let f = fx("dirty");
+        let repo = Path::new(&f.p.path);
+        let w = projects::worktree_create(&f.p, "d").unwrap();
+        work(Path::new(&w.path), "a.txt", "a\n");
+        std::fs::write(Path::new(&w.path).join("wip.txt"), "w").unwrap();
+        assert_eq!(code(integrate(&f.p, &wt_of(&f.p, &w)).unwrap_err()), "integrate.dirty");
+        std::fs::remove_file(Path::new(&w.path).join("wip.txt")).unwrap();
+        // a tracked file changed in the main checkout
+        std::fs::write(repo.join("base.txt"), "edited\n").unwrap();
+        assert_eq!(code(integrate(&f.p, &wt_of(&f.p, &w)).unwrap_err()), "integrate.default_dirty");
+        assert!(Path::new(&w.path).exists());
+        // an untracked file in the main checkout does not block
+        g(repo, &["checkout", "-q", "--", "base.txt"]);
+        std::fs::write(repo.join("scratch.txt"), "s").unwrap();
+        assert!(matches!(integrate(&f.p, &wt_of(&f.p, &w)).unwrap(), Outcome::Integrated { how: "ff", .. }));
+    }
+
+    #[test]
+    fn an_empty_branch_has_nothing_to_integrate_and_pr_code_is_never_integrated() {
+        let f = fx("empty");
+        let w = projects::worktree_create(&f.p, "e").unwrap();
+        assert_eq!(integrate(&f.p, &wt_of(&f.p, &w)).unwrap(), Outcome::Nothing);
+        assert!(Path::new(&w.path).exists());
+        work(Path::new(&w.path), "a.txt", "a\n");
+        git::mark_untrusted(Path::new(&w.path)).unwrap();
+        assert_eq!(code(integrate(&f.p, &wt_of(&f.p, &w)).unwrap_err()), "integrate.untrusted");
+    }
+
+    #[test]
+    fn push_after_integrate_pushes_only_when_asked() {
+        let mut f = fx("push");
+        let bare = f.root.join("origin.git");
+        std::fs::create_dir_all(&bare).unwrap();
+        g(&bare, &["init", "-q", "--bare", "-b", "main"]);
+        let repo = std::path::PathBuf::from(&f.p.path);
+        g(&repo, &["remote", "add", "origin", &bare.to_string_lossy()]);
+        g(&repo, &["push", "-q", "origin", "main"]);
+        let w = projects::worktree_create(&f.p, "p1").unwrap();
+        work(Path::new(&w.path), "a.txt", "a\n");
+        assert!(matches!(integrate(&f.p, &wt_of(&f.p, &w)).unwrap(), Outcome::Integrated { pushed: None, .. }));
+        let remote = |r: &str| git::run(&bare, &["rev-parse", r]).unwrap().stdout.trim().to_string();
+        assert_ne!(remote("main"), git::head(&repo).unwrap(), "no push without the setting");
+        f.p.push_after_integrate = true;
+        let w2 = projects::worktree_create(&f.p, "p2").unwrap();
+        work(Path::new(&w2.path), "b.txt", "b\n");
+        assert!(matches!(integrate(&f.p, &wt_of(&f.p, &w2)).unwrap(), Outcome::Integrated { pushed: Some(true), .. }));
+        assert_eq!(remote("main"), git::head(&repo).unwrap());
+    }
+
+    #[test]
+    fn marks_expire_and_are_taken_once() {
+        mark_done("/x/one", true);
+        assert_eq!(done_mark("/x/one", false), Some(true));
+        assert_eq!(done_mark("/x/one", true), Some(true));
+        assert_eq!(done_mark("/x/one", true), None);
+        set_attention("/x/two", Coded::new("integrate.dirty", "d".into(), &[]));
+        assert_eq!(attention("/x/two").unwrap().code, "integrate.dirty");
+        clear_attention("/x/two");
+        assert!(attention("/x/two").is_none());
+    }
+}

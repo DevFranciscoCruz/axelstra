@@ -530,7 +530,7 @@ fn plan(store: &Path, p: Parsed, map: &[(String, String)]) -> Result<Plan> {
             file_id: ip.id.clone(),
             st,
             existing,
-            proj: Project { id, name: ip.name.clone(), path: root, setup: ip.setup.clone(), parents },
+            proj: Project { id, name: ip.name.clone(), path: root, setup: ip.setup.clone(), parents, ..Default::default() },
         });
     }
     pv.projects.local_only =

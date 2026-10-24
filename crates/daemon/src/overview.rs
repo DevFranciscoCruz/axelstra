@@ -24,6 +24,10 @@ pub struct Row {
     /// why the branch counts as merged (only set for clean worktrees nobody works in)
     pub merged: Option<String>,
     pub busy: bool,
+    /// commits the default branch lacks, for `ax/*` branches nobody works in that are not merged ("por integrar")
+    pub unintegrated: u32,
+    /// why the last automatic integration did not happen (`integrate::attention`)
+    pub attention: Option<axelstra_core::msg::Coded>,
 }
 
 #[derive(Serialize, Debug, PartialEq, Default)]
@@ -70,7 +74,20 @@ fn rows(p: &Project, busy: &dyn Fn(&str) -> bool) -> Vec<Row> {
         } else {
             None
         };
-        out.push(Row { path: w.path, branch, dirty: st.dirty > 0, ahead: st.ahead > 0, behind: st.behind > 0, merged, busy });
+        let pending = branch.starts_with("ax/") && !busy && merged.is_none();
+        let unintegrated = if pending { crate::integrate::ahead_of(repo, &branch, &default) } else { 0 };
+        let attention = if pending { crate::integrate::attention(&w.path) } else { None };
+        out.push(Row {
+            path: w.path,
+            branch,
+            dirty: st.dirty > 0,
+            ahead: st.ahead > 0,
+            behind: st.behind > 0,
+            merged,
+            busy,
+            unintegrated,
+            attention,
+        });
     }
     out
 }
@@ -78,10 +95,22 @@ fn rows(p: &Project, busy: &dyn Fn(&str) -> bool) -> Vec<Row> {
 fn project_json(p: &Project, rows: &[Row]) -> Value {
     let merged: Vec<Value> =
         rows.iter().filter_map(|r| r.merged.as_ref().map(|why| json!({"path": r.path, "branch": r.branch, "why": why}))).collect();
-    json!({"id": p.id, "name": p.name, "counts": count(rows), "merged": merged})
+    // work nobody is doing and nothing integrated: the sidebar shows "por integrar" instead of an empty row
+    let pending: Vec<Value> = rows
+        .iter()
+        .filter(|r| r.unintegrated > 0)
+        .map(|r| {
+            let mut v = json!({"path": r.path, "branch": r.branch, "ahead": r.unintegrated, "dirty": r.dirty});
+            if let Some(a) = &r.attention {
+                v["attention"] = json!({"code": a.code, "params": a.params_json(), "text": a.text});
+            }
+            v
+        })
+        .collect();
+    json!({"id": p.id, "name": p.name, "counts": count(rows), "merged": merged, "pending": pending})
 }
 
-/// Uncached answer: `{projects: [{id, name, counts, merged: [{path, branch, why}]}]}`.
+/// Uncached answer: `{projects: [{id, name, counts, merged: [{path, branch, why}], pending: [{path, branch, ahead, dirty, attention?}]}]}`.
 pub fn compute(store: &Path, busy: &dyn Fn(&str) -> bool) -> Value {
     let list: Vec<Value> = projects::load(store).iter().map(|p| project_json(p, &rows(p, busy))).collect();
     json!({"projects": list})
@@ -146,7 +175,8 @@ mod tests {
 
     #[test]
     fn project_json_lists_only_merged() {
-        let p = Project { id: "p1".into(), name: "P".into(), path: ".".into(), setup: None, parents: Default::default() };
+        let p =
+            Project { id: "p1".into(), name: "P".into(), path: ".".into(), setup: None, parents: Default::default(), ..Default::default() };
         let rs = vec![
             row(|r| r.branch = "ax/a".into()),
             row(|r| {
@@ -180,7 +210,14 @@ mod tests {
         g(&repo, &["merge", "-q", "--ff-only", "ax/done"]);
         g(&repo, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
         std::fs::write(dirty.join("x.txt"), "x").unwrap();
-        let p = Project { id: "p".into(), name: "P".into(), path: repo.to_string_lossy().into(), setup: None, parents: Default::default() };
+        let p = Project {
+            id: "p".into(),
+            name: "P".into(),
+            path: repo.to_string_lossy().into(),
+            setup: None,
+            parents: Default::default(),
+            ..Default::default()
+        };
         let rs = rows(&p, &|_| false);
         let c = count(&rs);
         assert_eq!((c.total, c.dirty, c.merged, c.no_agent), (2, 1, 1, 2), "{rs:?}");
