@@ -447,7 +447,8 @@ async fn backup_restore_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<
 /// The workspace file picked for an import and the folder map chosen so far. They live here and not in the webview: the
 /// file and the folders come from the native dialogs, so a compromised page cannot name a file to read or a folder to
 /// register as a project (S4b); the page only chooses mode and conflict handling.
-static WORKSPACE_PICK: Mutex<(Option<String>, Vec<(String, String)>)> = Mutex::new((None, Vec::new()));
+type WorkspacePick = (Option<String>, Vec<(String, String)>);
+static WORKSPACE_PICK: Mutex<WorkspacePick> = Mutex::new((None, Vec::new()));
 
 /// `workspace.import_preview` of the picked file with the folder map so far, plus the map and the file name for the page.
 fn workspace_preview(st: &State) -> Result<Value, String> {
