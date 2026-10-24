@@ -6,6 +6,9 @@ import { For, Show, createEffect, createMemo, createResource, createSignal, onCl
 import { call, getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession, dispatchOverlaps, worktreeRename, worktreeSweep, worktreeSetParent } from "./api";
 import { groupRunning, isFinished, layout, wtKey } from "./wtGroups";
 import { Modal } from "./Modal";
+import { ProjectIcon } from "./sidebar/ProjectIcon";
+import { CreateWorktree } from "./sidebar/CreateWorktree";
+import { RenameWorktree } from "./sidebar/RenameWorktree";
 import { pickProject } from "./projectActions";
 import { StateDot } from "./StateDot";
 import { ago } from "./time";
@@ -71,21 +74,6 @@ import {
   watchOverview,
 } from "./store";
 import { createPersisted, isStringArray } from "./persist";
-
-function ProjectIcon(props: { id: string; name: string; url?: string | null }) {
-  const [broken, setBroken] = createSignal(false);
-  // a logo file inside the repo wins over the host avatar
-  const [repoLogo] = createResource(() => props.id, projectLogo);
-  const src = () => repoLogo() ?? props.url;
-  return (
-    <Show
-      when={src() && !broken()}
-      fallback={<span class="picon letter">{props.name.slice(0, 1).toUpperCase()}</span>}
-    >
-      <img class="picon" src={src()!} alt="" onError={() => setBroken(true)} />
-    </Show>
-  );
-}
 
 export function Sidebar() {
   // project id currently showing the "new worktree" dialog (in the store: the command palette opens it too)
@@ -835,57 +823,29 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
         <Icon name="gear" size={13} /> Definições
       </Button>
       <Show when={creating()}>
-        {(pid) => {
-          const proj = () => projects().find((x) => x.id === pid());
-          return (
-            <Modal label="Novo worktree" dirty={!!newName().trim()} onClose={() => void closeNewWorktree()}>
-              <div class="m-title" style={{ "font-weight": "600" }}>Novo worktree</div>
-              <Field label="Projeto" full><Input value={proj()?.name ?? ""} disabled /></Field>
-              <Field label="Nome" full><Input
-                  placeholder="nome do worktree (também o nome do branch)"
-                  value={newName()}
-                  onInput={(e) => setNewName(e.currentTarget.value)}
-                  onKeyDown={(e) => e.key === "Enter" && newName().trim() && void submitWorktree(pid())}
-                  ref={(el) => queueMicrotask(() => el.focus())}
-                /></Field>
-              <Field label="Agente" full><Select
-                  value={newAgent()}
-                  label="Agente"
-                  iconOnly
-                  options={[{ value: "none", label: "Nenhum (só o worktree)" }, ...agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))]}
-                  onChange={setNewAgentSig}
-                /></Field>
-              <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-                <Button onClick={() => void closeNewWorktree()}>Cancelar</Button>
-                <Button variant="default" disabled={!newName().trim()} onClick={() => void submitWorktree(pid())}>
-                  Criar worktree
-                </Button>
-              </div>
-            </Modal>
-          );
-        }}
+        {(pid) => (
+          <CreateWorktree
+            name={projects().find((x) => x.id === pid())?.name ?? ""}
+            newName={newName()}
+            setNewName={setNewName}
+            newAgent={newAgent()}
+            setNewAgent={setNewAgentSig}
+            onClose={() => void closeNewWorktree()}
+            onSubmit={() => void submitWorktree(pid())}
+          />
+        )}
       </Show>
       <NoteView />
       <Show when={renamingWt()}>
         {(r) => (
-          <Modal label="Mudar o nome do worktree" dirty={wtNewName().trim() !== r().name} onClose={() => setRenamingWt(null)}>
-            <div class="m-title" style={{ "font-weight": "600" }}>Mudar o nome do worktree</div>
-            <Field label="Nome" full><Input
-                value={wtNewName()}
-                onInput={(e) => { setWtNewName(e.currentTarget.value); setWtRenameErr(""); }}
-                onKeyDown={(e) => e.key === "Enter" && void submitWtRename()}
-                ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
-              /></Field>
-            <Show when={wtRenameErr()}>
-              <div class="note-status bad" role="alert">{wtRenameErr()}</div>
-            </Show>
-            <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-              <Button onClick={() => setRenamingWt(null)}>Cancelar</Button>
-              <Button variant="default" disabled={!wtNewName().trim() || wtNewName().trim() === r().name} onClick={() => void submitWtRename()}>
-                Mudar o nome
-              </Button>
-            </div>
-          </Modal>
+          <RenameWorktree
+            current={r().name}
+            value={wtNewName()}
+            error={wtRenameErr()}
+            onInput={(v) => { setWtNewName(v); setWtRenameErr(""); }}
+            onClose={() => setRenamingWt(null)}
+            onSubmit={() => void submitWtRename()}
+          />
         )}
       </Show>
     </aside>
