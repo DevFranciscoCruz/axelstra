@@ -285,7 +285,7 @@ jobs:
           ls -l symbols || true
       # Workflow artifacts are readable by anyone who can read this repo: no secrets belong in symbols.
       - name: Keep the debug symbols
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: symbols-${{ matrix.key }}-${{ steps.v.outputs.version }}
           path: symbols/
@@ -325,7 +325,7 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" out/* --clobber
       - name: Keep the dry-run installer on the run
         if: env.DRY_RUN == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: axelstra-dry-run-${{ matrix.key }}
           path: out/
@@ -394,7 +394,7 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" out/* --clobber
       - name: Keep the dry-run files on the run
         if: env.DRY_RUN == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: axelstra-dry-run-Linux
           path: out/
@@ -442,7 +442,7 @@ jobs:
           cat latest.json
       - name: Keep the dry-run manifest on the run
         if: env.DRY_RUN == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: axelstra-dry-run-manifest
           path: latest.json
