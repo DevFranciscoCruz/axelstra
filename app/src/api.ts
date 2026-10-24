@@ -21,7 +21,9 @@ export type SessionMeta = {
 };
 /** Set by the daemon on an agent that went quiet without reporting: the notice in message-code form (see msg/agents.ts). */
 export type StallInfo = { minutes: number; code: string; params: Record<string, unknown>; text: string };
-export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; stalled?: boolean; stall?: StallInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
+/** Set by the daemon while an agent waits for the user, from the agent's own hook event or `axelstra ask`/`escalate`. */
+export type WaitInfo = { kind: "permission" | "question" | "idle_input"; text: string };
+export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; wait?: WaitInfo | null; stalled?: boolean; stall?: StallInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean; /** worktree of the same project this one is grouped under */ parent?: string | null };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   /** false for a plain folder that is not a git repository (yet) */
