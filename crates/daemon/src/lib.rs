@@ -18,7 +18,6 @@ pub mod msgbus;
 pub mod notes;
 pub mod overlaps;
 pub mod overview;
-pub mod rebase;
 #[cfg(windows)]
 pub mod pipesec;
 pub mod ports;
@@ -26,6 +25,7 @@ pub mod projects;
 pub mod proto;
 pub mod publish;
 pub mod runner;
+pub mod rebase;
 pub mod server;
 pub mod skill;
 pub mod store;

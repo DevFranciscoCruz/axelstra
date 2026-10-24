@@ -70,12 +70,7 @@ mod tests {
     use std::process::Command;
 
     fn g(cwd: &Path, args: &[&str]) {
-        let o = Command::new("git")
-            .current_dir(cwd)
-            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
-            .args(args)
-            .output()
-            .unwrap();
+        let o = Command::new("git").current_dir(cwd).args(["-c", "user.name=t", "-c", "user.email=t@t"]).args(args).output().unwrap();
         assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr));
     }
 
