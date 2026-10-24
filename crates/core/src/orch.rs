@@ -554,7 +554,7 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
             if a.locate().is_none() {
                 return Err(a.missing_error());
             }
-            agents::resolve_argv(a, agent_command(a.id, &t.card.meta.permission_mode, runner.interactive())?)
+            agents::resolve_argv(a, agent_command(a.id, &t.card.meta.permission_mode, runner.interactive(), !crate::git::is_pr_code(&o.repo))?)
         }
     };
     let pf = prompt.to_string_lossy().to_string();
@@ -579,7 +579,7 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
 
 /// Command line for a card's agent, from the agents table. An agent with no way to take a prompt in its TUI
 /// runs one-shot even under an interactive runner.
-fn agent_command(agent: &str, permission_mode: &str, interactive: bool) -> Result<Vec<String>> {
+fn agent_command(agent: &str, permission_mode: &str, interactive: bool, trusted: bool) -> Result<Vec<String>> {
     if !card::PERMISSION_MODES.contains(&permission_mode) {
         return Err(crate::coded!("orch.bad_permission", "unknown permission_mode '{mode}'", mode = permission_mode));
     }
@@ -589,10 +589,11 @@ fn agent_command(agent: &str, permission_mode: &str, interactive: bool) -> Resul
         let mut v = a.interactive_argv(Some(ask), false);
         // the safe unattended flags go right after the program, before the prompt; a worker nobody watches cannot
         // answer the agent's "trust this folder?" question either
-        v.splice(1..1, a.trust.iter().chain(a.unattended.iter()).map(|s| s.to_string()));
+        let trust: &[&str] = if trusted { a.trust } else { &[] };
+        v.splice(1..1, trust.iter().chain(a.unattended.iter()).map(|s| s.to_string()));
         v
     } else {
-        a.headless_argv(ask, true, false)
+        a.headless_argv(ask, true, false, trusted)
     };
     if a.id == "claude" {
         v.splice(1..1, ["--permission-mode".to_string(), permission_mode.to_string()]);
@@ -790,7 +791,7 @@ mod tests {
     #[test]
     fn errors_and_reasons_carry_message_codes() {
         let c = |e: anyhow::Error| crate::msg::find(&e).map(|c| c.code.clone()).unwrap_or_default();
-        assert_eq!(c(agent_command("claude", "nope", false).unwrap_err()), "orch.bad_permission");
+        assert_eq!(c(agent_command("claude", "nope", false, true).unwrap_err()), "orch.bad_permission");
         assert_eq!(c(retry_merge(Path::new("."), Path::new("."), "../x", "a", false).unwrap_err()), "orch.bad_id");
         let tmp = std::env::temp_dir();
         let why = acceptance_coded(&tmp, "exit 1", Duration::from_secs(30)).unwrap();
@@ -805,16 +806,17 @@ mod tests {
     #[test]
     fn agent_command_follows_the_agents_table() {
         let p = "Read .axelstra/prompt.md and do the task described there.";
-        let c = agent_command("claude", "plan", false).unwrap();
+        let c = agent_command("claude", "plan", false, true).unwrap();
         assert_eq!(c, ["claude", "--permission-mode", "plan", "-p", p]);
-        assert_eq!(agent_command("claude", "plan", true).unwrap(), ["claude", "--permission-mode", "plan", p]);
-        let x = agent_command("chatgpt", "auto", false).unwrap();
+        assert_eq!(agent_command("claude", "plan", true, true).unwrap(), ["claude", "--permission-mode", "plan", p]);
+        let x = agent_command("chatgpt", "auto", false, true).unwrap();
         assert_eq!(x, ["codex", "exec", "--sandbox", "workspace-write", p]);
-        assert_eq!(agent_command("codex", "auto", true).unwrap(), ["codex", "--sandbox", "workspace-write", p]);
-        assert_eq!(agent_command("gemini", "auto", false).unwrap(), ["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-p", p]);
-        assert_eq!(agent_command("gemini", "auto", true).unwrap(), ["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-i", p]);
-        assert!(agent_command("rm", "auto", false).unwrap_err().to_string().contains("unknown agent"));
-        assert!(agent_command("claude", "--evil", false).is_err());
+        assert_eq!(agent_command("codex", "auto", true, true).unwrap(), ["codex", "--sandbox", "workspace-write", p]);
+        assert_eq!(agent_command("gemini", "auto", false, true).unwrap(), ["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-p", p]);
+        assert_eq!(agent_command("gemini", "auto", false, false).unwrap(), ["gemini", "--approval-mode", "auto_edit", "-p", p]);
+        assert_eq!(agent_command("gemini", "auto", true, true).unwrap(), ["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-i", p]);
+        assert!(agent_command("rm", "auto", false, true).unwrap_err().to_string().contains("unknown agent"));
+        assert!(agent_command("claude", "--evil", false, true).is_err());
     }
 
     #[test]

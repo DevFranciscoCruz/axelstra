@@ -50,7 +50,7 @@ impl trig::Env for DaemonEnv {
                 if ag.locate().is_none() {
                     return Err(ag.missing_error());
                 }
-                crate::automations::agent_command(trig::AGENT, prompt)?
+                crate::automations::agent_command(trig::AGENT, prompt, axelstra_core::git::folder_trusted(std::path::Path::new(worktree)))?
             }
         };
         // a task of the worktree like any other: `session.spawn` names it and makes the lead its parent. The agent

@@ -191,15 +191,17 @@ impl Agent {
 
     /// argv (program first) for a one-shot run on `prompt`. `unattended` adds the safe edit-without-asking
     /// flags, `dangerous` the permission-skipping ones; claude's own `--permission-mode` is the caller's.
-    pub fn headless_argv(&self, prompt: &str, unattended: bool, dangerous: bool) -> Vec<String> {
+    pub fn headless_argv(&self, prompt: &str, unattended: bool, dangerous: bool, trusted: bool) -> Vec<String> {
         let mut v = vec![self.exes[0].to_string()];
         // `codex exec` is a subcommand: options come after it, the prompt last
         let sub = self.id == "codex";
         if sub {
             v.extend(self.headless.iter().map(|s| s.to_string()));
         }
-        // a one-shot run cannot answer a trust prompt
-        v.extend(self.trust.iter().map(|s| s.to_string()));
+        // a one-shot run cannot answer a trust prompt; only a folder that is ours (`git::folder_trusted`) is trusted for it
+        if trusted {
+            v.extend(self.trust.iter().map(|s| s.to_string()));
+        }
         if unattended {
             v.extend(self.unattended.iter().map(|s| s.to_string()));
         }
@@ -216,14 +218,17 @@ impl Agent {
     }
 
     /// What an unattended "start with this prompt" launcher (automations) runs: the TUI on the prompt, or a one-shot
-    /// run for agents that cannot take a prompt in the TUI. Nobody is there to answer a trust prompt.
-    pub fn start_argv(&self, prompt: &str) -> Vec<String> {
+    /// run for agents that cannot take a prompt in the TUI. Nobody is there to answer a trust prompt, so a folder that is
+    /// `trusted` gets the agent's trust flag and any other (a pull request's worktree) is left to stop at the prompt.
+    pub fn start_argv(&self, prompt: &str, trusted: bool) -> Vec<String> {
         if self.interactive_prompt.is_some() {
             let mut v = self.interactive_argv(Some(prompt), false);
-            v.splice(1..1, self.trust.iter().map(|s| s.to_string()));
+            if trusted {
+                v.splice(1..1, self.trust.iter().map(|s| s.to_string()));
+            }
             v
         } else {
-            self.headless_argv(prompt, false, false)
+            self.headless_argv(prompt, false, false, trusted)
         }
     }
 }
@@ -284,39 +289,42 @@ mod tests {
 
     #[test]
     fn headless_argv_per_agent() {
-        let h = |id: &str, un, d| get(id).unwrap().headless_argv("P", un, d);
+        let h = |id: &str, un, d| get(id).unwrap().headless_argv("P", un, d, true);
         assert_eq!(h("claude", true, false), s(&["claude", "-p", "P"]));
         assert_eq!(h("codex", true, false), s(&["codex", "exec", "--sandbox", "workspace-write", "P"]));
         assert_eq!(h("gemini", true, false), s(&["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-p", "P"]));
+        // a folder that is not ours is never trusted for the user
+        assert_eq!(get("gemini").unwrap().headless_argv("P", true, false, false), s(&["gemini", "--approval-mode", "auto_edit", "-p", "P"]));
     }
 
     #[test]
     fn dangerous_flags_are_opt_in() {
         for a in TABLE {
-            let safe = a.headless_argv("P", true, false).join(" ");
+            let safe = a.headless_argv("P", true, false, true).join(" ");
             assert!(
                 !safe.contains("dangerously") && !safe.contains("yolo") && !safe.contains("--yes-always") && !safe.contains("--auto "),
                 "{safe}"
             );
         }
-        assert_eq!(get("claude").unwrap().headless_argv("P", false, true), s(&["claude", "--dangerously-skip-permissions", "-p", "P"]));
-        assert!(get("gemini").unwrap().headless_argv("P", false, true).contains(&"yolo".to_string()));
+        assert_eq!(get("claude").unwrap().headless_argv("P", false, true, true), s(&["claude", "--dangerously-skip-permissions", "-p", "P"]));
+        assert!(get("gemini").unwrap().headless_argv("P", false, true, true).contains(&"yolo".to_string()));
     }
 
     #[test]
     fn prompt_stays_one_argument() {
         let evil = "a; rm -rf / && $(x) 'q' \"d\"";
         for a in TABLE {
-            assert_eq!(a.headless_argv(evil, true, false).iter().filter(|x| x.as_str() == evil).count(), 1);
-            assert_eq!(a.start_argv(evil).iter().filter(|x| x.as_str() == evil).count(), 1);
+            assert_eq!(a.headless_argv(evil, true, false, true).iter().filter(|x| x.as_str() == evil).count(), 1);
+            assert_eq!(a.start_argv(evil, true).iter().filter(|x| x.as_str() == evil).count(), 1);
         }
     }
 
     #[test]
     fn start_argv_falls_back_to_one_shot() {
-        assert_eq!(get("claude").unwrap().start_argv("P"), s(&["claude", "P"]));
+        assert_eq!(get("claude").unwrap().start_argv("P", true), s(&["claude", "P"]));
         // unattended launchers trust the folder for the session; a tab the user opens does not
-        assert_eq!(get("gemini").unwrap().start_argv("P"), s(&["gemini", "--skip-trust", "-i", "P"]));
+        assert_eq!(get("gemini").unwrap().start_argv("P", true), s(&["gemini", "--skip-trust", "-i", "P"]));
+        assert_eq!(get("gemini").unwrap().start_argv("P", false), s(&["gemini", "-i", "P"]));
         assert_eq!(get("gemini").unwrap().interactive_argv(Some("P"), false), s(&["gemini", "-i", "P"]));
     }
 

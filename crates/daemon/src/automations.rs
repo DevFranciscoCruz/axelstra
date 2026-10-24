@@ -156,8 +156,8 @@ pub fn sh_quote(s: &str) -> String {
 
 /// Program and args that run the agent `cli` (an id from the agents table) on `prompt` in a shell and leave that
 /// shell open afterwards. Every argument is quoted; the agent's own flags come from the table.
-pub fn agent_command(cli: &str, prompt: &str) -> Result<(String, Vec<String>)> {
-    let argv = axelstra_core::agents::require(cli)?.start_argv(prompt);
+pub fn agent_command(cli: &str, prompt: &str, trusted: bool) -> Result<(String, Vec<String>)> {
+    let argv = axelstra_core::agents::require(cli)?.start_argv(prompt, trusted);
     Ok(shell_command(&argv))
 }
 
@@ -285,15 +285,15 @@ mod tests {
         assert_eq!(ps_quote("a\u{2019};calc;\u{2018}"), "'a\u{2019}\u{2019};calc;\u{2018}\u{2018}'");
         assert_eq!(ps_quote("\u{201A}\u{201B}"), "'\u{201A}\u{201A}\u{201B}\u{201B}'");
         assert_eq!(sh_quote("it's $x"), "'it'\\''s $x'");
-        let (_, args) = agent_command("claude", "a 'b'").unwrap();
+        let (_, args) = agent_command("claude", "a 'b'", true).unwrap();
         assert!(args.last().unwrap().contains("claude"));
     }
 
     #[test]
     fn automation_commands_come_from_the_agents_table() {
-        let gem = agent_command("gemini", "do it").unwrap().1.last().unwrap().clone();
+        let gem = agent_command("gemini", "do it", true).unwrap().1.last().unwrap().clone();
         assert!(gem.contains("gemini") && gem.contains("-i") && gem.contains("do it"), "{gem}");
-        assert!(agent_command("powershell", "x").is_err());
+        assert!(agent_command("powershell", "x", true).is_err());
     }
 
     #[test]

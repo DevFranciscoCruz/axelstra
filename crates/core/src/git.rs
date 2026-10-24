@@ -135,6 +135,31 @@ pub fn current_branch(repo: &Path) -> Result<String> {
     must(repo, &["rev-parse", "--abbrev-ref", "HEAD"])
 }
 
+/// File in a worktree's own git dir that marks its code as not the user's (a pull request's).
+pub const UNTRUSTED_MARK: &str = "axelstra-untrusted";
+
+/// Marks the worktree at `dir` as holding code the user did not write, so no agent is told to trust the folder.
+pub fn mark_untrusted(dir: &Path) -> Result<()> {
+    let gd = must(dir, &["rev-parse", "--path-format=absolute", "--git-dir"])?;
+    std::fs::write(Path::new(&gd).join(UNTRUSTED_MARK), "pull request
+")?;
+    Ok(())
+}
+
+/// Whether an unattended agent may be told to trust the folder `dir` (`--skip-trust`): only a worktree on an
+/// `ax/*` branch that was not made from a pull request (`is_pr_code`). Anything unknown is not trusted.
+pub fn folder_trusted(dir: &Path) -> bool {
+    current_branch(dir).is_ok_and(|b| b.starts_with("ax/")) && !is_pr_code(dir)
+}
+
+/// Whether `dir` holds a pull request's code: marked when `worktree.from_pr` made it, or still named `ax/pr-<number>`.
+/// A folder that cannot be read counts as pull-request code.
+pub fn is_pr_code(dir: &Path) -> bool {
+    let Ok(branch) = current_branch(dir) else { return true };
+    let numbered = branch.strip_prefix("ax/pr-").is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+    numbered || must(dir, &["rev-parse", "--path-format=absolute", "--git-dir"]).map_or(true, |gd| Path::new(&gd).join(UNTRUSTED_MARK).exists())
+}
+
 /// `git worktree list` is asked many times a second by the UI and the daemon (every folder check starts a process):
 /// the answer is reused for a moment and dropped whenever a worktree is added or removed here.
 type WtCache = std::collections::HashMap<String, (std::time::Instant, Vec<Worktree>)>;
