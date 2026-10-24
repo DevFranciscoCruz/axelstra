@@ -2,7 +2,7 @@ import { Icon, hasIcon } from "./Icon";
 import { Select } from "./Select";
 import { ask, askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
-import { getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession, dispatchOverlaps, worktreeRename, worktreeOverview, worktreeSweep, worktreeSetParent } from "./api";
+import { call, getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession, dispatchOverlaps, worktreeRename, worktreeOverview, worktreeSweep, worktreeSetParent } from "./api";
 import { groupRunning, isFinished, layout, wtKey } from "./wtGroups";
 import { Modal } from "./Modal";
 import { pickProject } from "./projectActions";
@@ -18,6 +18,8 @@ import { S } from "./strings";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import logo from "./assets/logo.png";
 import { Badge, Button, Field, Input, cn } from "./ui";
+import { errorText } from "./appError";
+import { waitShellReady } from "./shellReady";
 import {
   AGENTS,
   canonAgent,
@@ -276,7 +278,14 @@ export function Sidebar() {
       const copied = w.env_copied?.length ? ` · ${w.env_copied.length} ficheiro(s) de ambiente copiado(s)` : "";
       const skipped = w.env_skipped?.length ? ` · ${w.env_skipped.length} ficou de fora` : "";
       showNotice(`Worktree "${name}" criado${copied}${skipped}.`);
-      if (newAgent() !== "none") await launchDefaultAgent(projectId, w.path, newAgent(), AGENTS[newAgent()], undefined, undefined, projectTerse(projectId));
+      // the worktree exists by now: a failing agent must not skip the setup, and the user reads a sentence, not the raw error
+      if (newAgent() !== "none") {
+        try {
+          await launchDefaultAgent(projectId, w.path, newAgent(), AGENTS[newAgent()], undefined, undefined, projectTerse(projectId));
+        } catch (e) {
+          showNotice(`O worktree "${name}" foi criado, mas o agente não arrancou (${errorText(e).slice(0, 120)}). Abre-o a partir do separador +.`);
+        }
+      }
       let setup = projects().find((p) => p.id === projectId)?.setup;
       if (!setup && (await getSettings().then((x) => x.auto_install, () => false))) {
         const pm = await detectPackageManagers(projectId).catch(() => null);
@@ -285,8 +294,10 @@ export function Sidebar() {
       if (setup) {
         const [program, args] = await defaultShell();
         const { id } = await spawnSession(program, args, "setup", w.path, { project: projectId, worktree: w.path, kind: "shell" });
-        // give the shell a moment to print its prompt before typing into it
-        setTimeout(() => void writeSession(id, setup + "\r"), 600);
+        // type only once the shell has printed its prompt (a slow profile can take seconds); if it never does, type anyway
+        void waitShellReady(() => call<{ lines: string[] }>("session.screen", { id, lines: 5 }).then((r) => r.lines))
+          .then(() => writeSession(id, setup + "\r"))
+          .catch(() => 0);
       }
     });
 
@@ -555,6 +566,7 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
               <Input
                 class="mx-1.5 mb-1.5 mt-0.5 w-[calc(100%-12px)] border-primary bg-background"
                 placeholder="setup, ex.: bun install (vazio = nenhum)"
+                aria-label={`Comando de setup do projeto ${p.name}`}
                 value={setupText()}
                 onInput={(e) => setSetupText(e.currentTarget.value)}
                 onKeyDown={(e) => {
