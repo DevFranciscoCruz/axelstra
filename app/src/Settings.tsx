@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { NotifyMode, SettingsPatch, ShellChoice, Terse, backupExport, pickAndRestoreBackup, copyDiagnostics, diagnostics, getSettings, resetShellCache, setSettings } from "./api";
 import { restartDaemonFlow } from "./daemonActions";
 import { HooksSection } from "./HooksSection";
+import { WorkspaceSection } from "./WorkspaceSection";
 import { Modal } from "./Modal";
 import { S } from "./strings";
 import { classifySettingsError, diagnosticRows, errorText } from "./settingsLogic";
@@ -257,6 +258,8 @@ export function Settings() {
                   <Button onClick={() => void restoreBackup()}>{T.restore}</Button>
                 </div>
               </Section>
+
+              <WorkspaceSection />
 
               <HooksSection />
 

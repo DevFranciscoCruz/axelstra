@@ -1,3 +1,4 @@
+import type { WorkspaceConflicts, WorkspaceMode, WorkspaceOutcome, WorkspacePreview } from "./workspaceLogic";
 import type { WtUsage } from "./usageFormat";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -675,6 +676,31 @@ export const pickAndRestoreBackup = (title: string): Promise<{ restored: string[
     (r) => (r === null ? undefined : r),
     (e) => (isUnknownMethod(e) ? null : Promise.reject(e)),
   );
+
+// ---- workspace export / import: files and folders come from native dialogs held by the host, never from the page ----
+type WsExported = { path: string; summary: { projects: number; automations: number; cards: number } };
+/** A host command that opens a native dialog first (no timeout), with extra arguments. */
+const hostCmd = <T>(method: string, cmd: string, args: Record<string, unknown> = {}) => invoke<T>(cmd, args).catch((e) => Promise.reject(toAppError(method, e)));
+/** Save dialog, then `workspace.export`. `undefined` = cancelled; null = the daemon is too old. */
+export const pickAndExportWorkspace = (title: string): Promise<WsExported | null | undefined> =>
+  hostCmd<WsExported | null>("workspace.export", "workspace_export_pick", { title }).then(
+    (r) => r ?? undefined,
+    (e) => (isUnknownMethod(e) ? null : Promise.reject(e)),
+  );
+/** Open dialog for a workspace file, then its preview. `undefined` = cancelled; null = the daemon is too old. */
+export const pickWorkspaceFile = (title: string): Promise<WorkspacePreview | null | undefined> =>
+  hostCmd<WorkspacePreview | null>("workspace.import_preview", "workspace_import_pick", { title }).then(
+    (r) => r ?? undefined,
+    (e) => (isUnknownMethod(e) ? null : Promise.reject(e)),
+  );
+/** Folder dialog for where the projects under `old` (a path of the file) live here; the new preview, or undefined when cancelled. */
+export const mapWorkspaceFolder = (title: string, old: string): Promise<WorkspacePreview | undefined> =>
+  hostCmd<WorkspacePreview | null>("workspace.import_preview", "workspace_map_pick", { title, old }).then((r) => r ?? undefined);
+export const clearWorkspaceMap = () => hostCmd<WorkspacePreview>("workspace.import_preview", "workspace_map_clear");
+/** `workspace.import` of the file picked before, with the folder map; the page only chooses how. */
+export const applyWorkspaceImport = (mode: WorkspaceMode, conflicts: WorkspaceConflicts) => hostCmd<WorkspaceOutcome>("workspace.import", "workspace_import_apply", { mode, conflicts });
+/** The dialog was closed: the host forgets the picked file. */
+export const cancelWorkspaceImport = () => hostCmd<void>("workspace.import", "workspace_import_cancel").catch((e) => console.debug("workspace_import_cancel", e));
 
 export type JanitorEvent = { project: string; path: string; branch: string; into: string; why: string; at: number };
 /** Worktrees the automatic sweep removed since the last call (take semantics); an older daemon has none. */
