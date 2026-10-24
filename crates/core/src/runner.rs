@@ -36,6 +36,8 @@ pub trait Runner: Send + Sync {
 pub struct ProcessRunner;
 
 struct ProcHandle {
+    /// the exit was already seen (and the group cleaned up once): never signal the group id again
+    gone: bool,
     child: Child,
     job: Job,
 }
@@ -53,7 +55,7 @@ impl Runner for ProcessRunner {
         }
         let job = Job::new()?;
         let child = job.spawn(&mut cmd).with_context(|| format!("run {}", s.program))?;
-        Ok(Box::new(ProcHandle { child, job }))
+        Ok(Box::new(ProcHandle { gone: false, child, job }))
     }
 
     fn interactive(&self) -> bool {
@@ -63,7 +65,15 @@ impl Runner for ProcessRunner {
 
 impl Handle for ProcHandle {
     fn try_wait(&mut self) -> Result<Option<String>> {
-        Ok(self.child.try_wait()?.map(|s| format!("exited ({s})")))
+        let Some(s) = self.child.try_wait()? else { return Ok(None) };
+        if self.gone {
+            return Ok(Some(format!("exited ({s})")));
+        }
+        self.gone = true;
+        // the agent is gone and reaped: what it left running in its group must not outlive it (and the group id is
+        // not signalled again later, when the number may belong to someone else)
+        self.job.kill_and_forget(self.child.id());
+        Ok(Some(format!("exited ({s})")))
     }
 
     fn kill(&mut self) {
