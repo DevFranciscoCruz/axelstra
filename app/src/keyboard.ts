@@ -1,4 +1,5 @@
 import { cheatSheet } from "./commands";
+import { overlay } from "./store/overlay";
 
 /** Keyboard shortcuts the cheat sheet (?) lists, flat: [keys, what it does]. Built from the command registry. */
 export const SHORTCUTS: [string, string][] = cheatSheet().flatMap((g) => g.rows);
@@ -11,8 +12,9 @@ export const isTextTarget = (el: EventTarget | null): boolean => {
   return el.isContentEditable || !!el.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], .cm-editor");
 };
 
-/** a dialog or the palette is open: shortcuts that act on the page underneath must leave the keys alone */
-export const overlayOpen = (): boolean => !!document.querySelector('[role="dialog"], .pal-back');
+/** a dialog or the palette is open: shortcuts that act on the page underneath must leave the keys alone.
+ *  The shell's overlay signal answers first; the DOM check still covers what is not in it (confirm, the palette, sidebar dialogs). */
+export const overlayOpen = (): boolean => overlay() !== null || !!document.querySelector('[role="dialog"], .pal-back');
 
 /** the Mac keeps its shortcuts on Cmd where Windows and Linux use Ctrl */
 export const isMac = (platform: string = typeof navigator === "undefined" ? "" : navigator.platform || navigator.userAgent): boolean => /mac|iphone|ipad/i.test(platform);

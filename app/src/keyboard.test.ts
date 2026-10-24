@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { setShowSettings } from "./store/overlay";
 import { K, isMac, isTextTarget, overlayOpen } from "./keyboard";
 
 afterEach(() => (document.body.innerHTML = ""));
@@ -23,6 +24,13 @@ describe("overlayOpen", () => {
     expect(overlayOpen()).toBe(true);
     document.body.innerHTML = '<div class="pal-back"></div>';
     expect(overlayOpen()).toBe(true);
+  });
+  it("sees the shell overlay signal even before its dialog is in the DOM", () => {
+    document.body.innerHTML = "";
+    setShowSettings(true);
+    expect(overlayOpen()).toBe(true);
+    setShowSettings(false);
+    expect(overlayOpen()).toBe(false);
   });
 });
 
