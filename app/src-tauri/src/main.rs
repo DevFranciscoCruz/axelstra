@@ -172,6 +172,10 @@ const ALLOWED_METHODS: &[&str] = &[
     "computer.enable",
     "computer.status",
     "daemon.shutdown",
+    "backup.export",
+    "backup.restore",
+    "env.tools",
+    "notices.take",
     "dispatch.meta",
     "flow.list",
     "fs.create",
@@ -226,6 +230,7 @@ const ALLOWED_METHODS: &[&str] = &[
     "kanban.save",
     "open.editor",
     "orch.limits",
+    "orch.trust_info",
     "orch.retry",
     "orch.start",
     "orch.status",
@@ -245,6 +250,7 @@ const ALLOWED_METHODS: &[&str] = &[
     "session.rename",
     "session.resize",
     "session.resources",
+    "session.screen",
     "session.spawn",
     "settings.get",
     "settings.set",
@@ -911,7 +917,7 @@ mod tests {
         }
     }
 
-    /// Every `call("x.y"` / `callBg("x.y"` in the frontend (an optional `<Type>` after the name is skipped).
+    /// Every `call("x.y"` / `callBg("x.y"` / `callOr("x.y"` in the frontend (an optional `<Type>` after the name is skipped).
     /// A call whose method is not a string literal is returned as `?file`, since the list cannot cover it.
     fn called_methods() -> BTreeSet<String> {
         let mut files = vec![];
@@ -921,7 +927,7 @@ mod tests {
         for f in files {
             let t = std::fs::read_to_string(&f).unwrap();
             let b = t.as_bytes();
-            for name in ["call", "callBg"] {
+            for name in ["call", "callBg", "callOr"] {
                 for (at, _) in t.match_indices(name) {
                     let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || c == b'.';
                     if (at > 0 && ident(b[at - 1])) || !matches!(b.get(at + name.len()), Some(b'(' | b'<')) {
@@ -956,6 +962,8 @@ mod tests {
                             let end = rest[1..].find(q).expect("unterminated string");
                             found.insert(rest[1..1 + end].to_string());
                         }
+                        // `callOr` forwards its own `method` parameter to `call`: the literal is at its callers
+                        _ if rest.starts_with("method,") => {}
                         _ => {
                             found.insert(format!("?{}", f.file_name().unwrap().to_string_lossy()));
                         }
