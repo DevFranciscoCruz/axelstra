@@ -90,7 +90,7 @@ function Diagnostics() {
           </>
         )}
       </Show>
-      <div class="m-actions" style={{ "justify-content": "flex-start" }}>
+      <div class="m-actions start">
         <Button onClick={() => void refetch()}>{S.diagRun}</Button>
         <Button
           onClick={() =>
@@ -253,7 +253,7 @@ export function Settings() {
               </Section>
 
               <Section title={T.backup} note={T.backupNote}>
-                <div class="m-actions" style={{ "justify-content": "flex-start" }}>
+                <div class="m-actions start">
                   <Button onClick={() => void exportBackup()}>{T.export}</Button>
                   <Button onClick={() => void restoreBackup()}>{T.restore}</Button>
                 </div>
