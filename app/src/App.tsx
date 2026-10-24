@@ -552,8 +552,10 @@ export function App() {
   const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
   return (
+    <>
     <div
       class="app"
+      data-app-shell
       classList={{ "with-right": current() !== null && showRightPanel(), "no-left": !showSidebar() }}
       style={{ "--left-w": `${leftW()}px`, "--right-w": `${rightW()}px` }}
     >
@@ -667,10 +669,6 @@ export function App() {
       <Show when={showAutomations()}>
         <Automations />
       </Show>
-      <ContextMenu />
-      <ErrorToast>
-        <UpdateToast />
-      </ErrorToast>
       <CloseConfirm />
       <ConfirmHost />
       <Show when={showSidebar()}>
@@ -938,5 +936,11 @@ export function App() {
       </Show>
       <StatusBar />
     </div>
+    {/* outside the shell: menus and toasts stay usable while a dialog makes the shell inert */}
+    <ContextMenu />
+    <ErrorToast>
+      <UpdateToast />
+    </ErrorToast>
+    </>
   );
 }
