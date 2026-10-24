@@ -24,6 +24,7 @@ pub mod ports;
 pub mod projects;
 pub mod proto;
 pub mod publish;
+pub mod remote;
 pub mod runner;
 pub mod server;
 pub mod skill;
