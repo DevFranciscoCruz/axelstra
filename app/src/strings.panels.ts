@@ -1,5 +1,6 @@
 import { dict } from "./i18n";
 import { enP } from "./strings.panels.en";
+import { ptBRP } from "./strings.panels.ptbr";
 import { count } from "./i18n";
 
 /** pt-PT texts of the panels (sidebar, docker, kanban...) that strings.ts does not hold; same glossary as strings.ts. */
@@ -864,4 +865,4 @@ O branch tem de estar enviado para o remoto.`,
   },
 } as const;
 
-export const P = dict(ptP, enP);
+export const P = dict<typeof ptP>(ptP, enP, ptBRP);
