@@ -1,7 +1,7 @@
 import { createPoller } from "./poller";
 import { askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
-import { call, getSettings, detectPackageManagers, createWorktree, launchDefaultAgent, setProjectSetup, defaultShell, spawnSession, writeSession, dispatchOverlaps, worktreeRename } from "./api";
+import { getSettings, detectPackageManagers, createWorktree, launchDefaultAgent, setProjectSetup, dispatchOverlaps, worktreeRename } from "./api";
 import { groupRunning, isFinished, layout, wtKey } from "./wtGroups";
 import { ProjectHead, SetupEditor } from "./sidebar/ProjectHead";
 import { CreateWorktree } from "./sidebar/CreateWorktree";
@@ -18,7 +18,7 @@ import logo from "./assets/logo.png";
 import { Button } from "./ui";
 import { Icon } from "./Icon";
 import { errorText } from "./appError";
-import { waitShellReady } from "./shellReady";
+import { isMultiLine, runSetup } from "./setupRun";
 import { norm, toggleIn } from "./paths";
 import {
   AGENTS,
@@ -37,6 +37,7 @@ import {
   editorDirty,
   setEditorDirty,
   showNotice,
+  setShowProjectSettings,
   setShowDispatcher,
   setShowSettings,
   projects,
@@ -200,14 +201,7 @@ export function Sidebar() {
         const pm = await detectPackageManagers(projectId).catch(() => null);
         if (pm?.package_json && pm.suggested) setup = `${pm.suggested} install`;
       }
-      if (setup) {
-        const [program, args] = await defaultShell();
-        const { id } = await spawnSession(program, args, "setup", w.path, { project: projectId, worktree: w.path, kind: "shell" });
-        // type only once the shell has printed its prompt (a slow profile can take seconds); if it never does, type anyway
-        void waitShellReady(() => call<{ lines: string[] }>("session.screen", { id, lines: 5 }).then((r) => r.lines))
-          .then(() => writeSession(id, setup + "\r"))
-          .catch(() => 0);
-      }
+      if (setup) await runSetup(projectId, w.path, setup);
     });
 
   // leaving the new-worktree dialog with a name typed in asks first
@@ -238,7 +232,12 @@ export function Sidebar() {
       setRenamingWt({ path, name: label });
     },
     newWorktree: (id) => setCreating(id),
+    runSetup: (projectId, path, setup) =>
+      run(async () => {
+        if (!(await runSetup(projectId, path, setup))) showNotice(T.noSetup);
+      }),
     editSetup: (id, setup) => {
+      if (isMultiLine(setup)) return setShowProjectSettings(id);
       setSetupText(setup);
       setEditSetup(id);
     },

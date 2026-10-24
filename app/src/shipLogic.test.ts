@@ -54,3 +54,44 @@ describe("questions", () => {
     expect(autoMergeQuestion(st())).toContain("#7");
   });
 });
+
+import { applySuggestion, canCreatePr, canGenerate, genInitial, genReduce, generateLabel } from "./shipLogic";
+
+describe("generate button state", () => {
+  it("goes idle -> loading -> done and ignores a second click while loading", () => {
+    let s = genReduce(genInitial, { kind: "start" });
+    expect(s).toEqual({ phase: "loading", seq: 1 });
+    expect(genReduce(s, { kind: "start" })).toBe(s);
+    expect(canGenerate(s, true)).toBe(false);
+    s = genReduce(s, { kind: "ok", seq: 1 });
+    expect(s.phase).toBe("done");
+    expect(canGenerate(s, true)).toBe(true);
+    expect(canGenerate(s, false)).toBe(false);
+    expect(generateLabel(genInitial)).toBe("Gerar título e descrição");
+    expect(generateLabel({ phase: "loading", seq: 1 })).toBe("A gerar…");
+    expect(generateLabel(s)).toBe("Gerar de novo");
+  });
+  it("can fail and be retried; a late answer of an older request is dropped", () => {
+    let s = genReduce(genInitial, { kind: "start" });
+    s = genReduce(s, { kind: "fail", seq: 1 });
+    expect(s.phase).toBe("error");
+    expect(canGenerate(s, true)).toBe(true);
+    s = genReduce(s, { kind: "start" });
+    expect(s.seq).toBe(2);
+    expect(genReduce(s, { kind: "ok", seq: 1 })).toBe(s);
+    s = genReduce(s, { kind: "reset" });
+    expect(s).toEqual({ phase: "idle", seq: 2 });
+    const next = genReduce(s, { kind: "start" });
+    expect(genReduce(next, { kind: "ok", seq: 2 })).toBe(next);
+  });
+  it("applies a suggestion with a title, trimmed, and keeps the fields otherwise", () => {
+    const cur = { title: "mine", body: "b" };
+    expect(applySuggestion(cur, { title: "  feat: x ", body: "\nbody\n" })).toEqual({ title: "feat: x", body: "body" });
+    expect(applySuggestion(cur, { title: "  ", body: "x" })).toBe(cur);
+  });
+  it("creates only with a title and when idle", () => {
+    expect(canCreatePr(" ", false)).toBe(false);
+    expect(canCreatePr("t", true)).toBe(false);
+    expect(canCreatePr("t", false)).toBe(true);
+  });
+});
