@@ -40,14 +40,14 @@ pub fn store_path(projects_store: &Path) -> PathBuf {
 
 /// Entries that do not parse or fail `validate` are skipped, so one bad entry cannot drop the rest.
 pub fn load(store: &Path) -> Vec<Automation> {
-    let Some(items) = std::fs::read_to_string(store).ok().and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(&s).ok()) else {
+    let Some(items) = crate::store::read_json::<Vec<serde_json::Value>>(store).ok().flatten() else {
         return Vec::new();
     };
     items.into_iter().filter_map(|v| serde_json::from_value::<Automation>(v).ok()).filter(|a| validate(a).is_ok()).collect()
 }
 
 pub fn save_all(store: &Path, v: &[Automation]) -> Result<()> {
-    crate::store::write_atomic(store, &serde_json::to_vec_pretty(v)?)?;
+    crate::store::write_json(store, v)?;
     Ok(())
 }
 
