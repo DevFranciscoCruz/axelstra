@@ -45,10 +45,14 @@ mod imp {
 
         pub fn spawn(&self, cmd: &mut Command) -> Result<Child> {
             cmd.creation_flags(CREATE_NO_WINDOW);
-            let child = cmd.spawn()?;
+            let mut child = cmd.spawn()?;
             let ok = unsafe { AssignProcessToJobObject(self.0, child.as_raw_handle() as HANDLE) };
             if ok == 0 {
-                bail!("AssignProcessToJobObject failed");
+                // a child outside the job would outlive its owner and could not be killed as a tree: do not leave it running
+                let err = std::io::Error::last_os_error();
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!("AssignProcessToJobObject failed: {err}");
             }
             Ok(child)
         }
@@ -72,6 +76,22 @@ mod imp {
 
         pub fn kill(&self) {
             unsafe { TerminateJobObject(self.0, 1) };
+        }
+
+        /// Nothing to forget: a Job Object tracks its processes itself.
+        pub fn forget(&self, _pid: u32) {}
+
+        /// Unix needs the leader pid to clean up stragglers; here the whole job is killed.
+        pub fn kill_and_forget(&self, _pid: u32) {
+            self.kill();
+        }
+
+        pub fn usage_in(&self, _snap: &crate::procs::Snapshot) -> (u64, u64) {
+            self.usage()
+        }
+
+        pub fn memory_now_in(&self, _snap: &crate::procs::Snapshot) -> u64 {
+            self.memory_now()
         }
 
         /// (peak job memory bytes, total user+kernel CPU in 100ns ticks)
@@ -148,13 +168,37 @@ mod imp {
 #[cfg(not(windows))]
 mod imp {
     use super::*;
+    use crate::procs::{self, Snapshot};
+    use crate::sync::LockRecover;
     use std::os::unix::process::CommandExt;
     use std::sync::Mutex;
+    use std::time::{Duration, Instant};
 
     /// Unix has no Job Object: each tracked process leads its own process group
     /// (portable-pty makes the pty child a session leader; `spawn` below uses
     /// `process_group(0)`), and killing the group takes the whole tree with it.
+    ///
+    /// A pgid is only ever signalled while its leader is still our child, reaped or not: a zombie leader keeps the
+    /// pid (and so the group id) reserved, but once somebody `wait()`ed for it the number may be handed to an
+    /// unrelated process. `kill` therefore drops every pid that is no longer our child instead of signalling it.
     pub struct Job(Mutex<Vec<i32>>);
+
+    /// True while `pid` is a child of ours that has not been reaped yet (running or zombie). Looks without reaping.
+    fn is_unreaped_child(pid: i32) -> bool {
+        unsafe {
+            let mut si: libc::siginfo_t = std::mem::zeroed();
+            let r = libc::waitid(libc::P_PID, pid as libc::id_t, &mut si, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT);
+            // ECHILD: reaped already (or never ours)
+            !(r == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD))
+        }
+    }
+
+    /// Reaps `pid` if it already exited; true when it is gone for good.
+    fn reap(pid: i32) -> bool {
+        let mut st = 0;
+        let r = unsafe { libc::waitpid(pid, &mut st, libc::WNOHANG) };
+        r == pid || (r == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD))
+    }
 
     impl Job {
         pub fn new() -> Result<Job> {
@@ -164,17 +208,33 @@ mod imp {
         pub fn spawn(&self, cmd: &mut Command) -> Result<Child> {
             cmd.process_group(0);
             let c = cmd.spawn()?;
-            self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(c.id() as i32);
+            self.0.lock_recover().push(c.id() as i32);
             Ok(c)
         }
 
         pub fn assign_pid(&self, pid: u32) -> Result<()> {
-            self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(pid as i32);
+            self.0.lock_recover().push(pid as i32);
             Ok(())
         }
 
+        /// Stops tracking `pid` (call after reaping it, so its group id is never signalled once it can be reused).
+        pub fn forget(&self, pid: u32) {
+            self.0.lock_recover().retain(|p| *p != pid as i32);
+        }
+
+        /// Kills the group of `pid` right now, whether or not it was reaped, then stops tracking it. For a caller that
+        /// just reaped the leader and wants to clean up stragglers (nothing can have reused the number yet).
+        pub fn kill_and_forget(&self, pid: u32) {
+            unsafe {
+                libc::killpg(pid as i32, libc::SIGKILL);
+            }
+            self.forget(pid);
+        }
+
         pub fn kill(&self) {
-            for pgid in self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter() {
+            let mut g = self.0.lock_recover();
+            g.retain(|pgid| is_unreaped_child(*pgid));
+            for pgid in g.iter() {
                 // the group first (children), the leader itself in case it left the group
                 unsafe {
                     libc::killpg(*pgid, libc::SIGKILL);
@@ -185,18 +245,13 @@ mod imp {
 
         /// (resident memory bytes of the groups right now, cpu ticks: not tracked on unix)
         pub fn usage(&self) -> (u64, u64) {
-            let groups = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
-            let Ok(o) = Command::new("ps").args(["-A", "-o", "pgid=,rss="]).output() else { return (0, 0) };
-            let mut kib = 0u64;
-            for l in String::from_utf8_lossy(&o.stdout).lines() {
-                let mut f = l.split_whitespace();
-                if let (Some(g), Some(r)) = (f.next().and_then(|x| x.parse::<i32>().ok()), f.next().and_then(|x| x.parse::<u64>().ok())) {
-                    if groups.contains(&g) {
-                        kib += r;
-                    }
-                }
-            }
-            (kib * 1024, 0)
+            self.usage_in(&procs::snapshot_cached(Duration::from_secs(1)))
+        }
+
+        /// Same, on a process table the caller already took (one `ps` per poll for any number of jobs).
+        pub fn usage_in(&self, snap: &Snapshot) -> (u64, u64) {
+            let groups = self.0.lock_recover().clone();
+            (snap.rss_of_groups(&groups) * 1024, 0)
         }
     }
 
@@ -204,12 +259,93 @@ mod imp {
         pub fn memory_now(&self) -> u64 {
             self.usage().0
         }
+
+        pub fn memory_now_in(&self, snap: &Snapshot) -> u64 {
+            self.usage_in(snap).0
+        }
     }
 
-    // like KILL_ON_JOB_CLOSE: dropping the session ends its processes
+    // like KILL_ON_JOB_CLOSE: dropping the session ends its processes, and the dead ones are reaped (no zombies)
     impl Drop for Job {
         fn drop(&mut self) {
             self.kill();
+            let mut left: Vec<i32> = std::mem::take(&mut *self.0.lock_recover());
+            let end = Instant::now() + Duration::from_millis(500);
+            while !left.is_empty() && Instant::now() < end {
+                left.retain(|p| !reap(*p));
+                if !left.is_empty() {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn alive(pid: i32) -> bool {
+            unsafe { libc::kill(pid, 0) == 0 }
+        }
+
+        fn sleeper(job: &Job) -> Child {
+            job.spawn(Command::new("sh").args(["-c", "sleep 60 & wait"])).unwrap()
+        }
+
+        #[test]
+        fn kill_takes_the_group_and_drop_reaps_the_leader() {
+            let job = Job::new().unwrap();
+            let c = sleeper(&job);
+            let pid = c.id() as i32;
+            std::thread::sleep(Duration::from_millis(200));
+            job.kill();
+            drop(job);
+            // reaped by Drop: not a zombie any more, so the pid is gone
+            let end = Instant::now() + Duration::from_secs(3);
+            while alive(pid) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(!alive(pid), "leader {pid} left as zombie or alive");
+            std::mem::forget(c);
+        }
+
+        #[test]
+        fn a_reaped_child_is_not_signalled_again() {
+            let job = Job::new().unwrap();
+            let mut c = job.spawn(Command::new("sh").args(["-c", "exit 0"])).unwrap();
+            c.wait().unwrap();
+            let pid = c.id() as i32;
+            assert!(!is_unreaped_child(pid));
+            job.kill();
+            assert!(job.0.lock_recover().is_empty(), "reaped pid must be forgotten, not killed");
+        }
+
+        #[test]
+        fn zombie_leader_still_counts_as_ours_until_reaped() {
+            let job = Job::new().unwrap();
+            let mut c = job.spawn(Command::new("sh").args(["-c", "exit 0"])).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            assert!(is_unreaped_child(c.id() as i32));
+            c.wait().unwrap();
+            assert!(!is_unreaped_child(c.id() as i32));
+        }
+
+        #[test]
+        fn kill_and_forget_clears_stragglers_of_a_reaped_leader() {
+            let job = Job::new().unwrap();
+            // the leader exits at once and leaves a background sleeper in its group
+            let mut c = job.spawn(Command::new("sh").args(["-c", "sleep 60 & echo $!"]).stdout(std::process::Stdio::piped())).unwrap();
+            let mut out = String::new();
+            std::io::Read::read_to_string(c.stdout.as_mut().unwrap(), &mut out).unwrap();
+            let kid: i32 = out.trim().parse().unwrap();
+            c.wait().unwrap();
+            assert!(alive(kid));
+            job.kill_and_forget(c.id());
+            let end = Instant::now() + Duration::from_secs(3);
+            while alive(kid) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(!alive(kid), "straggler {kid} survived kill_and_forget");
         }
     }
 }

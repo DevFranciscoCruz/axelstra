@@ -1,10 +1,13 @@
 pub mod agents;
 pub mod card;
+pub mod exec;
 pub mod git;
 pub mod job;
 pub mod orch;
+pub mod paths;
 pub mod procs;
 pub mod pty;
 pub mod runner;
 pub mod screen;
+pub mod sync;
 pub mod waiting;
