@@ -1,7 +1,9 @@
 import { For, JSX, Show, createResource, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { NotifyMode, SettingsPatch, ShellChoice, Terse, backupExport, pickAndRestoreBackup, copyDiagnostics, diagnostics, getSettings, resetShellCache, setSettings } from "./api";
+import { NotifyMode, SettingsPatch, budgetCheck, ShellChoice, Terse, backupExport, pickAndRestoreBackup, copyDiagnostics, diagnostics, getSettings, resetShellCache, setSettings } from "./api";
 import { restartDaemonFlow } from "./daemonActions";
+import { BudgetsSection } from "./BudgetsSection";
+import { setBudgetRows } from "./budgetStore";
 import { HooksSection } from "./HooksSection";
 import { Modal } from "./Modal";
 import { S } from "./strings";
@@ -257,6 +259,11 @@ export function Settings() {
                   <Button onClick={() => void restoreBackup()}>{T.restore}</Button>
                 </div>
               </Section>
+
+              <BudgetsSection
+                budgets={cfg().budgets}
+                onSave={(b) => void save({ budgets: b }).then(() => budgetCheck().then(setBudgetRows, () => undefined))}
+              />
 
               <HooksSection />
 

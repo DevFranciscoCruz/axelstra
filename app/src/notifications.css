@@ -11,7 +11,7 @@
 .notif-kind { font-size: var(--fs-sm); font-weight: 600; color: var(--muted); }
 .notif-kind.ci-fail, .notif-kind.error { color: var(--danger); }
 .notif-kind.ci-pass, .notif-kind.done, .notif-kind.merged { color: var(--ok); }
-.notif-kind.waiting { color: var(--warn); }
+.notif-kind.waiting, .notif-kind.budget { color: var(--warn); }
 .notif-text { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .notif-meta { font-size: var(--fs-sm); color: var(--muted); }
 .statusbar .notif-pop { top: auto; bottom: calc(100% + 6px); }

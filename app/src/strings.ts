@@ -128,6 +128,7 @@ export const S = {
     ciPass: "CI a passar",
     merged: "Integrado",
     error: "Erro",
+    budget: "Orçamento",
   },
 
   versionSkew: {

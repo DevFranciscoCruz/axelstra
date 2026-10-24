@@ -1,8 +1,12 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { createPoller } from "./poller";
 import { ClaudeStatus, CodexLimits, CodexWindow, agentStatus, codexLimits } from "./api";
 import { activeSession, sessions } from "./store";
 import { P } from "./strings.panels";
+import { BudgetMeter } from "./BudgetMeter";
+import { budgetRows } from "./budgetStore";
+import { rowsFor } from "./budgetLogic";
+import { wtName } from "./Usage";
 
 /** time until a reset: "1h 49m", "4d", "29d 23h" */
 export const until = (secs: number) => {
@@ -87,6 +91,9 @@ export function LimitsBar() {
   const ctxTotal = () => cw()?.context_window_size ?? 0;
   const ctxPct = () => cw()?.used_percentage;
   const cx = () => codex();
+  // the token budgets of the worktree the active tab belongs to
+  const wt = () => sessions().find((x) => x.id === activeSession())?.meta?.worktree;
+  const budgets = () => (wt() ? rowsFor(budgetRows(), wt()!) : []);
 
   return (
     <div class="limits">
@@ -111,6 +118,7 @@ export function LimitsBar() {
         <Meter pct={cx()?.primary?.used_percent} label={fmtSecs(codexSecs(cx()?.primary, cx()?.as_of))} tip={P.limits.codexShort} />
         <Meter pct={cx()?.secondary?.used_percent} label={fmtSecs(codexSecs(cx()?.secondary, cx()?.as_of))} tip={P.limits.codexWeek} />
       </Show>
+      <For each={budgets()}>{(r) => <BudgetMeter row={r} name={wtName(wt()!)} />}</For>
     </div>
   );
 }
