@@ -25,6 +25,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     let (status, body) = crate::notes::split_status(text);
                     let _ = crate::notes::append(&note, status, body);
                 }
+                sweep_soon(reg);
             }
             // agents get a one-line notice; a worker with a reaper reports through it instead
             let quiet = p["quiet"].as_bool() == Some(true) || (kind == "done" && from.map(|f| reg.bus.is_reaped(f)).unwrap_or(false));

@@ -240,7 +240,7 @@ fn wt_dir(p: &Project, name: &str) -> Result<PathBuf> {
 }
 
 /// `copy_env`: also copy the git-ignored files `.worktreeinclude` selects (never for code that is not the user's own).
-fn create_at(p: &Project, name: &str, base: &str, copy_env: bool) -> Result<(git::Worktree, crate::wtenv::Report)> {
+pub(crate) fn create_at(p: &Project, name: &str, base: &str, copy_env: bool) -> Result<(git::Worktree, crate::wtenv::Report)> {
     let n = slug(name);
     if n.is_empty() {
         bail!("worktree name is empty");

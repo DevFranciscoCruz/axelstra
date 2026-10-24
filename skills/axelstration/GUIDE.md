@@ -129,7 +129,7 @@ Take a screenshot before and after acting, and prefer a CLI or API when the app 
 2. Main: `dispatch new` (worktree + lead). Lead: for each piece, `agent <own worktree> … --report-to` (or one `flow` file when there are dependencies).
 3. Keep working or stop; reports are typed into your session as workers finish. Answer questions with `reply` and stuck workers with `msg`. Treat reports as claims to verify: run the checks yourself.
 4. Integrate: review each worktree's diff, merge or cherry-pick, run the full test suite.
-5. Clean up: `worktree rm` the ones you no longer need.
+5. Clean up: finished leads close on `done` and the sweep removes integrated worktrees by itself; `worktree rm` only the ones it cannot judge.
 
 ## Rules
 
@@ -165,3 +165,5 @@ You are the lead of this worktree's theme. Own it end to end:
 - Workers report to you; answer their asks (`reply`), unblock escalations (`msg`), verify their reports, integrate their work.
 - Talk to main only through `axelstra done` / `ask` / `escalate` (they go to `$AXELSTRA_PARENT`). Workers never talk to main.
 - Work small enough to do yourself needs no worker.
+- **Lifecycle.** A lead started by `dispatch new/send` is ephemeral like a `--report-to` worker: when it calls `axelstra done "<report>"` its session closes by itself, and the report is typed into main and kept in the task file. Finish with `done` only when everything is committed and verified. Main only has to read the report; it does not close leads or remove worktrees.
+- **Cleanup.** The janitor sweep (every 10 minutes, and a few seconds after every `done` or merge) removes a worktree and its branch when the branch is inside the default branch or inside another live `ax/*` branch (stacked integration). It never touches a worktree with uncommitted changes, with a session that has not reported (a session that called `done` and is quiet does not count as busy), or with unmerged work, and it never deletes a branch whose commits no other ref holds. Every removal shows a toast and a notification-center entry ("worktree X removido (integrado em Y)"). `axelstra worktree sweep [--dry-run]` runs it by hand.

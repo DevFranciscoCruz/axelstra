@@ -10,6 +10,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let done = tokio::task::block_in_place(|| crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path), dry));
             Ok(json!({"swept": done}))
         }
+        // worktrees the automatic sweep removed since the last call (the app turns them into a toast)
+        "janitor.events" => Ok(json!({"events": crate::janitor::take_events()})),
         "janitor.auto" => {
             // on unless the user turned it off: the file records the opt-out
             let flag = reg.saved.with_file_name("janitor.off");
