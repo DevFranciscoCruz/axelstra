@@ -64,11 +64,14 @@ export type Settings = {
   terse: Terse; rules: string | null; pm: string | null; installed: string[]; auto_install: boolean;
   /** absent on a daemon from before these keys existed */
   notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice;
+  /** UI choices the webview keeps (pins, folded groups, notifications...): `axelstra.*` key -> saved string */
+  ui?: Record<string, string>;
 };
 export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice };
 /** `terse` asks for the rules of that level (a project's own choice) instead of the saved one */
 export const getSettings = (terse?: Terse) => call<Settings>("settings.get", terse ? { terse } : {});
-export const setSettings = (patch: SettingsPatch) => call("settings.set", patch);
+/** `ui`: UI state to store (`null` removes a key), sent by uiState.ts only, so it is not part of what the Settings screen merges */
+export const setSettings = (patch: SettingsPatch & { ui?: Record<string, string | null> }) => call("settings.set", patch);
 
 /** Result of `fn`, remembered once it succeeded; a failure is not remembered, so the next call tries again. */
 const once = <T>(fn: () => Promise<T>) => {

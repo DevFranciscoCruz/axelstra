@@ -68,7 +68,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let (shell, notify_sound, notify_mode) = ui_settings(&saved);
             Ok(
                 json!({"terse": terse, "rules": crate::skill::terse_rules(terse), "pm": pm, "installed": installed, "auto_install": saved["auto_install"] == json!(true),
-                "shell": shell, "notify_sound": notify_sound, "notify_mode": notify_mode}),
+                "shell": shell, "notify_sound": notify_sound, "notify_mode": notify_mode, "ui": saved["ui"].as_object().cloned().unwrap_or_default()}),
             )
         }
         "settings.set" => {
