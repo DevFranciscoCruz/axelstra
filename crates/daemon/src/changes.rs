@@ -155,12 +155,17 @@ pub fn diff(wt: &Path, path: &str, base: Option<&str>) -> Result<String> {
         o.stdout
     } else {
         let full = wt.join(path);
-        if !full.is_file() {
-            // deleted in the working tree and unknown to the index: nothing to show
+        // symlink_metadata: a link is never followed (it could point outside the worktree)
+        let md = std::fs::symlink_metadata(&full).ok().filter(|m| m.file_type().is_file());
+        if md.is_none() {
+            // deleted in the working tree, unknown to the index, or a link: nothing to show
             String::new()
         } else {
-            let bytes = std::fs::read(&full)?;
-            if bytes.contains(&0) {
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::Read::take(std::fs::File::open(&full)?, MAX_UNTRACKED_BYTES + 1), &mut bytes)?;
+            if bytes.len() as u64 > MAX_UNTRACKED_BYTES {
+                format!("File {path} (new) is larger than {} MB\n", MAX_UNTRACKED_BYTES >> 20)
+            } else if bytes.contains(&0) {
                 format!("Binary file {path} (new)\n")
             } else {
                 let text = String::from_utf8_lossy(&bytes);
@@ -271,5 +276,42 @@ mod tests {
             assert!(log(&here, Some(bad)).is_err());
             assert!(changes(&here, Some(bad)).is_err());
         }
+    }
+
+    fn repo(tag: &str) -> Option<std::path::PathBuf> {
+        let d = std::env::temp_dir().join(format!("axl-changes-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).ok()?;
+        for args in [vec!["init", "-q"], vec!["-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-q", "-m", "i"]] {
+            if !git::run(&d, &args).ok()?.ok {
+                return None;
+            }
+        }
+        Some(d)
+    }
+
+    #[test]
+    fn untracked_diff_is_bounded_and_never_follows_a_link() {
+        let Some(d) = repo("untracked") else { return };
+        std::fs::write(d.join("small.txt"), "a\nb\n").unwrap();
+        let s = diff(&d, "small.txt", None).unwrap();
+        assert!(s.contains("+a\n+b\n"), "{s}");
+        std::fs::write(d.join("big.txt"), vec![b'x'; (MAX_UNTRACKED_BYTES + 10) as usize]).unwrap();
+        let s = diff(&d, "big.txt", None).unwrap();
+        assert!(s.contains("larger than") && s.len() < 200, "{}", s.len());
+        // a link to a file outside the worktree shows nothing
+        let outside = std::env::temp_dir().join(format!("axl-changes-out-{}.txt", std::process::id()));
+        std::fs::write(&outside, "secret\n").unwrap();
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&outside, d.join("ln")).is_ok();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_file(&outside, d.join("ln")).is_ok();
+        if linked {
+            assert_eq!(diff(&d, "ln", None).unwrap(), "");
+        } else {
+            eprintln!("skipped link half: cannot create symlinks here");
+        }
+        let _ = std::fs::remove_file(&outside);
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
