@@ -3,22 +3,23 @@ import { moveIndex } from "./a11y";
 import { isTopModal, popModal, pushModal } from "./modalStack";
 import { NotifEntry, NotifKind, clearAll, markAllRead, notifications, notificationsOpenRequest, unreadCount } from "./notifications";
 import { ago } from "./time";
+import { basename } from "./paths";
+import { S } from "./strings";
 import "./notifications.css";
 import { Button, cn } from "./ui";
 
 /** word and glyph per kind: the meaning never rests on colour alone */
 const KIND: Record<NotifKind, [string, string]> = {
-  done: ["✓", "Terminou"],
-  waiting: ["?", "Espera por ti"],
-  "ci-fail": ["✕", "CI a falhar"],
-  "ci-pass": ["✓", "CI a passar"],
-  merged: ["⇄", "Merge feito"],
-  error: ["!", "Erro"],
+  done: ["✓", S.notif.done],
+  waiting: ["?", S.notif.waiting],
+  "ci-fail": ["✕", S.notif.ciFail],
+  "ci-pass": ["✓", S.notif.ciPass],
+  merged: ["⇄", S.notif.merged],
+  error: ["!", S.notif.error],
 };
 
 const FOCUSABLE = "button:not(:disabled)";
 
-const wtName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? "";
 
 /** Bell with an unread badge and the list of recent events. `onJump` opens what an entry is about (its worktree, and
  *  its agent session when it has one). Mount once, e.g. in the sidebar header. */
@@ -88,12 +89,12 @@ export function NotificationBell(props: { onJump: (e: NotifEntry) => void }) {
 
   const label = () => {
     const n = unreadCount();
-    return n ? `Notificações, ${n} por ler` : "Notificações";
+    return n ? S.notif.labelUnread(n) : S.notif.title;
   };
 
   return (
     <div class="notif">
-      <Button ref={bell} variant="icon" size="glyph" class="relative" title="Notificações" aria-label={label()} aria-haspopup="dialog" aria-expanded={open()} onClick={() => (open() ? close() : show())}>
+      <Button ref={bell} variant="icon" size="glyph" class="relative" title={S.notif.title} aria-label={label()} aria-haspopup="dialog" aria-expanded={open()} onClick={() => (open() ? close() : show())}>
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M8 2.2a3.8 3.8 0 0 0-3.8 3.8c0 3-1.4 4-1.4 4h10.4s-1.4-1-1.4-4A3.8 3.8 0 0 0 8 2.2zM6.6 12.6a1.5 1.5 0 0 0 2.8 0" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
@@ -102,12 +103,12 @@ export function NotificationBell(props: { onJump: (e: NotifEntry) => void }) {
         </Show>
       </Button>
       <Show when={open()}>
-        <div ref={pop} class="notif-pop" role="dialog" aria-label="Notificações">
+        <div ref={pop} class="notif-pop" role="dialog" aria-label={S.notif.title}>
           <div class="notif-head">
-            <span class="notif-title">Notificações</span>
-            <Button variant="outline" size="sm" class="h-auto py-0.5" disabled={notifications().length === 0} onClick={() => clearAll()}>Limpar tudo</Button>
+            <span class="notif-title">{S.notif.title}</span>
+            <Button variant="outline" size="sm" class="h-auto py-0.5" disabled={notifications().length === 0} onClick={() => clearAll()}>{S.notif.clearAll}</Button>
           </div>
-          <Show when={notifications().length} fallback={<div class="notif-empty">Sem notificações</div>}>
+          <Show when={notifications().length} fallback={<div class="notif-empty">{S.notif.empty}</div>}>
             <ul class="notif-list">
               <For each={notifications()}>
                 {(n) => (
@@ -115,11 +116,11 @@ export function NotificationBell(props: { onJump: (e: NotifEntry) => void }) {
                     <Button variant="row" size="bare" class={cn("notif-item h-auto w-full flex-col items-stretch gap-0.5 rounded-none border-0 border-b border-border px-2.5 py-2 hover:bg-muted focus-visible:bg-muted", fresh().has(n.id) && "border-l-[3px] border-l-primary pl-[7px]")} onClick={() => jump(n)}>
                       <span class={`notif-kind ${n.kind}`}>
                         <span aria-hidden="true">{KIND[n.kind][0]}</span> {KIND[n.kind][1]}
-                        <Show when={fresh().has(n.id)}> · novo</Show>
+                        <Show when={fresh().has(n.id)}> · {S.notif.fresh}</Show>
                       </span>
                       <span class="notif-text">{n.text}</span>
                       <span class="notif-meta">
-                        <Show when={wtName(n.worktree)}>{wtName(n.worktree)} · </Show>
+                        <Show when={basename(n.worktree)}>{basename(n.worktree)} · </Show>
                         {ago((Date.now() - n.at) / 1000)}
                       </span>
                     </Button>

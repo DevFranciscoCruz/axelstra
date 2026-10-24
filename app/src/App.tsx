@@ -25,7 +25,8 @@ import { Shortcuts } from "./Shortcuts";
 import { Handler, paletteCommands } from "./commands";
 import { requestNotificationsOpen } from "./notifications";
 import { restartDaemonFlow } from "./daemonActions";
-import { S } from "./strings";
+import { S, count } from "./strings";
+import { basename } from "./paths";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
 import { LEFT, RIGHT, resizeTo, splitTo } from "./layout";
 import { K, isTextTarget, overlayOpen } from "./keyboard";
@@ -145,12 +146,7 @@ export function App() {
         setComputerOn(await computerEnable(false));
         return;
       }
-      const ok = await ask("Permitir que os agentes vejam o ecrã e controlem o rato e o teclado?\n\nPodem tirar capturas de qualquer janela e clicar ou escrever em teu nome. Fica ligado até o desligar aqui ou fechar a aplicação.", {
-        title: "Controlo do ecrã",
-        kind: "warning",
-        okLabel: "Permitir",
-        cancelLabel: "Cancelar",
-      });
+      const ok = await ask(S.app.computerAsk, { title: S.app.computerTitle, kind: "warning", okLabel: S.app.allow, cancelLabel: S.cancel });
       if (ok) setComputerOn(await computerEnable(true));
     } catch (e) {
       setError(String(e));
@@ -183,9 +179,9 @@ export function App() {
       .then((m) => {
         void agentsList().then((l) => setInstalledAgents(l.filter((a) => a.installed).map((a) => a.id))).catch(() => setInstalledAgents(null));
         const bits: string[] = [];
-        if (m.includes("git")) bits.push("o git não está instalado ou não está no PATH (sem ele não há worktrees)");
-        if (m.includes("claude") && m.includes("codex")) bits.push("nem o claude nem o codex foram encontrados (instala um deles para usar agentes)");
-        if (bits.length) showNotice(`Falta configurar: ${bits.join("; ")}.`);
+        if (m.includes("git")) bits.push(S.app.noGit);
+        if (m.includes("claude") && m.includes("codex")) bits.push(S.app.noAgents);
+        if (bits.length) showNotice(S.app.missing(bits));
       })
       .catch(() => setInstalledAgents(null)),
   );
@@ -196,25 +192,25 @@ export function App() {
     const restore = (prefix: string) =>
       restoreSessions()
         .catch((e) => {
-          setError(`Não foi possível restaurar as sessões: ${errorText(e)}`);
+          setError(S.app.restoreFailed + errorText(e));
           return null;
         })
         .then((r) => {
           void refreshSessions();
           if (!r) return;
           const bits: string[] = [];
-          if (r.restored) bits.push(`${r.restored} ${r.restored === 1 ? "sessão restaurada" : "sessões restauradas"}`);
-          if (r.skipped) bits.push(`${r.skipped} ${r.skipped === 1 ? "conversa vazia ignorada" : "conversas vazias ignoradas"}`);
-          if (r.failed.length) bits.push(`não foi possível restaurar: ${r.failed.join(", ")}`);
+          if (r.restored) bits.push(count(r.restored, "sessão restaurada", "sessões restauradas"));
+          if (r.skipped) bits.push(count(r.skipped, "conversa vazia ignorada", "conversas vazias ignoradas"));
+          if (r.failed.length) bits.push(S.app.restoreFailedList(r.failed));
           if (bits.length) showNotice(`${prefix}: ${bits.join(" · ")}.`);
         });
-    void restore("Ao reabrir");
+    void restore(S.app.onReopen);
     // the daemon crashed or was replaced while the app was open: its sessions are gone, bring them back
     let unlistenRestart: (() => void) | undefined;
     void import("@tauri-apps/api/event").then(({ listen }) =>
       listen("daemon-restarted", () => {
-        showNotice("O daemon foi reiniciado; a restaurar as sessões…");
-        void restore("Após o reinício do daemon");
+        showNotice(S.app.daemonRestarted);
+        void restore(S.app.afterRestart);
       }).then((u) => (unlistenRestart = u)),
     );
     // the host reconnects to the daemon on its own: show it meanwhile, and say so when it did not work
@@ -225,10 +221,10 @@ export function App() {
         setDaemonReconnecting(false);
         if (!e.payload?.ok)
           toast({
-            text: "Não foi possível reconectar ao daemon. Reinicia o Axelstra se persistir.",
+            text: S.app.reconnectFailed,
             kind: "error",
             key: "daemon-reconnect",
-            action: { label: "Tentar agora", run: () => void retryDaemon() },
+            action: { label: S.toast.retryNow, run: () => void retryDaemon() },
           });
       }).then((u) => unlistenLink.push(u));
     });
@@ -306,7 +302,7 @@ export function App() {
         e.preventDefault();
         e.stopPropagation();
         const waiting = sessions().filter((x) => x.meta?.kind === "agent" && x.meta.worktree && sessionState(x) === "waiting");
-        if (!waiting.length) return showNotice("Nenhum agente está à espera de resposta.");
+        if (!waiting.length) return showNotice(S.app.noWaiting);
         const next = waiting.find((x) => x.id > activeSession()!) ?? waiting[0];
         openSession(next.meta!.worktree!, next.id);
         return;
@@ -474,7 +470,7 @@ export function App() {
     try {
       if (s.running) {
         const agent = s.meta?.kind === "agent";
-        const ok = await ask(`Fechar "${tabLabel(s)}"? ${agent ? "O agente em execução é terminado." : "O terminal e o que corre nele são terminados."}`, { title: agent ? "Fechar agente" : "Fechar terminal", kind: "warning", okLabel: "Fechar", cancelLabel: "Cancelar" });
+        const ok = await ask(S.app.closeAsk(tabLabel(s), agent), { title: agent ? S.app.closeAgent : S.app.closeTerminal, kind: "warning", okLabel: S.close, cancelLabel: S.cancel });
         if (!ok) return;
       }
       rememberClosed(s);
@@ -491,7 +487,7 @@ export function App() {
   // Ctrl+Shift+T: bring back the tab closed last (a shell opens anew; an agent resumes its conversation)
   const reopenClosed = async () => {
     const t = popClosed();
-    if (!t) return showNotice("Nenhum separador fechado para reabrir.");
+    if (!t) return showNotice(S.app.noClosed);
     const target = findWorktree(t.meta?.worktree ?? null) ?? current();
     if (!target) return;
     const m = t.meta;
@@ -555,7 +551,6 @@ export function App() {
     const v = view();
     return v.kind === k ? (v as Extract<typeof v, { kind: K }>) : null;
   };
-  const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
   // what the command registry (commands.ts) can run right now; the palette lists these
   const showPanel = (tab: "files" | "changes" | "pulls") => {
@@ -611,7 +606,7 @@ export function App() {
           style={{ left: "var(--left-w)" }}
           role="separator"
           aria-orientation="vertical"
-          aria-label="Largura da lista de projetos"
+          aria-label={S.app.leftWidth}
           aria-valuenow={leftW()}
           aria-valuemin={LEFT.min}
           aria-valuemax={LEFT.max}
@@ -626,7 +621,7 @@ export function App() {
           style={{ right: "var(--right-w)" }}
           role="separator"
           aria-orientation="vertical"
-          aria-label="Largura do painel direito"
+          aria-label={S.app.rightWidth}
           aria-valuenow={rightW()}
           aria-valuemin={RIGHT.min}
           aria-valuemax={RIGHT.max}
@@ -643,13 +638,13 @@ export function App() {
             done()(choice());
           };
           return (
-            <Modal label="Novo agente" onClose={() => done()(null)}>
-              <div class="m-heading">Novo agente</div>
+            <Modal label={S.app.newAgent} onClose={() => done()(null)}>
+              <div class="m-heading">{S.app.newAgent}</div>
               <div class="m-full" onKeyDown={(e) => e.key === "Enter" && (e.ctrlKey || e.metaKey) && go()}>
-                <Field label="Agente" full>
+                <Field label={S.app.agent} full>
                 <Select
                   value={choice()}
-                  label="Agente"
+                  label={S.app.agent}
                   iconOnly
                   options={[...agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))]}
                   onChange={setChoice}
@@ -657,9 +652,9 @@ export function App() {
                 </Field>
               </div>
               <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-                <Button onClick={() => done()(null)}>Cancelar</Button>
+                <Button onClick={() => done()(null)}>{S.cancel}</Button>
                 <Button variant="default" onClick={go} ref={(el) => queueMicrotask(() => el.focus())}>
-                  Abrir
+                  {S.app.open}
                 </Button>
               </div>
             </Modal>
@@ -691,7 +686,7 @@ export function App() {
       <CloseConfirm />
       <ConfirmHost />
       <Show when={showSidebar()}>
-        <Section name="projetos">
+        <Section name={S.app.sectionProjects}>
           <Sidebar />
         </Section>
       </Show>
@@ -701,23 +696,23 @@ export function App() {
           fallback={
             <div class="placeholder">
               <Show when={!showSidebar()}>
-                <Button variant="icon" size="tool" title={K("Mostrar projetos (Ctrl+B)")} aria-label={K("Mostrar projetos (Ctrl+B)")} onClick={toggleSidebar}>
+                <Button variant="icon" size="tool" title={K(S.app.showProjects)} aria-label={K(S.app.showProjects)} onClick={toggleSidebar}>
                   <PanelIcon side="left" on={false} />
                 </Button>
               </Show>
-              <div>Adiciona um projeto e escolhe um worktree.</div>
+              <div>{S.app.addProjectHint}</div>
               <Show when={projects().length === 0}>
-                <Button variant="default" onClick={() => void pickProject()}>Adicionar projeto</Button>
+                <Button variant="default" onClick={() => void pickProject()}>{S.app.addProject}</Button>
               </Show>
             </div>
           }
         >
           <div class="tabbar">
-            <Button variant="icon" size="tool" class={cn("ml-1 self-center", showSidebar() && "text-foreground")} title={K("Projetos (Ctrl+B)")} aria-label={K("Projetos (Ctrl+B)")} onClick={toggleSidebar}>
+            <Button variant="icon" size="tool" class={cn("ml-1 self-center", showSidebar() && "text-foreground")} title={K(S.app.projects)} aria-label={K(S.app.projects)} onClick={toggleSidebar}>
               <PanelIcon side="left" on={showSidebar()} />
             </Button>
             <Tabs value={stripValue()} onChange={() => {}} activationMode="manual" class="flex min-w-0">
-            <TabsList aria-label="Separadores" class="min-w-0 overflow-x-auto [scrollbar-width:none]">
+            <TabsList aria-label={S.app.tabs} class="min-w-0 overflow-x-auto [scrollbar-width:none]">
             <Tab value="kanban" selected={view().kind === "kanban"} onSelect={() => guarded(() => setView({ kind: "kanban" }))}>
               <span class="dtag"><Icon name="grid" size={11} /></span>
               <span>Kanban</span>
@@ -772,7 +767,7 @@ export function App() {
                         <StateDot state={dotOfSession(s)} />
                         <Input
                           class="h-auto w-[120px] rounded-sm border-border bg-transparent px-1 py-0 text-inherit"
-                          aria-label="Nome do separador"
+                          aria-label={S.app.tabName}
                           value={tabLabel(s)}
                           onClick={(e) => e.stopPropagation()}
                           onKeyDown={(e) => {
@@ -794,7 +789,7 @@ export function App() {
             </For>
             <Show when={shown("commit")}>
               {(c) => (
-                <Tab value="commit" class="diff-tab" selected title={c().commit.subject} onSelect={() => setView(c())} onClose={() => showView()} closeLabel="Fechar commit">
+                <Tab value="commit" class="diff-tab" selected title={c().commit.subject} onSelect={() => setView(c())} onClose={() => showView()} closeLabel={S.app.closeCommit}>
                   <span class="dtag"><Icon name="branch" size={11} /></span>
                   <span>{c().commit.short}</span>
                 </Tab>
@@ -802,17 +797,17 @@ export function App() {
             </Show>
             <Show when={shown("file")}>
               {(p) => (
-                <Tab value="file" class="diff-tab" selected title={p().path} onSelect={() => setView(p())} onClose={() => guarded(() => showView())} closeLabel="Fechar ficheiro">
+                <Tab value="file" class="diff-tab" selected title={p().path} onSelect={() => setView(p())} onClose={() => guarded(() => showView())} closeLabel={S.app.closeFile}>
                   <span class="dtag"><Icon name="pencil" size={11} /></span>
-                  <span>{baseName(p().path)}</span>
+                  <span>{basename(p().path)}</span>
                 </Tab>
               )}
             </Show>
             <Show when={shown("diff")}>
               {(p) => (
-                <Tab value="diff" class="diff-tab" selected title={p().path} onSelect={() => setView(p())} onClose={() => showView()} closeLabel="Fechar diff">
+                <Tab value="diff" class="diff-tab" selected title={p().path} onSelect={() => setView(p())} onClose={() => showView()} closeLabel={S.app.closeDiff}>
                   <span class="dtag">Δ</span>
-                  <span>{baseName(p().path)}</span>
+                  <span>{basename(p().path)}</span>
                 </Tab>
               )}
             </Show>
@@ -821,58 +816,58 @@ export function App() {
             <span class="grow" />
             <UsageChip />
             <Show when={computerOn()}>
-              <span class="computer-on" title="Os agentes podem ver o ecrã e controlar o rato e o teclado. Desliga em: paleta de comandos, «Controlo do ecrã»"><i class="bdot" /> ecrã</span>
+              <span class="computer-on" title={S.app.screenOnTip}><i class="bdot" /> {S.app.screen}</span>
             </Show>
             <For each={ports()}>
               {(port) => (
-                <Button variant="success" size="chip" class="ml-1.5 self-center rounded-xl" title={`Abrir http://localhost:${port} no navegador`} onClick={() => void openUrl(`http://localhost:${port}`)}>
+                <Button variant="success" size="chip" class="ml-1.5 self-center rounded-xl" title={S.app.openPort(port)} onClick={() => void openUrl(`http://localhost:${port}`)}>
                   :{port} <Icon name="external" size={11} inline />
                 </Button>
               )}
             </For>
-            <Button variant="icon" size="tool" class={cn("ml-1 self-center", listening() && "text-destructive")} title={K("Ditado por voz (Ctrl+Shift+M)")} aria-label={K("Ditado por voz (Ctrl+Shift+M)")} onClick={() => void toggleVoice()} hidden={!voiceSupported}>
+            <Button variant="icon" size="tool" class={cn("ml-1 self-center", listening() && "text-destructive")} title={K(S.app.voice)} aria-label={K(S.app.voice)} onClick={() => void toggleVoice()} hidden={!voiceSupported}>
               <MicIcon />
             </Button>
-            <Button variant="icon" size="tool" class={cn("ml-1 self-center", splitSession() !== null && "text-foreground")} title="Dividir: ver dois terminais lado a lado" aria-label="Dividir: ver dois terminais lado a lado" onClick={() => void toggleSplit()}>
+            <Button variant="icon" size="tool" class={cn("ml-1 self-center", splitSession() !== null && "text-foreground")} title={S.app.split} aria-label={S.app.split} onClick={() => void toggleSplit()}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
                 <path d="M5.5 3v10M10.5 3v10" />
               </svg>
             </Button>
-            <Button variant="icon" size="tool" class="ml-1 self-center" title={`Novo agente (${projectAgent(current()?.project.id)})`} aria-label={`Novo agente (${projectAgent(current()?.project.id)})`} onClick={newAgent}>
+            <Button variant="icon" size="tool" class="ml-1 self-center" title={S.app.newAgentOf(projectAgent(current()?.project.id))} aria-label={S.app.newAgentOf(projectAgent(current()?.project.id))} onClick={newAgent}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 1.5c.4 3.4 1.6 4.6 5 5-3.4.4-4.6 1.6-5 5-.4-3.4-1.6-4.6-5-5 3.4-.4 4.6-1.6 5-5z" />
               </svg>
             </Button>
-            <Button variant="icon" size="tool" class="ml-1 self-center" title="Novo terminal" aria-label="Novo terminal" onClick={newTerminal}>
+            <Button variant="icon" size="tool" class="ml-1 self-center" title={S.app.newTerminal} aria-label={S.app.newTerminal} onClick={newTerminal}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
                 <path d="M8 3.5v9M3.5 8h9" />
               </svg>
             </Button>
             <Show when={!showRightPanel() && !narrow()}>
-              <Button variant="icon" size="tool" class="ml-1 self-center" title={K("Mostrar painel direito (Ctrl+Shift+B)")} aria-label={K("Mostrar painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>
+              <Button variant="icon" size="tool" class="ml-1 self-center" title={K(S.app.showRight)} aria-label={K(S.app.showRight)} onClick={toggleRightPanel}>
                 <PanelIcon side="right" on={false} />
               </Button>
             </Show>
           </div>
           <VoiceDraft target={activeSession()} />
           <div class="term-area">
-            <Section name="terminais">
+            <Section name={S.app.sectionTerminals}>
             <Switch
               fallback={
               <Show
                 when={activeSession() !== null}
                 fallback={
                   <div class="placeholder empty">
-                    <div>Sem terminais neste worktree.</div>
+                    <div>{S.app.noTerminals}</div>
                     <Show when={current()}>{(c) => <WorktreeReports project={c().project.id} worktree={c().wt.path} />}</Show>
                     <div class="empty-actions">
                       <Button variant="default" onClick={() => void newAgent()}>
-                        <Icon name="sparkle" size={12} inline /> Abrir agente
+                        <Icon name="sparkle" size={12} inline /> {S.app.openAgent}
                       </Button>
                       <Button onClick={() => void newTerminal()}>+ Terminal</Button>
                     </div>
                     <div class="hints">
-                      <kbd>{K("Ctrl+K")}</kbd> paleta · <kbd>{K("Ctrl+B")}</kbd> projetos · <kbd>{K("Ctrl+Shift+B")}</kbd> painel direito
+                      <kbd>{K("Ctrl+K")}</kbd> {S.app.hintPalette} · <kbd>{K("?")}</kbd> {S.app.hintShortcuts} · <kbd>{K("Ctrl+B")}</kbd> {S.app.hintProjects} · <kbd>{K("Ctrl+Shift+B")}</kbd> {S.app.hintRight}
                     </div>
                   </div>
                 }
@@ -889,7 +884,7 @@ export function App() {
                     class="split-sep"
                     role="separator"
                     aria-orientation="vertical"
-                    aria-label="Largura do terminal dividido"
+                    aria-label={S.app.splitWidth}
                     aria-valuenow={Math.round(splitFrac() * 100)}
                     aria-valuemin={20}
                     aria-valuemax={80}
@@ -915,7 +910,7 @@ export function App() {
                     }}
                   />
                   <div class="split-pane group/split" style={{ flex: `0 0 ${splitFrac() * 100}%` }}>
-                    <Button variant="outline" size="bare" class="absolute right-2 top-1 z-[5] size-5 border-border/60 bg-popover leading-none text-muted-foreground opacity-0 transition-opacity focus-visible:opacity-100 group-hover/split:opacity-100" title="Fechar divisão" aria-label="Fechar divisão" onClick={() => setSplitSession(null)}>
+                    <Button variant="outline" size="bare" class="absolute right-2 top-1 z-[5] size-5 border-border/60 bg-popover leading-none text-muted-foreground opacity-0 transition-opacity focus-visible:opacity-100 group-hover/split:opacity-100" title={S.app.closeSplit} aria-label={S.app.closeSplit} onClick={() => setSplitSession(null)}>
                       <Icon name="x" />
                     </Button>
                     <Show when={splitSession()} keyed>
@@ -947,7 +942,7 @@ export function App() {
         </Show>
       </main>
       <Show when={current() && showRightPanel()}>
-        <Section name="painel direito">
+        <Section name={S.app.sectionRight}>
           <Show when={rightTab() === "files"} fallback={rightTab() === "pulls" ? <PullsPanel /> : <ChangesPanel />}>
             <FilesPanel />
           </Show>

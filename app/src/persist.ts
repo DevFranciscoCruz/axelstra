@@ -46,3 +46,27 @@ export function createPersisted<T>(key: string, ok: (v: unknown) => v is T, fall
     },
   ];
 }
+
+/** A boolean setting saved as "1" / "0" (the format the panel toggles already use); anything else gives `def`. */
+export function createPersistedFlag(key: string, def: boolean): [Accessor<boolean>, (v: boolean) => void] {
+  let initial = def;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === "1") initial = true;
+    else if (raw === "0") initial = false;
+  } catch {
+    /* storage unavailable: the default */
+  }
+  const [get, set] = createSignal(initial);
+  return [
+    get,
+    (v) => {
+      set(v);
+      try {
+        localStorage.setItem(key, v ? "1" : "0");
+      } catch {
+        /* storage unavailable: lasts until restart */
+      }
+    },
+  ];
+}

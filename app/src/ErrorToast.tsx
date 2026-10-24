@@ -3,6 +3,7 @@ import { Icon } from "./Icon";
 import { daemonReconnecting, dismissToast, retryDaemon, toasts } from "./store";
 import { latestText, pauseToast, resumeToast, type Toast } from "./toasts";
 import { Button } from "./ui";
+import { S } from "./strings";
 
 // .error-toast is position:fixed on its own; inside the stack the wrapper positions, the toasts flow
 const FLOW = { position: "static", transform: "none" } as const;
@@ -36,7 +37,7 @@ function ToastCard(props: { t: Toast }) {
           </Button>
         )}
       </Show>
-      <Button variant="icon" size="icon" class="size-6 flex-none" title="Fechar" aria-label="Fechar" onClick={() => dismissToast(t().id)}>
+      <Button variant="icon" size="icon" class="size-6 flex-none" title={S.toast.close} aria-label={S.toast.close} onClick={() => dismissToast(t().id)}>
         <Icon name="x" />
       </Button>
     </div>
@@ -53,7 +54,7 @@ export function ErrorToast(props: { children?: JSX.Element }) {
   return (
     <>
       <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {daemonReconnecting() ? "A reconectar ao daemon…" : latestText("info") || latestText("warn")}
+        {daemonReconnecting() ? S.toast.reconnecting : latestText("info") || latestText("warn")}
       </div>
       <div class="sr-only" role="alert" aria-atomic="true">
         {latestText("error")}
@@ -77,9 +78,9 @@ export function ErrorToast(props: { children?: JSX.Element }) {
         <div style={{ display: "contents", "pointer-events": "auto" }}>
           <Show when={daemonReconnecting()}>
             <div class="error-toast notice" style={FLOW}>
-              <span class="et-msg">A reconectar ao daemon…</span>
+              <span class="et-msg">{S.toast.reconnecting}</span>
               <Button size="sm" class="flex-none" onClick={() => void retryDaemon()}>
-                Tentar agora
+                {S.toast.retryNow}
               </Button>
             </div>
           </Show>
