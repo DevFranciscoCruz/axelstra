@@ -34,6 +34,7 @@ struct State {
 #[cfg(all(windows, target_env = "msvc", debug_assertions))]
 mod debugcrt;
 mod gpu;
+mod logging;
 mod stats;
 mod voice;
 
@@ -686,6 +687,18 @@ async fn diagnostics(state: tauri::State<'_, Arc<State>>) -> Result<Value, Strin
     .map_err(|e| e.to_string())
 }
 
+/// Plain-text bundle for bug reports: version, OS, data dir, tail of the latest log and of crash.log.
+#[tauri::command]
+async fn diagnostics_bundle() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| logging::bundle(&proto::data_dir())).await.map_err(|e| e.to_string())
+}
+
+/// An error caught by the webview (window.onerror / unhandledrejection), written to the log file.
+#[tauri::command]
+fn log_frontend_error(kind: String, message: String, stack: Option<String>) {
+    logging::log_frontend(&kind, &message, stack.as_deref().unwrap_or(""));
+}
+
 /// Deletes pasted clipboard images older than a day.
 fn clean_pastes() {
     let dir = std::env::temp_dir().join("axelstra-paste");
@@ -791,6 +804,7 @@ fn update_apply(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>) -> R
 }
 
 fn main() {
+    logging::init(&proto::data_dir());
     gpu::prefer_best_gpu();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -833,6 +847,8 @@ fn main() {
             notify_session,
             app_quit,
             diagnostics,
+            diagnostics_bundle,
+            log_frontend_error,
             stats::keep_awake,
             stats::mem_usage,
             voice::voice_status,
