@@ -51,6 +51,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     return Ok(v.clone());
                 }
             }
+            let gen = reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst);
             let ps = crate::projects::load(&reg.store);
             let v: Vec<Value> = ps
                 .iter()
@@ -76,7 +77,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 })
                 .collect();
             let all = Value::Array(v);
-            *reg.plist.lock_recover() = Some((std::time::Instant::now(), all.clone()));
+            // an answer computed while a project or worktree changed may predate the change: serve it, do not keep it
+            if reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst) == gen {
+                *reg.plist.lock_recover() = Some((std::time::Instant::now(), all.clone()));
+            }
             Ok(all)
         }
         "project.logo" => {

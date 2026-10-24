@@ -157,3 +157,29 @@ fn worktree_from_pull_request_head() {
     assert_eq!(std::fs::read_to_string(Path::new(wt["path"].as_str().unwrap()).join("pr.txt")).unwrap(), "from the pr");
     assert!(c.call("worktree.from_pr", json!({"project": id, "number": 99})).is_err(), "unknown PR");
 }
+
+/// A `project.list` that is answered (and cached) before `project.add` must not hide the new project for the next seconds.
+#[test]
+fn a_project_added_after_a_cached_list_shows_up_at_once() {
+    let root = std::env::temp_dir().join(format!("axelstra-plist-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let sh = |args: &[&str]| assert!(std::process::Command::new("git").current_dir(&repo).args(args).status().unwrap().success());
+    sh(&["init", "-q", "-b", "main"]);
+    sh(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"]);
+    let pipe = format!("{}-plist-{}", common::base_pipe(), std::process::id());
+    let token = "p".repeat(32);
+    let (p, t, s) = (pipe.clone(), token.clone(), common::store("plist"));
+    std::thread::spawn(move || {
+        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap().block_on(server::serve_with_store(p, t, s)).unwrap();
+    });
+    common::wait_ready(&pipe, &token);
+    let mut c = Client::connect(&pipe, &token).unwrap();
+    assert_eq!(c.call("project.list", json!({})).unwrap().as_array().unwrap().len(), 0); // cached for 3 s
+    c.call("project.add", json!({"path": &repo})).unwrap();
+    let list = c.call("project.list", json!({})).unwrap();
+    assert_eq!(list.as_array().unwrap().len(), 1, "{list}");
+    assert!(!list[0]["worktrees"].as_array().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(&root);
+}
