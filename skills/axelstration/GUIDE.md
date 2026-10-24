@@ -2,7 +2,7 @@
 
 You are running inside an Axelstra terminal (as Claude Code, Codex or any other agent that can run shell commands). The `axelstra` CLI talks to the same daemon as the app, so everything you start appears as a tab in the app and the user can watch or take over.
 
-Your own session id is `$AXELSTRA_SESSION` (PowerShell: `$env:AXELSTRA_SESSION`). A worker started by you finds you in `$AXELSTRA_PARENT`.
+Your own session id is `$AXELSTRA_SESSION` (PowerShell: `$env:AXELSTRA_SESSION`). A worker or lead started by you finds you in `$AXELSTRA_PARENT`.
 
 ## Discover
 
@@ -10,18 +10,38 @@ Your own session id is `$AXELSTRA_SESSION` (PowerShell: `$env:AXELSTRA_SESSION`)
 - `axelstra ls [--json]` — live sessions: id, worktree, agent, state (`working`, `waiting`, `idle`).
 - `axelstra limit [N]` — show or set how many workers may run at once (default 6). Starting more fails with "worker limit reached": wait for one to finish.
 
-## Isolate the work
-
-One worktree per **theme**, not per task. Workers on the same theme go into the same worktree, as several agents (`axelstra agent <worktree> ...` can be run many times on one path) that own different files; each commits only its own paths (`git add <paths>`, never `git add -A`). Open a second worktree only when the work is unrelated or two tasks must edit the same files. Never create a separate worktree just to integrate: integrate in the theme's worktree (or the main one) and remove the worktrees you created when done (`worktree rm`, or `--cleanup` with `flow`). A pile of worktrees with no agent in them is a mistake, not a record of the work:
+## Chain of command
 
 ```
-axelstra worktree create <project> <name>     # prints the new worktree path
+worker  ->  lead of the worktree  ->  main of the project
+```
+
+- **Main** (the session in the project's main checkout) is the dispatcher. It never edits and **never runs workers**. It creates or picks ONE worktree per theme and starts ONE **lead** agent in it. It talks only to leads.
+- The **lead** owns its worktree's theme. It splits the theme into tasks, starts workers in **its own worktree**, receives their messages, reports and asks, answers them, integrates, and is the only one that talks to main (`axelstra done` / `ask` / `escalate` go to `$AXELSTRA_PARENT`).
+- **Workers** talk only to their lead. `--report-to` with no value defaults to the session in `$AXELSTRA_SESSION`, so a lead's workers report to the lead.
+- Reports flow up, instructions flow down. A worktree must never exist without its lead.
+
+Before launching any agent:
+
+1. What is the theme?
+2. Does a worktree for it exist? (`axelstra dispatch list`)
+3. Does it have a lead? If not, start one before anything else.
+4. Am I main? Then I only start a lead (`dispatch new` / `dispatch send`), never workers.
+
+Example, "audit the project" (5 areas: api, ui, db, build, docs): main runs `axelstra dispatch new <project> audit "Audit the project: api, ui, db, build, docs" --title "Project audit"`. One worktree `ax/audit`, one lead. The lead starts 5 workers in that same worktree (one per area, `axelstra agent <its worktree> --prompt "Audit <area>, read-only ..." --report-to`), collects the 5 reports, merges them into one answer and sends it to main with `axelstra done`. Wrong: running the 5 workers in main, or creating 5 worktrees, or creating `ax/audit` and leaving it with no agent.
+
+## Isolate the work
+
+One worktree per **theme**, not per task and not per worker. Workers on the same theme go into the same worktree, as several agents (`axelstra agent <worktree> ...` can be run many times on one path) that own different files; each commits only its own paths (`git add <paths>`, never `git add -A`). Open a second worktree only when the work is unrelated or two tasks must edit the same files. Read-only themes (audits, reviews) share one worktree and their workers must not edit files. Never create a separate worktree just to integrate: integrate in the theme's worktree and remove the worktrees you created when done (`worktree rm`, or `--cleanup` with `flow`). A worktree with no lead agent in it is a mistake, not a record of the work:
+
+```
+axelstra worktree create <project> <name>     # prints the new worktree path; start its lead right after
 axelstra worktree rm <path>                   # when finished
 ```
 
 ## Delegate
 
-Start a worker agent in a worktree. It prints the worker's session id.
+Start an agent in a worktree (a lead from main, a worker from a lead). It prints the worker's session id.
 
 ```
 axelstra agent <worktree> --prompt "<task, with acceptance criteria>" --report-to
@@ -106,7 +126,7 @@ Take a screenshot before and after acting, and prefer a CLI or API when the app 
 ## Pattern
 
 1. Plan: split the task into independent pieces; list them for the user if they are not trivial.
-2. For each piece: `worktree create`, then `agent … --report-to` (or one `flow` file when there are dependencies).
+2. Main: `dispatch new` (worktree + lead). Lead: for each piece, `agent <own worktree> … --report-to` (or one `flow` file when there are dependencies).
 3. Keep working or stop; reports are typed into your session as workers finish. Answer questions with `reply` and stuck workers with `msg`. Treat reports as claims to verify: run the checks yourself.
 4. Integrate: review each worktree's diff, merge or cherry-pick, run the full test suite.
 5. Clean up: `worktree rm` the ones you no longer need.
@@ -120,20 +140,28 @@ Take a screenshot before and after acting, and prefer a CLI or API when the app 
 
 ## Dispatcher mode (main session)
 
-When the user works from the **main** worktree you are a dispatcher, not an implementer. Do not edit code there. Every request belongs to a topic, and every topic has its own worktree and its own agent.
+When the user works from the **main** worktree you are a dispatcher, not an implementer. Do not edit code there and do not start workers there. Every request belongs to a theme; every theme has one worktree and one lead agent. You start leads, nothing else.
 
 For each new request:
 
 1. `axelstra dispatch list --json` — open worktrees with `title`, `areas` (folders they touch), `last_request`, running `agents`, and `overlaps_with` (worktrees editing the same files).
 2. Decide where the request belongs, using the evidence: the same system or feature, the same folders in `areas`, a follow-up to `last_request`. A shared word is not enough.
 3. Act:
-   - **Clear match** → `axelstra dispatch send <branch-or-path> "<request>"`. If no agent is running there it starts one. Tell the user in one line: `sent to <branch>`.
-   - **No match** → `axelstra dispatch new <project> <short-name> "<request>" --title "<3-6 word topic>"`. One topic per worktree: a different system or an unrelated feature is a new topic.
-   - **Unsure** (two plausible worktrees, or a request that mixes topics) → ask the user which one, in one short question. Never create a worktree just to avoid asking.
+   - **Clear match** → `axelstra dispatch send <branch-or-path> "<request>"`. It goes to that worktree's lead (started if none runs). Tell the user in one line: `sent to <branch>`.
+   - **No match** → `axelstra dispatch new <project> <short-name> "<request>" --title "<3-6 word topic>"`. It creates the worktree and its lead together. One theme per worktree: a different system or an unrelated feature is a new theme. Never use `worktree create` alone.
+   - **Unsure** (two plausible worktrees, or a request that mixes themes) → ask the user which one, in one short question. Never create a worktree just to avoid asking.
 4. If the request touches files another worktree is already editing (`overlaps_with`, or its `areas`), say so before sending and let the user choose.
-5. Never send work to a worktree marked merged or archived (`list` hides them; `send` refuses). Open a new topic instead. When a topic is finished: `axelstra dispatch archive <branch>`.
+5. Never send work to a worktree marked merged or archived (`list` hides them; `send` refuses). Open a new theme instead. When a theme is finished: `axelstra dispatch archive <branch>`.
+6. Leads report to you with `done`/`ask`/`escalate`. Answer with `reply`/`msg`; verify claims before telling the user it is done.
 
-Inside a worktree (not main) the agent works on its topic and uses the orchestration commands above to split it into workers. Those workers show inside that worktree's box in the app.
-
-- `axelstra dispatch title <worktree> "<title>"` — rename a topic.
+- `axelstra dispatch title <worktree> "<title>"` — rename a theme.
 - Keep replies short: the user wants to see where each request went, not an essay.
+
+## Inside a worktree (not main)
+
+You are the lead of this worktree's theme. Own it end to end:
+
+- Split the theme into tasks and start workers in **this** worktree (`axelstra agent . --prompt ... --report-to`); do not create more worktrees for subtasks. Their sessions appear inside this worktree's box in the app.
+- Workers report to you; answer their asks (`reply`), unblock escalations (`msg`), verify their reports, integrate their work.
+- Talk to main only through `axelstra done` / `ask` / `escalate` (they go to `$AXELSTRA_PARENT`). Workers never talk to main.
+- Work small enough to do yourself needs no worker.
