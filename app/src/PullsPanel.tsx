@@ -1,3 +1,4 @@
+import { Loading } from "./Loading";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Badge, Button } from "./ui";
 import { Icon } from "./Icon";
@@ -60,7 +61,7 @@ export function PullsPanel() {
         </Button>
       </div>
       <div class="rlist">
-        <Show when={!items.loading} fallback={<div class="placeholder">A carregar…</div>}>
+        <Show when={!items.loading} fallback={<Loading onRetry={() => void refetch()} />}>
           <Show when={!items.error} fallback={<div class="placeholder">{String(items.error?.message ?? items.error)}</div>}>
             <For each={items()} fallback={<div class="placeholder">Nada em aberto</div>}>
               {(i) => (
