@@ -1,4 +1,5 @@
 pub mod agentlog;
+pub mod audit;
 pub mod automations;
 pub mod changes;
 pub mod checks;
