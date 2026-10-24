@@ -1,4 +1,5 @@
 import type { TriggerEvent, TriggerFiring, TriggerLimits, TriggerPreview, TriggerState } from "./api";
+import { coded } from "./msg";
 import { ago } from "./time";
 import { P } from "./strings.panels";
 
@@ -36,8 +37,9 @@ export const firingKind = (f: TriggerFiring): string =>
 export const eventText = (e: TriggerEvent): string => {
   const b = branchLabel(e.branch);
   if (e.kind === "ci_fix") return P.triggers.firedToast(b);
-  if (e.kind === "ci_fix_limited") return P.triggers.limitedToast(b, e.detail ?? "");
-  return P.triggers.failedToast(b, e.detail ?? "");
+  if (e.kind === "ci_fix_limited")
+    return P.triggers.limitedToast(b, coded(e.detail_code, e.detail_params, e.detail ?? ""));
+  return P.triggers.failedToast(b, coded(e.detail_code, e.detail_params, e.detail ?? ""));
 };
 
 const clampInt = (n: number, [lo, hi]: [number, number]): number => Math.min(hi, Math.max(lo, Math.round(n)));

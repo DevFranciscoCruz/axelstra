@@ -3,6 +3,7 @@ import { AddHostForm } from "./AddHostForm";
 import { ask } from "./Confirm";
 import { HostBadge, reconnectWithNotice } from "./HostBadge";
 import { errorText } from "./appError";
+import { coded } from "./msg";
 import { canReconnect } from "./hostLogic";
 import { hosts, removeHost, setError, showNotice } from "./store";
 import { S } from "./strings";
@@ -61,7 +62,9 @@ export function HostsSection() {
                   {R.remove}
                 </Button>
                 <Show when={h.error && h.state !== "ok"}>
-                  <p class="auto-note m-0 w-full break-words text-[var(--err)]">{h.error}</p>
+                  <p class="auto-note m-0 w-full break-words text-[var(--err)]">
+                    {coded(h.error_code, h.error_params, h.error ?? "")}
+                  </p>
                 </Show>
               </li>
             )}

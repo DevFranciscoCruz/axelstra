@@ -17,11 +17,13 @@ export const loadHosts = async (): Promise<void> => {
   setHosts(await hostsList());
 };
 
+type HostStateEvent = Parameters<typeof applyHostState>[1];
+
 /** `host-state` events keep the list current; returns the stop function. */
 export const watchHosts = (): (() => void) => {
   void loadHosts().catch((e) => console.debug("hosts_list", e));
   // eslint-disable-next-line solid/reactivity -- event listener callback
-  return onTauriEvent<{ id: string; state: HostState; error?: string | null }>("host-state", (ev) => {
+  return onTauriEvent<HostStateEvent>("host-state", (ev) => {
     const before = hostById(ev.id)?.state;
     setHosts((l) => applyHostState(l, ev));
     // a host that came (back) online brings its projects
