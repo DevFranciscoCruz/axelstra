@@ -308,7 +308,7 @@ export function App() {
         setFsTick((n) => n + 1);
         void refreshChanges();
       }
-    }, () => void refreshSessions());
+    }, () => void refreshSessions(), () => void refreshProjects());
   });
 
   // dev servers started in this worktree's terminals; a process lookup, so only while something runs

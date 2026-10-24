@@ -207,14 +207,15 @@ export const restoreSessions = async (): Promise<{ restored: number; skipped: nu
 
 /** Change events for the selected worktree: the daemon watches the files and tells us, so git runs only when needed. */
 let watchReady: Promise<void> | null = null;
-type WatchArgs = { worktree: string | null; onChanged: (worktree: string) => void; onSessions?: () => void };
+type WatchArgs = { worktree: string | null; onChanged: (worktree: string) => void; onSessions?: () => void; onProjects?: () => void };
 let lastWatch: WatchArgs | null = null;
 let watchListening = false;
-const startWatch = (onChanged: (worktree: string) => void, onSessions?: () => void) => {
+const startWatch = (onChanged: (worktree: string) => void, onSessions?: () => void, onProjects?: () => void) => {
   const ch = new Channel<{ event?: string; worktree?: string }>();
   ch.onmessage = (m) => {
     if (m?.event === "fs.changed" && m.worktree) onChanged(m.worktree);
     else if (m?.event === "session.changed") onSessions?.();
+    else if (m?.event === "projects.changed") onProjects?.();
   };
   return tauriInvoke<void>("watch_start", { onEvent: ch });
 };
@@ -222,15 +223,15 @@ const startWatch = (onChanged: (worktree: string) => void, onSessions?: () => vo
 const rewatch = () => {
   watchReady = null;
   const w = lastWatch;
-  if (w) void watchWorktree(w.worktree, w.onChanged, w.onSessions);
+  if (w) void watchWorktree(w.worktree, w.onChanged, w.onSessions, w.onProjects);
 };
-export const watchWorktree = async (worktree: string | null, onChanged: (worktree: string) => void, onSessions?: () => void) => {
-  lastWatch = { worktree, onChanged, onSessions };
+export const watchWorktree = async (worktree: string | null, onChanged: (worktree: string) => void, onSessions?: () => void, onProjects?: () => void) => {
+  lastWatch = { worktree, onChanged, onSessions, onProjects };
   if (!watchListening) {
     watchListening = true;
     for (const ev of ["watch-ended", "daemon-restarted"]) void listen(ev, rewatch).catch(() => (watchListening = false));
   }
-  watchReady ??= startWatch(onChanged, onSessions);
+  watchReady ??= startWatch(onChanged, onSessions, onProjects);
   try {
     await watchReady;
     await tauriInvoke("watch_set", { worktree });
