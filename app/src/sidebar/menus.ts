@@ -3,6 +3,8 @@ import { hasIcon } from "../Icon";
 import type { MenuItem } from "../ContextMenu";
 import { openInEditor, worktreeSetParent } from "../api";
 import { wtKey } from "../wtGroups";
+import { isRemote, remotePathOf } from "../paths";
+import { R } from "../strings.remote";
 import { P } from "../strings.panels";
 import { S } from "../strings";
 import { agentLabel } from "../agentLabel";
@@ -75,14 +77,15 @@ export const worktreeMenu = (d: MenuDeps, p: Proj, w: Wt, label: string, below: 
   },
   { separator: true },
   {
-    label: T.openIn,
+    label: isRemote(w.path) ? R.openInRemote : T.openIn,
     icon: "folder",
+    disabled: isRemote(w.path),
     children: [
       { label: T.explorer, run: () => d.run(() => revealItemInDir(w.path)) },
       { label: "VS Code", run: () => d.run(() => openInEditor(w.path, "code")) },
     ],
   },
-  { label: T.copyPath, icon: "copy", run: () => d.copy(w.path) },
+  { label: T.copyPath, icon: "copy", run: () => d.copy(remotePathOf(w.path)) },
   { label: T.runSetup, icon: "play", disabled: !p.setup?.trim(), run: () => d.runSetup(p.id, w.path, p.setup) },
   { label: T.rename, icon: "pencil", disabled: w.is_main, run: () => d.rename(w.path, w.branch ?? label, label) },
   { label: T.copyName, icon: "copy", run: () => d.copy(w.branch ?? label) },
@@ -139,11 +142,12 @@ export const projectMenu = (
   },
   { separator: true },
   {
-    label: T.openIn,
+    label: isRemote(p.path) ? R.openInRemote : T.openIn,
     icon: "folder",
+    disabled: isRemote(p.path),
     children: [{ label: T.explorer, run: () => d.run(() => revealItemInDir(p.path)) }],
   },
-  { label: T.copyPath, icon: "copy", run: () => d.copy(p.path) },
+  { label: T.copyPath, icon: "copy", run: () => d.copy(remotePathOf(p.path)) },
   { separator: true },
   { label: P.sidebar.dropLabel, icon: "x", danger: true, run: () => d.dropProject(p.id, p.name) },
 ];
