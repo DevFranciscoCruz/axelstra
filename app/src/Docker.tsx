@@ -6,7 +6,7 @@ import {
   dockerStats, dockerStatus, dockerVolumes,
 } from "./api";
 import { ask } from "./Confirm";
-import { MenuItem, showMenu, showMenuAt } from "./ContextMenu";
+import { MenuItem, isMenuKey, showMenu, showMenuAt } from "./ContextMenu";
 import { Icon } from "./Icon";
 import { Badge, Button, Checkbox, Input, cn } from "./ui";
 import { TerminalView } from "./TerminalView";
@@ -267,7 +267,11 @@ export function DockerView() {
     }
     const c = containers().find((x) => x.id === curId());
     if (!c) return;
-    if (e.key === "Enter") {
+    if (isMenuKey(e)) {
+      e.preventDefault();
+      const r = (document.querySelector<HTMLElement>(`[data-cid="${c.id}"]`) ?? (t as HTMLElement)).getBoundingClientRect();
+      showMenuAt(r.left + 24, r.bottom, menuFor(c));
+    } else if (e.key === "Enter") {
       e.preventDefault();
       showPane(c, "logs");
     } else if (e.key === "Delete") {

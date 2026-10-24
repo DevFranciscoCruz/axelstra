@@ -7,7 +7,7 @@ import { For, Show, createEffect, createMemo, createResource, createSignal, on, 
 import { PAGE, capList, sameListing } from "./listing";
 import { press } from "./a11y";
 import { FsEntry, GrepHit, fsCreate, fsDelete, fsGrep, fsList, fsRename, fsSearch } from "./api";
-import { MenuItem, showMenu } from "./ContextMenu";
+import { MenuItem, menuKey, showMenu } from "./ContextMenu";
 import { RightTabs } from "./RightTabs";
 import { changes, findWorktree, fsTick, guarded, openFile, selectedWorktree, setError, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban, rightTab, showNotice } from "./store";
 import { S } from "./strings";
@@ -292,13 +292,17 @@ function Node(props: { wt: string; dir: string; e: FsEntry; depth: number }) {
           class="file"
           classList={{ active: !props.e.dir && openFile() === path() }}
           style={pad()}
-          {...press(() => (props.e.dir ? toggle(path()) : openPath(path())))}
+          {...press(
+            () => (props.e.dir ? toggle(path()) : openPath(path())),
+            "button",
+            (e) => {
+              if (menuKey(() => fileMenu(props.wt, path(), props.e.dir))(e)) return;
+              if (e.key === "F2") setEditing({ mode: "rename", parent: props.dir, target: path() });
+              else if (e.key === "Delete") showMenu(new MouseEvent("contextmenu", { clientX: 40, clientY: 40 }), fileMenu(props.wt, path(), props.e.dir).slice(-1));
+            },
+          )}
           aria-expanded={props.e.dir ? open() : undefined}
           onContextMenu={(e) => showMenu(e, fileMenu(props.wt, path(), props.e.dir))}
-          onKeyDown={(e) => {
-            if (e.key === "F2") setEditing({ mode: "rename", parent: props.dir, target: path() });
-            else if (e.key === "Delete") showMenu(new MouseEvent("contextmenu", { clientX: 40, clientY: 40 }), fileMenu(props.wt, path(), props.e.dir).slice(-1));
-          }}
         >
           <span class="twisty">{props.e.dir ? <Chevron open={open()} /> : ""}</span>
           {props.e.dir ? <Folder open={open()} /> : <FileGlyph />}
@@ -401,7 +405,7 @@ export function FilesPanel() {
             {(f) => {
               const i = f.lastIndexOf("/");
               return (
-                <div class="file" classList={{ active: openFile() === f }} {...press(() => openPath(f))} onContextMenu={(e) => showMenu(e, fileMenu(wt()!, f, false))} title={f}>
+                <div class="file" classList={{ active: openFile() === f }} {...press(() => openPath(f), "button", menuKey(() => fileMenu(wt()!, f, false)))} onContextMenu={(e) => showMenu(e, fileMenu(wt()!, f, false))} title={f}>
                   <FileGlyph />
                   <span class="fname2">
                     <span class="fn">{f.slice(i + 1)}</span>
@@ -416,7 +420,7 @@ export function FilesPanel() {
           <For each={grouped()} fallback={<div class="empty">{hits.loading ? "A procurar…" : "Sem resultados"}</div>}>
             {([path, list]) => (
               <div class="ghit">
-                <div class="file" {...press(() => openPath(path))} onContextMenu={(e) => showMenu(e, fileMenu(wt()!, path, false))} title={path}>
+                <div class="file" {...press(() => openPath(path), "button", menuKey(() => fileMenu(wt()!, path, false)))} onContextMenu={(e) => showMenu(e, fileMenu(wt()!, path, false))} title={path}>
                   <FileGlyph />
                   <span class="fname2">
                     <span class="fn">{baseOf(path)}</span>
@@ -443,7 +447,7 @@ export function FilesPanel() {
               <>
                 <div
                   class="file root"
-                  {...press(() => toggle(""))}
+                  {...press(() => toggle(""), "button", menuKey(() => fileMenu(w, "", true).filter((i) => "separator" in i || ["Novo ficheiro", "Nova pasta"].includes(i.label)).slice(0, 2)))}
                   aria-expanded={isOpen("")}
                   onContextMenu={(e) => showMenu(e, fileMenu(w, "", true).filter((i) => "separator" in i || ["Novo ficheiro", "Nova pasta"].includes(i.label)).slice(0, 2))}
                 >
