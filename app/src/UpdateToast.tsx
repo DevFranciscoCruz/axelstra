@@ -4,6 +4,7 @@ import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Button } from "./ui";
 import { createPoller } from "./poller";
 import { errorText } from "./appError";
+import { S } from "./strings";
 
 /** the version the user said "later" to: remembered, so a restart does not bring the same card back */
 const DISMISSED_KEY = "axelstra.updateDismissed";
@@ -97,14 +98,14 @@ export function UpdateToast() {
   return (
     <Show when={shown()}>
       {(i) => (
-        <div class="update-toast" role="status" aria-label="Atualização disponível" style={FLOW}>
+        <div class="update-toast" role="status" aria-label={S.update.available} style={FLOW}>
           <div class="ut-head">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M8 2.5v8M4.8 7.6 8 10.8l3.2-3.2M3 13h10" />
             </svg>
             <div>
-              <p class="ut-title">Versão {i().version} pronta</p>
-              <p class="ut-sub">Os terminais e agentes continuam a correr. Se preferires, a atualização instala ao fechar a app.</p>
+              <p class="ut-title">{S.update.ready(i().version)}</p>
+              <p class="ut-sub">{S.update.sub}</p>
             </div>
           </div>
           <div class="ut-actions">
@@ -115,16 +116,16 @@ export function UpdateToast() {
                 setDismissed(i().version);
               }}
             >
-              Mais tarde
+              {S.update.later}
             </Button>
             <Button variant="default" disabled={busy()} onClick={() => void install()}>
-              {busy() ? "A reiniciar…" : "Reiniciar agora"}
+              {busy() ? S.update.restarting : S.update.restart}
             </Button>
           </div>
           <Show when={i().notes}>
             {(n) => (
               <details class="mt-2 text-[length:var(--fs-md)]">
-                <summary class="cursor-pointer text-muted-foreground">Novidades desta versão</summary>
+                <summary class="cursor-pointer text-muted-foreground">{S.update.notes}</summary>
                 <p class="mt-1 max-h-32 overflow-auto whitespace-pre-line">{n()}</p>
               </details>
             )}
