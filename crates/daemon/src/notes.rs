@@ -1,4 +1,5 @@
-//! Names and task files of agents. Every agent gets a name ("Tarefa N", counted per project) and a markdown file with
+//! Names and task files of agents. A worker gets a name ("Tarefa N", counted per project); the lead of a worktree
+//! (`meta["lead"]`) is called "main" and does not use a number. Both get a markdown file with
 //! its goal and a "Relatorio" section. The files live in the app data directory, outside the repository, in one
 //! folder per project; `axelstra note` and `axelstra done` append to them, the app reads and exports them.
 
@@ -39,6 +40,26 @@ pub fn safe_name(s: &str) -> String {
     } else {
         trimmed
     }
+}
+
+/// Name of the lead agent of a worktree: the agent that owns the worktree's theme and reports to the project main.
+pub const LEAD_NAME: &str = "main";
+
+/// Role of a new agent session: is it the lead of its worktree, and which session is its parent when none was given.
+/// `agents` are the running agents of the same worktree as (id, is_lead); `project_main` is the running agent of the
+/// project's main checkout, if any. A lead is the agent the client says is one (a restored lead), or the first fresh
+/// agent of a worktree that has none (a task started with `worker` never is). A restored agent that was named
+/// ("Tarefa 3") is never promoted: sessions saved before leads existed come back as they were.
+pub fn pick_role(meta: &Value, label: Option<&str>, worker: bool, agents: &[(u32, bool)], project_main: Option<u32>, parent: Option<u32>) -> (bool, Option<u32>) {
+    if meta["kind"] != "agent" || meta["main"] == true {
+        return (false, parent);
+    }
+    let agent = meta["agent"].as_str().unwrap_or_default();
+    let fresh = label.map(str::trim).filter(|l| !l.is_empty() && *l != agent).is_none();
+    let live_lead = agents.iter().find(|(_, lead)| *lead).map(|(id, _)| *id);
+    let lead = !worker && (meta["lead"] == true || (fresh && live_lead.is_none()));
+    let parent = parent.or(if lead { project_main } else { live_lead });
+    (lead, parent)
 }
 
 /// "Tarefa 7" -> 7
@@ -126,11 +147,13 @@ pub fn inside_root(root: &Path, p: &Path) -> bool {
 /// `goal` is the prompt the agent starts with, if any.
 /// `alone` is true when the project has no other running agent: a new name then starts again at "Tarefa 1" and the
 /// finished tasks' files move to `arquivo/`. The main worktree is no task: its agent gets no name and no file.
+/// The lead of a worktree (`meta["lead"]`) is named "main" and takes no number; its file is "main - <worktree folder>".
 pub fn on_spawn(root: &Path, label: Option<&str>, meta: &mut Option<Value>, goal: Option<&str>, alone: bool) -> Option<String> {
     let kept = label.map(str::to_string);
     let Some(m) = meta.as_mut().filter(|m| m["kind"] == "agent" && m["main"] != true) else { return kept };
     let project = safe_name(m["project"].as_str().unwrap_or("geral"));
     let agent = m["agent"].as_str().unwrap_or("agent").to_string();
+    let lead = m["lead"] == true;
     let dir = root.join(&project);
     let name = match label.map(str::trim).filter(|l| !l.is_empty() && *l != agent) {
         Some(l) => {
@@ -143,14 +166,23 @@ pub fn on_spawn(root: &Path, label: Option<&str>, meta: &mut Option<Value>, goal
             if alone {
                 restart(&dir, &project);
             }
-            format!("Tarefa {}", next_number(&dir, &project))
+            if lead {
+                LEAD_NAME.to_string()
+            } else {
+                format!("Tarefa {}", next_number(&dir, &project))
+            }
         }
     };
     // a restored agent comes back with its file; the path is only believed when it is really one of ours
     let known = m["note"].as_str().map(PathBuf::from).filter(|p| inside_root(root, p));
     if known.is_none() {
         let wt = m["worktree"].as_str().unwrap_or_default();
-        match create(&dir, &name, &template(&name, &agent, wt, goal)) {
+        // one lead per worktree: the file carries the worktree's folder so two leads of a project do not share a name
+        let file = match (lead, wt.replace('\\', "/").trim_end_matches('/').rsplit('/').next()) {
+            (true, Some(f)) if !f.is_empty() => format!("{name} - {f}"),
+            _ => name.clone(),
+        };
+        match create(&dir, &file, &template(&name, &agent, wt, goal)) {
             Ok(p) => m["note"] = json!(p.to_string_lossy()),
             Err(e) => {
                 eprintln!("task file for {name}: {e}");
@@ -331,6 +363,70 @@ mod tests {
         let mut m3 = agent_meta("p-count");
         assert_eq!(on_spawn(&root, Some("claude"), &mut m3, None, false).as_deref(), Some("Tarefa 3"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn lead_meta(project: &str, wt: &str) -> Option<Value> {
+        Some(json!({"project": project, "worktree": wt, "kind": "agent", "agent": "claude", "lead": true}))
+    }
+
+    #[test]
+    fn the_lead_is_main_with_a_file_per_worktree_and_takes_no_task_number() {
+        let root = dir("lead");
+        let mut a = lead_meta("p-lead", "C:/x/wt-a");
+        let mut b = lead_meta("p-lead", "C:/x/wt-b");
+        assert_eq!(on_spawn(&root, Some("claude"), &mut a, Some("tema A"), false).as_deref(), Some("main"));
+        assert_eq!(on_spawn(&root, None, &mut b, None, false).as_deref(), Some("main"));
+        let (fa, fb) = (a.unwrap()["note"].as_str().unwrap().to_string(), b.unwrap()["note"].as_str().unwrap().to_string());
+        assert!(fa.ends_with("main - wt-a.md") && fb.ends_with("main - wt-b.md"), "{fa} {fb}");
+        assert!(std::fs::read_to_string(&fa).unwrap().starts_with("# main
+"));
+        // the first task is still Tarefa 1
+        let mut t = agent_meta("p-lead");
+        assert_eq!(on_spawn(&root, Some("claude"), &mut t, None, false).as_deref(), Some("Tarefa 1"));
+        // a restored lead keeps its name and its file
+        let mut back = lead_meta("p-lead", "C:/x/wt-a");
+        back.as_mut().unwrap()["note"] = json!(fa);
+        assert_eq!(on_spawn(&root, Some("main"), &mut back, None, false).as_deref(), Some("main"));
+        assert_eq!(back.unwrap()["note"], json!(fa));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn numbering_restarts_when_the_project_is_alone_even_with_a_lead_first() {
+        let root = dir("lead-alone");
+        let mut t = agent_meta("p-lead-alone");
+        assert_eq!(on_spawn(&root, Some("claude"), &mut t, None, false).as_deref(), Some("Tarefa 1"));
+        // everything stopped: a new lead archives the old files; the next task starts at 1 again
+        let mut l = lead_meta("p-lead-alone", "C:/x/wt");
+        assert_eq!(on_spawn(&root, Some("claude"), &mut l, None, true).as_deref(), Some("main"));
+        let mut t2 = agent_meta("p-lead-alone");
+        assert_eq!(on_spawn(&root, Some("claude"), &mut t2, None, false).as_deref(), Some("Tarefa 1"));
+        assert!(root.join("p-lead-alone").join("arquivo").is_dir());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn roles_follow_the_worktree() {
+        let fresh = json!({"kind": "agent", "agent": "claude", "worktree": "w"});
+        // no lead in the worktree: the first fresh agent leads and reports to the project main
+        assert_eq!(pick_role(&fresh, Some("claude"), false, &[], Some(1), None), (true, Some(1)));
+        assert_eq!(pick_role(&fresh, None, false, &[], None, None), (true, None));
+        // a lead is running: a new agent is a task under it, unless it already has a parent
+        assert_eq!(pick_role(&fresh, Some("claude"), false, &[(5, true)], Some(1), None), (false, Some(5)));
+        assert_eq!(pick_role(&fresh, Some("claude"), false, &[(5, true)], Some(1), Some(9)), (false, Some(9)));
+        // only tasks running (an old session): the next agent becomes the lead
+        assert_eq!(pick_role(&fresh, Some("claude"), false, &[(5, false)], Some(1), None), (true, Some(1)));
+        // a worker asked for as such, a named (restored) task and the main checkout are never promoted
+        assert_eq!(pick_role(&fresh, Some("claude"), true, &[], Some(1), None), (false, None));
+        assert_eq!(pick_role(&fresh, Some("Tarefa 4"), false, &[], Some(1), None), (false, None));
+        let main = json!({"kind": "agent", "agent": "claude", "main": true});
+        assert_eq!(pick_role(&main, Some("claude"), false, &[], None, None), (false, None));
+        // a restored lead stays the lead
+        let mut lead = fresh.clone();
+        lead["lead"] = json!(true);
+        assert_eq!(pick_role(&lead, Some("main"), false, &[(5, false)], Some(1), None), (true, Some(1)));
+        // terminals are no agents
+        assert_eq!(pick_role(&json!({"kind": "terminal"}), None, false, &[], Some(1), None), (false, None));
     }
 
     #[test]
