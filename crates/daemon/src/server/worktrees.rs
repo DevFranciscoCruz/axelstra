@@ -226,6 +226,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 r
             })?;
             forget_project_list(reg);
+            // sessions saved for the folder that just went are dropped from sessions.json
+            reg.persist();
             Ok(match out {
                 crate::integrate::Outcome::Nothing => {
                     json!({"integrated": false, "into": "", "how": "none", "removed": false, "pushed": null})
@@ -268,6 +270,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             tokio::task::block_in_place(|| kill_and_wait(&doomed, Duration::from_secs(5)));
             tokio::task::block_in_place(|| crate::projects::worktree_remove(&pr, path))?;
             let _ = crate::projects::forget_parent(&reg.store, &pr.id, path);
+            reg.persist();
             Ok(json!({}))
         }
         m => anyhow::bail!("unknown method {m}"),

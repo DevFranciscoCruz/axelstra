@@ -265,7 +265,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             if let Some(f) = reg.metas.lock_recover().remove(&id).and_then(|m| m["key"].as_str().and_then(|k| history_file(reg, k))) {
                 let _ = std::fs::remove_file(f);
             }
-            reg.specs.lock_recover().remove(&id);
+            let gone = reg.specs.lock_recover().remove(&id);
+            if let Some(spec) = gone {
+                reg.drop_sid_of(&spec);
+            }
             reg.bus.forget(id);
             reg.persist();
             Ok(json!({}))

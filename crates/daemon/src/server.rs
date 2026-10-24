@@ -151,17 +151,34 @@ impl Registry {
         self.broadcast("projects.changed");
     }
 
-    /// Rewrites sessions.json: still-pending sessions first, then the live ones.
+    /// Rewrites sessions.json: still-pending sessions first, then the live ones. A record of a deleted worktree or of a
+    /// session that reported with `axelstra done` is not kept: it is dropped here, with its `sid/` file, so the
+    /// clean-up is continuous (every persist) and not only the one at start.
     fn persist(&self) {
         // both locks stay held through the write, so two persists cannot land out of order
         let specs = self.specs.lock_recover();
-        let pending = self.pending.lock_recover();
+        let mut pending = self.pending.lock_recover();
+        let dead: Vec<Value> = pending.iter().filter(|r| !rec_alive(r)).cloned().collect();
+        pending.retain(rec_alive);
+        for r in &dead {
+            self.drop_sid_of(r);
+        }
         let mut v = pending.clone();
         let mut ids: Vec<_> = specs.keys().copied().collect();
         ids.sort();
         // a session that reported with `axelstra done` is finished: restoring it would only start an agent with nothing to do
-        v.extend(ids.iter().filter(|i| self.bus.finished(**i).is_none()).map(|i| specs[i].clone()));
+        v.extend(ids.iter().filter(|i| self.bus.finished(**i).is_none() && rec_alive(&specs[*i])).map(|i| specs[i].clone()));
         let _ = write_json(&self.saved, &v);
+    }
+
+    /// Deletes the files a saved session left behind: the `sid/<key>.json` the hook wrote (the conversation id used to
+    /// resume it) and its saved terminal history.
+    fn drop_sid_of(&self, rec: &Value) {
+        let Some(key) = rec["meta"]["key"].as_str().filter(|k| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')) else {
+            return;
+        };
+        let _ = std::fs::remove_file(self.saved.with_file_name("sid").join(format!("{key}.json")));
+        let _ = std::fs::remove_file(self.saved.with_file_name("scrollback").join(format!("{key}.txt")));
     }
 
     fn new(store: std::path::PathBuf, pipe: String, token: String) -> Registry {
@@ -644,7 +661,10 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
         reg.sessions.lock_recover().remove(&id);
         reg.labels.lock_recover().remove(&id);
         reg.metas.lock_recover().remove(&id);
-        reg.specs.lock_recover().remove(&id);
+        let gone = reg.specs.lock_recover().remove(&id);
+        if let Some(spec) = gone {
+            reg.drop_sid_of(&spec);
+        }
         reg.bus.forget(id);
         reg.persist();
         reg.pulse.bump();
@@ -820,6 +840,8 @@ fn spawn_janitor(reg: Arc<Registry>) {
             }
             if swept.iter().any(|s| s["removed"] == true) {
                 reap_orphans(&reg);
+                // the sessions saved for the removed worktrees go from sessions.json now
+                reg.persist();
                 reg.projects_changed();
             }
             reg.announce_events();
@@ -1700,6 +1722,28 @@ mod registry_tests {
         assert_eq!(saved["data"].as_array().unwrap().len(), 1);
         let kept = std::fs::read_dir(dir.join("backups")).unwrap().count();
         assert_eq!(kept, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_persist_drops_records_of_deleted_worktrees_with_their_sid_files() {
+        let dir = std::env::temp_dir().join(format!("axl-reg-persist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let alive = dir.join("wt-alive");
+        std::fs::create_dir_all(&alive).unwrap();
+        std::fs::create_dir_all(dir.join("sid")).unwrap();
+        let gone = dir.join("wt-gone");
+        let rec = |w: &std::path::Path, key: &str| json!({"program": "x", "cwd": w.to_string_lossy(), "meta": {"worktree": w.to_string_lossy(), "key": key}});
+        std::fs::write(dir.join("sid").join("aaa.json"), "{}").unwrap();
+        std::fs::write(dir.join("sid").join("bbb.json"), "{}").unwrap();
+        let reg = Registry::new(dir.join("projects.json"), "p".into(), "t".into());
+        *reg.pending.lock_recover() = vec![rec(&alive, "aaa"), rec(&gone, "bbb")];
+        reg.persist();
+        assert_eq!(reg.pending.lock_recover().len(), 1);
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("sessions.json")).unwrap()).unwrap();
+        assert_eq!(saved["data"].as_array().unwrap().len(), 1);
+        assert!(dir.join("sid").join("aaa.json").exists());
+        assert!(!dir.join("sid").join("bbb.json").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
