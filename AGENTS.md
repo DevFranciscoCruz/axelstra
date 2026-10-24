@@ -92,4 +92,4 @@ the whole CI, stamps the tag into the three files, builds, uploads to a draft re
 ## Git hygiene
 
 Add paths explicitly (`git add <paths>`), never `git add -A`. `.kanban/` and `.axelstra/` are
-intentionally ignored. There is no LICENSE file; do not add one without the owner's decision.
+intentionally ignored. The project is MIT-licensed (`LICENSE`); do not change the license without the owner's decision.
