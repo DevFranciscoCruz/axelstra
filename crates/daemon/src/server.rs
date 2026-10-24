@@ -1162,12 +1162,15 @@ fn session_list(reg: &Registry) -> Vec<Value> {
             let idle = view.idle_ms();
             // quiet for a moment and the screen ends in a question: the agent waits for the user
             let agent = meta.as_ref().map(|m| m["kind"] == "agent").unwrap_or(false);
+            // an agent that called `axelstra done` has nothing pending: only an escalation keeps it red
+            let reported = reg.bus.finished(id).is_some();
             let waiting = running
                 && (reg.bus.is_escalated(id)
-                    || (idle >= 1500
+                    || (!reported
+                        && idle >= 1500
                         && (axelstra_core::waiting::needs_input(&view.tail(4096))
                             || (agent && axelstra_core::waiting::asks_question(&view.screen_tail(12)))))
-                    || reg.hints.waiting(id, view.since_input_ms(), idle));
+                    || (!reported && reg.hints.waiting(id, view.since_input_ms(), idle)));
             let facts = stall_facts(reg, id, running, idle, view.since_input_ms(), meta.as_ref(), &busy);
             let stalled = crate::stall::is_stalled(&facts, stall_ms);
             let stall = stalled.then(|| {

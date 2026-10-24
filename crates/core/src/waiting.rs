@@ -125,14 +125,68 @@ const ASK_PHRASES: &[&str] = &[
     "want me to",
 ];
 
-/// True when the screen's last lines (as rendered, see `Session::screen_lines`) contain a free-form question
-/// the agent put to the user ("Uso X ou Y?"), which has no fixed marker, or a statement that hands a decision,
-/// confirmation or permission to the user without a question mark. The TUI's own hints don't count.
+/// A line the TUI draws around the conversation (box borders, status bar, hints, turn summary), never agent prose.
+fn is_chrome(l: &str) -> bool {
+    let t = l.trim();
+    let low = t.to_lowercase();
+    t.starts_with(['─', '━', '╭', '╰', '│', '┃', '✻', '✢', '✶', '✳', '✽', '⏵', '⏸', '⎿'])
+        || low.starts_with("interrupted")
+        || low.starts_with("model:")
+        || low.starts_with("? ")
+        || low.contains("for shortcuts")
+        || low.contains("shift+tab")
+        || low.contains("auto mode")
+        || low.contains("esc to interrupt")
+        || low.contains("what should claude do instead")
+        || low.contains("ctrl+")
+}
+
+/// "Cooked for 2m 18s", "Sautéed for 1m 33s · done": the TUI's end-of-turn summary.
+fn is_turn_end(l: &str) -> bool {
+    let low = l.trim().trim_start_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+    let timed = low.split(" for ").nth(1).is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()) && r.contains(['s', 'm']));
+    timed || low.ends_with("· done") || low == "done"
+}
+
+/// The user's own line in the transcript or the input box: `> text`, `❯ text`.
+fn user_text(l: &str) -> Option<&str> {
+    let t = l.trim().trim_matches(|c: char| "│┃| ".contains(c));
+    let rest = t.strip_prefix('>').or_else(|| t.strip_prefix('❯'))?;
+    let rest = rest.trim();
+    (!rest.is_empty()).then_some(rest)
+}
+
+/// Code, diff and tool output are not prose the agent addresses to the user.
+fn is_code_like(t: &str) -> bool {
+    let digits = t.trim_start_matches(|c: char| c.is_ascii_digit() || c == ' ');
+    t.starts_with(['+', '-']) && t.len() > 1 && !t.starts_with("- ") && !t.starts_with("--")
+        || digits.len() < t.len() && digits.starts_with(['+', '-', ' '])
+        || t.ends_with([';', '{', '}'])
+        || t.contains("=>")
+        || t.starts_with("//")
+        || t.starts_with("$ ")
+}
+
+/// True when the agent's last reply ends in a free-form question put to the user ("Uso X ou Y?"), which has no fixed
+/// marker, or in a statement that hands a decision, confirmation or permission to the user without a question mark.
+/// Only the agent's current turn counts: what comes before the user's last line (an answered question, the echo of the
+/// user's own text) and what comes after the turn summary or a box border (status bar, hints, input box) is ignored.
 pub fn asks_question(lines: &[String]) -> bool {
-    let from = lines.len().saturating_sub(8);
-    lines[from..].iter().any(|l| {
-        let t = l.trim().trim_matches(|c: char| "│┃|>* ".contains(c)).trim();
-        if t.chars().count() < 8 || t.contains("for shortcuts") || t.starts_with("? ") {
+    // anything up to the user's last line is answered (or is the user's own text)
+    let from = lines.iter().rposition(|l| user_text(l).is_some()).map_or(0, |i| i + 1);
+    let mut reply: Vec<&str> = Vec::new();
+    for l in &lines[from..] {
+        if is_turn_end(l) || l.trim().starts_with(['─', '━', '╭', '╰']) {
+            break;
+        }
+        if !is_chrome(l) {
+            reply.push(l);
+        }
+    }
+    let from = reply.len().saturating_sub(5);
+    reply[from..].iter().any(|l| {
+        let t = l.trim().trim_matches(|c: char| "●•*".contains(c)).trim();
+        if t.chars().count() < 8 || is_code_like(t) || is_turn_end(t) {
             return false;
         }
         t.ends_with('?') || {
@@ -265,6 +319,74 @@ mod tests {
         let mut old = vec!["Waiting for your decision.".to_string()];
         old.extend((0..10).map(|i| format!("saída {i} do comando")));
         assert!(!asks_question(&old));
+    }
+
+    fn screen(s: &str) -> Vec<String> {
+        s.lines().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn finished_turn_and_user_echo_are_not_questions() {
+        // real screen: work done, then the user typed a question and interrupted
+        assert!(!asks_question(&screen(
+            "● PR aberto: https://github.com/x/y/pull/3
+✻ Cooked for 2m 18s · done
+
+> Ao reabrir: 67 sessões restauradas. Onde estao essas 67 sessoes?
+  Interrupted · What should Claude do instead?
+──────
+> 
+──────
+  ⏵⏵ auto mode on (shift+tab to cycle)"
+        )));
+        assert!(!asks_question(&screen(
+            "● Feito.
+✻ Sautéed for 1m 33s · done
+──────
+> 
+──────
+  ? for shortcuts"
+        )));
+        // an old question answered by the user
+        assert!(!asks_question(&screen(
+            "● Uso A ou B?
+> A
+● Feito, usei A.
+✻ Brewed for 9s"
+        )));
+        // question in a diff / code
+        assert!(!asks_question(&screen(
+            "● Editei.
+  12 +  let x = a ? b : c;
+  13 +  if ok { run(); }"
+        )));
+        // input box with text typed by the user
+        assert!(!asks_question(&screen(
+            "● Feito.
+──────
+> queres que eu pare?
+──────"
+        )));
+    }
+
+    #[test]
+    fn agent_question_at_end_of_turn_still_counts() {
+        assert!(asks_question(&screen(
+            "● Analisei.
+  Uso a opção A ou a B?
+✻ Brewed for 20s
+──────
+> 
+──────
+  ? for shortcuts"
+        )));
+        assert!(asks_question(&screen(
+            "> faz isto
+● Fico a aguardar a tua decisão.
+──────
+> 
+──────"
+        )));
     }
 
     #[test]
