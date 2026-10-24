@@ -107,3 +107,82 @@ fn an_agent_cannot_change_the_host_registry() {
     assert!(agent.call("settings.get", json!({})).is_ok());
     assert!(agent.call("settings.set", json!({"notify_sound": false})).is_ok());
 }
+
+fn names(r: &Value) -> Vec<(String, bool)> {
+    r["entries"].as_array().unwrap().iter().map(|e| (e["name"].as_str().unwrap().to_string(), e["git"] == true)).collect()
+}
+
+#[test]
+fn host_info_and_browse() {
+    let (pipe, token) = start("hosts-browse");
+    let mut app = Client::connect(&pipe, &token).unwrap();
+
+    let info = app.call("host.info", json!({})).unwrap();
+    let os = if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    };
+    assert_eq!(info["os"], os);
+    assert_eq!(info["sep"], std::path::MAIN_SEPARATOR.to_string());
+    assert_eq!(info["proto"], axelstra_daemon::proto::PROTO);
+    assert_eq!(info["build"], axelstra_daemon::proto::BUILD_ID);
+    assert!(info["home"].is_string() && info["user"].is_string() && info["hostname"].is_string());
+    assert_eq!(info["shell"].is_null(), cfg!(windows) || std::env::var_os("SHELL").is_none());
+
+    // default: home
+    let home = app.call("host.browse", json!({})).unwrap();
+    assert_eq!(home["path"], info["home"]);
+    assert_eq!(home["home"], info["home"]);
+    assert!(!home["path"].as_str().unwrap().starts_with(r"\?\"));
+    assert!(home["entries"].is_array());
+
+    // a temp dir with subdirs, a repo, a file and a dot dir
+    let d = std::env::temp_dir().join(format!("axelstra-browse-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    for n in ["beta", "Alpha", "repo/.git", "gamma"] {
+        std::fs::create_dir_all(d.join(n)).unwrap();
+    }
+    std::fs::write(d.join("file.txt"), "x").unwrap();
+    let r = app.call("host.browse", json!({"path": d.to_string_lossy()})).unwrap();
+    assert_eq!(names(&r), [("Alpha".to_string(), false), ("beta".into(), false), ("gamma".into(), false), ("repo".into(), true)]);
+    assert!(r.get("truncated").is_none());
+    assert!(!r["path"].as_str().unwrap().starts_with(r"\?\"));
+    let parent = r["parent"].as_str().unwrap();
+    assert!(d.starts_with(parent), "{parent}");
+    // a trailing separator or a dotted path reaches the same directory
+    let dotted = d.join("beta").join("..");
+    assert_eq!(app.call("host.browse", json!({"path": dotted.to_string_lossy()})).unwrap()["path"], r["path"]);
+
+    // a directory above the limit is cut
+    let big = d.join("big");
+    for i in 0..510 {
+        std::fs::create_dir_all(big.join(format!("d{i:03}"))).unwrap();
+    }
+    let r = app.call("host.browse", json!({"path": big.to_string_lossy()})).unwrap();
+    assert_eq!(r["entries"].as_array().unwrap().len(), 500);
+    assert_eq!(r["truncated"], true);
+
+    // errors
+    let e = app.call("host.browse", json!({"path": d.join("nope").to_string_lossy()})).unwrap_err().to_string();
+    assert!(e.contains("does not exist"), "{e}");
+    let e = app.call("host.browse", json!({"path": d.join("file.txt").to_string_lossy()})).unwrap_err().to_string();
+    assert!(e.contains("not a directory"), "{e}");
+    let e = app.call("host.browse", json!({"path": "relative/dir"})).unwrap_err().to_string();
+    assert!(e.contains("not an absolute path"), "{e}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn an_agent_cannot_look_around_the_host() {
+    let (pipe, token) = start("hosts-browse-role");
+    let mut app = Client::connect(&pipe, &token).unwrap();
+    let mut agent = agent_of(&mut app, &pipe);
+    for (m, p) in [("host.info", json!({})), ("host.browse", json!({})), ("host.browse", json!({"path": std::env::temp_dir()}))] {
+        let e = agent.call(m, p).unwrap_err().to_string();
+        assert!(e.contains("not allowed to agents"), "{m}: {e}");
+    }
+    assert!(app.call("host.info", json!({})).is_ok());
+}
