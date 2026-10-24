@@ -126,17 +126,16 @@ const trackAgents = (list: SessionInfo[]) => {
     const watching = viewing && document.hasFocus();
     if (!viewing) setAttention((cur) => new Set(cur).add(norm(wtPath)));
     // "waiting" is announced above, from the agent's event, not from here
-    if (watching || state === "waiting") continue;
+    if (watching) continue;
     const since = workingSince.get(s.id);
     if (Date.now() - appStart < NOTIFY_GRACE_MS || !since || Date.now() - since < NOTIFY_MIN_WORK_MS) continue;
     const name = wtPath.split(/[\\/]/).pop() ?? wtPath;
     const who = s.label ?? L.defaultAgent;
-    const T = state === "done" ? L.notify.done : state === "waiting" ? L.notify.waiting : L.notify.stopped;
+    const T = state === "done" ? L.notify.done : L.notify.stopped;
     const [head, body] = [T.head(who, name), T.body(who, name)];
-    void notify(head, body, wtPath, s.id, state === "waiting");
+    void notify(head, body, wtPath, s.id, false);
     // a session that merely went quiet is not worth a line in the centre (it is the common case, and not an error)
-    if (state === "done" || state === "waiting")
-      pushNotification({ kind: state, worktree: wtPath, session: s.id, text: body });
+    if (state === "done") pushNotification({ kind: "done", worktree: wtPath, session: s.id, text: body });
   }
 };
 
