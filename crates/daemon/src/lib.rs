@@ -5,6 +5,7 @@ pub mod backup;
 pub mod changes;
 pub mod checks;
 pub mod client;
+pub mod computer;
 pub mod docker;
 pub mod envtools;
 pub mod fsops;
