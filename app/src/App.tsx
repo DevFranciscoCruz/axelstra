@@ -20,15 +20,12 @@ import { Automations } from "./Automations";
 import { Dispatcher } from "./Dispatcher";
 import { Settings } from "./Settings";
 import { Shortcuts } from "./Shortcuts";
-import { Handler, paletteCommands } from "./commands";
-import { requestNotificationsOpen } from "./notifications";
-import { restartDaemonFlow } from "./daemonActions";
 import { S } from "./strings";
 import { startDrag } from "./dragResize";
 import { basename } from "./paths";
-import { APP_THEMES, appTheme, setAppTheme } from "./theme";
 import { LEFT, RIGHT, resizeTo } from "./layout";
 import { K } from "./keyboard";
+import { buildPaletteActions } from "./paletteActions";
 import { AgentPickerModal } from "./AgentPickerModal";
 import { SplitPane } from "./SplitPane";
 import { useBootstrap } from "./useBootstrap";
@@ -62,15 +59,10 @@ import {
   projectTerse,
   changesMode,
   showAutomations,
-  setShowAutomations,
   showDispatcher,
-  setShowDispatcher,
   setSessionCloser,
   showSettings,
   showAgentSearch,
-  setShowAgentSearch,
-  setShowSettings,
-  setShowShortcuts,
   showShortcuts,
   showView,
   projectAgent,
@@ -81,7 +73,6 @@ import {
   rememberClosed,
   popClosed,
   showOrchestra,
-  setShowOrchestra,
   computerOn,
   setComputerOn,
   ports,
@@ -89,13 +80,11 @@ import {
   setSplitSession,
   projects,
   setCreatingWorktree,
-  setRemoveRequest,
   findWorktree,
   view,
   openFile,
   setView,
   rightTab,
-  setRightTab,
   setShowProjectSettings,
   showProjectSettings,
   refreshChanges,
@@ -332,45 +321,8 @@ export function App() {
     return v.kind === k ? (v as Extract<typeof v, { kind: K }>) : null;
   };
 
-  // what the command registry (commands.ts) can run right now; the palette lists these
-  const showPanel = (tab: "files" | "changes" | "pulls") => {
-    setRightTab(tab);
-    if (!showRightPanel()) toggleRightPanel();
-  };
-  const cycleTheme = () => setAppTheme(APP_THEMES[(APP_THEMES.indexOf(appTheme()) + 1) % APP_THEMES.length]);
-  const paletteActions = () => {
-    const c = current();
-    const h: Partial<Record<string, Handler>> = {
-      settings: { run: () => setShowSettings(true) },
-      shortcuts: { run: () => setShowShortcuts(true) },
-      toggleSidebar: { run: toggleSidebar, label: showSidebar() ? "Ocultar projetos" : "Mostrar projetos" },
-      toggleRight: { run: toggleRightPanel, label: showRightPanel() ? "Ocultar painel direito" : "Mostrar painel direito" },
-      docker: { run: () => guarded(() => setView({ kind: "docker" })) },
-      notifications: { run: requestNotificationsOpen },
-      theme: { run: cycleTheme, label: `Mudar o tema (agora: ${S.appThemes[appTheme()]})` },
-      searchChats: { run: () => setShowAgentSearch(true) },
-      voice: { run: () => void toggleVoice(), label: listening() ? "Parar o ditado por voz" : undefined },
-      orchestra: { run: () => setShowOrchestra(true) },
-      dispatcher: { run: () => setShowDispatcher(true) },
-      automations: { run: () => setShowAutomations(true) },
-      computer: { run: () => void toggleComputer(), label: computerOn() ? "Controlo do ecrã pelos agentes: desligar" : "Controlo do ecrã pelos agentes: ligar" },
-      restartDaemon: { run: () => void restartDaemonFlow() },
-    };
-    if (projects().length > 0) h.newWorktree = { run: () => { showSidebarNow(); setCreatingWorktree(c?.project.id ?? projects()[0].id); } };
-    if (c) {
-      h.kanban = { run: () => guarded(() => setView({ kind: "kanban" })) };
-      h.panelFiles = { run: () => showPanel("files") };
-      h.panelChanges = { run: () => showPanel("changes") };
-      h.panelPulls = { run: () => showPanel("pulls") };
-      h.newAgent = { run: () => void newAgent(), label: `Novo agente (${projectAgent(c.project.id)})` };
-      h.newTerminal = { run: () => void newTerminal() };
-      h.split = { run: () => void toggleSplit() };
-      h.reopen = { run: () => void reopenClosed() };
-      if (activeSession() !== null) h.rename = { run: () => setRenaming(activeSession()) };
-      if (!c.wt.is_main) h.removeWorktree = { run: () => { showSidebarNow(); setRemoveRequest({ project: c.project.id, path: c.wt.path, name: c.wt.branch ?? c.wt.path }); } };
-    }
-    return paletteCommands(h, K);
-  };
+  const paletteActions = () =>
+    buildPaletteActions({ current, newAgent, newTerminal, toggleSplit, reopenClosed, toggleComputer, computerOn, startRename: setRenaming, showSidebarNow });
 
   return (
     <>
