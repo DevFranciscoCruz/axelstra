@@ -2,12 +2,13 @@
 //! guarantees agents die with the daemon and lets us kill a whole tree; on
 //! Unix the same is done with process groups.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::process::{Child, Command};
 
 #[cfg(windows)]
 mod imp {
     use super::*;
+    use anyhow::bail;
     use std::os::windows::io::AsRawHandle;
     use std::os::windows::process::CommandExt;
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -193,6 +194,21 @@ mod imp {
         }
     }
 
+    /// Exit code of child `pid` if it has exited, WITHOUT reaping it (None while running or when it is not our
+    /// child). The zombie keeps the pid, and so the process group id, reserved: killing the group stays safe until
+    /// the Job is dropped and reaps it.
+    pub fn peek_exit(pid: u32) -> Option<i32> {
+        unsafe {
+            let mut si: libc::siginfo_t = std::mem::zeroed();
+            let r = libc::waitid(libc::P_PID, pid as libc::id_t, &mut si, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT);
+            if r != 0 || si.si_pid() == 0 {
+                return None;
+            }
+            let st = si.si_status();
+            Some(if si.si_code == libc::CLD_EXITED { st } else { 128 + st })
+        }
+    }
+
     /// Reaps `pid` if it already exited; true when it is gone for good.
     fn reap(pid: i32) -> bool {
         let mut st = 0;
@@ -321,6 +337,19 @@ mod imp {
         }
 
         #[test]
+        fn peek_exit_reports_the_code_without_reaping() {
+            let job = Job::new().unwrap();
+            let mut c = job.spawn(Command::new("sh").args(["-c", "exit 5"])).unwrap();
+            let end = Instant::now() + Duration::from_secs(5);
+            while peek_exit(c.id()).is_none() && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(peek_exit(c.id()), Some(5));
+            assert_eq!(peek_exit(c.id()), Some(5), "peeking twice: still not reaped");
+            assert_eq!(c.wait().unwrap().code(), Some(5), "the owner can still reap it");
+            assert_eq!(peek_exit(c.id()), None);
+        }
+        #[test]
         fn zombie_leader_still_counts_as_ours_until_reaped() {
             let job = Job::new().unwrap();
             let mut c = job.spawn(Command::new("sh").args(["-c", "exit 0"])).unwrap();
@@ -350,4 +379,6 @@ mod imp {
     }
 }
 
+#[cfg(unix)]
+pub use imp::peek_exit;
 pub use imp::Job;
