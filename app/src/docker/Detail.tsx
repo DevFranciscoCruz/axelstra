@@ -9,6 +9,8 @@ import { createLatest, isRunning, isSecretKey, joinPath, portChips, searchLog, s
 import { findWorktree, refreshSessions, selectedWorktree, sessions, setError, showNotice } from "../store";
 import { FAST_MS, nameOf, shells, DTab, DTABS } from "./shared";
 import { Empty } from "./Lists";
+import { P } from "../strings.panels";
+import { count } from "../strings";
 
 // ---- detail pane ----
 export function Detail(props: { id: string; c: DockerContainer; stat?: DockerStat; tab: DTab; setTab: (t: DTab) => void; onClose: () => void; onOpenTab: (k: "logs" | "shell", c: DockerContainer) => void }) {
@@ -24,15 +26,15 @@ export function Detail(props: { id: string; c: DockerContainer; stat?: DockerSta
     tabs[k]?.focus();
   };
   return (
-    <aside class="dk-detail" aria-label={`Detalhes de ${props.c.name}`}>
+    <aside class="dk-detail" aria-label={P.docker.detailsOf(props.c.name)}>
       <div class="dk-dhead">
         <span class="dot" classList={{ on: stateInfo(props.c.state).cls === "on", warn: stateInfo(props.c.state).cls === "warn" }} />
         <strong class="dk-dtitle" title={props.c.name}>{props.c.name}</strong>
         <span class="auto-note">{stateInfo(props.c.state).text}</span>
         <span class="grow" />
-        <Button variant="icon" size="icon" aria-label="Fechar detalhes" title="Fechar (Esc)" onClick={props.onClose}><Icon name="x" size={14} /></Button>
+        <Button variant="icon" size="icon" aria-label={P.docker.closeDetails} title={P.docker.closeDetailsTip} onClick={props.onClose}><Icon name="x" size={14} /></Button>
       </div>
-      <div class="dk-dtabs" role="tablist" aria-label="Detalhes" onKeyDown={onTabKey}>
+      <div class="dk-dtabs" role="tablist" aria-label={P.docker.details} onKeyDown={onTabKey}>
         <For each={DTABS}>
           {([t, label], i) => (
             <Button variant="ghost" ref={(el) => (tabs[i()] = el)} role="tab" aria-selected={props.tab === t} tabindex={props.tab === t ? 0 : -1} class={cn("h-auto rounded-none border-0 border-b-2 px-2.5 py-1.5 font-normal text-muted-foreground hover:bg-transparent hover:text-foreground", props.tab === t ? "on border-primary text-foreground" : "border-transparent")} onClick={() => props.setTab(t)}>
@@ -61,35 +63,35 @@ export function InfoTab(props: { c: DockerContainer; stat?: DockerStat }) {
     <div class="dk-info">
       <Show when={err()}><div class="dk-err" role="alert">{err()}</div></Show>
       <dl>
-        <dt>Imagem</dt><dd>{props.c.image}</dd>
-        <dt>Estado</dt><dd>{props.c.status}</dd>
+        <dt>{P.docker.info.image}</dt><dd>{props.c.image}</dd>
+        <dt>{P.docker.info.state}</dt><dd>{props.c.status}</dd>
         <dt>ID</dt><dd class="mono">{props.c.id.slice(0, 12)}</dd>
-        <dt>Criado</dt><dd>{props.c.created}</dd>
+        <dt>{P.docker.info.created}</dt><dd>{props.c.created}</dd>
         <Show when={props.c.project}><dt>Compose</dt><dd>{props.c.project}{props.c.service ? ` · ${props.c.service}` : ""}</dd></Show>
-        <Show when={props.stat}><dt>CPU / memória</dt><dd>{props.stat!.cpu.toFixed(1)}% · {props.stat!.mem}</dd></Show>
+        <Show when={props.stat}><dt>{P.docker.info.cpuMem}</dt><dd>{props.stat!.cpu.toFixed(1)}% · {props.stat!.mem}</dd></Show>
         <Show when={info()}>
-          <dt>Comando</dt><dd class="mono">{info()!.command || "—"}</dd>
-          <Show when={info()!.workdir}><dt>Pasta</dt><dd class="mono">{info()!.workdir}</dd></Show>
-          <Show when={info()!.restart}><dt>Reinício</dt><dd>{info()!.restart}</dd></Show>
+          <dt>{P.docker.info.command}</dt><dd class="mono">{info()!.command || "—"}</dd>
+          <Show when={info()!.workdir}><dt>{P.docker.info.folder}</dt><dd class="mono">{info()!.workdir}</dd></Show>
+          <Show when={info()!.restart}><dt>{P.docker.info.restart}</dt><dd>{info()!.restart}</dd></Show>
         </Show>
       </dl>
       <Show when={chips().length}>
-        <h4>Portas</h4>
+        <h4>{P.docker.info.ports}</h4>
         <div class="dk-ports">
-          <For each={chips()}>{(p) => (p.url ? <Button variant="outline" size="bare" class="px-1.5 text-xs" aria-label={`Abrir ${p.url} no navegador`} onClick={() => void openUrl(p.url!)}>{p.label}</Button> : <Badge>{p.label}</Badge>)}</For>
+          <For each={chips()}>{(p) => (p.url ? <Button variant="outline" size="bare" class="px-1.5 text-xs" aria-label={P.docker.openUrl(p.url)} onClick={() => void openUrl(p.url!)}>{p.label}</Button> : <Badge>{p.label}</Badge>)}</For>
         </div>
       </Show>
       <Show when={info()}>
-        <h4>Redes</h4>
-        <Show when={info()!.networks.length} fallback={<span class="auto-note">Sem redes.</span>}>
+        <h4>{P.docker.info.networks}</h4>
+        <Show when={info()!.networks.length} fallback={<span class="auto-note">{P.docker.info.noNetworks}</span>}>
           <ul class="dk-kv"><For each={info()!.networks}>{([n, ip]) => <li><span>{n}</span><span class="mono">{ip}</span></li>}</For></ul>
         </Show>
-        <h4>Montagens</h4>
-        <Show when={info()!.mounts.length} fallback={<span class="auto-note">Sem montagens.</span>}>
-          <ul class="dk-kv"><For each={info()!.mounts}>{([kind, src, dst, rw]) => <li><span class="mono" title={src}>{src}</span><span class="mono">{dst} <span class="auto-note">{kind}{rw ? "" : " · só leitura"}</span></span></li>}</For></ul>
+        <h4>{P.docker.info.mounts}</h4>
+        <Show when={info()!.mounts.length} fallback={<span class="auto-note">{P.docker.info.noMounts}</span>}>
+          <ul class="dk-kv"><For each={info()!.mounts}>{([kind, src, dst, rw]) => <li><span class="mono" title={src}>{src}</span><span class="mono">{dst} <span class="auto-note">{kind}{rw ? "" : P.docker.info.readOnly}</span></span></li>}</For></ul>
         </Show>
-        <h4>Variáveis de ambiente</h4>
-        <Show when={info()!.env.length} fallback={<span class="auto-note">Nenhuma.</span>}>
+        <h4>{P.docker.info.env}</h4>
+        <Show when={info()!.env.length} fallback={<span class="auto-note">{P.docker.info.none}</span>}>
           <ul class="dk-kv">
             <For each={info()!.env}>
               {([k, v]) => {
@@ -101,8 +103,8 @@ export function InfoTab(props: { c: DockerContainer; stat?: DockerStat }) {
                     <span class="mono dk-val">
                       {visible() ? v : "••••••••"}
                       <Show when={secret}>
-                        <Button variant="link" size="bare" class="text-primary underline hover:text-primary" aria-label={`${visible() ? "Esconder" : "Mostrar"} ${k}`} onClick={() => setShown((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; })}>
-                          {visible() ? "esconder" : "mostrar"}
+                        <Button variant="link" size="bare" class="text-primary underline hover:text-primary" aria-label={visible() ? P.docker.info.hideKey(k) : P.docker.info.showKey(k)} onClick={() => setShown((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; })}>
+                          {visible() ? P.docker.info.hide : P.docker.info.show}
                         </Button>
                       </Show>
                     </span>
@@ -145,13 +147,13 @@ export function LogsTab(props: { c: DockerContainer; onOpenTab: () => void }) {
   return (
     <div class="dk-logs">
       <div class="dk-tools">
-        <Input class="dk-search min-w-0 flex-1" type="search" placeholder="Procurar nos logs" aria-label="Procurar nos logs" value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
-        <Checkbox labelClass="set-check" checked={follow()} onChange={(e) => setFollow(e.currentTarget.checked)} label="Seguir" />
-        <Button size="sm" onClick={props.onOpenTab}>Abrir num separador</Button>
+        <Input class="dk-search min-w-0 flex-1" type="search" placeholder={P.docker.logsSearch} aria-label={P.docker.logsSearch} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
+        <Checkbox labelClass="set-check" checked={follow()} onChange={(e) => setFollow(e.currentTarget.checked)} label={P.docker.follow} />
+        <Button size="sm" onClick={props.onOpenTab}>{P.docker.openInTab}</Button>
       </div>
       <Show when={err()}><div class="dk-err" role="alert">{err()}</div></Show>
-      <pre ref={pre} class="dk-pre" tabindex="0" aria-label="Logs">{lines().join("\n") || (text() ? "Nada corresponde à pesquisa." : "Sem logs.")}</pre>
-      <div class="auto-note">{query() ? `${lines().length} linhas correspondem · ` : ""}últimas 500 linhas, atualizadas a cada 3 s</div>
+      <pre ref={pre} class="dk-pre" tabindex="0" aria-label={P.docker.menu.logs}>{lines().join("\n") || (text() ? P.docker.logsNoMatch : P.docker.noLogs)}</pre>
+      <div class="auto-note">{query() ? P.docker.logsLinesMatch(lines().length) : ""}{P.docker.logsFooter}</div>
     </div>
   );
 }
@@ -165,7 +167,7 @@ export function ShellTab(props: { c: DockerContainer; run: boolean; onOpenTab: (
   };
   const start = async () => {
     const wt = selectedWorktree();
-    if (!wt) return setErr("Escolhe um worktree para abrir a shell.");
+    if (!wt) return setErr(P.docker.pickWorktreeShell);
     try {
       const id = await dockerOpenShell(wt, props.c.name, findWorktree(wt)?.project.id);
       shells.set(props.c.id, id);
@@ -180,12 +182,12 @@ export function ShellTab(props: { c: DockerContainer; run: boolean; onOpenTab: (
     <div class="dk-term">
       <Show when={live() != null} fallback={
         <div class="dk-empty">
-          <span class="auto-note">{props.run ? "Abre uma shell dentro do contentor (bash se existir, senão sh)." : "O contentor está parado: inicie-o para abrir uma shell."}</span>
-          <Button variant="default" size="sm" class="primary" disabled={!props.run} onClick={() => void start()}>Abrir shell</Button>
+          <span class="auto-note">{props.run ? P.docker.shellHintRun : P.docker.shellHintStopped}</span>
+          <Button variant="default" size="sm" class="primary" disabled={!props.run} onClick={() => void start()}>{P.docker.openShell}</Button>
           <Show when={err()}><div class="dk-err" role="alert">{err()}</div></Show>
         </div>
       }>
-        <div class="dk-tools"><span class="grow" /><Button size="sm" onClick={props.onOpenTab}>Abrir num separador</Button></div>
+        <div class="dk-tools"><span class="grow" /><Button size="sm" onClick={props.onOpenTab}>{P.docker.openInTab}</Button></div>
         <div class="dk-termhost"><TerminalView id={live()!} focus onExit={() => { shells.delete(props.c.id); setSid(null); void refreshSessions(); }} /></div>
       </Show>
     </div>
@@ -217,10 +219,10 @@ export function FilesTab(props: { c: DockerContainer; run: boolean }) {
     }
   };
   return (
-    <Show when={props.run} fallback={<Empty text="O contentor está parado: os ficheiros só se veem enquanto corre." />}>
+    <Show when={props.run} fallback={<Empty text={P.docker.filesStopped} />}>
       <div class="dk-files">
         <div class="dk-tools">
-          <Button variant="icon" size="icon" aria-label="Pasta acima" title="Pasta acima" disabled={path() === "/"} onClick={() => { setFile(null); setPath(joinPath(path(), "..")); }}><Icon name="arrowUp" size={14} /></Button>
+          <Button variant="icon" size="icon" aria-label={P.docker.parentFolder} title={P.docker.parentFolder} disabled={path() === "/"} onClick={() => { setFile(null); setPath(joinPath(path(), "..")); }}><Icon name="arrowUp" size={14} /></Button>
           <code class="dk-code grow">{path()}</code>
         </div>
         <Show when={err()}><div class="dk-err" role="alert">{err()}</div></Show>
@@ -238,8 +240,8 @@ export function FilesTab(props: { c: DockerContainer; run: boolean }) {
         <Show when={file()}>
           {(f) => (
             <>
-              <div class="auto-note mono">{f().path} · só leitura</div>
-              <pre class="dk-pre" tabindex="0" aria-label={`Conteúdo de ${f().path}`}>{f().text}</pre>
+              <div class="auto-note mono">{P.docker.readOnlyNote(f().path)}</div>
+              <pre class="dk-pre" tabindex="0" aria-label={P.docker.contentOf(f().path)}>{f().text}</pre>
             </>
           )}
         </Show>

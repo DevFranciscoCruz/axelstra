@@ -1,18 +1,20 @@
 import type { DockerContainer, DockerImage, DockerPort } from "./api";
+import { plural } from "./strings";
+import { P } from "./strings.panels";
 
 export type Filter = "all" | "running" | "stopped";
 export type Group = { project: string; workingDir: string; items: DockerContainer[]; running: number };
 
 const STATES: Record<string, { text: string; cls: "on" | "warn" | "off" }> = {
-  running: { text: "a correr", cls: "on" },
-  paused: { text: "em pausa", cls: "warn" },
-  restarting: { text: "a reiniciar", cls: "warn" },
-  created: { text: "criado", cls: "off" },
-  exited: { text: "parado", cls: "off" },
-  dead: { text: "morto", cls: "off" },
+  running: { text: P.docker.states.running, cls: "on" },
+  paused: { text: P.docker.states.paused, cls: "warn" },
+  restarting: { text: P.docker.states.restarting, cls: "warn" },
+  created: { text: P.docker.states.created, cls: "off" },
+  exited: { text: P.docker.states.exited, cls: "off" },
+  dead: { text: P.docker.states.dead, cls: "off" },
 };
 /** Label and colour class of a container state; the label is always shown, the colour is only a hint. */
-export const stateInfo = (state: string) => STATES[state] ?? { text: state || "desconhecido", cls: "off" as const };
+export const stateInfo = (state: string) => STATES[state] ?? { text: state || P.docker.states.unknown, cls: "off" as const };
 
 export const isRunning = (c: DockerContainer) => c.state === "running";
 
@@ -54,11 +56,12 @@ export const parseCreated = (s: string): number | null => {
 export const ago = (ms: number | null, now = Date.now()) => {
   if (ms == null) return "";
   const s = Math.max(0, Math.round((now - ms) / 1000));
-  if (s < 60) return "agora";
-  const units: [number, string, string][] = [[60, "minuto", "minutos"], [24, "hora", "horas"], [30, "dia", "dias"], [12, "mês", "meses"], [Infinity, "ano", "anos"]];
+  if (s < 60) return P.docker.ago.now;
+  const steps = [60, 24, 30, 12, Infinity];
+  const units = P.docker.ago.units.map(([one, many], i) => [steps[i], one, many] as [number, string, string]);
   let n = s / 60;
   for (const [step, one, many] of units) {
-    if (n < step) return `há ${Math.floor(n)} ${Math.floor(n) === 1 ? one : many}`;
+    if (n < step) return P.docker.ago.since(Math.floor(n), plural(Math.floor(n), one, many));
     n /= step;
   }
   return "";

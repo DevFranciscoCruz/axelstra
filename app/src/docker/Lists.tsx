@@ -6,6 +6,7 @@ import { Badge, Button } from "../ui";
 import { ago, imageUsers, isRunning, parseCreated, portChips, stateInfo } from "../dockerLogic";
 import { sessions, setError, showNotice } from "../store";
 import { DIcon } from "./shared";
+import { P } from "../strings.panels";
 
 export function Empty(props: { text: string }) {
   return <div class="dk-empty auto-note">{props.text}</div>;
@@ -14,26 +15,26 @@ export function Empty(props: { text: string }) {
 export function Unavailable(props: { status: DockerStatus | null; err: string; loaded: boolean; retry: () => void }) {
   return (
     <div class="dk-empty">
-      <Show when={props.loaded || props.status} fallback={<span class="auto-note">A verificar o Docker…</span>}>
+      <Show when={props.loaded || props.status} fallback={<span class="auto-note">{P.docker.checking}</span>}>
         <Show
           when={props.status?.installed !== false}
           fallback={
             <>
-              <strong>O Docker não está instalado</strong>
-              <span class="auto-note">Instale o Docker Desktop para ver e gerir contentores aqui. Depois de instalar, abra-o e volte a esta vista.</span>
+              <strong>{P.docker.notInstalled}</strong>
+              <span class="auto-note">{P.docker.installHint}</span>
               <Button variant="link" size="bare" class="text-primary underline hover:text-primary" onClick={() => void openUrl("https://docs.docker.com/get-started/get-docker/")}>
-                Como instalar o Docker Desktop
+                {P.docker.howInstall}
               </Button>
-              <Button size="sm" onClick={props.retry}>Tentar de novo</Button>
+              <Button size="sm" onClick={props.retry}>{P.docker.retry}</Button>
             </>
           }
         >
-          <strong>O motor do Docker não está a correr</strong>
-          <span class="auto-note">Abra o Docker Desktop e espere que fique pronto. Esta vista volta a tentar sozinha a cada 10 segundos.</span>
+          <strong>{P.docker.engineDown}</strong>
+          <span class="auto-note">{P.docker.engineHint}</span>
           <Show when={props.status?.error || props.err}>
             <code class="dk-code">{props.status?.error || props.err}</code>
           </Show>
-          <Button size="sm" onClick={props.retry}>Tentar de novo</Button>
+          <Button size="sm" onClick={props.retry}>{P.docker.retry}</Button>
         </Show>
       </Show>
     </div>
@@ -44,9 +45,9 @@ export function ComposeBar(props: { compose: DockerCompose | null; wt: string | 
   return (
     <Show when={props.wt && props.compose}>
       <div class="dk-compose">
-        <Show when={props.compose!.file} fallback={<span class="auto-note">Este worktree não tem ficheiro compose (compose.yaml, docker-compose.yml…).</span>}>
-          <strong>Compose deste worktree</strong>
-          <span class="auto-note">{props.compose!.file} · projeto {props.compose!.project}</span>
+        <Show when={props.compose!.file} fallback={<span class="auto-note">{P.docker.noCompose}</span>}>
+          <strong>{P.docker.composeOf}</strong>
+          <span class="auto-note">{P.docker.composeProject(props.compose!.file!, props.compose!.project)}</span>
           <For each={props.compose!.services}>
             {(s) => (
               <Badge class="[&_.dot.warn]:bg-[var(--warn)]" title={s.status}>
@@ -55,11 +56,11 @@ export function ComposeBar(props: { compose: DockerCompose | null; wt: string | 
             )}
           </For>
           <Show when={!props.compose!.services.length}>
-            <span class="auto-note">Sem serviços criados.</span>
+            <span class="auto-note">{P.docker.noServices}</span>
           </Show>
           <span class="grow" />
-          <Button size="sm" disabled={props.busy} onClick={() => props.run("up")}>Iniciar</Button>
-          <Button size="sm" disabled={props.busy} onClick={() => props.run("down")}>Parar e remover</Button>
+          <Button size="sm" disabled={props.busy} onClick={() => props.run("up")}>{P.docker.start}</Button>
+          <Button size="sm" disabled={props.busy} onClick={() => props.run("down")}>{P.docker.composeDownOk}</Button>
         </Show>
       </div>
     </Show>
@@ -96,29 +97,29 @@ export function Row(props: {
         <For each={chips()}>
           {(p) =>
             p.url ? (
-              <Button variant="outline" size="bare" class="px-1.5 text-xs" title={`Abrir ${p.url} no navegador`} aria-label={`Abrir ${p.url} no navegador`} onClick={(e) => { e.stopPropagation(); void openUrl(p.url!); }}>
+              <Button variant="outline" size="bare" class="px-1.5 text-xs" title={P.docker.openUrl(p.url)} aria-label={P.docker.openUrl(p.url)} onClick={(e) => { e.stopPropagation(); void openUrl(p.url!); }}>
                 {p.label}
               </Button>
             ) : (
-              <Badge title="Porta exposta, não publicada">{p.label}</Badge>
+              <Badge title={P.docker.portExposed}>{p.label}</Badge>
             )
           }
         </For>
       </span>
       <span class="dk-num" title="CPU">{run() && props.stat ? `${props.stat.cpu.toFixed(1)}%` : ""}</span>
-      <span class="dk-num dk-mem" title="Memória">{run() && props.stat ? props.stat.mem.split(" / ")[0] : ""}</span>
+      <span class="dk-num dk-mem" title={P.docker.memory}>{run() && props.stat ? props.stat.mem.split(" / ")[0] : ""}</span>
       <span class="dk-num dk-age" title={props.c.created}>{ago(parseCreated(props.c.created))}</span>
-      <span class="dk-acts" role="group" aria-label="Ações" onClick={(e) => e.stopPropagation()}>
+      <span class="dk-acts" role="group" aria-label={P.docker.actions} onClick={(e) => e.stopPropagation()}>
         <Show when={!run()}>
-          <Button variant="icon" size="icon" aria-label={`Iniciar ${props.c.name}`} title="Iniciar" disabled={props.busy} onClick={props.onStart}><DIcon name="play" /></Button>
+          <Button variant="icon" size="icon" aria-label={P.docker.startNamed(props.c.name)} title={P.docker.start} disabled={props.busy} onClick={props.onStart}><DIcon name="play" /></Button>
         </Show>
         <Show when={run()}>
-          <Button variant="icon" size="icon" aria-label={`Parar ${props.c.name}`} title="Parar" disabled={props.busy} onClick={props.onStop}><DIcon name="stop" /></Button>
-          <Button variant="icon" size="icon" aria-label={`Reiniciar ${props.c.name}`} title="Reiniciar" disabled={props.busy} onClick={props.onRestart}><DIcon name="refresh" /></Button>
+          <Button variant="icon" size="icon" aria-label={P.docker.stopNamed(props.c.name)} title={P.docker.stop} disabled={props.busy} onClick={props.onStop}><DIcon name="stop" /></Button>
+          <Button variant="icon" size="icon" aria-label={P.docker.restartNamed(props.c.name)} title={P.docker.restart} disabled={props.busy} onClick={props.onRestart}><DIcon name="refresh" /></Button>
         </Show>
-        <Button variant="icon" size="icon" aria-label={`Logs de ${props.c.name}`} title="Logs" onClick={props.onLogs}><DIcon name="logs" /></Button>
-        <Button variant="icon" size="icon" aria-label={`Shell em ${props.c.name}`} title="Shell" disabled={!run()} onClick={props.onShell}><DIcon name="terminal" /></Button>
-        <Button variant="icon" size="icon" class="text-destructive" aria-label={`Remover ${props.c.name}`} title="Remover" disabled={props.busy} onClick={props.onRemove}><DIcon name="trash" /></Button>
+        <Button variant="icon" size="icon" aria-label={P.docker.logsOf(props.c.name)} title={P.docker.menu.logs} onClick={props.onLogs}><DIcon name="logs" /></Button>
+        <Button variant="icon" size="icon" aria-label={P.docker.shellIn(props.c.name)} title={P.docker.menu.shell} disabled={!run()} onClick={props.onShell}><DIcon name="terminal" /></Button>
+        <Button variant="icon" size="icon" class="text-destructive" aria-label={P.docker.removeNamed(props.c.name)} title={P.docker.remove} disabled={props.busy} onClick={props.onRemove}><DIcon name="trash" /></Button>
       </span>
     </div>
   );
@@ -132,7 +133,7 @@ const has = (q: string, ...parts: string[]) => {
 export function VolumesList(props: { list: DockerVolume[]; q: string; busy: boolean; onRemove: (v: DockerVolume) => void }) {
   const rows = () => props.list.filter((v) => has(props.q, v.name, v.driver, ...v.used_by));
   return (
-    <Show when={rows().length} fallback={<Empty text={props.list.length ? "Nenhum volume corresponde à pesquisa." : "Não há volumes."} />}>
+    <Show when={rows().length} fallback={<Empty text={props.list.length ? P.docker.noVolumeMatch : P.docker.noVolumes} />}>
       <div class="dk-list">
         <For each={rows()}>
           {(v) => (
@@ -142,12 +143,12 @@ export function VolumesList(props: { list: DockerVolume[]; q: string; busy: bool
                 <span class="auto-note" title={v.mountpoint}>{v.driver} · {v.mountpoint}</span>
               </span>
               <span class="dk-ports">
-                <Show when={v.used_by.length} fallback={<Badge variant="warn">sem uso</Badge>}>
+                <Show when={v.used_by.length} fallback={<Badge variant="warn">{P.docker.unused}</Badge>}>
                   <For each={v.used_by}>{(n) => <Badge>{n}</Badge>}</For>
                 </Show>
               </span>
               <span class="dk-acts show">
-                <Button variant="icon" size="icon" class="text-destructive" aria-label={`Remover volume ${v.name}`} title="Remover" disabled={props.busy || v.used_by.length > 0} onClick={() => props.onRemove(v)}><DIcon name="trash" /></Button>
+                <Button variant="icon" size="icon" class="text-destructive" aria-label={P.docker.removeVolumeNamed(v.name)} title={P.docker.remove} disabled={props.busy || v.used_by.length > 0} onClick={() => props.onRemove(v)}><DIcon name="trash" /></Button>
               </span>
             </div>
           )}
@@ -160,7 +161,7 @@ export function VolumesList(props: { list: DockerVolume[]; q: string; busy: bool
 export function ImagesList(props: { list: DockerImage[]; containers: DockerContainer[]; q: string; busy: boolean; onRemove: (i: DockerImage) => void }) {
   const rows = () => props.list.filter((i) => has(props.q, i.id, ...i.tags));
   return (
-    <Show when={rows().length} fallback={<Empty text={props.list.length ? "Nenhuma imagem corresponde à pesquisa." : "Não há imagens."} />}>
+    <Show when={rows().length} fallback={<Empty text={props.list.length ? P.docker.noImageMatch : P.docker.noImages} />}>
       <div class="dk-list">
         <For each={rows()}>
           {(i) => {
@@ -168,18 +169,18 @@ export function ImagesList(props: { list: DockerImage[]; containers: DockerConta
             return (
               <div class="dk-row plain">
                 <span class="dk-name wide">
-                  <strong>{i.tags.length ? i.tags.join(", ") : "<sem nome>"}</strong>
+                  <strong>{i.tags.length ? i.tags.join(", ") : P.docker.unnamed}</strong>
                   <span class="auto-note">{i.id} · {ago(parseCreated(i.created))}</span>
                 </span>
                 <span class="dk-ports">
-                  <Show when={i.dangling}><Badge variant="warn" title="Sem nome nem etiqueta: sobra de uma reconstrução">dangling</Badge></Show>
-                  <Show when={users().length} fallback={<Badge>sem contentores</Badge>}>
+                  <Show when={i.dangling}><Badge variant="warn" title={P.docker.orphanTip}>{P.docker.orphan}</Badge></Show>
+                  <Show when={users().length} fallback={<Badge>{P.docker.noContainers}</Badge>}>
                     <For each={users()}>{(c) => <Badge>{c.name}</Badge>}</For>
                   </Show>
                 </span>
                 <span class="dk-num dk-size">{i.size}</span>
                 <span class="dk-acts show">
-                  <Button variant="icon" size="icon" class="text-destructive" aria-label={`Remover imagem ${i.tags[0] ?? i.id}`} title="Remover" disabled={props.busy || users().length > 0} onClick={() => props.onRemove(i)}><DIcon name="trash" /></Button>
+                  <Button variant="icon" size="icon" class="text-destructive" aria-label={P.docker.removeImageNamed(i.tags[0] ?? i.id)} title={P.docker.remove} disabled={props.busy || users().length > 0} onClick={() => props.onRemove(i)}><DIcon name="trash" /></Button>
                 </span>
               </div>
             );
@@ -193,7 +194,7 @@ export function ImagesList(props: { list: DockerImage[]; containers: DockerConta
 export function NetworksList(props: { list: DockerNetwork[]; q: string }) {
   const rows = () => props.list.filter((n) => has(props.q, n.name, n.driver, ...n.containers));
   return (
-    <Show when={rows().length} fallback={<Empty text={props.list.length ? "Nenhuma rede corresponde à pesquisa." : "Não há redes."} />}>
+    <Show when={rows().length} fallback={<Empty text={props.list.length ? P.docker.noNetworkMatch : P.docker.noNetworks} />}>
       <div class="dk-list">
         <For each={rows()}>
           {(n) => (
@@ -203,7 +204,7 @@ export function NetworksList(props: { list: DockerNetwork[]; q: string }) {
                 <span class="auto-note">{n.driver} · {n.scope} · {n.id.slice(0, 12)}</span>
               </span>
               <span class="dk-ports">
-                <Show when={n.containers.length} fallback={<Badge>sem contentores</Badge>}>
+                <Show when={n.containers.length} fallback={<Badge>{P.docker.noContainers}</Badge>}>
                   <For each={n.containers}>{(c) => <Badge>{c}</Badge>}</For>
                 </Show>
               </span>

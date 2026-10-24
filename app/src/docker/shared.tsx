@@ -1,9 +1,10 @@
 import { JSX, Show } from "solid-js";
 import { Icon } from "../Icon";
 import { sessions, setError, showNotice } from "../store";
+import { P } from "../strings.panels";
 
 export type DTab = "info" | "logs" | "terminal" | "files";
-export const DTABS: [DTab, string][] = [["info", "Info"], ["logs", "Logs"], ["terminal", "Terminal"], ["files", "Ficheiros"]];
+export const DTABS: [DTab, string][] = (["info", "logs", "terminal", "files"] as DTab[]).map((t) => [t, P.docker.tabs[t]]);
 
 /** Small stroke icons the shared Icon set does not have. */
 const GLYPHS: Record<string, JSX.Element> = {
