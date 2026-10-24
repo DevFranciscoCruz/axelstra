@@ -18,6 +18,7 @@ mod misc;
 mod orchestration;
 mod origin;
 mod session;
+mod triggers;
 mod vcs;
 mod worktrees;
 
@@ -244,7 +245,7 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
     match method {
         "computer.enable" => p["on"].as_bool() == Some(true),
         "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" | "notices.take" | "audit.list"
-        | "backup.export" | "backup.restore" | "gh.send_comment" => true,
+        | "backup.export" | "backup.restore" | "gh.send_comment" | "triggers.set" | "triggers.events" => true,
         _ => false,
     }
 }
@@ -580,6 +581,7 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     }
     let _ = std::fs::write(dir.join("hooks.json"), hook.to_string());
     spawn_scheduler(reg.clone());
+    triggers::spawn_loop(reg.clone());
     spawn_idle_exit(reg.clone());
     accept_loop(&pipe, reg, token).await
 }
@@ -1063,6 +1065,7 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
         "worktree" | "project" | "pm" | "janitor" | "dispatch" | "ports" => worktrees::call(c),
         "fs" | "watch" | "open" => files::call(c),
         "git" | "gh" => vcs::call(c),
+        "triggers" => triggers::call(c),
         "docker" => containers::call(c),
         "orch" | "kanban" | "automation" => orchestration::call(c),
         "msg" | "notes" => messaging::call(c),
