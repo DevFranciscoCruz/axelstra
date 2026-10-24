@@ -253,6 +253,9 @@ enum Cmd {
         /// Allow the cards' `acceptance` commands to run (they come from the repository: only for a repo you trust)
         #[arg(long)]
         trust_acceptance: bool,
+        /// Non-interactive confirmation for cards with a bypass permission_mode: the pin printed by `--trust-acceptance`
+        #[arg(long, requires = "trust_acceptance")]
+        confirm_bypass: Option<String>,
         /// Agent command, `{prompt_file}` is substituted. Everything after `--`.
         #[arg(last = true)]
         agent: Vec<String>,
@@ -377,6 +380,7 @@ mod dispatch;
 mod hook;
 mod lock;
 mod orchcmd;
+mod startconfirm;
 mod statusline;
 
 fn main() -> Result<()> {
@@ -467,7 +471,7 @@ fn main() -> Result<()> {
                 println!("{id}  agent={} deps={:?}", c.meta.agent, c.meta.depends_on);
             }
         }
-        Cmd::Start { repo, name, max, wt_root, daemon, trust_acceptance, agent } => {
+        Cmd::Start { repo, name, max, wt_root, daemon, trust_acceptance, confirm_bypass, agent } => {
             let repo = axelstra_core::git::canon(&repo)?;
             let wt_root = wt_root.unwrap_or_else(|| repo.parent().unwrap().join(".axelstra-wt"));
             let opts = orch::Options {
@@ -479,7 +483,7 @@ fn main() -> Result<()> {
                 poll_ms: 500,
                 runner: if daemon { Some(std::sync::Arc::new(axelstra_daemon::runner::DaemonRunner::connect_default()?)) } else { None },
             };
-            let r = if trust_acceptance { orch::run_trusted(&opts)? } else { orch::run(&opts)? };
+            let r = if trust_acceptance { startconfirm::run(&opts, confirm_bypass.as_deref())? } else { orch::run(&opts)? };
             println!("integration: {} ({})", r.integ_branch, r.integ_wt.display());
             println!("merged: {:?}", r.merged);
             for (id, why) in &r.failed {

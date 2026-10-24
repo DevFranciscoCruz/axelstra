@@ -421,6 +421,12 @@ impl Session {
         Some(st.exit_code() as i32)
     }
 
+    /// True when process `pid` is in this session's process tree (its Job Object on Windows, its process groups and
+    /// their descendants on Unix). Used to tell an agent's own processes from the app and the user's terminals.
+    pub fn owns_pid(&self, pid: u32) -> bool {
+        self.job.contains(pid)
+    }
+
     pub fn pid(&self) -> Option<u32> {
         self.child.lock_recover().process_id()
     }
