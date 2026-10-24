@@ -8,6 +8,7 @@ import { writeSession } from "./api";
 import { askDiscard } from "./Confirm";
 import { downloadErrorText, micErrorText, transcribeErrorText } from "./voiceErrors";
 import { createPersistedFlag } from "./persist";
+import { P } from "./strings.panels";
 
 // Local dictation: the webview records 16 kHz mono audio, the Rust side transcribes it with Whisper
 // (sherpa-onnx, model downloaded on first use). Hands-free: recording stops by itself after a pause in
@@ -58,12 +59,12 @@ async function transcribe() {
   }
   chunks = [];
   if (total < 8000) {
-    setVoiceError("Áudio demasiado curto.");
+    setVoiceError(P.voice.tooShort);
     return;
   }
   try {
     const text = await invoke<string>("voice_transcribe", pcm.buffer, { headers: { "x-lang": lang() } });
-    if (!text) setVoiceError(`Nenhuma fala detetada (nível do microfone ${(lastPeak * 100).toFixed(1)}%).`);
+    if (!text) setVoiceError(P.voice.noSpeech((lastPeak * 100).toFixed(1)));
     else if (autoSend() && recTarget !== null) {
       await writeSession(recTarget, text + "\r");
       setDraft(null);
@@ -149,7 +150,7 @@ export async function toggleVoice() {
         // nothing crossed the threshold: a dead microphone is dropped, anything else still goes to Whisper
         if (peak < 0.002) {
           cancelVoice();
-          setVoiceError("Sem sinal do microfone. Verifica o microfone selecionado no Windows.");
+          setVoiceError(P.voice.noSignal);
         } else void stopVoice();
       } else if (elapsed >= MAX_MS) void stopVoice();
     };
@@ -203,7 +204,7 @@ export const VoiceDraft = (props: { target: number | null }) => {
   };
   // a dictated text that was not sent yet is not thrown away without asking
   const closeKeepingText = async () => {
-    if (draft()?.trim() && !(await askDiscard("O texto ditado ainda não foi enviado."))) return;
+    if (draft()?.trim() && !(await askDiscard(P.voice.unsent))) return;
     close();
   };
   const send = async (enter: boolean) => {
@@ -215,16 +216,16 @@ export const VoiceDraft = (props: { target: number | null }) => {
   return (
     <Show when={draft() !== null || voiceError()}>
       <div class="voice-bar">
-        <span class="voice-dot" classList={{ on: listening(), busy: voiceState() === "transcribing" }} title={listening() ? "A gravar…" : voiceState() === "transcribing" ? "A transcrever…" : "Parado"} />
+        <span class="voice-dot" classList={{ on: listening(), busy: voiceState() === "transcribing" }} title={listening() ? P.voice.recording : voiceState() === "transcribing" ? P.voice.transcribing : P.voice.stopped} />
         <Show when={draft() !== null && !showText()}>
-          <span class="voice-status">{listening() ? "A ouvir… fale; envia ao parar de falar (Esc cancela)" : voiceState() === "transcribing" ? "A transcrever…" : ""}</span>
+          <span class="voice-status">{listening() ? P.voice.listening : voiceState() === "transcribing" ? P.voice.transcribing : ""}</span>
         </Show>
         <Show when={draft() !== null && showText()}>
           <Textarea
             ref={ta}
             class="voice-text"
             rows={Math.min(5, Math.max(1, (draft() ?? "").split("\n").length))}
-            placeholder={listening() ? "A gravar… clique em Parar" : voiceState() === "transcribing" ? "A transcrever…" : "Fale ou escreva; Enter envia"}
+            placeholder={listening() ? P.voice.placeholderRec : voiceState() === "transcribing" ? P.voice.transcribing : P.voice.placeholderIdle}
             value={draft() ?? ""}
             onInput={(e) => setDraft(e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -234,29 +235,29 @@ export const VoiceDraft = (props: { target: number | null }) => {
               } else if (e.key === "Escape") void closeKeepingText();
             }}
           />
-          <Button size="sm" onClick={() => void toggleVoice()} disabled={voiceState() === "transcribing"} title={K("Ditado (Ctrl+Shift+M)")}>
-            {listening() ? "Parar" : voiceState() === "transcribing" ? "…" : "Ditar"}
+          <Button size="sm" onClick={() => void toggleVoice()} disabled={voiceState() === "transcribing"} title={K(P.voice.dictationTip)}>
+            {listening() ? P.voice.stop : voiceState() === "transcribing" ? "…" : P.voice.dictate}
           </Button>
-          <Button size="sm" onClick={() => void send(false)} title="Colar no terminal sem Enter">
-            Colar
+          <Button size="sm" onClick={() => void send(false)} title={P.voice.pasteTip}>
+            {P.voice.paste}
           </Button>
           <Button variant="default" size="sm" onClick={() => void send(true)}>
-            Enviar
+            {P.voice.send}
           </Button>
         </Show>
-        <Checkbox labelClass="voice-auto" title="Enviar para o terminal assim que parar de falar" checked={autoSend()} onChange={(e) => setAutoSend(e.currentTarget.checked)} label="Enviar automático" />
+        <Checkbox labelClass="voice-auto" title={P.voice.autoTip} checked={autoSend()} onChange={(e) => setAutoSend(e.currentTarget.checked)} label={P.voice.auto} />
         <Show when={needModel()}>
           <span class="voice-err">
-            Ditado local precisa de um modelo (~160 MB, descarregado uma vez).{" "}
+            {P.voice.needModel}{" "}
             <Button variant="default" size="sm" disabled={dlProgress() !== null} onClick={() => void downloadModel()}>
-              {dlProgress() === null ? "Descarregar" : `${Math.round(dlProgress()! * 100)}%`}
+              {dlProgress() === null ? P.voice.download : `${Math.round(dlProgress()! * 100)}%`}
             </Button>
           </span>
         </Show>
         <Show when={voiceError()}>
           <span class="voice-err">{voiceError()}</span>
         </Show>
-        <Button variant="icon" size="icon" title="Fechar (Esc)" aria-label="Fechar (Esc)" onClick={() => void closeKeepingText()}>
+        <Button variant="icon" size="icon" title={P.voice.close} aria-label={P.voice.close} onClick={() => void closeKeepingText()}>
           <Icon name="x" />
         </Button>
       </div>

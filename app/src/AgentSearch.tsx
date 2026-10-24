@@ -5,6 +5,7 @@ import { ago } from "./time";
 import { Modal } from "./Modal";
 import { findWorktree, projects, projectTerse, refreshSessions, setError, setShowAgentSearch, setActiveSession, selectWorktree } from "./store";
 import { Input } from "./ui";
+import { P } from "./strings.panels";
 
 const sha256Hex = async (s: string) =>
   [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -45,7 +46,7 @@ export function AgentSearch() {
           setDone(true);
         }
       } catch (e) {
-        if (mine === seq) setError(String(e).includes("unknown method") ? "Reinicia o daemon para usar a pesquisa de conversas." : String(e));
+        if (mine === seq) setError(String(e).includes("unknown method") ? P.agentSearch.restartDaemon : String(e));
       } finally {
         if (mine === seq) setBusy(false);
       }
@@ -90,15 +91,15 @@ export function AgentSearch() {
   };
 
   return (
-    <Modal label="Pesquisar conversas" onClose={() => setShowAgentSearch(false)} class="modal auto">
+    <Modal label={P.agentSearch.title} onClose={() => setShowAgentSearch(false)} class="modal auto">
       <Input
         class="m-title"
-        placeholder="Pesquisar nas conversas do Claude, Codex e Gemini…"
+        placeholder={P.agentSearch.placeholder}
         role="combobox"
         aria-expanded={hits().length > 0}
         aria-controls="search-list"
         aria-activedescendant={hits().length ? `search-hit-${sel()}` : undefined}
-        aria-label="Pesquisar nas conversas"
+        aria-label={P.agentSearch.label}
         value={q()}
         onKeyDown={onKey}
         onInput={(e) => {
@@ -107,7 +108,7 @@ export function AgentSearch() {
         }}
         ref={(el) => queueMicrotask(() => el.focus())}
       />
-      <div class="auto-list" id="search-list" role="listbox" aria-label="Conversas encontradas">
+      <div class="auto-list" id="search-list" role="listbox" aria-label={P.agentSearch.found}>
         <For each={hits()}>
           {(h, i) => (
             <div
@@ -119,7 +120,7 @@ export function AgentSearch() {
               classList={{ off: !target(h), on: i() === sel() }}
               onMouseEnter={() => setSel(i())}
               onClick={() => void open(h)}
-              title={target(h) ? "Retomar esta conversa" : folder(h) || h.cwd}
+              title={target(h) ? P.agentSearch.resume : folder(h) || h.cwd}
             >
               <div class="auto-main">
                 <div class="auto-name">
@@ -132,10 +133,10 @@ export function AgentSearch() {
         </For>
       </div>
       <div class="auto-note" role="status">
-        <Show when={busy()}>A pesquisar…</Show>
-        <Show when={!busy() && done() && hits().length === 0}>Nada encontrado.</Show>
+        <Show when={busy()}>{P.agentSearch.searching}</Show>
+        <Show when={!busy() && done() && hits().length === 0}>{P.agentSearch.none}</Show>
       </div>
-      <div class="auto-note">Só as conversas do Claude e do Gemini em worktrees conhecidos podem ser retomadas aqui; as restantes aparecem a cinzento.</div>
+      <div class="auto-note">{P.agentSearch.note}</div>
     </Modal>
   );
 }
