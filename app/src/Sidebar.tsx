@@ -394,7 +394,18 @@ export function Sidebar() {
     const ok = await ask(`Tirar "${name}" da lista?
 
 Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "warning", okLabel: "Tirar", cancelLabel: "Cancelar" });
-    if (ok) await run(() => removeProject(id));
+    if (ok) {
+      let gone = true;
+      await run(async () => {
+        try {
+          await removeProject(id);
+        } catch (e) {
+          gone = false;
+          throw e;
+        }
+      });
+      if (gone) showNotice(S.projectRemoved(name));
+    }
   };
 
   const projectMenu = (p: { id: string; name: string; path: string; setup?: string | null }): MenuItem[] => [
@@ -441,15 +452,21 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
     removing.add(norm(path));
     showNotice(`A remover "${name}"…`);
     try {
+      let gone = true;
       await run(async () => {
-        for (const s of sessionsOf(path)) {
-          if (s.running) await killSession(s.id);
-          await removeSession(s.id);
+        try {
+          for (const s of sessionsOf(path)) {
+            if (s.running) await killSession(s.id);
+            await removeSession(s.id);
+          }
+          await removeWorktree(projectId, path);
+        } catch (e) {
+          gone = false;
+          throw e;
         }
-        await removeWorktree(projectId, path);
         if (norm(selectedWorktree()) === norm(path)) selectWorktree(null);
       });
-      showNotice(`"${name}" removido.`);
+      if (gone) showNotice(S.worktreeRemoved(name));
     } finally {
       removing.delete(norm(path));
     }
