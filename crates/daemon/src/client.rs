@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 #[cfg(windows)]
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
+use std::process::{Child, ChildStdin, ChildStdout};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 pub enum Frame {
@@ -21,6 +23,67 @@ enum Conn {
     File(File),
     #[cfg(unix)]
     Unix(std::os::unix::net::UnixStream),
+    /// A child process (`ssh`, `wsl.exe`) running `axelstra bridge` on the other machine; its stdin/stdout carry the frames.
+    Child(ChildConn),
+}
+
+fn recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The child process behind a `Conn::Child`, shared by every clone of the connection and by the watchdog.
+struct ChildShared {
+    child: Mutex<Child>,
+    /// the last bytes the child wrote to stderr (ssh and wsl.exe explain their failures there)
+    stderr: Arc<Mutex<Vec<u8>>>,
+    label: String,
+}
+
+/// Longest stderr tail kept from the child.
+const STDERR_KEEP: usize = 4096;
+
+impl ChildShared {
+    fn kill(&self) {
+        let _ = recover(&self.child).kill();
+    }
+
+    /// What the child said and how it ended, for an error message; `None` when it said nothing and still runs.
+    fn diagnostics(&self) -> Option<String> {
+        let end = std::time::Instant::now() + Duration::from_millis(300);
+        let status = loop {
+            let st = recover(&self.child).try_wait().ok().flatten();
+            if st.is_some() || std::time::Instant::now() >= end {
+                break st;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        if status.is_some() {
+            // let the stderr reader take the last bytes
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let said = String::from_utf8_lossy(&recover(&self.stderr)).trim().to_string();
+        match (status, said.is_empty()) {
+            (Some(st), true) => Some(format!("{} ended ({st})", self.label)),
+            (Some(st), false) => Some(format!("{} ended ({st}) and said: {said}", self.label)),
+            (None, false) => Some(format!("{} said: {said}", self.label)),
+            (None, true) => None,
+        }
+    }
+}
+
+impl Drop for ChildShared {
+    fn drop(&mut self) {
+        let c = self.child.get_mut().unwrap_or_else(PoisonError::into_inner);
+        let _ = c.kill();
+        let _ = c.wait();
+    }
+}
+
+#[derive(Clone)]
+struct ChildConn {
+    rd: Arc<Mutex<ChildStdout>>,
+    wr: Arc<Mutex<ChildStdin>>,
+    shared: Arc<ChildShared>,
 }
 
 impl Conn {
@@ -30,6 +93,7 @@ impl Conn {
             Conn::File(f) => Conn::File(f.try_clone()?),
             #[cfg(unix)]
             Conn::Unix(s) => Conn::Unix(s.try_clone()?),
+            Conn::Child(c) => Conn::Child(c.clone()),
         })
     }
 }
@@ -41,6 +105,7 @@ impl Read for Conn {
             Conn::File(f) => f.read(buf),
             #[cfg(unix)]
             Conn::Unix(s) => s.read(buf),
+            Conn::Child(c) => recover(&c.rd).read(buf),
         }
     }
 }
@@ -52,6 +117,7 @@ impl Write for Conn {
             Conn::File(f) => f.write(buf),
             #[cfg(unix)]
             Conn::Unix(s) => s.write(buf),
+            Conn::Child(c) => recover(&c.wr).write(buf),
         }
     }
     fn flush(&mut self) -> std::io::Result<()> {
@@ -60,6 +126,7 @@ impl Write for Conn {
             Conn::File(f) => f.flush(),
             #[cfg(unix)]
             Conn::Unix(s) => s.flush(),
+            Conn::Child(c) => recover(&c.wr).flush(),
         }
     }
 }
@@ -121,17 +188,23 @@ fn is_timeout(e: &anyhow::Error) -> bool {
         .any(|io| matches!(io.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) || io.raw_os_error() == Some(995))
 }
 
-/// One watchdog thread for every deadline of the process: calls register `(handle, time)` and the thread cancels the
-/// pending I/O of the ones that run out. (It used to be one OS thread per call.)
-#[cfg(windows)]
+/// One watchdog thread for every deadline of the process: calls register `(what to do, time)` and the thread acts on the
+/// ones that run out: it cancels the pending I/O of a pipe handle (Windows) or kills the child process behind a bridge.
+/// (It used to be one OS thread per call.)
 mod watchdog {
-    use std::sync::{Condvar, Mutex, Once};
+    use std::sync::{Arc, Condvar, Mutex, Once};
     use std::time::{Duration, Instant};
+
+    enum Action {
+        #[cfg(windows)]
+        Cancel(isize),
+        Kill(Arc<super::ChildShared>),
+    }
 
     struct Entry {
         id: u64,
         at: Instant,
-        handle: isize,
+        action: Action,
     }
 
     struct State {
@@ -147,20 +220,29 @@ mod watchdog {
         STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    #[cfg(windows)]
     pub fn arm(handle: isize, limit: Duration) -> u64 {
+        push(Action::Cancel(handle), limit)
+    }
+
+    pub fn arm_kill(child: Arc<super::ChildShared>, limit: Duration) -> u64 {
+        push(Action::Kill(child), limit)
+    }
+
+    fn push(action: Action, limit: Duration) -> u64 {
         START.call_once(|| {
             std::thread::Builder::new().name("client-watchdog".into()).spawn(run).expect("watchdog thread");
         });
         let mut st = lock();
         st.next += 1;
         let id = st.next;
-        st.entries.push(Entry { id, at: Instant::now() + limit, handle });
+        st.entries.push(Entry { id, at: Instant::now() + limit, action });
         drop(st);
         WAKE.notify_all();
         id
     }
 
-    /// Returns true when the deadline had already fired (the I/O was cancelled).
+    /// Returns true when the deadline had already fired (the I/O was cancelled, the child killed).
     pub fn disarm(id: u64) -> bool {
         let mut st = lock();
         let before = st.entries.len();
@@ -172,11 +254,17 @@ mod watchdog {
         let mut st = lock();
         loop {
             let now = Instant::now();
-            // cancelling happens under the lock, so `disarm` cannot return while a cancel is about to land on a later
+            // acting happens under the lock, so `disarm` cannot return while a cancel is about to land on a later
             // call's I/O on the same handle
             st.entries.retain(|e| {
                 if e.at <= now {
-                    unsafe { windows_sys::Win32::System::IO::CancelIoEx(e.handle as _, std::ptr::null()) };
+                    match &e.action {
+                        #[cfg(windows)]
+                        Action::Cancel(handle) => {
+                            unsafe { windows_sys::Win32::System::IO::CancelIoEx(*handle as _, std::ptr::null()) };
+                        }
+                        Action::Kill(child) => child.kill(),
+                    }
                     false
                 } else {
                     true
@@ -195,39 +283,47 @@ mod watchdog {
 }
 
 /// Bounds the blocking I/O on one connection handle until `finish`.
-struct Deadline {
+enum Deadline {
     #[cfg(windows)]
-    id: u64,
+    Cancel(u64),
     #[cfg(unix)]
-    sock: std::os::unix::net::UnixStream,
+    Sock(std::os::unix::net::UnixStream),
+    /// a bridge child: when the deadline runs out the child is killed, which ends the pending read or write
+    Kill(u64),
 }
 
-#[cfg(windows)]
 impl Deadline {
     fn start(conn: &Conn, limit: Duration) -> std::io::Result<Deadline> {
-        use std::os::windows::io::AsRawHandle;
-        let Conn::File(f) = conn;
-        Ok(Deadline { id: watchdog::arm(f.as_raw_handle() as isize, limit) })
+        Ok(match conn {
+            #[cfg(windows)]
+            Conn::File(f) => {
+                use std::os::windows::io::AsRawHandle;
+                Deadline::Cancel(watchdog::arm(f.as_raw_handle() as isize, limit))
+            }
+            #[cfg(unix)]
+            Conn::Unix(s) => {
+                let sock = s.try_clone()?;
+                sock.set_read_timeout(Some(limit))?;
+                sock.set_write_timeout(Some(limit))?;
+                Deadline::Sock(sock)
+            }
+            Conn::Child(c) => Deadline::Kill(watchdog::arm_kill(c.shared.clone(), limit)),
+        })
     }
 
-    fn finish(self) {
-        watchdog::disarm(self.id);
-    }
-}
-
-#[cfg(unix)]
-impl Deadline {
-    fn start(conn: &Conn, limit: Duration) -> std::io::Result<Deadline> {
-        let Conn::Unix(s) = conn;
-        let sock = s.try_clone()?;
-        sock.set_read_timeout(Some(limit))?;
-        sock.set_write_timeout(Some(limit))?;
-        Ok(Deadline { sock })
-    }
-
-    fn finish(self) {
-        let _ = self.sock.set_read_timeout(None);
-        let _ = self.sock.set_write_timeout(None);
+    /// Ends the bound; true when it had already fired.
+    fn finish(self) -> bool {
+        match self {
+            #[cfg(windows)]
+            Deadline::Cancel(id) => watchdog::disarm(id),
+            #[cfg(unix)]
+            Deadline::Sock(sock) => {
+                let _ = sock.set_read_timeout(None);
+                let _ = sock.set_write_timeout(None);
+                false
+            }
+            Deadline::Kill(id) => watchdog::disarm(id),
+        }
     }
 }
 
@@ -247,6 +343,8 @@ pub struct Client {
     pub build: String,
     /// `SECURITY_MIN` of the daemon (0 for a daemon from before it existed)
     pub security: u64,
+    /// the whole `hello` result, for the bridge to hand on to its own client
+    hello: Value,
 }
 
 /// How long one write to the daemon may block (a daemon that stopped reading with a full pipe).
@@ -295,6 +393,75 @@ fn open(path: &str) -> Result<Conn> {
     Ok(Conn::Unix(s))
 }
 
+/// A read that never leaves a blocking `ReadFile` pending on a pipe file. On Windows a synchronous handle runs one
+/// operation at a time: a pending read keeps a write on the (duplicated) handle waiting, so a relay that reads in one
+/// thread and writes in another would stall on the first request. This waits for data with `PeekNamedPipe` instead.
+#[cfg(windows)]
+struct PeekRead(Conn);
+
+#[cfg(windows)]
+impl Read for PeekRead {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+        let Conn::File(f) = &self.0 else { return self.0.read(buf) };
+        let mut nap = Duration::from_millis(1);
+        loop {
+            let mut avail = 0u32;
+            let ok = unsafe {
+                PeekNamedPipe(f.as_raw_handle() as _, std::ptr::null_mut(), 0, std::ptr::null_mut(), &mut avail, std::ptr::null_mut())
+            };
+            if ok == 0 {
+                // broken pipe: the daemon closed its end, which reads as end of stream
+                return Ok(0);
+            }
+            if avail > 0 {
+                let n = buf.len().min(avail as usize);
+                return self.0.read(&mut buf[..n]);
+            }
+            std::thread::sleep(nap);
+            nap = (nap * 2).min(Duration::from_millis(10));
+        }
+    }
+}
+
+fn spawn_child(program: &str, args: &[String], env: &[(String, String)], label: &str) -> Result<ChildConn> {
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new(program);
+    cmd.args(args).envs(env.iter().map(|(k, v)| (k, v))).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW: the app has no console, ssh/wsl must not flash one
+        cmd.creation_flags(0x0800_0000);
+    }
+    let mut child = cmd.spawn().with_context(|| format!("could not start `{program}` for {label}"))?;
+    let (stdin, stdout, stderr) = (child.stdin.take(), child.stdout.take(), child.stderr.take());
+    let (Some(stdin), Some(stdout), Some(mut stderr)) = (stdin, stdout, stderr) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        bail!("could not attach to the pipes of `{program}`");
+    };
+    let said = Arc::new(Mutex::new(Vec::new()));
+    let tail = said.clone();
+    std::thread::Builder::new().name("remote-stderr".into()).spawn(move || {
+        let mut buf = [0u8; 1024];
+        while let Ok(n) = stderr.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            let mut t = recover(&tail);
+            t.extend_from_slice(&buf[..n]);
+            if t.len() > STDERR_KEEP {
+                let cut = t.len() - STDERR_KEEP;
+                t.drain(..cut);
+            }
+        }
+    })?;
+    let shared = Arc::new(ChildShared { child: Mutex::new(child), stderr: said, label: label.to_string() });
+    Ok(ChildConn { rd: Arc::new(Mutex::new(stdout)), wr: Arc::new(Mutex::new(stdin)), shared })
+}
+
 impl Client {
     pub fn connect(pipe: &str, token: &str) -> Result<Client> {
         Self::connect_as(pipe, token, None)
@@ -328,13 +495,101 @@ impl Client {
             broken: false,
             build: String::new(),
             security: 0,
+            hello: Value::Null,
         };
         let hello = c.call("hello", json!({"token": token, "client": client, "agent_token": agent_token}))?;
+        c.adopt_hello(hello);
+        Ok(c)
+    }
+
+    fn adopt_hello(&mut self, hello: Value) {
+        let c = self;
         c.proto = hello["proto"].as_u64().unwrap_or(1);
         c.instance = hello["instance"].as_u64().unwrap_or(0);
         c.build = hello["build"].as_str().unwrap_or_default().to_string();
         c.security = hello["security"].as_u64().unwrap_or(0);
+        c.hello = hello;
+    }
+
+    /// What `axelstra bridge` connects with: the user's CLI on this machine, never presenting an agent credential
+    /// (`AXELSTRA_AGENT_TOKEN` is not even read). The role then comes from the bridge process alone.
+    pub fn connect_bridge(pipe: &str, token: &str) -> Result<Client> {
+        Self::connect_with(pipe, token, Some("cli"), None)
+    }
+
+    /// The daemon on another machine, through `ssh` or `wsl.exe` running `axelstra bridge` there. The whole connect
+    /// (the child starting, the bridge announcing itself, `hello`) must be done within `connect_timeout`, else the child
+    /// is killed. What the child wrote to stderr goes into the errors; the child is killed when the client is dropped.
+    pub fn connect_remote(spec: &crate::remote::RemoteSpec, connect_timeout: Duration) -> Result<Client> {
+        let (program, args, env) = spec.command();
+        let label = spec.to_string();
+        let conn = spawn_child(&program, &args, &env, &label)?;
+        let mut c = Client {
+            rd: Conn::Child(conn.clone()),
+            wr: Conn::Child(conn),
+            next: 0,
+            proto: 0,
+            instance: 0,
+            timeout: Some(connect_timeout),
+            broken: false,
+            build: String::new(),
+            security: 0,
+            hello: Value::Null,
+        };
+        let started = std::time::Instant::now();
+        let deadline = Deadline::start(&c.rd, connect_timeout).ok();
+        let banner = crate::remote::scan_banner(&mut c.rd);
+        let fired = deadline.map(Deadline::finish).unwrap_or(false);
+        if let Err(e) = banner {
+            let e = if fired {
+                anyhow::anyhow!("no answer within {connect_timeout:?} (is `axelstra` installed there, and its daemon running?)")
+            } else {
+                e
+            };
+            return Err(c.explain(e.context(format!("could not reach {label}"))));
+        }
+        // what is left of the budget bounds `hello` (the bridge already did the daemon's)
+        c.timeout = Some(connect_timeout.saturating_sub(started.elapsed()).max(Duration::from_secs(1)));
+        let hello = c.call("hello", json!({"client": "cli"})).map_err(|e| e.context(format!("could not reach {label}")))?;
+        c.adopt_hello(hello);
+        c.timeout = None;
         Ok(c)
+    }
+
+    /// Pid of the `ssh`/`wsl.exe` child of a remote connection.
+    pub fn child_id(&self) -> Option<u32> {
+        match &self.rd {
+            Conn::Child(c) => Some(recover(&c.shared.child).id()),
+            _ => None,
+        }
+    }
+
+    /// The `hello` result the daemon gave (for the bridge, which answers its own client's `hello` with it).
+    pub fn hello_result(&self) -> &Value {
+        &self.hello
+    }
+
+    /// Splits the connection into its two directions, for the bridge to copy bytes through.
+    pub fn into_streams(self) -> (Box<dyn Read + Send>, Box<dyn Write + Send>) {
+        #[cfg(windows)]
+        let rd = PeekRead(self.rd);
+        #[cfg(not(windows))]
+        let rd = self.rd;
+        (Box::new(rd), Box::new(self.wr))
+    }
+
+    /// Adds what a remote child said (stderr) and how it ended to an error that is not the daemon's own answer.
+    fn explain(&self, e: anyhow::Error) -> anyhow::Error {
+        if e.downcast_ref::<Remote>().is_some() {
+            return e;
+        }
+        match &self.rd {
+            Conn::Child(c) => match c.shared.diagnostics() {
+                Some(d) => e.context(d),
+                None => e,
+            },
+            _ => e,
+        }
     }
 
     /// Independent handle for a second thread (e.g. one reads while one writes).
@@ -349,6 +604,7 @@ impl Client {
             broken: self.broken,
             build: self.build.clone(),
             security: self.security,
+            hello: self.hello.clone(),
         })
     }
 
@@ -361,19 +617,18 @@ impl Client {
         self.next += 1;
         let id = self.next;
         let req = json!({"id": id, "method": method, "params": params});
-        self.write_bounded(&encode(JSON, req.to_string().as_bytes())).map_err(|e| anyhow::Error::new(NotSent(e)))?;
+        self.write_bounded(&encode(JSON, req.to_string().as_bytes())).map_err(|e| self.explain(anyhow::Error::new(NotSent(e))))?;
         let limit = self.timeout.unwrap_or_else(|| default_timeout(method));
         let deadline = Deadline::start(&self.rd, limit).ok();
         let res = self.reply(method, id);
-        if let Some(d) = deadline {
-            d.finish();
-        }
+        let fired = deadline.map(Deadline::finish).unwrap_or(false);
         match res {
-            Err(e) if is_timeout(&e) => {
+            Err(e) if fired || is_timeout(&e) => {
                 self.broken = true;
                 let msg = format!("{method}: the daemon did not answer within {limit:?} (it may be hung); reconnect or restart it");
-                Err(anyhow::Error::new(CallTimeout(msg)))
+                Err(self.explain(anyhow::Error::new(CallTimeout(msg))))
             }
+            Err(e) => Err(self.explain(e)),
             r => r,
         }
     }
@@ -382,9 +637,10 @@ impl Client {
     /// the connection is not used again.
     fn write_bounded(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         let deadline = Deadline::start(&self.wr, WRITE_LIMIT).ok();
-        let r = self.wr.write_all(bytes);
-        if let Some(d) = deadline {
-            d.finish();
+        let mut r = self.wr.write_all(bytes);
+        let fired = deadline.map(Deadline::finish).unwrap_or(false);
+        if fired && r.is_err() {
+            r = Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "the write to the daemon did not finish in time"));
         }
         if r.is_err() {
             self.broken = true;
