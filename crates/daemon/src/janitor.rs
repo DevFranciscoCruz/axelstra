@@ -150,4 +150,54 @@ mod tests {
         assert_eq!(merged_reason(&dir, "ax/local", "main").as_deref(), Some("already in local main"));
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn sweep_removes_only_merged_idle_agent_worktrees() {
+        let root = std::env::temp_dir().join(format!("axl-sweep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let repo = root.join("proj");
+        std::fs::create_dir_all(&repo).unwrap();
+        let g = |dir: &Path, args: &[&str]| assert!(git::run(dir, args).unwrap().ok, "git {args:?}");
+        let commit = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"];
+        g(&repo, &["init", "-q", "-b", "main"]);
+        g(&repo, &commit);
+        let store = root.join("projects.json");
+        let p = projects::add(&store, &repo.to_string_lossy()).unwrap();
+        // done: committed on its branch, then merged into main
+        let done = projects::worktree_create(&p, "done").unwrap();
+        g(Path::new(&done.path), &commit);
+        g(&repo, &["merge", "-q", "--ff-only", "ax/done"]);
+        // busy: merged too, but a session works in it
+        let busy = projects::worktree_create(&p, "busy").unwrap();
+        g(Path::new(&busy.path), &commit);
+        g(&repo, &["merge", "-q", "--ff-only", "ax/busy"]);
+        // dirty: merged, with an uncommitted file
+        let dirty = projects::worktree_create(&p, "dirty").unwrap();
+        g(Path::new(&dirty.path), &commit);
+        g(&repo, &["merge", "-q", "--ff-only", "ax/dirty"]);
+        std::fs::write(Path::new(&dirty.path).join("wip.txt"), "w").unwrap();
+        // open: unmerged work
+        let open = projects::worktree_create(&p, "open").unwrap();
+        g(Path::new(&open.path), &commit);
+        // fresh: nobody committed anything
+        let fresh = projects::worktree_create(&p, "fresh").unwrap();
+
+        let is_busy = |path: &str| axelstra_core::paths::same(path, &busy.path);
+        // a dry run reports and removes nothing
+        let dry = sweep(&store, &is_busy, true);
+        assert_eq!(dry.len(), 1, "{dry:?}");
+        assert_eq!(dry[0]["branch"], "ax/done");
+        assert_eq!(dry[0]["dry_run"], true);
+        assert_eq!(dry[0]["removed"], false);
+        assert!(Path::new(&done.path).exists());
+
+        let real = sweep(&store, &is_busy, false);
+        assert_eq!(real.len(), 1, "{real:?}");
+        assert_eq!(real[0]["removed"], true);
+        assert!(!Path::new(&done.path).exists());
+        for kept in [&busy, &dirty, &open, &fresh] {
+            assert!(Path::new(&kept.path).exists(), "{} must stay", kept.path);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
