@@ -95,3 +95,13 @@ describe("generate button state", () => {
     expect(canCreatePr("t", false)).toBe(true);
   });
 });
+
+describe("problemText with a message code", () => {
+  it("shows the daemon's own detail in the UI language and gh's words as they are", () => {
+    const coded = { problem: "error" as const, detail: "gh took too long", detail_code: "gh.timeout", detail_params: { cmd: "pr view", secs: "15" } };
+    expect(problemText(coded).text).toContain("pr view");
+    expect(problemText(coded).text).not.toBe("gh took too long");
+    expect(problemText({ problem: "error", detail: "HTTP 502" }).text).toBe("HTTP 502");
+    expect(problemText({ problem: "error", detail: "x", detail_code: "gh.unknown_to_this_app" }).text).toBe("x");
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DockerContainer, DockerImage } from "./api";
-import { ago, filterContainers, groupByProject, imageUsers, isSecretKey, joinPath, parseCreated, portChips, searchLog, stateInfo } from "./dockerLogic";
+import { ago, dockerError, filterContainers, groupByProject, imageUsers, isSecretKey, joinPath, parseCreated, portChips, searchLog, stateInfo } from "./dockerLogic";
 
 const c = (o: Partial<DockerContainer>): DockerContainer => ({
   id: "1", name: "n", image: "redis:8", state: "running", status: "Up", ports: [], created: "", project: "", working_dir: "", service: "", volumes: [], networks: [], ...o,
@@ -93,5 +93,15 @@ describe("F11 guards", () => {
     const m = new Map([["c1", 1], ["c2", 2], ["c3", 3]]);
     pruneShells(m, [2]);
     expect([...m]).toEqual([["c2", 2]]);
+  });
+});
+
+describe("dockerError", () => {
+  it("is the translated text for a coded error, the plain text otherwise, empty when there is none", () => {
+    expect(dockerError({ error: "docker is not installed", error_code: "docker.not_installed" })).toContain("Docker");
+    expect(dockerError({ error: "docker is not installed", error_code: "docker.not_installed" })).not.toBe("docker is not installed");
+    expect(dockerError({ error: "boom" })).toBe("boom");
+    expect(dockerError({ error: "" })).toBe("");
+    expect(dockerError(null)).toBe("");
   });
 });

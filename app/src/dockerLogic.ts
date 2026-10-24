@@ -1,4 +1,5 @@
 import type { DockerContainer, DockerImage, DockerPort } from "./api";
+import { coded } from "./msg";
 import { plural } from "./strings";
 import { P } from "./strings.panels";
 
@@ -143,3 +144,8 @@ export const pruneShells = (shells: Map<string, number>, liveIds: Iterable<numbe
   const live = new Set(liveIds);
   for (const [cid, sid] of shells) if (!live.has(sid)) shells.delete(cid);
 };
+
+/** The engine problem `docker.status` reports, in the UI language when the daemon sent its message code. */
+export const dockerError = (
+  s: { error?: string; error_code?: string; error_params?: Record<string, string> } | null | undefined,
+): string => (s?.error ? coded(s.error_code, s.error_params, s.error) : "");

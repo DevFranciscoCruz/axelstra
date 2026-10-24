@@ -1,8 +1,9 @@
 //! A small Docker Desktop on top of the `docker` CLI. Every call is a fixed argument list (never a shell), has a timeout,
 //! and every id, name and image reference is checked before it reaches the command line.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use axelstra_core::pty::Spawn;
+use axelstra_core::{coded, msg};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::Read;
@@ -22,6 +23,11 @@ pub struct Status {
     pub running: bool,
     pub version: String,
     pub error: String,
+    /// message code and params of `error` (the UI shows it in its language); empty when there is no error
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub error_code: String,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub error_params: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Serialize, Debug, PartialEq, Clone)]
@@ -133,7 +139,12 @@ pub fn valid_reference(s: &str) -> bool {
 
 fn name_arg<'a>(kind: &str, s: &'a str) -> Result<&'a str> {
     if !valid_name(s) {
-        bail!("invalid {kind} {s:?}: only letters, digits, _ . - are allowed");
+        return Err(coded!(
+            "docker.bad_name",
+            "invalid {kind} {name}: only letters, digits, _ . - are allowed",
+            kind = kind,
+            name = format!("{s:?}")
+        ));
     }
     Ok(s)
 }
@@ -150,11 +161,11 @@ const MAX_OUT: usize = 8 << 20;
 /// grandchild holding the pipe cannot hang the caller.
 fn docker_capped(cmd: &mut Command, limit: Duration, what: &str) -> Result<axelstra_core::exec::Captured> {
     let o = axelstra_core::exec::run_capped(cmd, limit, MAX_OUT).map_err(|e| match e.downcast_ref::<std::io::Error>() {
-        Some(io) if io.kind() == std::io::ErrorKind::NotFound => anyhow::anyhow!("docker is not installed"),
-        _ => e.context("could not start docker"),
+        Some(io) if io.kind() == std::io::ErrorKind::NotFound => coded!("docker.not_installed", "docker is not installed"),
+        _ => coded!("docker.spawn", "could not start docker: {detail}", detail = format!("{e:#}")),
     })?;
     if o.timed_out {
-        bail!("docker {what} timed out after {}s", limit.as_secs());
+        return Err(coded!("docker.timeout", "docker {what} timed out after {secs}s", what = what, secs = limit.as_secs()));
     }
     Ok(o)
 }
@@ -164,21 +175,55 @@ fn run_full(args: &[&str], limit: Duration) -> Result<(String, String)> {
     let what = args.first().copied().unwrap_or("");
     let o = docker_capped(Command::new("docker").args(args), limit, what)?;
     if !o.success() {
-        let msg = o.stderr_lossy();
-        let msg = msg.trim();
-        bail!("{}", if msg.is_empty() { format!("docker {what} failed") } else { msg.to_string() });
+        return Err(failure(what, &o.stderr_lossy()));
     }
     Ok((o.stdout_lossy(), o.stderr_lossy()))
+}
+
+/// The error for a docker command that exited non-zero: docker's own stderr is the English text; the usual causes get
+/// a code of their own so the UI can say what to do.
+fn failure(what: &str, stderr: &str) -> anyhow::Error {
+    let detail = stderr.trim();
+    if detail.is_empty() {
+        return coded!("docker.failed_silent", "docker {what} failed", what = what);
+    }
+    let m = detail.to_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|n| m.contains(n));
+    if has(&["cannot connect to the docker daemon", "is the docker daemon running", "error during connect", "docker_engine"]) {
+        coded!("docker.not_running", "{detail}", what = what, detail = detail)
+    } else if has(&["port is already allocated", "address already in use"]) {
+        coded!("docker.port_busy", "{detail}", what = what, detail = detail)
+    } else if has(&["is being used", "in use", "is using its volume", "conflict"]) {
+        coded!("docker.in_use", "{detail}", what = what, detail = detail)
+    } else if has(&["no such container", "no such image", "no such volume", "no such network", "no such object", "not found"]) {
+        coded!("docker.not_found", "{detail}", what = what, detail = detail)
+    } else {
+        coded!("docker.failed", "{detail}", what = what, detail = detail)
+    }
 }
 
 /// Not installed and engine not running are different problems with different fixes.
 pub fn status() -> Status {
     match run(&["version", "--format", "{{.Server.Version}}"], QUERY) {
-        Ok(v) => Status { installed: true, running: true, version: v.trim().to_string(), error: String::new() },
+        Ok(v) => Status {
+            installed: true,
+            running: true,
+            version: v.trim().to_string(),
+            error: String::new(),
+            error_code: String::new(),
+            error_params: Default::default(),
+        },
         Err(e) => {
-            let msg = e.to_string();
-            let installed = msg != "docker is not installed";
-            Status { installed, running: false, version: String::new(), error: msg }
+            let c = msg::find(&e);
+            let installed = c.map(|c| c.code.as_str()) != Some("docker.not_installed");
+            Status {
+                installed,
+                running: false,
+                version: String::new(),
+                error: e.to_string(),
+                error_code: c.map(|c| c.code.clone()).unwrap_or_default(),
+                error_params: c.map(|c| c.params.clone()).unwrap_or_default(),
+            }
         }
     }
 }
@@ -331,8 +376,8 @@ pub fn parse_networks(out: &str, containers: &[Container]) -> Vec<Network> {
 
 /// The parts of `docker inspect` the detail pane shows.
 pub fn parse_inspect(out: &str) -> Result<Inspect> {
-    let v: Value = serde_json::from_str(out).context("docker inspect returned invalid JSON")?;
-    let c = v.get(0).context("docker inspect returned nothing")?;
+    let v: Value = serde_json::from_str(out).map_err(|_| coded!("docker.inspect_bad_json", "docker inspect returned invalid JSON"))?;
+    let c = v.get(0).ok_or_else(|| coded!("docker.inspect_empty", "docker inspect returned nothing"))?;
     fn words(a: &Value) -> Vec<&str> {
         a.as_array().map(|l| l.iter().filter_map(Value::as_str).collect()).unwrap_or_default()
     }
@@ -389,7 +434,7 @@ pub fn valid_container_path(p: &str) -> bool {
 
 fn path_arg(p: &str) -> Result<&str> {
     if !valid_container_path(p) {
-        bail!("invalid path {p:?}: it must be absolute");
+        return Err(coded!("docker.bad_path", "invalid path {path}: it must be absolute", path = format!("{p:?}")));
     }
     Ok(p)
 }
@@ -425,14 +470,14 @@ pub fn fs_read(id: &str, path: &str) -> Result<String> {
     std::fs::create_dir_all(&dir)?;
     let result = (|| {
         run(&["cp", &src, &dir.to_string_lossy()], QUERY)?;
-        let file = std::fs::read_dir(&dir)?.flatten().next().context("nothing was copied")?.path();
+        let file = std::fs::read_dir(&dir)?.flatten().next().ok_or_else(|| coded!("docker.nothing_copied", "nothing was copied"))?.path();
         if !file.is_file() {
-            bail!("that is a folder, not a file");
+            return Err(coded!("docker.is_folder", "that is a folder, not a file"));
         }
         let mut bytes = Vec::new();
         std::fs::File::open(&file)?.take(READ_MAX).read_to_end(&mut bytes)?;
         if bytes.contains(&0) {
-            bail!("binary file, not shown");
+            return Err(coded!("docker.binary_file", "binary file, not shown"));
         }
         let truncated = std::fs::metadata(&file)?.len() > READ_MAX;
         Ok(format!("{}{}", String::from_utf8_lossy(&bytes), if truncated { "\n… (cut at 512 KB)" } else { "" }))
@@ -539,7 +584,7 @@ pub fn action(action: &str, target: &str, force: bool, volumes: bool, wt: Option
         }
         "image.remove" => {
             if !valid_reference(target) {
-                bail!("invalid image reference {target:?}");
+                return Err(coded!("docker.bad_reference", "invalid image reference {reference}", reference = format!("{target:?}")));
             }
             run(&if force { vec!["rmi", "-f", target] } else { vec!["rmi", target] }, ACTION)?
         }
@@ -549,8 +594,8 @@ pub fn action(action: &str, target: &str, force: bool, volumes: bool, wt: Option
         // anonymous volumes nobody uses; named ones are only removed one by one, on purpose
         "prune.volumes" => run(&["volume", "prune", "-f"], ACTION)?,
         "compose.up" | "compose.down" => {
-            let wt = wt.context("compose needs a worktree")?;
-            let file = compose_file(wt).context("this worktree has no compose file")?;
+            let wt = wt.ok_or_else(|| coded!("docker.compose_no_worktree", "compose needs a worktree"))?;
+            let file = compose_file(wt).ok_or_else(|| coded!("docker.compose_no_file", "this worktree has no compose file"))?;
             let project = compose_project(wt);
             let mut a = vec!["compose", "-p", project.as_str(), "-f", file];
             if action == "compose.up" {
@@ -572,20 +617,21 @@ pub fn action(action: &str, target: &str, force: bool, volumes: bool, wt: Option
                 Err(e) => (vec![e.to_string()], vec![]),
             };
             if action == "compose.up" && !refusals.is_empty() {
-                bail!(
+                return Err(coded!(
+                    "docker.compose_refused",
                     "refusing compose up:
-- {}",
-                    refusals.join(
+- {detail}",
+                    detail = refusals.join(
                         "
 - "
                     )
-                );
+                ));
             }
             // down only stops what exists, so a finding there is reported, not blocking
             warnings.extend(refusals);
             let o = compose(if action == "compose.up" { &["up", "-d"] } else { &["down"] }, ACTION * 5)?;
             if !o.success() {
-                bail!("{}", o.stderr_lossy().trim());
+                return Err(failure("compose", &o.stderr_lossy()));
             }
             // compose writes its progress to stderr
             let mut text = o.stderr_lossy();
@@ -602,7 +648,7 @@ pub fn action(action: &str, target: &str, force: bool, volumes: bool, wt: Option
             }
             text
         }
-        _ => bail!("unknown docker action {action}"),
+        _ => return Err(coded!("docker.unknown_action", "unknown docker action {action}", action = action)),
     };
     Ok(out.trim().to_string())
 }
@@ -918,5 +964,22 @@ mod tests {
         r.unwrap();
         println!("removed: {removed:?}");
         removed.unwrap();
+    }
+
+    #[test]
+    fn failures_and_bad_arguments_carry_message_codes() {
+        let code = |e: anyhow::Error| msg::find(&e).map(|c| c.code.clone()).unwrap_or_default();
+        assert_eq!(code(failure("ps", "")), "docker.failed_silent");
+        assert_eq!(code(failure("ps", "Cannot connect to the Docker daemon at unix:///var/run/docker.sock")), "docker.not_running");
+        assert_eq!(code(failure("rm", "Error response from daemon: No such container: x")), "docker.not_found");
+        assert_eq!(code(failure("rm", "conflict: unable to remove repository reference")), "docker.in_use");
+        assert_eq!(code(failure("run", "Bind for 0.0.0.0:80 failed: port is already allocated")), "docker.port_busy");
+        let e = failure("ps", "something else");
+        assert_eq!(e.to_string(), "something else", "the English text is docker's own words");
+        assert_eq!(msg::find(&e).unwrap().params["what"], "ps");
+        assert_eq!(code(name_arg("container", "a b").unwrap_err()), "docker.bad_name");
+        assert_eq!(code(path_arg("relative").unwrap_err()), "docker.bad_path");
+        assert_eq!(code(parse_inspect("[]").unwrap_err()), "docker.inspect_empty");
+        assert_eq!(code(parse_inspect("nope").unwrap_err()), "docker.inspect_bad_json");
     }
 }

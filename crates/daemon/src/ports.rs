@@ -1,7 +1,7 @@
 //! Dev servers a worktree's terminals are running: TCP ports in LISTEN state owned by the sessions'
 //! processes or anything they started.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use axelstra_core::procs;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -81,10 +81,10 @@ fn listening_table() -> Result<Vec<Port>> {
                     return Ok(v);
                 }
                 122 | 0xFFFF_FFFF => buf = vec![0u32; (size as usize).div_ceil(4) + 16], // ERROR_INSUFFICIENT_BUFFER
-                e => anyhow::bail!("GetExtendedTcpTable failed ({e})"),
+                e => return Err(axelstra_core::coded!("port.table_failed", "GetExtendedTcpTable failed ({code})", code = e)),
             }
         }
-        anyhow::bail!("GetExtendedTcpTable kept growing")
+        Err(axelstra_core::coded!("port.table_growing", "GetExtendedTcpTable kept growing"))
     }
     // MIB_TCPROW_OWNER_PID: state, local addr, local port, remote addr, remote port, pid
     let mut all = family(AF_INET as u32, 24, 8)?;
@@ -98,17 +98,21 @@ fn run_tool(cmd: &mut Command) -> Result<axelstra_core::exec::Captured> {
     axelstra_core::exec::run_capped(cmd, std::time::Duration::from_secs(10), 8 << 20)
 }
 
+fn tool_failed(tool: &str, e: &anyhow::Error) -> anyhow::Error {
+    axelstra_core::coded!("port.tool_failed", "could not run {tool}: {detail}", tool = tool, detail = format!("{e:#}"))
+}
+
 fn all_listening() -> Result<Vec<Port>> {
     if cfg!(windows) {
         #[cfg(windows)]
         if let Ok(v) = listening_table() {
             return Ok(v);
         }
-        let o = run_tool(Command::new("netstat").args(["-ano", "-p", "TCP"])).context("run netstat")?;
+        let o = run_tool(Command::new("netstat").args(["-ano", "-p", "TCP"])).map_err(|e| tool_failed("netstat", &e))?;
         Ok(parse_netstat(&o.stdout_lossy()))
     } else {
         // lsof exits 1 when nothing listens: not an error
-        let o = run_tool(Command::new("lsof").args(["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pn"])).context("run lsof")?;
+        let o = run_tool(Command::new("lsof").args(["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pn"])).map_err(|e| tool_failed("lsof", &e))?;
         Ok(parse_lsof(&o.stdout_lossy()))
     }
 }

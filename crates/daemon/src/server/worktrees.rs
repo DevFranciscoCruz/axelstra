@@ -198,8 +198,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let known = axelstra_core::git::worktree_list(std::path::Path::new(&pr.path))?;
             let gone = crate::projects::norm_path(path);
             match known.iter().find(|w| crate::projects::norm_path(&w.path) == gone) {
-                None => anyhow::bail!("not a worktree of this project"),
-                Some(w) if w.is_main => anyhow::bail!("cannot remove the main worktree"),
+                None => return Err(axelstra_core::coded!("worktree.not_found", "not a worktree of this project")),
+                Some(w) if w.is_main => return Err(axelstra_core::coded!("worktree.remove_main", "cannot remove the main worktree")),
                 _ => {}
             }
             // a live session keeps its cwd open, which on Windows makes the folder impossible to remove: kill and

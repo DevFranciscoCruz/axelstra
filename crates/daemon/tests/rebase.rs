@@ -92,13 +92,13 @@ fn worktree_rebase_over_the_daemon() {
     // a session still printing in the worktree: refused, nothing moved
     let before = Command::new("git").current_dir(w).args(["rev-parse", "HEAD"]).output().unwrap().stdout;
     let e = c.call("worktree.rebase", req()).unwrap_err().to_string();
-    assert!(e.contains("sessão ativa"), "{e}");
+    assert!(e.contains("session is active"), "{e}");
     c.call("session.remove", json!({"id": sid})).unwrap();
 
     // dirty (an untracked file counts): refused
     std::fs::write(w.join("new.txt"), "x").unwrap();
     let e = c.call("worktree.rebase", req()).unwrap_err().to_string();
-    assert!(e.contains("alterações"), "{e}");
+    assert!(e.contains("uncommitted changes"), "{e}");
     std::fs::remove_file(w.join("new.txt")).unwrap();
     assert_eq!(Command::new("git").current_dir(w).args(["rev-parse", "HEAD"]).output().unwrap().stdout, before);
 
