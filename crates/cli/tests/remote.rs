@@ -22,9 +22,12 @@ fn env() -> &'static Env {
         let root = std::env::temp_dir().join(format!("axelstra-bridge-{}", std::process::id()));
         let data = root.join("data");
         std::fs::create_dir_all(&data).unwrap();
-        std::env::set_var("LOCALAPPDATA", &data);
-        std::env::set_var("XDG_DATA_HOME", &data);
-        std::env::set_var("HOME", &data);
+        // not `data` itself: on Unix the default dir would then be the override and the serve guard refuses it
+        let home = root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("LOCALAPPDATA", &home);
+        std::env::set_var("XDG_DATA_HOME", &home);
+        std::env::set_var("HOME", &home);
         // AXELSTRA_DATA_DIR wins over the three above, so it must point at this throwaway dir too
         std::env::set_var("AXELSTRA_DATA_DIR", data.join("axelstra"));
         std::env::set_var("AXELSTRA_TEST_PIPE", format!("br{}", std::process::id()));
