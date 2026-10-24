@@ -284,4 +284,17 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(f.parent().unwrap());
     }
+
+    #[test]
+    fn a_status_line_in_the_settings_is_neither_replaced_nor_duplicated() {
+        let f = tmp("statusline");
+        let before = r#"{"statusLine":{"type":"command","command":"ccstatusline","padding":0},"model":"opus"}"#;
+        std::fs::write(&f, before).unwrap();
+        install_at(&f).unwrap();
+        install_at(&f).unwrap();
+        let v = read(&f);
+        assert_eq!(v["statusLine"], json!({"type":"command","command":"ccstatusline","padding":0}));
+        assert_eq!(std::fs::read_to_string(&f).unwrap().matches("statusLine").count(), 1);
+        let _ = std::fs::remove_dir_all(f.parent().unwrap());
+    }
 }
