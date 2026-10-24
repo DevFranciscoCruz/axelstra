@@ -9,7 +9,17 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..", "app", "src-tau
 const json = (f) => JSON.parse(readFileSync(join(root, f), "utf8"));
 const conf = json("tauri.conf.json");
 const caps = json("capabilities/default.json");
-const directives = (csp) => Object.fromEntries(csp.split(";").map((d) => d.trim()).filter(Boolean).map((d) => { const [k, ...v] = d.split(/\s+/); return [k, v]; }));
+const directives = (csp) =>
+  Object.fromEntries(
+    csp
+      .split(";")
+      .map((d) => d.trim())
+      .filter(Boolean)
+      .map((d) => {
+        const [k, ...v] = d.split(/\s+/);
+        return [k, v];
+      }),
+  );
 
 test("production CSP is locked down", () => {
   const d = directives(conf.app.security.csp);
