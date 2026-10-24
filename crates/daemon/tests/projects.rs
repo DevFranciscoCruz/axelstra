@@ -172,7 +172,13 @@ fn a_project_added_after_a_cached_list_shows_up_at_once() {
     let token = "p".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), common::store("plist"));
     std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap().block_on(server::serve_with_store(p, t, s)).unwrap();
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(server::serve_with_store(p, t, s))
+            .unwrap();
     });
     common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();

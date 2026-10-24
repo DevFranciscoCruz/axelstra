@@ -677,7 +677,10 @@ mod tests {
     fn gemini_needs_the_interactive_prompt_flag_the_others_do_not() {
         assert_eq!(prompt_flags("gemini", true), " --skip-trust -i");
         assert_eq!(prompt_flags("gemini", false), " -i");
-        assert_eq!((prompt_flags("claude", true), prompt_flags("codex", true), prompt_flags("other", true)), (String::new(), String::new(), String::new()));
+        assert_eq!(
+            (prompt_flags("claude", true), prompt_flags("codex", true), prompt_flags("other", true)),
+            (String::new(), String::new(), String::new())
+        );
     }
 
     #[test]

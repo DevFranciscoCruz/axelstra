@@ -145,8 +145,11 @@ pub const UNTRUSTED_MARK: &str = "axelstra-untrusted";
 /// Marks the worktree at `dir` as holding code the user did not write, so no agent is told to trust the folder.
 pub fn mark_untrusted(dir: &Path) -> Result<()> {
     let gd = must(dir, &["rev-parse", "--path-format=absolute", "--git-dir"])?;
-    std::fs::write(Path::new(&gd).join(UNTRUSTED_MARK), "pull request
-")?;
+    std::fs::write(
+        Path::new(&gd).join(UNTRUSTED_MARK),
+        "pull request
+",
+    )?;
     Ok(())
 }
 
@@ -161,7 +164,8 @@ pub fn folder_trusted(dir: &Path) -> bool {
 pub fn is_pr_code(dir: &Path) -> bool {
     let Ok(branch) = current_branch(dir) else { return true };
     let numbered = branch.strip_prefix("ax/pr-").is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
-    numbered || must(dir, &["rev-parse", "--path-format=absolute", "--git-dir"]).map_or(true, |gd| Path::new(&gd).join(UNTRUSTED_MARK).exists())
+    numbered
+        || must(dir, &["rev-parse", "--path-format=absolute", "--git-dir"]).map_or(true, |gd| Path::new(&gd).join(UNTRUSTED_MARK).exists())
 }
 
 /// `git worktree list` is asked many times a second by the UI and the daemon (every folder check starts a process):
@@ -606,7 +610,8 @@ mod long_path_tests {
         assert!(!wt.exists());
         // the parked folder is emptied by the background purge, also when it is deep
         purge_trash(&root);
-        let left = std::fs::read_dir(&root).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(".axelstra-trash-")).count();
+        let left =
+            std::fs::read_dir(&root).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(".axelstra-trash-")).count();
         assert_eq!(left, 0);
         assert!(!worktree_list(&repo).unwrap().iter().any(|w| w.branch.as_deref() == Some("ax/deep")));
         let _ = remove_tree(&root);

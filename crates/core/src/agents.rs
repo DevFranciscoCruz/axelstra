@@ -294,7 +294,10 @@ mod tests {
         assert_eq!(h("codex", true, false), s(&["codex", "exec", "--sandbox", "workspace-write", "P"]));
         assert_eq!(h("gemini", true, false), s(&["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-p", "P"]));
         // a folder that is not ours is never trusted for the user
-        assert_eq!(get("gemini").unwrap().headless_argv("P", true, false, false), s(&["gemini", "--approval-mode", "auto_edit", "-p", "P"]));
+        assert_eq!(
+            get("gemini").unwrap().headless_argv("P", true, false, false),
+            s(&["gemini", "--approval-mode", "auto_edit", "-p", "P"])
+        );
     }
 
     #[test]
@@ -306,7 +309,10 @@ mod tests {
                 "{safe}"
             );
         }
-        assert_eq!(get("claude").unwrap().headless_argv("P", false, true, true), s(&["claude", "--dangerously-skip-permissions", "-p", "P"]));
+        assert_eq!(
+            get("claude").unwrap().headless_argv("P", false, true, true),
+            s(&["claude", "--dangerously-skip-permissions", "-p", "P"])
+        );
         assert!(get("gemini").unwrap().headless_argv("P", false, true, true).contains(&"yolo".to_string()));
     }
 
