@@ -5,10 +5,11 @@ import { Icon } from "./Icon";
 import { For, Show, createResource, createSignal } from "solid-js";
 import { GhItem, ghList, worktreeFromPr } from "./api";
 import { RightTabs } from "./RightTabs";
+import { P } from "./strings.panels";
 import { findWorktree, refreshProjects, selectWorktree, selectedWorktree, setError, rightTab , showNotice } from "./store";
 
-const CHECK: Record<string, [string, string]> = { pass: ["check", "Checks a passar"], fail: ["x", "Checks a falhar"], pending: ["ellipsis", "Checks a correr"] };
-const REVIEW: Record<string, string> = { approved: "aprovado", changes: "alterações pedidas", review: "falta revisão" };
+const CHECK: Record<string, [string, string]> = { pass: ["check", P.pulls.checks.pass], fail: ["x", P.pulls.checks.fail], pending: ["ellipsis", P.pulls.checks.pending] };
+const REVIEW = P.pulls.review;
 
 /** Open pull requests and issues of the selected project, read through the GitHub CLI. */
 export function PullsPanel() {
@@ -37,7 +38,7 @@ export function PullsPanel() {
       const w = await worktreeFromPr(p, n);
       await refreshProjects();
       selectWorktree(w.path);
-      showNotice(`Worktree do PR #${n} criado.`);
+      showNotice(P.pulls.wtCreated(n));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -50,20 +51,20 @@ export function PullsPanel() {
       <RightTabs />
       <div class="rtools">
         <Button variant="icon" size="icon" class={kind() === "pr" ? "text-primary" : undefined} aria-pressed={kind() === "pr"} onClick={() => setKind("pr")}>
-          PRs
+          {P.pulls.prs}
         </Button>
         <Button variant="icon" size="icon" class={kind() === "issue" ? "text-primary" : undefined} aria-pressed={kind() === "issue"} onClick={() => setKind("issue")}>
-          Problemas
+          {P.pulls.issues}
         </Button>
         <span class="grow" />
-        <Button variant="icon" size="icon" title="Atualizar" aria-label="Atualizar" onClick={() => void refetch()}>
+        <Button variant="icon" size="icon" title={P.pulls.refresh} aria-label={P.pulls.refresh} onClick={() => void refetch()}>
           <Icon name="refresh" />
         </Button>
       </div>
       <div class="rlist">
         <Show when={!items.loading} fallback={<Loading onRetry={() => void refetch()} />}>
           <Show when={!items.error} fallback={<div class="placeholder">{String(items.error?.message ?? items.error)}</div>}>
-            <For each={items()} fallback={<div class="placeholder">Nada em aberto</div>}>
+            <For each={items()} fallback={<div class="placeholder">{P.pulls.nothing}</div>}>
               {(i) => (
                 <div class="pr">
                   <div class="pr-title">
@@ -80,7 +81,7 @@ export function PullsPanel() {
                   <div class="pr-meta">
                     <span>{i.author}</span>
                     <Show when={i.draft}>
-                      <Badge>rascunho</Badge>
+                      <Badge>{P.pulls.draft}</Badge>
                     </Show>
                     <Show when={i.review}>
                       <Badge>{REVIEW[i.review]}</Badge>
@@ -90,11 +91,11 @@ export function PullsPanel() {
                     </Show>
                     <span class="grow" />
                     <Show when={kind() === "pr"}>
-                      <Button variant="icon" size="icon" disabled={busy() === i.number} title="Abrir num worktree novo" onClick={() => void work(i.number)}>
-                        {busy() === i.number ? "…" : "Worktree"}
+                      <Button variant="icon" size="icon" disabled={busy() === i.number} title={P.pulls.openWtTip} onClick={() => void work(i.number)}>
+                        {busy() === i.number ? "…" : P.pulls.worktree}
                       </Button>
                     </Show>
-                    <Button variant="icon" size="icon" title="Abrir no navegador" aria-label="Abrir no navegador" onClick={() => void open(i.url)}>
+                    <Button variant="icon" size="icon" title={P.pulls.openBrowser} aria-label={P.pulls.openBrowser} onClick={() => void open(i.url)}>
                       <Icon name="external" />
                     </Button>
                   </div>

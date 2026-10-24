@@ -3,6 +3,7 @@ import { For, Show, createResource } from "solid-js";
 import { gitShow } from "./api";
 import { parseDiff } from "./DiffView";
 import { openCommit, selectedWorktree } from "./store";
+import { P } from "./strings.panels";
 
 type FileDiff = { path: string; text: string };
 
@@ -34,7 +35,7 @@ export function CommitView() {
       </div>
       <div class="diff-body">
         <Show when={!patch.loading} fallback={<Loading onRetry={() => void refetch()} />}>
-          <For each={files()} fallback={<div class="placeholder">Commit sem alterações de texto</div>}>
+          <For each={files()} fallback={<div class="placeholder">{P.commitView.noText}</div>}>
             {(f) => {
               const rows = parseDiff(f.text);
               return (
@@ -42,7 +43,7 @@ export function CommitView() {
                   <div class="cfile">{f.path}</div>
                   <Show
                     when={rows.length > 0}
-                    fallback={<div class="empty">Sem diferenças de texto (binário ou ficheiro vazio)</div>}
+                    fallback={<div class="empty">{P.commitView.noDiff}</div>}
                   >
                     <table>
                       <tbody>
