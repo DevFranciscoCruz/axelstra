@@ -1,5 +1,5 @@
 use crate::proto::*;
-use crate::store::{read_json, write_atomic, write_backed_up, LockRecover};
+use crate::store::{read_json, write_atomic, write_json, LockRecover};
 use anyhow::Result;
 use axelstra_core::pty::{Session, Spawn};
 use serde::Deserialize;
@@ -75,9 +75,7 @@ impl Registry {
         let mut ids: Vec<_> = specs.keys().copied().collect();
         ids.sort();
         v.extend(ids.iter().map(|i| specs[i].clone()));
-        if let Ok(text) = serde_json::to_string(&v) {
-            let _ = write_backed_up(&self.saved, text.as_bytes());
-        }
+        let _ = write_json(&self.saved, &v);
     }
 
     fn new(store: std::path::PathBuf, pipe: String, token: String) -> Registry {
@@ -225,7 +223,7 @@ fn new_agent_token() -> Option<String> {
 fn agent_forbidden(method: &str, p: &Value) -> bool {
     match method {
         "computer.enable" => p["on"].as_bool() == Some(true),
-        "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" => true,
+        "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" | "notices.take" => true,
         _ => false,
     }
 }
@@ -1338,7 +1336,7 @@ fn dispatch(
                 saved["auto_install"] = json!(b);
             }
             apply_ui_settings(&mut saved, p)?;
-            write_backed_up(&reg.saved.with_file_name("settings.json"), &serde_json::to_vec_pretty(&saved)?)?;
+            write_json(&reg.saved.with_file_name("settings.json"), &saved)?;
             Ok(json!({}))
         }
         "dispatch.meta" => {
@@ -1879,6 +1877,8 @@ fn dispatch(
         "hooks.status" => Ok(crate::hooks::status()?),
         "hooks.install" => tokio::task::block_in_place(crate::hooks::install),
         "ping" => Ok(hello_info()),
+        // what the daemon recovered or lost on its own (a state file moved aside, restored from a backup): shown once
+        "notices.take" => Ok(json!({"notices": crate::store::take_notices()})),
         // used by the app updater: the installer cannot replace a running axelstra.exe.
         // Sessions die with the daemon (Job Objects), so the UI warns before calling this.
         "daemon.shutdown" => {
@@ -1997,7 +1997,8 @@ mod registry_tests {
             .find(|p| p.file_name().unwrap().to_string_lossy().starts_with("sessions.json.bad."))
             .expect("corrupt file kept as .bad.<ts>");
         assert_eq!(std::fs::read_to_string(bad).unwrap(), "[{ broken");
-        assert_eq!(std::fs::read_to_string(dir.join("sessions.json")).unwrap(), "[]");
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("sessions.json")).unwrap()).unwrap();
+        assert_eq!(saved, json!({"v": 1, "data": []}));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
