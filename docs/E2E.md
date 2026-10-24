@@ -82,3 +82,12 @@ advisory: a red job does not fail CI or releases. Promote it to blocking once it
 - A Linux/macOS run. macOS has no WebDriver for WKWebView at all; Linux would need `tauri-driver` + xvfb.
 - The fake agent is not used by `e2e.mjs` yet (it runs a plain shell command); switch the session scenario to
   `tools/fake-agent.*` when a scenario needs agent behaviour (done, conflict, hang).
+
+## No window on the user's screen
+
+`visual.mjs` and `e2e.mjs` start the app with `AXELSTRA_TEST_HIDDEN=1`. The Tauri host (`show_main_window` in
+`app/src-tauri/src/main.rs`) then shows its window at (-32000, -32000), out of the taskbar and unfocusable, so nothing
+appears on screen and no focus is stolen, while WebView2 keeps rendering (`Page.captureScreenshot` over CDP works, never a
+screen grab). `e2e.mjs` asserts the window bounds are off-screen. Both scripts use a temp data dir, a test pipe and a
+private WebView2 profile, and kill the app's whole process tree in `finally`, also on failure. `smoke.mjs` runs only the
+daemon, no window.

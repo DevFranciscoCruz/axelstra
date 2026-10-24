@@ -1199,6 +1199,20 @@ fn update_apply(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>) -> R
     app.restart();
 }
 
+/// The window is created hidden (`visible: false` in tauri.conf.json) and shown here. Under `AXELSTRA_TEST_HIDDEN=1`
+/// (visual/e2e drivers) it is shown far off-screen, out of the taskbar and unfocusable: WebView2 still renders, so
+/// the DevTools screenshots work, but nothing appears on the user's screen or steals the focus.
+fn show_main_window(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let Some(w) = app.get_webview_window("main") else { return };
+    if std::env::var_os("AXELSTRA_TEST_HIDDEN").is_some_and(|v| v == "1") {
+        let _ = w.set_focusable(false);
+        let _ = w.set_skip_taskbar(true);
+        let _ = w.set_position(tauri::PhysicalPosition::new(-32000, -32000));
+    }
+    let _ = w.show();
+}
+
 fn main() {
     logging::init(&proto::data_dir());
     gpu::prefer_best_gpu();
@@ -1211,6 +1225,7 @@ fn main() {
         .manage(voice::Voice::default())
         .setup(|app| {
             let _ = APP.set(app.handle().clone());
+            show_main_window(app.handle());
             hosts::load();
             std::thread::spawn(clean_pastes);
             Ok(())

@@ -48,6 +48,7 @@ const env = {
   USER: user,
   AXELSTRA_TEST_PIPE: user,
   PATH: `${bin};${process.env.PATH}`,
+  AXELSTRA_TEST_HIDDEN: "1", // the host shows its window off-screen, unfocusable, out of the taskbar
   WEBVIEW2_USER_DATA_FOLDER: join(dir, "webview"),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
 };

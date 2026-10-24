@@ -47,3 +47,6 @@ dir before the `test` step and fails if any changed after it; it is skipped when
 those four files are compared, because a real running daemon legitimately rewrites `sessions.json` (and backups),
 `lag.log`, `statusline.log` and `status/` on its own; a leak into those would not be caught by the script. It also
 cannot see a test that only reads. The `serve` refusal is the real barrier; the script is the net.
+
+App-level drivers (`tools/e2e.mjs`, `tools/visual.mjs`) set `AXELSTRA_TEST_HIDDEN=1` so the app window is created off-screen
+and unfocusable (see `docs/E2E.md`). Never launch the real app from a test without it.
