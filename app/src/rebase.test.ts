@@ -41,7 +41,9 @@ describe("rebase messages", () => {
     expect(o.kind).toBe("warn");
     expect(o.text).toContain("a.txt, b.txt");
     expect(o.text).toContain("ficou como estava");
-    expect(rebaseOutcome("t", "main", { ok: false, conflicted: ["a"], restored: false }).text).toContain("não foi possível");
+    expect(rebaseOutcome("t", "main", { ok: false, conflicted: ["a"], restored: false }).text).toContain(
+      "não foi possível",
+    );
   });
 
   it("blocks a busy or dirty worktree before asking", () => {

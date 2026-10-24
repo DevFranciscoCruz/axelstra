@@ -33,7 +33,11 @@ export const formatLimit = (n: number | undefined): string => {
 export type Scope = "default" | { worktree: string };
 
 /** `b` with `patch` merged into the limit of `scope`; a key set to `undefined` is removed. */
-export const withLimit = (b: Budgets, scope: Scope, patch: Partial<Record<keyof BudgetLimit, number | boolean | undefined>>): Budgets => {
+export const withLimit = (
+  b: Budgets,
+  scope: Scope,
+  patch: Partial<Record<keyof BudgetLimit, number | boolean | undefined>>,
+): Budgets => {
   const merge = (cur: BudgetLimit | undefined): BudgetLimit => {
     const next: Record<string, number | boolean> = { ...(cur ?? {}) } as Record<string, number | boolean>;
     for (const [k, v] of Object.entries(patch)) {
@@ -57,10 +61,15 @@ export const hasLimits = (b: Budgets | undefined): boolean =>
   !!b && (!!b.default?.daily || !!b.default?.weekly || Object.keys(b.worktrees ?? {}).length > 0);
 
 /** The rows that belong to a worktree. */
-export const rowsFor = (rows: BudgetRow[], worktree: string): BudgetRow[] => rows.filter((r) => norm(r.worktree) === norm(worktree));
+export const rowsFor = (rows: BudgetRow[], worktree: string): BudgetRow[] =>
+  rows.filter((r) => norm(r.worktree) === norm(worktree));
 
 const RANK: Record<BudgetLevel, number> = { ok: 0, warn: 1, over: 2 };
-export const worstLevel = (rows: BudgetRow[]): BudgetLevel => rows.reduce<BudgetLevel>((w, r) => (RANK[r.level] > RANK[w] ? r.level : w), "ok");
+export const worstLevel = (rows: BudgetRow[]): BudgetLevel =>
+  rows.reduce<BudgetLevel>((w, r) => (RANK[r.level] > RANK[w] ? r.level : w), "ok");
 
 /** The meter colour classes the status bar already has (`warn`, `bad`). */
-export const levelClass = (l: BudgetLevel): { warn: boolean; bad: boolean } => ({ warn: l === "warn", bad: l === "over" });
+export const levelClass = (l: BudgetLevel): { warn: boolean; bad: boolean } => ({
+  warn: l === "warn",
+  bad: l === "over",
+});

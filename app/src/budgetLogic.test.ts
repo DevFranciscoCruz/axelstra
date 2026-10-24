@@ -1,10 +1,28 @@
 import { describe, expect, it } from "vitest";
 import type { BudgetRow } from "./api";
-import { MAX_LIMIT, formatLimit, hasLimits, levelClass, parseTokens, rowsFor, withLimit, withoutWorktree, worstLevel } from "./budgetLogic";
+import {
+  MAX_LIMIT,
+  formatLimit,
+  hasLimits,
+  levelClass,
+  parseTokens,
+  rowsFor,
+  withLimit,
+  withoutWorktree,
+  worstLevel,
+} from "./budgetLogic";
 
 const WT_A = String.raw`C:\wt\a`;
 const WT_B = String.raw`C:\wt\b`;
-const row = (level: BudgetRow["level"], worktree = WT_A, period: BudgetRow["period"] = "daily"): BudgetRow => ({ worktree, period, used: 1, limit: 2, pct: 50, level, auto_pause: false });
+const row = (level: BudgetRow["level"], worktree = WT_A, period: BudgetRow["period"] = "daily"): BudgetRow => ({
+  worktree,
+  period,
+  used: 1,
+  limit: 2,
+  pct: 50,
+  level,
+  auto_pause: false,
+});
 
 describe("parseTokens", () => {
   it("reads plain numbers, suffixes and pt-PT separators", () => {
@@ -20,13 +38,15 @@ describe("parseTokens", () => {
   it("empty means no limit, nonsense is refused", () => {
     expect(parseTokens("")).toBeNull();
     expect(parseTokens("   ")).toBeNull();
-    for (const bad of ["abc", "0", "-5", "5x", "1.5", "1,5", "M", "5MM", "0k", `${MAX_LIMIT + 1}`]) expect(parseTokens(bad), bad).toBeUndefined();
+    for (const bad of ["abc", "0", "-5", "5x", "1.5", "1,5", "M", "5MM", "0k", `${MAX_LIMIT + 1}`])
+      expect(parseTokens(bad), bad).toBeUndefined();
   });
 });
 
 describe("formatLimit", () => {
   it("round-trips with parseTokens", () => {
-    for (const n of [1, 999, 1000, 800_000, 1_500_000, 5_000_000, 2_000_000_000, 1_234_567]) expect(parseTokens(formatLimit(n))).toBe(n);
+    for (const n of [1, 999, 1000, 800_000, 1_500_000, 5_000_000, 2_000_000_000, 1_234_567])
+      expect(parseTokens(formatLimit(n))).toBe(n);
     expect(formatLimit(5_000_000)).toBe("5M");
     expect(formatLimit(800_000)).toBe("800k");
     expect(formatLimit(1_234_567)).toBe("1234567");
