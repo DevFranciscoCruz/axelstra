@@ -131,6 +131,23 @@ async function until(label, fn, ms = 30000) {
   throw new Error(`timeout waiting for ${label}${last instanceof Error ? `: ${last.message}` : ""}`);
 }
 
+/**
+ * Selects the worktree row named "main" (a session opens its terminal once its worktree is selected). The UI can
+ * miss a project the daemon only just learned about until its next refresh, so a reload is the retry.
+ */
+async function selectWorktree(page) {
+  const click =
+    "(() => { const el = [...document.querySelectorAll('span,div')].find((e) => e.children.length === 0 && e.textContent.trim() === 'main'); const t = el?.closest('[role=button],button,[tabindex]') ?? el; if (!t) return false; t.click(); return true; })()";
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await until("the worktree row", () => page.evaluate(click), 12000);
+    } catch (e) {
+      if (attempt >= 3) throw e;
+      await page.send("Page.reload");
+    }
+  }
+}
+
 let failed = null;
 try {
   launch();
@@ -156,12 +173,7 @@ try {
   await page.send("Page.reload");
   await until("the project in the sidebar", () => page.evaluate("document.body.innerText.includes('repo')"));
   console.log("ok  session: the project is listed");
-  // select the worktree row (a session opens a terminal once its worktree is selected)
-  await until("the worktree row", () =>
-    page.evaluate(
-      "(() => { const el = [...document.querySelectorAll('span,div')].find((e) => e.children.length === 0 && e.textContent.trim() === 'main'); const t = el?.closest('[role=button],button,[tabindex]') ?? el; if (!t) return false; t.click(); return true; })()",
-    ),
-  );
+  await selectWorktree(page);
   await until("the terminal to mount", () => page.evaluate("!!document.querySelector('.xterm')"), 40000);
   console.log("ok  session: an xterm terminal is mounted");
   const id = /\d+/.exec(sp.stdout)?.[0];
@@ -183,12 +195,19 @@ try {
   console.log("ok  restore: the daemon kept the session after the app closed");
   launch();
   page = await connect();
+  await selectWorktree(page);
   await until("the terminal after relaunch", () => page.evaluate("!!document.querySelector('.xterm')"), 40000);
   console.log("ok  restore: relaunched app shows the session again");
 
   await sleep(1000);
   if (problems.length) throw new Error(`browser problems:\n  ${[...new Set(problems)].join("\n  ")}`);
   console.log("ok  no CSP violation, console error or uncaught exception");
+  // the policy must really be enforced: a <style> that did not get the page's nonce has to be refused
+  const blocked = await page.evaluate(
+    "(() => { document.head.insertAdjacentHTML('beforeend', '<style>body{outline:3px solid red}</style>'); return getComputedStyle(document.body).outlineStyle === 'none'; })()",
+  );
+  if (!blocked) throw new Error("CSP is not enforcing: an un-nonced <style> was applied");
+  console.log("ok  CSP enforced: an injected <style> without the nonce is refused");
   page.close();
 } catch (e) {
   failed = e;

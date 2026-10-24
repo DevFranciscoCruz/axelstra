@@ -33,9 +33,22 @@ test("production CSP is locked down", () => {
   assert.ok(!d["script-src"].includes("'unsafe-inline'") && !d["script-src"].includes("'unsafe-eval'"));
 });
 
+test("styles: elements need the nonce, only style attributes may be inline", () => {
+  const d = directives(conf.app.security.csp);
+  // style elements (xterm's DOM renderer, CodeMirror) get their nonce from app/index.html; see SECURITY.md
+  assert.deepEqual(d["style-src"], ["'self'"]);
+  assert.ok(!("style-src-elem" in d), "style-src-elem would bypass the nonce Tauri adds to style-src");
+  assert.deepEqual(d["style-src-attr"], ["'unsafe-inline'"]);
+  const html = readFileSync(new URL("../app/index.html", import.meta.url), "utf8");
+  assert.match(html, /<style>[^<]*<\/style>/, "index.html needs a <style> so Tauri injects the nonce");
+  assert.match(html, /\.nonce/, "index.html needs the script that hands the nonce to runtime <style> elements");
+});
+
 test("img-src only allows the avatar hosts", () => {
   const hosts = directives(conf.app.security.csp)["img-src"].filter((s) => s.startsWith("http"));
   assert.deepEqual(hosts.sort(), ["https://avatars.githubusercontent.com", "https://github.com"]);
+  // nothing in the app builds blob: images; add it back only with the code that needs it
+  assert.deepEqual(directives(conf.app.security.csp)["img-src"].filter((s) => !s.startsWith("http")), ["'self'", "data:"]);
 });
 
 test("capability grants no broad defaults", () => {
