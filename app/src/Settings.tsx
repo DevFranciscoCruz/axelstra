@@ -1,11 +1,11 @@
 import { For, JSX, Show, createResource, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { NotifyMode, SettingsPatch, ShellChoice, Terse, backupExport, backupRestore, call, copyDiagnostics, daemonShutdown, diagnostics, getSettings, resetShellCache, setSettings } from "./api";
-import { ask } from "./Confirm";
+import { NotifyMode, SettingsPatch, ShellChoice, Terse, backupExport, backupRestore, copyDiagnostics, diagnostics, getSettings, resetShellCache, setSettings } from "./api";
+import { restartDaemonFlow } from "./daemonActions";
 import { HooksSection } from "./HooksSection";
 import { Modal } from "./Modal";
 import { S } from "./strings";
-import { classifySettingsError, diagnosticRows, errorText, waitUntil } from "./settingsLogic";
+import { classifySettingsError, diagnosticRows, errorText } from "./settingsLogic";
 import { setError, setShowSettings, showNotice } from "./store";
 import { DEFAULT_FONT, MAX_FONT, MIN_FONT, TermTheme, setTermPrefs, termPrefs } from "./termprefs";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
@@ -139,21 +139,7 @@ export function Settings() {
       setError(errorText(e));
     }
   };
-  // The daemon is a separate process that outlives the app. Shutting it down is safe cross-platform: the next call starts
-  // a fresh one (and the app restores the sessions, see "daemon-restarted").
-  const restartDaemon = async () => {
-    if (!(await ask(S.restartConfirm, { title: S.restartTitle, kind: "warning", okLabel: S.restartDaemon }))) return;
-    setRestarting(true);
-    try {
-      await daemonShutdown().catch((e) => console.debug("daemon.shutdown", e)); // the connection drops with the daemon
-      if (!(await waitUntil(() => call("ping"), 20, 500))) throw new Error("o daemon não voltou a responder");
-      await refetch();
-    } catch (e) {
-      showNotice(S.restartFailed + errorText(e));
-    } finally {
-      setRestarting(false);
-    }
-  };
+  const restartDaemon = () => void restartDaemonFlow(setRestarting, () => void refetch());
   return (
     <Modal label={S.settings} class="modal settings" onClose={() => setShowSettings(false)}>
       <div class="auto-head">
@@ -168,7 +154,7 @@ export function Settings() {
             <div class="auto-note">{classifySettingsError(s.error) === "old-daemon" ? S.oldDaemon : S.loadFailed + errorText(s.error)}</div>
             <div class="m-actions">
               <Show when={classifySettingsError(s.error) === "old-daemon"}>
-                <Button variant="default" disabled={restarting()} onClick={() => void restartDaemon()}>
+                <Button variant="default" disabled={restarting()} onClick={restartDaemon}>
                   {restarting() ? S.restartingDaemon : S.restartDaemon}
                 </Button>
               </Show>

@@ -1,3 +1,5 @@
+import { Accessor, createSignal } from "solid-js";
+
 /** Reading what localStorage (or any saved JSON) holds without trusting its shape: a value that does not pass `ok` gives `fallback`. */
 export const parseJson = <T>(raw: string | null, ok: (v: unknown) => v is T, fallback: T): T => {
   if (raw === null) return fallback;
@@ -22,3 +24,25 @@ export const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typ
 export const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
 /** an array with its non-conforming members dropped */
 export const filterArray = <T>(v: unknown, ok: (x: unknown) => x is T): T[] => (Array.isArray(v) ? v.filter(ok) : []);
+
+/** saves `v` as JSON under `key`; storage that is missing, full or blocked is not an error (the value lasts until restart) */
+export const writeJson = (key: string, v: unknown): void => {
+  try {
+    localStorage.setItem(key, JSON.stringify(v));
+  } catch {
+    /* storage unavailable */
+  }
+};
+
+/** A signal that remembers itself: starts from the validated saved value (or `fallback`) and saves on every set. */
+export function createPersisted<T>(key: string, ok: (v: unknown) => v is T, fallback: T): [Accessor<T>, (v: T | ((prev: T) => T)) => T] {
+  const [get, set] = createSignal<T>(readJson(key, ok, fallback));
+  return [
+    get,
+    (v) => {
+      const next = set(() => (typeof v === "function" ? (v as (prev: T) => T)(get()) : v));
+      writeJson(key, next);
+      return next;
+    },
+  ];
+}

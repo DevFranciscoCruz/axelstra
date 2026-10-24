@@ -9,6 +9,7 @@ export const S = {
   restartConfirm: "Reiniciar o daemon fecha os terminais abertos; os agentes são retomados depois do reinício. Continuar?",
   restartTitle: "Reiniciar o daemon",
   restartFailed: "Não foi possível reiniciar o daemon: ",
+  daemonSilent: "o daemon não voltou a responder",
   oldDaemon: "O daemon em execução é de uma versão anterior e não conhece este pedido. Reinicia-o para carregar as definições.",
   loadFailed: "Não foi possível carregar as definições: ",
 
@@ -64,6 +65,16 @@ export const S = {
   diagLag: "Registo de lag",
   diagMissing: "Ferramentas em falta",
   diagNoneMissing: "Nenhuma",
+
+  // command palette
+  paletteTitle: "Paleta de comandos",
+  palettePlaceholder: "Ir para worktree ou executar ação…",
+  paletteResults: "Resultados",
+  paletteAction: "ação",
+  paletteEmpty: "Nada encontrado",
+  paletteNoMatch: (q: string) => `Nada corresponde a «${q}». Tenta outras palavras.`,
+  paletteFoot: "↑↓ escolher · Enter executar · Esc fechar · ? lista de atalhos",
+  detached: "(destacado)",
 
   // terminal
   attachFailed: "não foi possível ligar a esta sessão: ",

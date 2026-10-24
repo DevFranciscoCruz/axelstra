@@ -22,6 +22,11 @@ import { Automations } from "./Automations";
 import { Dispatcher } from "./Dispatcher";
 import { Settings } from "./Settings";
 import { Shortcuts } from "./Shortcuts";
+import { Handler, paletteCommands } from "./commands";
+import { requestNotificationsOpen } from "./notifications";
+import { restartDaemonFlow } from "./daemonActions";
+import { S } from "./strings";
+import { APP_THEMES, appTheme, setAppTheme } from "./theme";
 import { LEFT, RIGHT, resizeTo, splitTo } from "./layout";
 import { K, isTextTarget, overlayOpen } from "./keyboard";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -95,6 +100,7 @@ import {
   openFile,
   setView,
   rightTab,
+  setRightTab,
   setShowProjectSettings,
   showProjectSettings,
   toast,
@@ -551,6 +557,46 @@ export function App() {
   };
   const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
+  // what the command registry (commands.ts) can run right now; the palette lists these
+  const showPanel = (tab: "files" | "changes" | "pulls") => {
+    setRightTab(tab);
+    if (!showRightPanel()) toggleRightPanel();
+  };
+  const cycleTheme = () => setAppTheme(APP_THEMES[(APP_THEMES.indexOf(appTheme()) + 1) % APP_THEMES.length]);
+  const paletteActions = () => {
+    const c = current();
+    const h: Partial<Record<string, Handler>> = {
+      settings: { run: () => setShowSettings(true) },
+      shortcuts: { run: () => setShowShortcuts(true) },
+      toggleSidebar: { run: toggleSidebar, label: showSidebar() ? "Ocultar projetos" : "Mostrar projetos" },
+      toggleRight: { run: toggleRightPanel, label: showRightPanel() ? "Ocultar painel direito" : "Mostrar painel direito" },
+      docker: { run: () => guarded(() => setView({ kind: "docker" })) },
+      notifications: { run: requestNotificationsOpen },
+      theme: { run: cycleTheme, label: `Mudar o tema (agora: ${S.appThemes[appTheme()]})` },
+      searchChats: { run: () => setShowAgentSearch(true) },
+      voice: { run: () => void toggleVoice(), label: listening() ? "Parar o ditado por voz" : undefined },
+      orchestra: { run: () => setShowOrchestra(true) },
+      dispatcher: { run: () => setShowDispatcher(true) },
+      automations: { run: () => setShowAutomations(true) },
+      computer: { run: () => void toggleComputer(), label: computerOn() ? "Controlo do ecrã pelos agentes: desligar" : "Controlo do ecrã pelos agentes: ligar" },
+      restartDaemon: { run: () => void restartDaemonFlow() },
+    };
+    if (projects().length > 0) h.newWorktree = { run: () => { showSidebarNow(); setCreatingWorktree(c?.project.id ?? projects()[0].id); } };
+    if (c) {
+      h.kanban = { run: () => guarded(() => setView({ kind: "kanban" })) };
+      h.panelFiles = { run: () => showPanel("files") };
+      h.panelChanges = { run: () => showPanel("changes") };
+      h.panelPulls = { run: () => showPanel("pulls") };
+      h.newAgent = { run: () => void newAgent(), label: `Novo agente (${projectAgent(c.project.id)})` };
+      h.newTerminal = { run: () => void newTerminal() };
+      h.split = { run: () => void toggleSplit() };
+      h.reopen = { run: () => void reopenClosed() };
+      if (activeSession() !== null) h.rename = { run: () => setRenaming(activeSession()) };
+      if (!c.wt.is_main) h.removeWorktree = { run: () => { showSidebarNow(); setRemoveRequest({ project: c.project.id, path: c.wt.path, name: c.wt.branch ?? c.wt.path }); } };
+    }
+    return paletteCommands(h, K);
+  };
+
   return (
     <>
     <div
@@ -620,34 +666,7 @@ export function App() {
           );
         }}
       </Show>
-      <Palette
-        actions={() => [
-          ...(current()
-            ? [
-                { label: `Novo agente (${projectAgent(current()!.project.id)})`, run: () => void newAgent() },
-                { label: "Novo terminal", run: () => void newTerminal() },
-                { label: "Dividir terminal", run: () => void toggleSplit() },
-                { label: "Reabrir último separador fechado", hint: K("Ctrl+Shift+T"), run: () => void reopenClosed() },
-                ...(activeSession() !== null ? [{ label: "Mudar o nome do separador", hint: "F2", run: () => setRenaming(activeSession()) }] : []),
-                ...(current()!.wt.is_main
-                  ? []
-                  : [{ label: "Remover worktree atual", hint: "worktree", run: () => { showSidebarNow(); setRemoveRequest({ project: current()!.project.id, path: current()!.wt.path, name: current()!.wt.branch ?? current()!.wt.path }); } }]),
-              ]
-            : []),
-          ...(projects().length > 0
-            ? [{ label: "Novo worktree", hint: "worktree", run: () => { showSidebarNow(); setCreatingWorktree(current()?.project.id ?? projects()[0].id); } }]
-            : []),
-          { label: "Pesquisar conversas", hint: K("Ctrl+Shift+F"), run: () => setShowAgentSearch(true) },
-          { label: "Orquestração: agentes e workers", run: () => setShowOrchestra(true) },
-          { label: "Definições", hint: K("Ctrl+,"), run: () => setShowSettings(true) },
-          { label: "Despachante", hint: "pedidos enviados a cada worktree", run: () => setShowDispatcher(true) },
-          { label: "Automatizações", hint: "agendamento", run: () => setShowAutomations(true) },
-          { label: "Atalhos de teclado", hint: "?", run: () => setShowShortcuts(true) },
-          { label: showSidebar() ? "Ocultar projetos" : "Mostrar projetos", hint: K("Ctrl+B"), run: toggleSidebar },
-          { label: showRightPanel() ? "Ocultar painel direito" : "Mostrar painel direito", hint: K("Ctrl+Shift+B"), run: toggleRightPanel },
-          { label: computerOn() ? "Controlo do ecrã pelos agentes: desligar" : "Controlo do ecrã pelos agentes: ligar", run: () => void toggleComputer() },
-        ]}
-      />
+      <Palette actions={paletteActions} />
       <Show when={showShortcuts()}>
         <Shortcuts />
       </Show>
