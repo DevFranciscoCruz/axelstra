@@ -39,6 +39,17 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 })
             })
         }
+        "git.timeline" => {
+            // read-only, so agents may ask for it too
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            let project = p["project"].as_str().unwrap_or_default().to_string();
+            let with_ci = p["ci"].as_bool().unwrap_or(false);
+            let root = crate::notes::root(reg.saved.parent().unwrap_or(std::path::Path::new("")));
+            tokio::task::block_in_place(|| -> Result<Value> {
+                let notes = crate::notes::for_worktree(&root, &project, &wt.to_string_lossy());
+                Ok(serde_json::to_value(crate::timeline::build(&wt, &notes, with_ci)?)?)
+            })
+        }
         "git.checks" | "git.merge" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             let out = tokio::task::block_in_place(|| -> Result<Value> {
