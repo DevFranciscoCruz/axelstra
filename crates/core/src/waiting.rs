@@ -211,8 +211,7 @@ mod tests {
             assert_eq!(WaitKind::parse(k.as_str()), Some(k));
         }
         assert_eq!(WaitKind::parse("screen"), None);
-        assert_eq!(clean_text("  a[31m b
-"), "a[31m b");
+        assert_eq!(clean_text("  a\x1b[31m b\r\n"), "a[31m b");
         assert_eq!(clean_text(&"x".repeat(900)).chars().count(), WAIT_TEXT_MAX + 1);
     }
 
