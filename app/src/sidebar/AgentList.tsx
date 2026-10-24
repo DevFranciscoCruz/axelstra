@@ -6,6 +6,7 @@ import { openNote } from "../NoteView";
 import { ago } from "../time";
 import { DOT_LABEL, dotOfSession } from "../agentState";
 import { agentRowInfo, agentRowLabel } from "../agentRow";
+import { isLead, lacksLead, leadFirst } from "../leadRole";
 import { P } from "../strings.panels";
 import {
   activeSession,
@@ -23,18 +24,36 @@ const T = P.sidebar;
 const idleLabel = (ms?: number) => (ms === undefined ? "" : ago(ms / 1000));
 
 /** The agents of one worktree under its row: folds away, opens a tab, renames in place with F2, closes with the middle button. */
-export function AgentList(props: { path: string; depth: number; hidden: boolean; onToggle: () => void }) {
+export function AgentList(props: {
+  path: string;
+  depth: number;
+  hidden: boolean;
+  onToggle: () => void;
+  /** the project's main checkout has no lead */
+  isMain?: boolean;
+  onStartLead?: () => void;
+}) {
   const [renaming, setRenaming] = createSignal<number | null>(null);
   // agents of this worktree; workers that an agent of another worktree started show in their own worktree
-  const agents = () => sessionsOf(props.path).filter((x) => x.meta?.kind === "agent");
+  // the lead first, its tasks after it
+  const agents = () => leadFirst(sessionsOf(props.path).filter((x) => x.meta?.kind === "agent"));
+  const hasLead = () => agents().some((a) => a.running && isLead(a));
+  const missingLead = () => !!props.onStartLead && lacksLead(agents(), !!props.isMain);
   const finishRename = (id: number, name: string | null) => {
     if (name !== null) renameTab(id, name);
     setRenaming(null);
     queueMicrotask(() => document.querySelector<HTMLElement>(`[data-agent-row="${id}"]`)?.focus());
   };
   return (
-    <Show when={agents().length > 0}>
+    <Show when={agents().length > 0 || missingLead()}>
       <div class="wt-agents" style={props.depth > 0 ? { "margin-left": `${14 + props.depth * 14}px` } : undefined}>
+        <Show when={missingLead()}>
+          <Button type="button" variant="link" size="bare" class="w-full justify-start gap-1.5 px-1.5 py-0.5 text-xs" title={T.startLeadTip} onClick={() => props.onStartLead?.()}>
+            <Icon name="plus" size={11} />
+            {T.startLead}
+          </Button>
+        </Show>
+        <Show when={agents().length > 0}>
         <Button
           variant="link"
           size="bare"
@@ -45,14 +64,15 @@ export function AgentList(props: { path: string; depth: number; hidden: boolean;
           <span>{T.agentsCount(agents().length)}</span>
           <Icon name={props.hidden ? "chevRight" : "chevDown"} size={11} />
         </Button>
-        <Show when={!props.hidden}>
+        </Show>
+        <Show when={agents().length > 0 && !props.hidden}>
           <For each={agents()}>
             {(a) => {
               const info = () => agentRowInfo(a, props.path, tabLabel(a));
               const state = () => DOT_LABEL[dotOfSession(a)];
               const active = () => activeSession() === a.id && norm(selectedWorktree()) === norm(props.path);
               return (
-                <div class="wt-agent" classList={{ active: active() }}>
+                <div class="wt-agent" classList={{ active: active(), lead: isLead(a), task: !isLead(a) && hasLead() }}>
                   <Show
                     when={renaming() !== a.id}
                     fallback={
@@ -101,6 +121,11 @@ export function AgentList(props: { path: string; depth: number; hidden: boolean;
                       <span class="wt-agent-name">
                         {a.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}
                         {info().name}
+                        {isLead(a) ? (
+                          <span class="wt-lead-tag" role="img" title={T.leadTip} aria-label={T.leadTip}>
+                            <Icon name="star" size={11} inline />
+                          </span>
+                        ) : null}
                       </span>
                       <Show when={info().kind}>
                         <span

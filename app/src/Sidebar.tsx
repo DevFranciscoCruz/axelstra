@@ -43,6 +43,7 @@ import {
   refreshProjects,
   refreshSessions,
   selectWorktree,
+  openSession,
   sessionsOf,
   overview,
   refreshOverview,
@@ -137,6 +138,24 @@ export function Sidebar() {
       setEditorDirty(false);
     }
     selectWorktree(path);
+  };
+
+  // a worktree without a lead starts one: the project's default agent, which the daemon names "main"
+  const startingLead = new Set<string>();
+  const startLead = async (projectId: string, path: string, name: string) => {
+    if (startingLead.has(norm(path))) return;
+    startingLead.add(norm(path));
+    try {
+      const agent = projectPrefsOf(projectId).agent;
+      const key = agent && AGENTS[agent] ? agent : canonAgent(savedAgent() === "none" ? "claude" : savedAgent());
+      const id = await launchDefaultAgent(projectId, path, key, AGENTS[key], undefined, undefined, projectTerse(projectId));
+      await refreshSessions();
+      openSession(path, id);
+    } catch (e) {
+      showNotice(T.leadFailed(name, errorText(e).slice(0, 120)));
+    } finally {
+      startingLead.delete(norm(path));
+    }
   };
 
   // a project with its own default agent starts new worktrees with it
@@ -294,6 +313,7 @@ export function Sidebar() {
                       onOpen={() => void openWorktree(w.path)}
                       onToggleFold={() => toggleFolded(wtKey(w.path))}
                       onToggleAgents={() => setAgentsHiddenList([...toggleIn(agentsHidden(), norm(w.path))])}
+                      onStartLead={() => void startLead(p.id, w.path, w.branch ?? w.path)}
                       onDrop={(label) => void dropWorktree(p.id, w.path, label)}
                     />
                   );

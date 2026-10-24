@@ -11,7 +11,7 @@ export const agentRowInfo = (s: Pick<SessionInfo, "id" | "label" | "meta">, list
   const kind = s.meta?.agent ?? "";
   const own = s.meta?.worktree;
   const worktree = own && norm(own) !== norm(listedUnder) ? folderName(own) : "";
-  return { name, kind, worktree, hasReport: !!s.meta?.note };
+  return { name, kind, worktree, hasReport: !!s.meta?.note, lead: s.meta?.lead === true };
 };
 
 /** Accessible name of a whole row, read in one go by a screen reader. */
