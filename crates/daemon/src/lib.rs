@@ -30,4 +30,5 @@ pub mod skill;
 pub mod store;
 pub mod watcher;
 pub mod wtenv;
+pub mod workspace;
 pub mod wtstatus;

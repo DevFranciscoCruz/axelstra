@@ -153,6 +153,40 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             reg.wt_gen.fetch_add(1, Ordering::SeqCst);
             Ok(json!({"restored": restored}))
         }
+        // one JSON file with projects, automations, settings and kanban cards; never tokens or sessions. The paths come
+        // from the user (native dialog or CLI), which is why agents are refused all three
+        "workspace.export" => {
+            let path = p["path"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| anyhow::anyhow!("path is required"))?;
+            let sum = tokio::task::block_in_place(|| crate::workspace::export_to(&reg.store, std::path::Path::new(path)))?;
+            Ok(json!({"path": path.replace('\\', "/"), "summary": sum}))
+        }
+        "workspace.import_preview" => {
+            let path = p["path"].as_str().unwrap_or_default();
+            let map = crate::workspace::parse_map(&p["map"])?;
+            let pv = tokio::task::block_in_place(|| crate::workspace::preview(&reg.store, path, &map))?;
+            Ok(serde_json::to_value(pv)?)
+        }
+        "workspace.import" => {
+            let path = p["path"].as_str().unwrap_or_default();
+            let replace = match p["mode"].as_str().unwrap_or("merge") {
+                "merge" => false,
+                "replace" => true,
+                m => anyhow::bail!("mode must be merge or replace, not {m:?}"),
+            };
+            let overwrite = match p["conflicts"].as_str().unwrap_or("keep") {
+                "keep" => false,
+                "overwrite" => true,
+                m => anyhow::bail!("conflicts must be keep or overwrite, not {m:?}"),
+            };
+            let o = crate::workspace::Options { replace, overwrite, map: crate::workspace::parse_map(&p["map"])? };
+            let out = {
+                let _g = reg.auto_lock.lock_recover();
+                tokio::task::block_in_place(|| crate::workspace::import(&reg.store, path, &o))?
+            };
+            *reg.plist.lock_recover() = None;
+            reg.wt_gen.fetch_add(1, Ordering::SeqCst);
+            Ok(serde_json::to_value(out)?)
+        }
         "notices.take" => Ok(json!({"notices": crate::store::take_notices()})),
         // used by the app updater: the installer cannot replace a running axelstra.exe.
         // Sessions die with the daemon (Job Objects), so the UI warns before calling this.
