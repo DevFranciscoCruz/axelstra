@@ -4,7 +4,12 @@ import { count, plural } from "./strings";
 
 describe("friendlyError", () => {
   it("prefixes an unknown git/gh/docker message with a Portuguese line and keeps the original", () => {
-    for (const m of ["fatal: something exotic happened", "error: pack-objects died", "Error response from daemon: weird", "gh: Could not do the thing"]) {
+    for (const m of [
+      "fatal: something exotic happened",
+      "error: pack-objects died",
+      "Error response from daemon: weird",
+      "gh: Could not do the thing",
+    ]) {
       const out = friendlyError(m);
       expect(out).toMatch(/^Uma ferramenta externa/);
       expect(out).toContain(m);

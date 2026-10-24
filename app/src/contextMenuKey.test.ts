@@ -29,7 +29,11 @@ describe("keyboard context menus (U2)", () => {
   it("press passes keys to the row handler and still activates on Enter", () => {
     let seen = "";
     let hit = 0;
-    const p = press(() => hit++, "button", (e) => (seen = e.key));
+    const p = press(
+      () => hit++,
+      "button",
+      (e) => (seen = e.key),
+    );
     const el = document.createElement("div");
     const e = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
     Object.defineProperty(e, "target", { value: el });

@@ -41,10 +41,7 @@ export function CommitView() {
               return (
                 <>
                   <div class="cfile">{f.path}</div>
-                  <Show
-                    when={rows.length > 0}
-                    fallback={<div class="empty">{P.commitView.noDiff}</div>}
-                  >
+                  <Show when={rows.length > 0} fallback={<div class="empty">{P.commitView.noDiff}</div>}>
                     <table>
                       <tbody>
                         <For each={rows}>

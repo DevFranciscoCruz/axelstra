@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 const mem = new Map<string, string>();
-vi.stubGlobal("localStorage", { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v), removeItem: (k: string) => void mem.delete(k) });
+vi.stubGlobal("localStorage", {
+  getItem: (k: string) => mem.get(k) ?? null,
+  setItem: (k: string, v: string) => void mem.set(k, v),
+  removeItem: (k: string) => void mem.delete(k),
+});
 
 import * as store from "./store";
 import * as ui from "./store/ui";

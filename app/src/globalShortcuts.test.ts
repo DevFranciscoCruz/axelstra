@@ -4,14 +4,36 @@ import type { SessionInfo } from "./api";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => undefined }));
 vi.mock("./Confirm", () => ({ ask: vi.fn(async () => true) }));
 vi.mock("./Voice", () => ({ toggleVoice: vi.fn(async () => {}) }));
-vi.mock("./api", () => ({ listSessions: async () => [], listProjects: async () => [], worktreeStatus: async () => [], worktreeOverview: async () => [], ghListBg: async () => [], gitChanges: async () => null, flowTasks: async () => [], callBg: async () => ({}), call: async () => ({}) }));
+vi.mock("./api", () => ({
+  listSessions: async () => [],
+  listProjects: async () => [],
+  worktreeStatus: async () => [],
+  worktreeOverview: async () => [],
+  ghListBg: async () => [],
+  gitChanges: async () => null,
+  flowTasks: async () => [],
+  callBg: async () => ({}),
+  call: async () => ({}),
+}));
 
 const memory = () => {
   const m = new Map<string, string>();
-  return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), clear: () => m.clear() };
+  return {
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => void m.set(k, v),
+    removeItem: (k: string) => void m.delete(k),
+    clear: () => m.clear(),
+  };
 };
 
-const sess = (id: number, over: Partial<SessionInfo> = {}): SessionInfo => ({ id, running: true, idle_ms: 9000, label: null, meta: { kind: "shell", worktree: "/w" }, ...over });
+const sess = (id: number, over: Partial<SessionInfo> = {}): SessionInfo => ({
+  id,
+  running: true,
+  idle_ms: 9000,
+  label: null,
+  meta: { kind: "shell", worktree: "/w" },
+  ...over,
+});
 
 const setup = async () => {
   vi.resetModules();

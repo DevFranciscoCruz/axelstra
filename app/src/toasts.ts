@@ -86,7 +86,8 @@ export const toast = (o: ToastInput): number => {
   });
   if (sticky) stop(id);
   else arm(id, ttl);
-  if (kind === "error" && o.record !== false) pushNotification({ kind: "error", worktree: "", text: o.text.split("\n")[0] });
+  if (kind === "error" && o.record !== false)
+    pushNotification({ kind: "error", worktree: "", text: o.text.split("\n")[0] });
   return id;
 };
 

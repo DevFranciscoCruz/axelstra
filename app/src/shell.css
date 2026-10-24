@@ -1,4 +1,14 @@
 /* App shell additions (command palette footer, shortcut hint) */
-.pal-foot { padding: 6px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: var(--fs-sm); }
-.hint-keys { color: var(--muted); font-size: var(--fs-sm); }
-.hint-keys kbd { padding: 0 4px; }
+.pal-foot {
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.hint-keys {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.hint-keys kbd {
+  padding: 0 4px;
+}

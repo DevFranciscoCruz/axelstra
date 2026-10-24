@@ -16,7 +16,8 @@ export const [overlay, setOverlay] = createSignal<Overlay | null>(null);
 
 const isOpen = (k: Kind) => overlay()?.kind === k;
 /** closing a dialog only does anything while it is the one showing */
-const set = (k: Exclude<Kind, "projectSettings">) => (on: boolean) => setOverlay((cur) => (on ? ({ kind: k } as Overlay) : cur?.kind === k ? null : cur));
+const set = (k: Exclude<Kind, "projectSettings">) => (on: boolean) =>
+  setOverlay((cur) => (on ? ({ kind: k } as Overlay) : cur?.kind === k ? null : cur));
 
 export const showSettings = () => isOpen("settings");
 export const setShowSettings = set("settings");
@@ -36,4 +37,5 @@ export const showProjectSettings = (): string | null => {
   const o = overlay();
   return o?.kind === "projectSettings" ? o.project : null;
 };
-export const setShowProjectSettings = (id: string | null) => setOverlay((cur) => (id ? { kind: "projectSettings", project: id } : cur?.kind === "projectSettings" ? null : cur));
+export const setShowProjectSettings = (id: string | null) =>
+  setOverlay((cur) => (id ? { kind: "projectSettings", project: id } : cur?.kind === "projectSettings" ? null : cur));

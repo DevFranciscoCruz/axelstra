@@ -31,7 +31,11 @@ export function useBootstrap() {
     // typing lag diagnosis: stalls of the webview's main thread go to lag.log (see lag_log in the host)
     try {
       const obs = new PerformanceObserver((list) => {
-        for (const e of list.getEntries()) if (e.duration >= 80) void tauriInvoke("lag_log", { what: "main thread stalled", ms: Math.round(e.duration) }).catch((err) => console.debug("lag_log", err));
+        for (const e of list.getEntries())
+          if (e.duration >= 80)
+            void tauriInvoke("lag_log", { what: "main thread stalled", ms: Math.round(e.duration) }).catch((err) =>
+              console.debug("lag_log", err),
+            );
       });
       obs.observe({ entryTypes: ["longtask"] });
       onCleanup(() => obs.disconnect());
@@ -40,7 +44,12 @@ export function useBootstrap() {
     }
   });
 
-  onMount(() => void computerStatus().then(setComputerOn).catch((e) => console.debug("computer.status", e)));
+  onMount(
+    () =>
+      void computerStatus()
+        .then(setComputerOn)
+        .catch((e) => console.debug("computer.status", e)),
+  );
 
   // notes the daemon kept from its startup (a corrupt state file it recovered from, ...); an older daemon has none
   onMount(
@@ -51,16 +60,19 @@ export function useBootstrap() {
   );
 
   // a missing git, or no agent CLI at all, is explained once at startup instead of surfacing as a cryptic failure later
-  onMount(() =>
-    void tauriInvoke<string[]>("missing_tools")
-      .then((m) => {
-        void agentsList().then((l) => setInstalledAgents(l.filter((a) => a.installed).map((a) => a.id))).catch(() => setInstalledAgents(null));
-        const bits: string[] = [];
-        if (m.includes("git")) bits.push(S.app.noGit);
-        if (m.includes("claude") && m.includes("codex")) bits.push(S.app.noAgents);
-        if (bits.length) showNotice(S.app.missing(bits));
-      })
-      .catch(() => setInstalledAgents(null)),
+  onMount(
+    () =>
+      void tauriInvoke<string[]>("missing_tools")
+        .then((m) => {
+          void agentsList()
+            .then((l) => setInstalledAgents(l.filter((a) => a.installed).map((a) => a.id)))
+            .catch(() => setInstalledAgents(null));
+          const bits: string[] = [];
+          if (m.includes("git")) bits.push(S.app.noGit);
+          if (m.includes("claude") && m.includes("codex")) bits.push(S.app.noAgents);
+          if (bits.length) showNotice(S.app.missing(bits));
+        })
+        .catch(() => setInstalledAgents(null)),
   );
 
   onMount(() => {
@@ -131,12 +143,17 @@ export function useBootstrap() {
   // the daemon watches the selected worktree and tells us when files or git state changed
   createEffect(() => {
     const w = selectedWorktree();
-    void watchWorktree(w, (changed) => {
-      if (norm(changed) === norm(selectedWorktree())) {
-        setFsTick((n) => n + 1);
-        void refreshChanges();
-      }
-    }, () => void refreshSessions(), () => void refreshProjects());
+    void watchWorktree(
+      w,
+      (changed) => {
+        if (norm(changed) === norm(selectedWorktree())) {
+          setFsTick((n) => n + 1);
+          void refreshChanges();
+        }
+      },
+      () => void refreshSessions(),
+      () => void refreshProjects(),
+    );
   });
 
   // dev servers started in this worktree's terminals; a process lookup, so only while something runs
@@ -157,8 +174,10 @@ export function useBootstrap() {
     const t = createPoller(refreshPorts, 8000);
     onCleanup(() => t.stop());
   });
-  createEffect(on(selectedWorktree, () => {
-    setPorts([]);
-    void refreshPorts();
-  }));
+  createEffect(
+    on(selectedWorktree, () => {
+      setPorts([]);
+      void refreshPorts();
+    }),
+  );
 }

@@ -29,8 +29,20 @@ export const COMMANDS: Command[] = [
   { id: "palette", label: "Paleta de comandos", keys: "Ctrl+K", group: "geral", palette: false },
   { id: "settings", label: "Definições", keys: "Ctrl+,", group: "geral" },
   { id: "shortcuts", label: "Atalhos de teclado", keys: "?", group: "geral" },
-  { id: "contextMenu", label: "Menu de contexto do elemento focado", keys: "Shift+F10", group: "geral", palette: false },
-  { id: "confirm", label: "Confirmar o diálogo, o cartão ou o commit", keys: "Ctrl+Enter", group: "geral", palette: false },
+  {
+    id: "contextMenu",
+    label: "Menu de contexto do elemento focado",
+    keys: "Shift+F10",
+    group: "geral",
+    palette: false,
+  },
+  {
+    id: "confirm",
+    label: "Confirmar o diálogo, o cartão ou o commit",
+    keys: "Ctrl+Enter",
+    group: "geral",
+    palette: false,
+  },
 
   { id: "toggleSidebar", label: "Mostrar/ocultar projetos", keys: "Ctrl+B", group: "vista" },
   { id: "toggleRight", label: "Mostrar/ocultar painel direito", keys: "Ctrl+Shift+B", group: "vista" },
@@ -42,7 +54,13 @@ export const COMMANDS: Command[] = [
   { id: "notifications", label: "Notificações", hint: "histórico de avisos", group: "vista" },
   { id: "theme", label: "Mudar o tema", hint: "sistema → escuro → claro", group: "vista" },
 
-  { id: "nextTab", label: "Separador seguinte / anterior", keys: "Ctrl+Tab / Ctrl+Shift+Tab", group: "separadores", palette: false },
+  {
+    id: "nextTab",
+    label: "Separador seguinte / anterior",
+    keys: "Ctrl+Tab / Ctrl+Shift+Tab",
+    group: "separadores",
+    palette: false,
+  },
   { id: "gotoTab", label: "Ir para o separador n", keys: "Ctrl+1 … Ctrl+9", group: "separadores", palette: false },
   { id: "reopen", label: "Reabrir o último separador fechado", keys: "Ctrl+Shift+T", group: "separadores" },
   { id: "nextWaiting", label: "Ir para o próximo agente à espera de resposta", keys: "Ctrl+J", group: "separadores" },
@@ -61,9 +79,20 @@ export const COMMANDS: Command[] = [
   { id: "dispatcher", label: "Despachante", hint: "pedidos enviados a cada worktree", group: "ferramentas" },
   { id: "automations", label: "Automatizações", hint: "agendamento", group: "ferramentas" },
   { id: "computer", label: "Controlo do ecrã pelos agentes", hint: "permissão", group: "ferramentas" },
-  { id: "restartDaemon", label: "Reiniciar o daemon", hint: "fecha os terminais; os agentes retomam", group: "ferramentas" },
+  {
+    id: "restartDaemon",
+    label: "Reiniciar o daemon",
+    hint: "fecha os terminais; os agentes retomam",
+    group: "ferramentas",
+  },
 
-  { id: "tabRename", label: "Mudar o nome de um separador", keys: "Duplo clique no separador", group: "rato", palette: false },
+  {
+    id: "tabRename",
+    label: "Mudar o nome de um separador",
+    keys: "Duplo clique no separador",
+    group: "rato",
+    palette: false,
+  },
   { id: "tabClose", label: "Fechar um separador", keys: "Clique do meio no separador", group: "rato", palette: false },
 ];
 
@@ -77,12 +106,19 @@ export type Handler = { run: () => void; label?: string };
 export const cheatSheet = (): { group: CommandGroup; title: string; rows: [string, string][] }[] => {
   const order = Object.keys(GROUP_LABEL) as CommandGroup[];
   return order
-    .map((g) => ({ group: g, title: GROUP_LABEL[g], rows: COMMANDS.filter((c) => c.group === g && c.keys).map((c) => [c.keys!, c.label] as [string, string]) }))
+    .map((g) => ({
+      group: g,
+      title: GROUP_LABEL[g],
+      rows: COMMANDS.filter((c) => c.group === g && c.keys).map((c) => [c.keys!, c.label] as [string, string]),
+    }))
     .filter((g) => g.rows.length);
 };
 
 /** palette entries for the commands that have a handler right now, in registry order */
-export const paletteCommands = (handlers: Partial<Record<string, Handler | undefined>>, fmtKeys: (k: string) => string = (k) => k) =>
+export const paletteCommands = (
+  handlers: Partial<Record<string, Handler | undefined>>,
+  fmtKeys: (k: string) => string = (k) => k,
+) =>
   COMMANDS.flatMap((c) => {
     const h = handlers[c.id];
     if (!h || c.palette === false) return [];

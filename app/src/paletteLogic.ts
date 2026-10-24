@@ -1,6 +1,10 @@
 /** Ranking for the command palette: every word of the query must match; better matches come first. */
 
-const fold = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+const fold = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 
 /** how well one word matches `text` (both folded): 0 = no match */
 const wordScore = (text: string, w: string): number => {
@@ -35,7 +39,12 @@ export type Ranked<T> = { item: T; score: number };
  * Items matching `q`, best first. Items in `recents` (most recent first) get a bonus, which alone orders an empty
  * query: the recent ones first, then the rest in their given order.
  */
-export const rank = <T extends { label: string; id: string }>(items: T[], q: string, recents: string[] = [], max = 200): T[] => {
+export const rank = <T extends { label: string; id: string }>(
+  items: T[],
+  q: string,
+  recents: string[] = [],
+  max = 200,
+): T[] => {
   const words = fold(q).split(/\s+/).filter(Boolean);
   const bonus = (id: string) => {
     const i = recents.indexOf(id);
@@ -51,4 +60,5 @@ export const rank = <T extends { label: string; id: string }>(items: T[], q: str
 };
 
 /** `id` moved to the front of `list`, no repeats, at most `max` */
-export const pushRecent = (list: string[], id: string, max = 8): string[] => [id, ...list.filter((x) => x !== id)].slice(0, max);
+export const pushRecent = (list: string[], id: string, max = 8): string[] =>
+  [id, ...list.filter((x) => x !== id)].slice(0, max);

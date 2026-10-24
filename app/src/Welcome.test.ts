@@ -28,7 +28,10 @@ describe("Welcome", () => {
       createComponent(Welcome, {
         onAddProject: vi.fn(),
         projectName: "proj",
-        worktrees: [{ path: "/w/main", branch: "main", is_main: true }, { path: "/w/x", branch: "ax/x", is_main: false }],
+        worktrees: [
+          { path: "/w/main", branch: "main", is_main: true },
+          { path: "/w/x", branch: "ax/x", is_main: false },
+        ],
         onPick,
         onNewWorktree,
       }),

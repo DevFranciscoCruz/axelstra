@@ -5,7 +5,17 @@ import { openInEditor, worktreeSetParent } from "../api";
 import { wtKey } from "../wtGroups";
 import { P } from "../strings.panels";
 import { S } from "../strings";
-import { canonAgent, agentKeys, isPinned, norm, projectPrefsOf, projectTerse, setAttention, setProjectPref, togglePin } from "../store";
+import {
+  canonAgent,
+  agentKeys,
+  isPinned,
+  norm,
+  projectPrefsOf,
+  projectTerse,
+  setAttention,
+  setProjectPref,
+  togglePin,
+} from "../store";
 import type { SidebarActions } from "./actions";
 
 const T = P.sidebar.menu;
@@ -23,10 +33,18 @@ export type MenuDeps = Pick<SidebarActions, "run" | "copy" | "sleepWorktree" | "
 
 /** "Mover para…": the other worktrees of the project, minus itself and what is already below it (that would loop) */
 const moveMenu = (d: MenuDeps, projectId: string, worktrees: Wt[], w: Wt, below: string[]): MenuItem[] => [
-  { label: T.moveNone, icon: w.parent ? undefined : "check", run: () => d.run(() => worktreeSetParent(projectId, w.path, null)) },
+  {
+    label: T.moveNone,
+    icon: w.parent ? undefined : "check",
+    run: () => d.run(() => worktreeSetParent(projectId, w.path, null)),
+  },
   ...worktrees
     .filter((x) => !x.is_main && !below.includes(wtKey(x.path)))
-    .map((x) => ({ label: x.branch ?? x.path, icon: wtKey(w.parent) === wtKey(x.path) ? "check" : undefined, run: () => d.run(() => worktreeSetParent(projectId, w.path, x.path)) })),
+    .map((x) => ({
+      label: x.branch ?? x.path,
+      icon: wtKey(w.parent) === wtKey(x.path) ? "check" : undefined,
+      run: () => d.run(() => worktreeSetParent(projectId, w.path, x.path)),
+    })),
 ];
 
 export const worktreeMenu = (d: MenuDeps, p: Proj, w: Wt, label: string, below: string[] = []): MenuItem[] => [
@@ -35,8 +53,16 @@ export const worktreeMenu = (d: MenuDeps, p: Proj, w: Wt, label: string, below: 
     label: S.replies,
     icon: "sparkle",
     children: [
-      { label: T.followGlobal, icon: projectTerse(p.id) ? undefined : "check", run: () => setProjectPref(p.id, { terse: undefined }) },
-      ...(["off", "short", "tiny"] as const).map((v) => ({ label: S.terse[v].label, icon: projectTerse(p.id) === v ? "check" : undefined, run: () => setProjectPref(p.id, { terse: v }) })),
+      {
+        label: T.followGlobal,
+        icon: projectTerse(p.id) ? undefined : "check",
+        run: () => setProjectPref(p.id, { terse: undefined }),
+      },
+      ...(["off", "short", "tiny"] as const).map((v) => ({
+        label: S.terse[v].label,
+        icon: projectTerse(p.id) === v ? "check" : undefined,
+        run: () => setProjectPref(p.id, { terse: v }),
+      })),
     ],
   },
   { separator: true },
@@ -51,28 +77,54 @@ export const worktreeMenu = (d: MenuDeps, p: Proj, w: Wt, label: string, below: 
   { label: T.copyPath, icon: "copy", run: () => d.copy(w.path) },
   { label: T.rename, icon: "pencil", disabled: w.is_main, run: () => d.rename(w.path, w.branch ?? label, label) },
   { label: T.copyName, icon: "copy", run: () => d.copy(w.branch ?? label) },
-  { label: T.moveTo, icon: "branch", disabled: w.is_main || !p.worktrees || p.worktrees.filter((x) => !x.is_main).length < 2, children: p.worktrees ? moveMenu(d, p.id, p.worktrees, w, below) : [] },
+  {
+    label: T.moveTo,
+    icon: "branch",
+    disabled: w.is_main || !p.worktrees || p.worktrees.filter((x) => !x.is_main).length < 2,
+    children: p.worktrees ? moveMenu(d, p.id, p.worktrees, w, below) : [],
+  },
   { separator: true },
   { label: isPinned(w.path) ? T.unpin : T.pin, icon: "pin", run: () => togglePin(w.path) },
   { label: T.markUnread, icon: "circleHalf", run: () => setAttention((cur) => new Set(cur).add(norm(w.path))) },
   { separator: true },
   { label: T.sleep, icon: "moon", run: () => d.sleepWorktree(w.path, label) },
-  { label: P.sidebar.removeWorktree, icon: "x", danger: true, disabled: w.is_main, run: () => d.dropWorktree(p.id, w.path, label) },
+  {
+    label: P.sidebar.removeWorktree,
+    icon: "x",
+    danger: true,
+    disabled: w.is_main,
+    run: () => d.dropWorktree(p.id, w.path, label),
+  },
 ];
 
-export const projectMenu = (d: MenuDeps, p: { id: string; name: string; path: string; setup?: string | null }): MenuItem[] => [
+export const projectMenu = (
+  d: MenuDeps,
+  p: { id: string; name: string; path: string; setup?: string | null },
+): MenuItem[] => [
   { label: P.sidebar.newWorktree, icon: "plus", run: () => d.newWorktree(p.id) },
   { label: T.setupCmd, icon: "gear", run: () => d.editSetup(p.id, p.setup ?? "") },
   {
     label: T.defaultAgent,
     icon: "sparkle",
     children: [
-      { label: T.followGlobal, icon: projectPrefsOf(p.id).agent ? undefined : "check", run: () => setProjectPref(p.id, { agent: undefined }) },
-      ...agentKeys().map((a) => ({ label: projectPrefsOf(p.id).agent && canonAgent(projectPrefsOf(p.id).agent!) === a ? `${a} ✓` : a, icon: hasIcon(a) ? a : undefined, run: () => setProjectPref(p.id, { agent: a }) })),
+      {
+        label: T.followGlobal,
+        icon: projectPrefsOf(p.id).agent ? undefined : "check",
+        run: () => setProjectPref(p.id, { agent: undefined }),
+      },
+      ...agentKeys().map((a) => ({
+        label: projectPrefsOf(p.id).agent && canonAgent(projectPrefsOf(p.id).agent!) === a ? `${a} ✓` : a,
+        icon: hasIcon(a) ? a : undefined,
+        run: () => setProjectPref(p.id, { agent: a }),
+      })),
     ],
   },
   { separator: true },
-  { label: T.openIn, icon: "folder", children: [{ label: T.explorer, run: () => d.run(() => revealItemInDir(p.path)) }] },
+  {
+    label: T.openIn,
+    icon: "folder",
+    children: [{ label: T.explorer, run: () => d.run(() => revealItemInDir(p.path)) }],
+  },
   { label: T.copyPath, icon: "copy", run: () => d.copy(p.path) },
   { separator: true },
   { label: P.sidebar.dropLabel, icon: "x", danger: true, run: () => d.dropProject(p.id, p.name) },

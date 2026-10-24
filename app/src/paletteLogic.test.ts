@@ -4,7 +4,13 @@ import { pushRecent, rank } from "./paletteLogic";
 const it_ = (label: string, id = label) => ({ label, id });
 
 describe("palette ranking", () => {
-  const items = [it_("Definições"), it_("Novo terminal"), it_("Docker"), it_("Mostrar painel direito"), it_("proj / docker-fix")];
+  const items = [
+    it_("Definições"),
+    it_("Novo terminal"),
+    it_("Docker"),
+    it_("Mostrar painel direito"),
+    it_("proj / docker-fix"),
+  ];
   it("keeps everything for an empty query, in order", () => {
     expect(rank(items, "").map((i) => i.label)).toEqual(items.map((i) => i.label));
   });

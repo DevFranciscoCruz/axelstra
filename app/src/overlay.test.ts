@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { overlay, setOverlay, setShowProjectSettings, setShowSettings, setShowShortcuts, showProjectSettings, showSettings, showShortcuts } from "./store/overlay";
+import {
+  overlay,
+  setOverlay,
+  setShowProjectSettings,
+  setShowSettings,
+  setShowShortcuts,
+  showProjectSettings,
+  showSettings,
+  showShortcuts,
+} from "./store/overlay";
 
 beforeEach(() => setOverlay(null));
 

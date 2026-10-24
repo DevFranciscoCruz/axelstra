@@ -1,5 +1,16 @@
 import { createSignal } from "solid-js";
-import { Changes, GhItem, Project, WtStatus, Worktree, ghListBg, gitChanges, listProjects, worktreeOverview, worktreeStatus } from "../api";
+import {
+  Changes,
+  GhItem,
+  Project,
+  WtStatus,
+  Worktree,
+  ghListBg,
+  gitChanges,
+  listProjects,
+  worktreeOverview,
+  worktreeStatus,
+} from "../api";
 import { apiContext } from "../apiContext";
 import { errorText } from "../appError";
 import { norm } from "../paths";
@@ -38,7 +49,6 @@ export const watchOverview = () => {
     if (--overviewUsers === 0) overviewPoll?.stop();
   };
 };
-
 
 /** git state per worktree (keyed by normalized path) and the open PR per branch, for the sidebar badges */
 export const [wtStatus, setWtStatus] = createSignal<Record<string, WtStatus>>({});

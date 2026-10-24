@@ -29,7 +29,11 @@ export function formatError(kind: string, value: unknown, where?: string): Error
 
 /** Installs window.onerror + unhandledrejection; `send` must never throw into the page.
  *  `onRejection` also gets every unhandled rejection (the app shows it as an error toast instead of failing silently). */
-export function installErrorHooks(send: (r: ErrorReport) => void, target: Window = window, onRejection?: (reason: unknown, r: ErrorReport) => void): void {
+export function installErrorHooks(
+  send: (r: ErrorReport) => void,
+  target: Window = window,
+  onRejection?: (reason: unknown, r: ErrorReport) => void,
+): void {
   const safe = (r: ErrorReport) => {
     try {
       send(r);

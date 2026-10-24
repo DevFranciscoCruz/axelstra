@@ -11,12 +11,17 @@ describe("command registry", () => {
   });
   it("the palette offers only commands with a handler and can relabel them", () => {
     const run = () => {};
-    const out = paletteCommands({ docker: { run }, toggleSidebar: { run, label: "Ocultar projetos" }, nextTab: { run } });
+    const out = paletteCommands({
+      docker: { run },
+      toggleSidebar: { run, label: "Ocultar projetos" },
+      nextTab: { run },
+    });
     expect(out.map((c) => c.id)).toEqual(["toggleSidebar", "docker"]);
     expect(out[0]).toMatchObject({ label: "Ocultar projetos", hint: "Ctrl+B" });
   });
   it("covers the new palette entries", () => {
     const ids = COMMANDS.filter((c) => c.palette !== false).map((c) => c.id);
-    for (const id of ["docker", "notifications", "theme", "voice", "toggleRight", "restartDaemon"]) expect(ids).toContain(id);
+    for (const id of ["docker", "notifications", "theme", "voice", "toggleRight", "restartDaemon"])
+      expect(ids).toContain(id);
   });
 });

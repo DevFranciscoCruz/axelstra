@@ -19,7 +19,9 @@ export function Shortcuts() {
         <For each={cheatSheet()}>
           {(g) => (
             <>
-              <div class="auto-note" role="heading" aria-level="3">{g.title}</div>
+              <div class="auto-note" role="heading" aria-level="3">
+                {g.title}
+              </div>
               <For each={g.rows}>
                 {([keys, what]) => (
                   <div class="disp-head">

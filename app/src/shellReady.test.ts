@@ -17,7 +17,13 @@ describe("waitShellReady", () => {
   });
   it("survives a read that throws", async () => {
     let n = 0;
-    const r = await waitShellReady(async () => { if (n++ < 2) throw new Error("no session"); return ["$"]; }, { sleep: noSleep });
+    const r = await waitShellReady(
+      async () => {
+        if (n++ < 2) throw new Error("no session");
+        return ["$"];
+      },
+      { sleep: noSleep },
+    );
     expect(r).toBe(true);
   });
 });

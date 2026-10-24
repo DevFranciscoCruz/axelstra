@@ -4,7 +4,10 @@ export const W = {
   flow: "Adiciona um projeto, cria um worktree e abre um agente.",
   add: "Adicionar projeto",
   pickTitle: "Escolhe um worktree",
-  pickFlow: (project?: string) => (project ? `Abre um worktree de ${project} ou cria um novo para uma tarefa.` : "Abre um worktree ou cria um novo para uma tarefa."),
+  pickFlow: (project?: string) =>
+    project
+      ? `Abre um worktree de ${project} ou cria um novo para uma tarefa.`
+      : "Abre um worktree ou cria um novo para uma tarefa.",
   newWorktree: "Novo worktree",
   detached: "(destacado)",
   mainTag: "principal",

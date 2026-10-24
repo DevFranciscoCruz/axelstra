@@ -24,7 +24,8 @@ export const FIELDS = [
 ];
 
 // A [[package]] block of Cargo.lock; a workspace-local package has no `source` line.
-const LOCK_BLOCK_RE = /(\[\[package\]\]\r?\nname = "[^"]*"\r?\nversion = ")([^"]*)("\r?\n)((?:(?!\[\[package\]\])[^\n]*\n?)*)/g;
+const LOCK_BLOCK_RE =
+  /(\[\[package\]\]\r?\nname = "[^"]*"\r?\nversion = ")([^"]*)("\r?\n)((?:(?!\[\[package\]\])[^\n]*\n?)*)/g;
 
 export function lockVersions(root) {
   const path = join(root, "Cargo.lock");
@@ -63,7 +64,9 @@ export function check(root) {
   const version = fields[0].version;
   const stale = lockVersions(root).filter((p) => p.version !== version);
   if (stale.length) {
-    throw new Error(`Cargo.lock disagrees with Cargo.toml (${version}): ${stale.map((p) => `${p.name}=${p.version}`).join(", ")}`);
+    throw new Error(
+      `Cargo.lock disagrees with Cargo.toml (${version}): ${stale.map((p) => `${p.name}=${p.version}`).join(", ")}`,
+    );
   }
   return version;
 }
@@ -154,7 +157,10 @@ function selfTest() {
     throws(() => check(dir), /Cargo\.lock disagrees.*core=0\.0\.9/, "lock drift detected");
     put("Cargo.lock", lock("0.1.0", "0.1.0"));
     stamp(dir, "v2.0.0");
-    assert(readFileSync(join(dir, "Cargo.lock"), "utf8") === lock("2.0.0", "2.0.0").replace('"1.0.0"', '"1.0.0"'), "lock: workspace packages stamped, registry ones untouched");
+    assert(
+      readFileSync(join(dir, "Cargo.lock"), "utf8") === lock("2.0.0", "2.0.0").replace('"1.0.0"', '"1.0.0"'),
+      "lock: workspace packages stamped, registry ones untouched",
+    );
     rmSync(join(dir, "Cargo.lock"));
 
     put("Cargo.toml", "[workspace]\n");

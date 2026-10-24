@@ -10,8 +10,12 @@ import { S } from "./strings";
  * `onState` follows the progress (true while restarting); `after` runs once the new daemon answers. Returns false when the
  * user declined or it failed.
  */
-export async function restartDaemonFlow(onState?: (restarting: boolean) => void, after?: () => void | Promise<void>): Promise<boolean> {
-  if (!(await ask(S.restartConfirm, { title: S.restartTitle, kind: "warning", okLabel: S.restartDaemon }))) return false;
+export async function restartDaemonFlow(
+  onState?: (restarting: boolean) => void,
+  after?: () => void | Promise<void>,
+): Promise<boolean> {
+  if (!(await ask(S.restartConfirm, { title: S.restartTitle, kind: "warning", okLabel: S.restartDaemon })))
+    return false;
   onState?.(true);
   try {
     await daemonShutdown().catch((e) => console.debug("daemon.shutdown", e)); // the connection drops with the daemon

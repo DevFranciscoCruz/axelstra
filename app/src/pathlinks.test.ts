@@ -56,6 +56,7 @@ describe("safeLinkUrl", () => {
   it("allows only http and https", () => {
     expect(safeLinkUrl("https://example.com/a")).toBe("https://example.com/a");
     expect(safeLinkUrl("http://localhost:3000")).toBe("http://localhost:3000/");
-    for (const bad of ["mailto:a@b.c", "tel:123", "file:///C:/x", "javascript:alert(1)", "ssh://h", "not a url", ""]) expect(safeLinkUrl(bad)).toBeNull();
+    for (const bad of ["mailto:a@b.c", "tel:123", "file:///C:/x", "javascript:alert(1)", "ssh://h", "not a url", ""])
+      expect(safeLinkUrl(bad)).toBeNull();
   });
 });

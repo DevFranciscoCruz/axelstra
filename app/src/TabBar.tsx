@@ -39,106 +39,159 @@ export function TabBar(props: Props) {
 
   return (
     <Tabs value={stripValue()} onChange={() => {}} activationMode="manual" class="flex min-w-0">
-    <TabsList aria-label={S.app.tabs} class="min-w-0 overflow-x-auto [scrollbar-width:none]">
-    <Tab value="kanban" selected={view().kind === "kanban"} onSelect={() => guarded(() => setView({ kind: "kanban" }))}>
-      <span class="dtag"><Icon name="grid" size={11} /></span>
-      <span>Kanban</span>
-    </Tab>
-    <Tab value="docker" selected={view().kind === "docker"} onSelect={() => guarded(() => setView({ kind: "docker" }))}>
-      <span class="dtag"><Icon name="box" size={11} /></span>
-      <span>Docker</span>
-    </Tab>
-    <For each={props.tabs}>
-      {(s) => (
+      <TabsList aria-label={S.app.tabs} class="min-w-0 overflow-x-auto [scrollbar-width:none]">
         <Tab
-          id={`tab-${s.id}`}
-          value={`tab-${s.id}`}
-          selected={view().kind === "terminal" && activeSession() === s.id}
-          onSelect={() => props.showTab(s)}
-          onClose={() => void props.close(s)}
-          onRename={() => props.setRenaming(s.id)}
-          dropBefore={dropOn() === s.id && dragTab() !== s.id}
-          wrap={{
-            draggable: props.renaming !== s.id,
-            onDragStart: (e) => {
-              setDragTab(s.id);
-              e.dataTransfer?.setData("text/plain", String(s.id));
-            },
-            onDragOver: (e) => {
-              if (dragTab() === null) return;
-              e.preventDefault();
-              setDropOn(s.id);
-            },
-            onDrop: (e) => {
-              e.preventDefault();
-              const from = dragTab();
-              if (from !== null) moveTab(props.tabs.map((t) => t.id), from, s.id);
-              setDragTab(null);
-              setDropOn(null);
-            },
-            onDragEnd: () => {
-              setDragTab(null);
-              setDropOn(null);
-            },
-            onDblClick: () => props.setRenaming(s.id),
-            onMouseDown: (e) => e.button === 1 && e.preventDefault(),
-            onAuxClick: (e) => {
-              if (e.button !== 1) return;
-              e.preventDefault();
-              void props.close(s);
-            },
-          }}
-          editing={
-            props.renaming === s.id ? (
-              <>
-                <StateDot state={dotOfSession(s)} />
-                <Input
-                  class="h-auto w-[120px] rounded-sm border-border bg-transparent px-1 py-0 text-inherit"
-                  aria-label={S.app.tabName}
-                  value={tabLabel(s)}
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === "Enter") finishRename(s.id, e.currentTarget.value);
-                    else if (e.key === "Escape") finishRename(s.id, null);
-                  }}
-                  onBlur={(e) => props.renaming === s.id && finishRename(s.id, e.currentTarget.value, false)}
-                  ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
-                />
-              </>
-            ) : undefined
-          }
+          value="kanban"
+          selected={view().kind === "kanban"}
+          onSelect={() => guarded(() => setView({ kind: "kanban" }))}
         >
-          <StateDot state={dotOfSession(s)} />
-          <span>{s.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{tabLabel(s)}</span>
+          <span class="dtag">
+            <Icon name="grid" size={11} />
+          </span>
+          <span>Kanban</span>
         </Tab>
-      )}
-    </For>
-    <Show when={shown("commit")}>
-      {(c) => (
-        <Tab value="commit" class="diff-tab" selected title={c().commit.subject} onSelect={() => setView(c())} onClose={() => showView()} closeLabel={S.app.closeCommit}>
-          <span class="dtag"><Icon name="branch" size={11} /></span>
-          <span>{c().commit.short}</span>
+        <Tab
+          value="docker"
+          selected={view().kind === "docker"}
+          onSelect={() => guarded(() => setView({ kind: "docker" }))}
+        >
+          <span class="dtag">
+            <Icon name="box" size={11} />
+          </span>
+          <span>Docker</span>
         </Tab>
-      )}
-    </Show>
-    <Show when={shown("file")}>
-      {(p) => (
-        <Tab value="file" class="diff-tab" selected title={p().path} onSelect={() => setView(p())} onClose={() => guarded(() => showView())} closeLabel={S.app.closeFile}>
-          <span class="dtag"><Icon name="pencil" size={11} /></span>
-          <span>{basename(p().path)}</span>
-        </Tab>
-      )}
-    </Show>
-    <Show when={shown("diff")}>
-      {(p) => (
-        <Tab value="diff" class="diff-tab" selected title={p().path} onSelect={() => setView(p())} onClose={() => showView()} closeLabel={S.app.closeDiff}>
-          <span class="dtag">Δ</span>
-          <span>{basename(p().path)}</span>
-        </Tab>
-      )}
-    </Show>
-    </TabsList>
+        <For each={props.tabs}>
+          {(s) => (
+            <Tab
+              id={`tab-${s.id}`}
+              value={`tab-${s.id}`}
+              selected={view().kind === "terminal" && activeSession() === s.id}
+              onSelect={() => props.showTab(s)}
+              onClose={() => void props.close(s)}
+              onRename={() => props.setRenaming(s.id)}
+              dropBefore={dropOn() === s.id && dragTab() !== s.id}
+              wrap={{
+                draggable: props.renaming !== s.id,
+                onDragStart: (e) => {
+                  setDragTab(s.id);
+                  e.dataTransfer?.setData("text/plain", String(s.id));
+                },
+                onDragOver: (e) => {
+                  if (dragTab() === null) return;
+                  e.preventDefault();
+                  setDropOn(s.id);
+                },
+                onDrop: (e) => {
+                  e.preventDefault();
+                  const from = dragTab();
+                  if (from !== null)
+                    moveTab(
+                      props.tabs.map((t) => t.id),
+                      from,
+                      s.id,
+                    );
+                  setDragTab(null);
+                  setDropOn(null);
+                },
+                onDragEnd: () => {
+                  setDragTab(null);
+                  setDropOn(null);
+                },
+                onDblClick: () => props.setRenaming(s.id),
+                onMouseDown: (e) => e.button === 1 && e.preventDefault(),
+                onAuxClick: (e) => {
+                  if (e.button !== 1) return;
+                  e.preventDefault();
+                  void props.close(s);
+                },
+              }}
+              editing={
+                props.renaming === s.id ? (
+                  <>
+                    <StateDot state={dotOfSession(s)} />
+                    <Input
+                      class="h-auto w-[120px] rounded-sm border-border bg-transparent px-1 py-0 text-inherit"
+                      aria-label={S.app.tabName}
+                      value={tabLabel(s)}
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === "Enter") finishRename(s.id, e.currentTarget.value);
+                        else if (e.key === "Escape") finishRename(s.id, null);
+                      }}
+                      onBlur={(e) => props.renaming === s.id && finishRename(s.id, e.currentTarget.value, false)}
+                      ref={(el) =>
+                        queueMicrotask(() => {
+                          el.focus();
+                          el.select();
+                        })
+                      }
+                    />
+                  </>
+                ) : undefined
+              }
+            >
+              <StateDot state={dotOfSession(s)} />
+              <span>
+                {s.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}
+                {tabLabel(s)}
+              </span>
+            </Tab>
+          )}
+        </For>
+        <Show when={shown("commit")}>
+          {(c) => (
+            <Tab
+              value="commit"
+              class="diff-tab"
+              selected
+              title={c().commit.subject}
+              onSelect={() => setView(c())}
+              onClose={() => showView()}
+              closeLabel={S.app.closeCommit}
+            >
+              <span class="dtag">
+                <Icon name="branch" size={11} />
+              </span>
+              <span>{c().commit.short}</span>
+            </Tab>
+          )}
+        </Show>
+        <Show when={shown("file")}>
+          {(p) => (
+            <Tab
+              value="file"
+              class="diff-tab"
+              selected
+              title={p().path}
+              onSelect={() => setView(p())}
+              onClose={() => guarded(() => showView())}
+              closeLabel={S.app.closeFile}
+            >
+              <span class="dtag">
+                <Icon name="pencil" size={11} />
+              </span>
+              <span>{basename(p().path)}</span>
+            </Tab>
+          )}
+        </Show>
+        <Show when={shown("diff")}>
+          {(p) => (
+            <Tab
+              value="diff"
+              class="diff-tab"
+              selected
+              title={p().path}
+              onSelect={() => setView(p())}
+              onClose={() => showView()}
+              closeLabel={S.app.closeDiff}
+            >
+              <span class="dtag">Δ</span>
+              <span>{basename(p().path)}</span>
+            </Tab>
+          )}
+        </Show>
+      </TabsList>
     </Tabs>
   );
 }
