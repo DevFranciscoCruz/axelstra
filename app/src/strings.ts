@@ -1,5 +1,6 @@
 import { count, dict } from "./i18n";
 import { enS } from "./strings.en";
+import { ptBRS } from "./strings.ptbr";
 /** UI texts of the settings screen and the terminal, in one place and in pt-PT (gestor, ligar, ficheiro, ecrã). */
 /**
  * Glossary (pt-PT). One word per thing, so the screens agree:
@@ -172,7 +173,7 @@ export const ptS = {
     rightWidth: "Largura do painel direito",
     splitWidth: "Largura do terminal dividido",
     newAgent: "Novo agente",
-    newAgentOf: (agent: string) => `Novo agente (${S.agentNames[agent] ?? agent})`,
+    newAgentOf: (agent: string): string => `Novo agente (${S.agentNames[agent] ?? agent})`,
     agent: "Agente",
     open: "Abrir",
     showProjects: "Mostrar projetos (Ctrl+B)",
@@ -240,4 +241,4 @@ export const ptS = {
   deleteFailed: (n: string, e: unknown) => `Não foi possível apagar "${n}": ${String(e).replace(/^Error: /, "")}`,
 } as const;
 
-export const S = dict(ptS, enS);
+export const S = dict<typeof ptS>(ptS, enS, ptBRS);
