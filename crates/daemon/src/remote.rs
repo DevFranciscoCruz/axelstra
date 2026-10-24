@@ -43,18 +43,22 @@ pub fn check_bin(bin: &str) -> Result<()> {
         && !bin.starts_with('-')
         && bin.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '~'));
     if !ok {
-        bail!("invalid remote program {bin:?}: use letters, digits and . _ - / ~, not starting with '-'");
+        return Err(axelstra_core::coded!(
+            "host.bad_bin",
+            "invalid remote program {bin:?}: use letters, digits and . _ - / ~, not starting with '-'",
+            bin = bin
+        ));
     }
     Ok(())
 }
 
 fn check_port(p: &str) -> Result<u16> {
     if p.is_empty() || p.len() > 5 || !p.chars().all(|c| c.is_ascii_digit()) {
-        bail!("invalid port {p:?}");
+        return Err(axelstra_core::coded!("host.bad_port", "invalid port {p:?}", p = p));
     }
     match p.parse::<u16>() {
         Ok(n) if n >= 1 => Ok(n),
-        _ => bail!("invalid port {p:?}"),
+        _ => Err(axelstra_core::coded!("host.bad_port", "invalid port {p:?}", p = p)),
     }
 }
 
@@ -64,38 +68,49 @@ impl RemoteSpec {
     pub fn parse(spec: &str) -> Result<RemoteSpec> {
         let spec = spec.trim();
         if spec.is_empty() {
-            bail!("empty host spec (use wsl:<distro> or ssh:[user@]host[:port])");
+            return Err(axelstra_core::coded!("host.spec_empty", "empty host spec (use wsl:<distro> or ssh:[user@]host[:port])"));
         }
         if spec.len() > 300 || spec.chars().any(|c| c.is_control() || c.is_whitespace() || !c.is_ascii()) {
-            bail!("invalid host spec: no spaces, control characters or non-ASCII characters allowed");
+            return Err(axelstra_core::coded!(
+                "host.spec_chars",
+                "invalid host spec: no spaces, control characters or non-ASCII characters allowed"
+            ));
         }
         let bin = DEFAULT_BIN.to_string();
         if let Some(distro) = spec.strip_prefix("wsl:") {
             if !is_ident(distro) {
-                bail!("invalid WSL distro name {distro:?}");
+                return Err(axelstra_core::coded!("host.bad_distro", "invalid WSL distro name {distro:?}", distro = distro));
             }
             return Ok(RemoteSpec::Wsl { distro: distro.into(), bin });
         }
         let Some(rest) = spec.strip_prefix("ssh:") else {
-            bail!("unknown host spec {spec:?} (use wsl:<distro> or ssh:[user@]host[:port])");
+            return Err(axelstra_core::coded!(
+                "host.spec_unknown",
+                "unknown host spec {spec:?} (use wsl:<distro> or ssh:[user@]host[:port])",
+                spec = spec
+            ));
         };
         let (user, hostport) = match rest.split_once('@') {
             Some((u, h)) => {
                 if !is_ident(u) {
-                    bail!("invalid ssh user {u:?}");
+                    return Err(axelstra_core::coded!("host.bad_user", "invalid ssh user {u:?}", u = u));
                 }
                 (Some(u.to_string()), h)
             }
             None => (None, rest),
         };
         let (host, port) = if let Some(v6) = hostport.strip_prefix('[') {
-            let Some((addr, tail)) = v6.split_once(']') else { bail!("unterminated '[' in {hostport:?}") };
+            let Some((addr, tail)) = v6.split_once(']') else {
+                return Err(axelstra_core::coded!("host.unterminated_bracket", "unterminated '[' in {hostport:?}", hostport = hostport));
+            };
             if addr.is_empty() || !addr.contains(':') || !addr.chars().all(|c| c.is_ascii_hexdigit() || matches!(c, ':' | '.')) {
-                bail!("invalid IPv6 address {addr:?}");
+                return Err(axelstra_core::coded!("host.bad_ipv6", "invalid IPv6 address {addr:?}", addr = addr));
             }
             let port = match tail {
                 "" => None,
-                t => Some(check_port(t.strip_prefix(':').with_context(|| format!("unexpected {t:?} after ']'"))?)?),
+                t => Some(check_port(
+                    t.strip_prefix(':').ok_or_else(|| axelstra_core::coded!("host.after_bracket", "unexpected {t:?} after ']'", t = t))?,
+                )?),
             };
             (addr.to_string(), port)
         } else {
@@ -106,7 +121,7 @@ impl RemoteSpec {
         };
         let v6 = host.contains(':');
         if !v6 && !is_ident(&host) {
-            bail!("invalid ssh host {host:?}");
+            return Err(axelstra_core::coded!("host.bad_host", "invalid ssh host {host:?}", host = host));
         }
         Ok(RemoteSpec::Ssh { user, host, port, bin })
     }
@@ -197,11 +212,15 @@ pub fn scan_banner(r: &mut impl Read) -> Result<()> {
     let mut b = [0u8; 1];
     loop {
         if r.read(&mut b).context("reading the bridge's output")? == 0 {
-            bail!("the connection closed before the bridge announced itself");
+            return Err(axelstra_core::coded!("host.bridge_closed", "the connection closed before the bridge announced itself"));
         }
         total += 1;
         if total > BANNER_SCAN_MAX {
-            bail!("no bridge banner in the first {BANNER_SCAN_MAX} bytes: is `axelstra bridge` what runs there?");
+            return Err(axelstra_core::coded!(
+                "host.no_banner",
+                "no bridge banner in the first {max} bytes: is `axelstra bridge` what runs there?",
+                max = BANNER_SCAN_MAX
+            ));
         }
         match b[0] {
             b'\n' => {
@@ -212,7 +231,12 @@ pub fn scan_banner(r: &mut impl Read) -> Result<()> {
                     return Ok(());
                 }
                 if line.starts_with(b"AXELSTRA-BRIDGE/") {
-                    bail!("the remote bridge speaks {:?}, this client {BANNER:?}: update the older side", String::from_utf8_lossy(&line));
+                    return Err(axelstra_core::coded!(
+                        "host.bridge_version",
+                        "the remote bridge speaks {theirs:?}, this client {ours:?}: update the older side",
+                        theirs = String::from_utf8_lossy(&line),
+                        ours = BANNER
+                    ));
                 }
                 line.clear();
             }
@@ -420,5 +444,27 @@ mod tests {
         // a line that merely contains the banner is not it
         let e = scan_banner(&mut std::io::Cursor::new(b"xAXELSTRA-BRIDGE/1\n".to_vec())).unwrap_err();
         assert!(e.to_string().contains("closed before"), "{e:#}");
+    }
+}
+
+#[cfg(test)]
+mod code_tests {
+    use super::*;
+    use axelstra_core::msg::find;
+
+    fn code(r: Result<RemoteSpec>) -> String {
+        find(&r.unwrap_err()).unwrap().code.clone()
+    }
+
+    #[test]
+    fn spec_errors_carry_codes() {
+        assert_eq!(code(RemoteSpec::parse("")), "host.spec_empty");
+        assert_eq!(code(RemoteSpec::parse("ftp:x")), "host.spec_unknown");
+        assert_eq!(code(RemoteSpec::parse("wsl:a b")), "host.spec_chars");
+        assert_eq!(code(RemoteSpec::parse("ssh:h:99999")), "host.bad_port");
+        assert_eq!(code(RemoteSpec::parse("ssh:[::1")), "host.unterminated_bracket");
+        let e = check_bin("-x").unwrap_err();
+        assert_eq!(find(&e).unwrap().code, "host.bad_bin");
+        assert_eq!(find(&e).unwrap().params["bin"], "-x");
     }
 }

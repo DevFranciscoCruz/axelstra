@@ -5,7 +5,7 @@
 //! UNVERIFIED (CLI not installed here, taken from the official docs): every gemini flag.
 //! `codex --full-auto` no longer exists in 0.154, so codex uses `--sandbox workspace-write` instead.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 /// Dangerous means: skips the agent's permission prompts. Never added unless the caller asks for it.
@@ -88,11 +88,11 @@ pub fn get(id: &str) -> Option<&'static Agent> {
     TABLE.iter().find(|a| a.id == id || a.aliases.contains(&id))
 }
 
-/// The table entry for `id`, or a pt-PT error naming the valid ids.
+/// The table entry for `id`, or a coded error naming the valid ids.
 pub fn require(id: &str) -> Result<&'static Agent> {
     match get(id) {
         Some(a) => Ok(a),
-        None => bail!("agente desconhecido '{id}'; usa um destes: {}", ids().join(", ")),
+        None => Err(crate::coded!("agent.unknown", "unknown agent '{id}'; use one of: {ids}", id = id, ids = ids().join(", "))),
     }
 }
 
@@ -141,7 +141,12 @@ impl Agent {
 
     /// Error text for a missing agent, with the install command.
     pub fn missing_message(&self) -> String {
-        format!("{} não encontrado: instala com {}", self.name, self.install)
+        format!("{} not found: install it with {}", self.name, self.install)
+    }
+
+    /// `missing_message` as a coded error, for the UI.
+    pub fn missing_error(&self) -> anyhow::Error {
+        crate::coded!("agent.not_installed", "{name} not found: install it with {install}", name = self.name, install = self.install)
     }
 
     pub fn info(&self) -> AgentInfo {
@@ -242,7 +247,7 @@ mod tests {
         assert!(get("rm").is_none());
         assert!(get("").is_none());
         let e = require("rm -rf").unwrap_err().to_string();
-        assert!(e.contains("desconhecido") && e.contains("gemini"), "{e}");
+        assert!(e.contains("unknown agent") && e.contains("gemini"), "{e}");
         assert_eq!(ids(), ["claude", "codex", "gemini"]);
     }
 
@@ -318,6 +323,22 @@ mod tests {
     #[test]
     fn missing_message_has_the_install_command() {
         let m = get("gemini").unwrap().missing_message();
-        assert_eq!(m, "Gemini CLI não encontrado: instala com npm install -g @google/gemini-cli");
+        assert_eq!(m, "Gemini CLI not found: install it with npm install -g @google/gemini-cli");
+    }
+}
+
+#[cfg(test)]
+mod code_tests {
+    use super::*;
+    use crate::msg::find;
+
+    #[test]
+    fn errors_carry_codes() {
+        let e = require("nope").unwrap_err();
+        assert_eq!(find(&e).unwrap().code, "agent.unknown");
+        assert_eq!(find(&e).unwrap().params["id"], "nope");
+        let m = get("gemini").unwrap().missing_error();
+        assert_eq!(find(&m).unwrap().code, "agent.not_installed");
+        assert_eq!(m.to_string(), get("gemini").unwrap().missing_message());
     }
 }

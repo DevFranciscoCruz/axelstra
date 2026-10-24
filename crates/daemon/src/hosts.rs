@@ -1,7 +1,7 @@
 //! The host registry: the `hosts` setting (remote daemons the app can reach). See docs/remote-daemon.md.
 
 use crate::remote::{check_bin, RemoteSpec};
-use anyhow::{bail, Result};
+use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -22,38 +22,44 @@ pub fn validate(v: &Value) -> Result<Value> {
     if v.is_null() {
         return Ok(json!([]));
     }
-    let Some(list) = v.as_array() else { bail!("hosts must be an array") };
+    let Some(list) = v.as_array() else { return Err(axelstra_core::coded!("host.list_not_array", "hosts must be an array")) };
     if list.len() > MAX_HOSTS {
-        bail!("hosts holds at most {MAX_HOSTS} entries");
+        return Err(axelstra_core::coded!("host.list_too_long", "hosts holds at most {max} entries", max = MAX_HOSTS));
     }
     let (mut ids, mut slots) = (HashSet::new(), HashSet::new());
     let mut out = Vec::with_capacity(list.len());
     for (i, h) in list.iter().enumerate() {
-        let Some(o) = h.as_object() else { bail!("hosts[{i}] must be an object") };
+        let Some(o) = h.as_object() else {
+            return Err(axelstra_core::coded!("host.entry_not_object", "hosts[{i}] must be an object", i = i));
+        };
         let id = o.get("id").and_then(Value::as_str).unwrap_or_default();
         if !id_ok(id) {
-            bail!("hosts[{i}].id must match ^[a-z][a-z0-9-]{{0,23}}$");
+            return Err(axelstra_core::coded!("host.id_invalid", "hosts[{i}].id must match ^[a-z][a-z0-9-]{{0,23}}$", i = i));
         }
         if id == "local" {
-            bail!("hosts[{i}].id \"local\" is reserved");
+            return Err(axelstra_core::coded!("host.id_reserved", "hosts[{i}].id \"local\" is reserved", i = i));
         }
         if !ids.insert(id.to_string()) {
-            bail!("hosts[{i}].id {id:?} is used twice");
+            return Err(axelstra_core::coded!("host.id_twice", "hosts[{i}].id {id:?} is used twice", i = i, id = id));
         }
         let slot = match o.get("slot").and_then(Value::as_u64) {
             Some(s @ 1..=127) => s,
-            _ => bail!("hosts[{i}].slot must be a whole number from 1 to 127"),
+            _ => return Err(axelstra_core::coded!("host.slot_invalid", "hosts[{i}].slot must be a whole number from 1 to 127", i = i)),
         };
         if !slots.insert(slot) {
-            bail!("hosts[{i}].slot {slot} is used twice");
+            return Err(axelstra_core::coded!("host.slot_twice", "hosts[{i}].slot {slot} is used twice", i = i, slot = slot));
         }
         let name = o.get("name").and_then(Value::as_str).unwrap_or_default();
         if !(1..=40).contains(&name.chars().count()) || name.chars().any(char::is_control) {
-            bail!("hosts[{i}].name must have 1 to 40 characters, no control characters");
+            return Err(axelstra_core::coded!(
+                "host.name_invalid",
+                "hosts[{i}].name must have 1 to 40 characters, no control characters",
+                i = i
+            ));
         }
         let spec = o.get("spec").and_then(Value::as_str).unwrap_or_default().trim();
         // `parse` never yields the test-only Exec variant
-        RemoteSpec::parse(spec).map_err(|e| anyhow::anyhow!("hosts[{i}].spec: {e}"))?;
+        RemoteSpec::parse(spec).with_context(|| format!("hosts[{i}].spec"))?;
         let mut e = Map::new();
         e.insert("id".into(), json!(id));
         e.insert("name".into(), json!(name));
@@ -62,10 +68,10 @@ pub fn validate(v: &Value) -> Result<Value> {
         match o.get("bin") {
             None | Some(Value::Null) => {}
             Some(Value::String(b)) => {
-                check_bin(b).map_err(|e| anyhow::anyhow!("hosts[{i}].bin: {e}"))?;
+                check_bin(b).with_context(|| format!("hosts[{i}].bin"))?;
                 e.insert("bin".into(), json!(b));
             }
-            Some(_) => bail!("hosts[{i}].bin must be a string"),
+            Some(_) => return Err(axelstra_core::coded!("host.bin_not_string", "hosts[{i}].bin must be a string", i = i)),
         }
         out.push(Value::Object(e));
     }
@@ -117,21 +123,25 @@ pub fn browse(path: Option<&str>) -> Result<Value> {
     let home = home().map(|h| display(&h));
     let asked = match path.map(str::trim).filter(|p| !p.is_empty()) {
         Some(p) => PathBuf::from(p),
-        None => PathBuf::from(home.clone().ok_or_else(|| anyhow::anyhow!("no home directory on this machine"))?),
+        None => PathBuf::from(home.clone().ok_or_else(|| axelstra_core::coded!("host.no_home", "no home directory on this machine"))?),
     };
     if !asked.is_absolute() {
-        bail!("{} is not an absolute path", asked.display());
+        return Err(axelstra_core::coded!("host.not_absolute", "{path} is not an absolute path", path = asked.display()));
     }
     let dir = match std::fs::canonicalize(&asked) {
         Ok(d) => d,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => bail!("{} does not exist", asked.display()),
-        Err(e) => bail!("cannot open {}: {e}", asked.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(axelstra_core::coded!("host.dir_missing", "{path} does not exist", path = asked.display()))
+        }
+        Err(e) => {
+            return Err(axelstra_core::coded!("host.cannot_open", "cannot open {path}: {detail}", path = asked.display(), detail = e))
+        }
     };
     if !dir.is_dir() {
-        bail!("{} is not a directory", display(&dir));
+        return Err(axelstra_core::coded!("host.not_dir", "{path} is not a directory", path = display(&dir)));
     }
     let mut names: Vec<(String, bool)> = std::fs::read_dir(&dir)
-        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", display(&dir)))?
+        .map_err(|e| axelstra_core::coded!("host.cannot_read", "cannot read {path}: {detail}", path = display(&dir), detail = e))?
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_dir())
         .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path().join(".git").exists()))
@@ -255,5 +265,23 @@ mod tests {
                 assert!(!matches!(spec, RemoteSpec::Exec { .. }), "{s}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod code_tests {
+    use super::*;
+    use axelstra_core::msg::find;
+
+    #[test]
+    fn validation_errors_carry_codes() {
+        let c = |v: Value| find(&validate(&v).unwrap_err()).unwrap().code.clone();
+        assert_eq!(c(json!({})), "host.list_not_array");
+        assert_eq!(c(json!([1])), "host.entry_not_object");
+        assert_eq!(c(json!([{"id": "local", "slot": 1, "name": "x", "spec": "wsl:a"}])), "host.id_reserved");
+        assert_eq!(c(json!([{"id": "a", "slot": 0, "name": "x", "spec": "wsl:a"}])), "host.slot_invalid");
+        // the inner spec error keeps its own code under the `hosts[i].spec` context
+        assert_eq!(c(json!([{"id": "a", "slot": 1, "name": "x", "spec": "nope"}])), "host.spec_unknown");
+        assert_eq!(find(&browse(Some("relative/dir")).unwrap_err()).unwrap().code, "host.not_absolute");
     }
 }

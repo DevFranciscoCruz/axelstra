@@ -15,7 +15,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let token_ok = p.get("token").and_then(Value::as_str).is_some_and(|t| ct_eq(t, token));
             if agent_session.is_none() && !token_ok {
                 reg.hello_failed();
-                anyhow::bail!("bad token");
+                return Err(axelstra_core::coded!("rpc.bad_token", "bad token"));
             }
             reg.bad_hellos.store(0, Ordering::SeqCst);
             *authed = true;
@@ -30,7 +30,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "agent.status" => {
             let key = p["key"].as_str().unwrap_or_default();
             if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-                anyhow::bail!("bad key");
+                return Err(axelstra_core::coded!("agent.bad_status_key", "bad key"));
             }
             let file = reg.saved.parent().unwrap_or(std::path::Path::new("")).join("status").join(format!("{key}.json"));
             let status = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
@@ -56,7 +56,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         // the gate lives here, not in the CLI: while screen control is off nothing below runs, whoever asks
         m if m.starts_with("computer.") && !matches!(m, "computer.status" | "computer.enable") => {
             if !reg.computer.load(Ordering::SeqCst) {
-                anyhow::bail!("screen control is off. The user turns it on in the Axelstra app (command palette: «Controlo do ecrã»); an agent cannot enable it");
+                return Err(axelstra_core::coded!("computer.off", "screen control is off. The user turns it on in the Axelstra app (command palette: «Screen control»); an agent cannot enable it"));
             }
             tokio::task::block_in_place(|| crate::computer::call(m, p))
         }
@@ -64,7 +64,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "computer.enable" => {
             // agents run the CLI: only the app (a connection that did not say it is the CLI) may turn it on
             if *cli && p["on"].as_bool() == Some(true) {
-                anyhow::bail!("screen control can only be turned on by the user in the app");
+                return Err(axelstra_core::coded!("computer.user_only", "screen control can only be turned on by the user in the app"));
             }
             reg.computer.store(p["on"].as_bool() == Some(true), Ordering::SeqCst);
             Ok(json!({"enabled": reg.computer.load(Ordering::SeqCst)}))
@@ -89,14 +89,14 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let mut saved = read_settings(&reg.saved);
             if let Some(level) = p["terse"].as_str() {
                 if !["off", "short", "tiny"].contains(&level) {
-                    return Err(anyhow::anyhow!("terse must be off, short or tiny"));
+                    return Err(axelstra_core::coded!("settings.bad_terse", "terse must be off, short or tiny"));
                 }
                 saved["terse"] = json!(level);
             }
             if p.get("pm").is_some() {
                 saved["pm"] = match p["pm"].as_str() {
                     Some(m) if ["bun", "pnpm", "yarn", "npm"].contains(&m) => json!(m),
-                    Some(_) => return Err(anyhow::anyhow!("pm must be bun, pnpm, yarn or npm")),
+                    Some(_) => return Err(axelstra_core::coded!("settings.bad_pm", "pm must be bun, pnpm, yarn or npm")),
                     None => Value::Null,
                 };
             }
@@ -171,7 +171,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({"path": out.to_string_lossy().replace('\\', "/")}))
         }
         "backup.restore" => {
-            let src = p["path"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| anyhow::anyhow!("path is required"))?;
+            let src = p["path"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| axelstra_core::coded!("workspace.path_required", "path is required"))?;
             let dir = reg.saved.parent().unwrap_or(std::path::Path::new("")).to_path_buf();
             let restored = tokio::task::block_in_place(|| crate::backup::restore(&dir, std::path::Path::new(src)))?;
             if restored.iter().any(|f| f == "sessions.json") {
@@ -187,7 +190,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         // one JSON file with projects, automations, settings and kanban cards; never tokens or sessions. The paths come
         // from the user (native dialog or CLI), which is why agents are refused all three
         "workspace.export" => {
-            let path = p["path"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| anyhow::anyhow!("path is required"))?;
+            let path = p["path"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| axelstra_core::coded!("workspace.path_required", "path is required"))?;
             let sum = tokio::task::block_in_place(|| crate::workspace::export_to(&reg.store, std::path::Path::new(path)))?;
             Ok(json!({"path": path.replace('\\', "/"), "summary": sum}))
         }
@@ -202,12 +208,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let replace = match p["mode"].as_str().unwrap_or("merge") {
                 "merge" => false,
                 "replace" => true,
-                m => anyhow::bail!("mode must be merge or replace, not {m:?}"),
+                m => return Err(axelstra_core::coded!("workspace.bad_mode", "mode must be merge or replace, not {m:?}", m = m)),
             };
             let overwrite = match p["conflicts"].as_str().unwrap_or("keep") {
                 "keep" => false,
                 "overwrite" => true,
-                m => anyhow::bail!("conflicts must be keep or overwrite, not {m:?}"),
+                m => return Err(axelstra_core::coded!("workspace.bad_conflicts", "conflicts must be keep or overwrite, not {m:?}", m = m)),
             };
             let o = crate::workspace::Options { replace, overwrite, map: crate::workspace::parse_map(&p["map"])? };
             let out = {

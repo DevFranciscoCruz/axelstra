@@ -5,7 +5,7 @@
 use crate::job::Job;
 use crate::sync::LockRecover;
 use crate::termseq::{DsrFilter, EscTracker};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::collections::VecDeque;
 use std::io::{Read, Write};
@@ -242,7 +242,9 @@ impl Session {
         for (k, v) in &s.env {
             cmd.env(k, v);
         }
-        let mut child = pair.slave.spawn_command(cmd).with_context(|| format!("spawn {}", s.program))?;
+        let mut child = pair.slave.spawn_command(cmd).map_err(|e| {
+            crate::coded!("session.spawn_failed", "spawn {program}: {detail}", program = s.program, detail = format!("{e:#}"))
+        })?;
         drop(pair.slave);
 
         // the child already runs: if the rest of the setup fails, it must not be left behind with nobody owning it
@@ -380,8 +382,10 @@ impl Session {
     /// Everything the program receives goes through the writer thread, in order, so typing and notices never interleave.
     fn queue_input(&self, data: &[u8]) -> Result<()> {
         self.input.try_send(data.to_vec()).map_err(|e| match e {
-            TrySendError::Full(_) => anyhow::anyhow!("session input backlog is full (the program is not reading its input)"),
-            TrySendError::Disconnected(_) => anyhow::anyhow!("session input closed"),
+            TrySendError::Full(_) => {
+                crate::coded!("session.input_full", "session input backlog is full (the program is not reading its input)")
+            }
+            TrySendError::Disconnected(_) => crate::coded!("session.input_closed", "session input closed"),
         })
     }
 

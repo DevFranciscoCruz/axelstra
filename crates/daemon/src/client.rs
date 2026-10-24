@@ -441,12 +441,20 @@ fn spawn_child(program: &str, args: &[String], env: &[(String, String)], label: 
         // CREATE_NO_WINDOW: the app has no console, ssh/wsl must not flash one
         cmd.creation_flags(0x0800_0000);
     }
-    let mut child = cmd.spawn().with_context(|| format!("could not start `{program}` for {label}"))?;
+    let mut child = cmd.spawn().map_err(|e| {
+        axelstra_core::coded!(
+            "host.spawn_failed",
+            "could not start `{program}` for {label}: {detail}",
+            program = program,
+            label = label,
+            detail = e
+        )
+    })?;
     let (stdin, stdout, stderr) = (child.stdin.take(), child.stdout.take(), child.stderr.take());
     let (Some(stdin), Some(stdout), Some(mut stderr)) = (stdin, stdout, stderr) else {
         let _ = child.kill();
         let _ = child.wait();
-        bail!("could not attach to the pipes of `{program}`");
+        return Err(axelstra_core::coded!("host.attach_failed", "could not attach to the pipes of `{program}`", program = program));
     };
     let said = Arc::new(Mutex::new(Vec::new()));
     let tail = said.clone();
@@ -548,7 +556,11 @@ impl Client {
         let fired = deadline.map(Deadline::finish).unwrap_or(false);
         if let Err(e) = banner {
             let e = if fired {
-                anyhow::anyhow!("no answer within {connect_timeout:?} (is `axelstra` installed there, and its daemon running?)")
+                axelstra_core::coded!(
+                    "host.no_answer",
+                    "no answer within {timeout} (is `axelstra` installed there, and its daemon running?)",
+                    timeout = format!("{connect_timeout:?}")
+                )
             } else {
                 e
             };

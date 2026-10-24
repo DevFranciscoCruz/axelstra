@@ -106,9 +106,9 @@ pub fn parse(saved: &Value) -> Budgets {
 }
 
 fn check_limit(what: &str, v: &Value) -> anyhow::Result<Value> {
-    let o = v.as_object().ok_or_else(|| anyhow::anyhow!("budgets {what} must be an object"))?;
+    let o = v.as_object().ok_or_else(|| axelstra_core::coded!("budget.not_object", "budgets {what} must be an object", what = what))?;
     if let Some(k) = o.keys().find(|k| !["daily", "weekly", "auto_pause"].contains(&k.as_str())) {
-        anyhow::bail!("budgets {what}: unknown key {k:?}");
+        return Err(axelstra_core::coded!("budget.unknown_key", "budgets {what}: unknown key {k:?}", what = what, k = k));
     }
     let mut out = serde_json::Map::new();
     for k in ["daily", "weekly"] {
@@ -118,7 +118,15 @@ fn check_limit(what: &str, v: &Value) -> anyhow::Result<Value> {
                 Some(n) if (1..=MAX_LIMIT).contains(&n) => {
                     out.insert(k.into(), json!(n));
                 }
-                _ => anyhow::bail!("budgets {what}.{k} must be a whole number of tokens between 1 and {MAX_LIMIT}, or null"),
+                _ => {
+                    return Err(axelstra_core::coded!(
+                        "budget.bad_limit",
+                        "budgets {what}.{k} must be a whole number of tokens between 1 and {max}, or null",
+                        what = what,
+                        k = k,
+                        max = MAX_LIMIT
+                    ))
+                }
             },
         }
     }
@@ -127,7 +135,9 @@ fn check_limit(what: &str, v: &Value) -> anyhow::Result<Value> {
         Some(Value::Bool(b)) => {
             out.insert("auto_pause".into(), json!(b));
         }
-        Some(_) => anyhow::bail!("budgets {what}.auto_pause must be true or false"),
+        Some(_) => {
+            return Err(axelstra_core::coded!("budget.bad_auto_pause", "budgets {what}.auto_pause must be true or false", what = what))
+        }
     }
     Ok(Value::Object(out))
 }
@@ -135,23 +145,27 @@ fn check_limit(what: &str, v: &Value) -> anyhow::Result<Value> {
 /// Checks a `budgets` value of `settings.set` and returns it normalized; nothing is saved from an invalid one.
 /// Shape: `{"default": Limit, "worktrees": {"<path>": Limit}}` with `Limit = {daily?, weekly?, auto_pause?}`.
 pub fn validate(v: &Value) -> anyhow::Result<Value> {
-    let o = v.as_object().ok_or_else(|| anyhow::anyhow!("budgets must be an object"))?;
+    let o = v.as_object().ok_or_else(|| axelstra_core::coded!("budget.root_not_object", "budgets must be an object"))?;
     if let Some(k) = o.keys().find(|k| !["default", "worktrees"].contains(&k.as_str())) {
-        anyhow::bail!("budgets: unknown key {k:?}");
+        return Err(axelstra_core::coded!("budget.root_unknown_key", "budgets: unknown key {k:?}", k = k));
     }
     let mut out = serde_json::Map::new();
     if let Some(d) = o.get("default").filter(|d| !d.is_null()) {
         out.insert("default".into(), check_limit("default", d)?);
     }
     if let Some(w) = o.get("worktrees").filter(|w| !w.is_null()) {
-        let w = w.as_object().ok_or_else(|| anyhow::anyhow!("budgets.worktrees must be an object"))?;
+        let w = w.as_object().ok_or_else(|| axelstra_core::coded!("budget.worktrees_not_object", "budgets.worktrees must be an object"))?;
         if w.len() > MAX_WORKTREES {
-            anyhow::bail!("budgets.worktrees holds at most {MAX_WORKTREES} entries");
+            return Err(axelstra_core::coded!(
+                "budget.too_many_worktrees",
+                "budgets.worktrees holds at most {max} entries",
+                max = MAX_WORKTREES
+            ));
         }
         let mut m = serde_json::Map::new();
         for (path, l) in w {
             if path.is_empty() || path.len() > 1024 {
-                anyhow::bail!("budgets.worktrees: a path must have 1 to 1024 characters");
+                return Err(axelstra_core::coded!("budget.bad_path", "budgets.worktrees: a path must have 1 to 1024 characters"));
             }
             m.insert(path.clone(), check_limit("worktrees entry", l)?);
         }
@@ -457,5 +471,22 @@ mod tests {
         let e = take_events();
         assert_eq!((e.len(), e[0]["level"].as_str(), e[0]["paused"].clone()), (1, Some("warn"), json!([])));
         assert!(take_events().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod code_tests {
+    use super::*;
+    use axelstra_core::msg::find;
+
+    #[test]
+    fn validation_errors_carry_codes() {
+        let c = |v: Value| find(&validate(&v).unwrap_err()).unwrap().code.clone();
+        assert_eq!(c(json!([])), "budget.root_not_object");
+        assert_eq!(c(json!({"x": 1})), "budget.root_unknown_key");
+        assert_eq!(c(json!({"default": 3})), "budget.not_object");
+        assert_eq!(c(json!({"default": {"daily": 0}})), "budget.bad_limit");
+        assert_eq!(c(json!({"default": {"auto_pause": "x"}})), "budget.bad_auto_pause");
+        assert_eq!(c(json!({"worktrees": {"": {}}})), "budget.bad_path");
     }
 }

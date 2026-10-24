@@ -85,11 +85,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({"data_url": logo}))
         }
         "project.add" => {
-            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
+            let path = p["path"].as_str().ok_or_else(|| missing("path"))?;
             Ok(serde_json::to_value(crate::projects::add(&reg.store, path)?)?)
         }
         "project.setup" => {
-            let id = p["id"].as_str().ok_or_else(|| anyhow::anyhow!("missing id"))?;
+            let id = p["id"].as_str().ok_or_else(|| missing("id"))?;
             crate::projects::set_setup(&reg.store, id, p["setup"].as_str().map(String::from))?;
             Ok(json!({}))
         }
@@ -108,7 +108,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "worktree.create" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
+            let name = p["name"].as_str().ok_or_else(|| missing("name"))?;
             // a parent that is not a worktree of this project is refused before anything is created
             let parent = p["parent"].as_str().map(str::trim).filter(|s| !s.is_empty());
             if let Some(par) = parent {
@@ -127,15 +127,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "worktree.set_parent" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
+            let path = p["path"].as_str().ok_or_else(|| missing("path"))?;
             let parent = p["parent"].as_str();
             tokio::task::block_in_place(|| crate::projects::set_parent(&reg.store, &pr.id, path, parent))?;
             Ok(json!({}))
         }
         "worktree.rename" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
-            let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
+            let path = p["path"].as_str().ok_or_else(|| missing("path"))?;
+            let name = p["name"].as_str().ok_or_else(|| missing("name"))?;
             let busy = reg.worktree_working(path);
             let wt = tokio::task::block_in_place(|| crate::projects::worktree_rename(&pr, path, name, busy))?;
             let _ = crate::projects::rename_parent(&reg.store, &pr.id, path, &wt.path);
@@ -165,7 +165,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "worktree.rebase" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
+            let path = p["path"].as_str().ok_or_else(|| missing("path"))?;
             let busy = reg.worktree_working(path);
             tokio::task::block_in_place(|| crate::rebase::rebase(std::path::Path::new(&pr.path), path, busy))
         }
@@ -183,17 +183,19 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "worktree.from_pr" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let n = p["number"].as_u64().ok_or_else(|| anyhow::anyhow!("missing number"))?;
+            let n = p["number"].as_u64().ok_or_else(|| missing("number"))?;
             let (wt, warning) = tokio::task::block_in_place(|| crate::projects::worktree_from_pr_report(&pr, n))?;
             let mut v = serde_json::to_value(wt)?;
             if let (Some(w), Some(o)) = (warning, v.as_object_mut()) {
-                o.insert("warning".into(), json!(w));
+                o.insert("warning".into(), json!(w.text));
+                o.insert("warning_code".into(), json!(w.code));
+                o.insert("warning_params".into(), w.params_json());
             }
             Ok(v)
         }
         "worktree.remove" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
+            let path = p["path"].as_str().ok_or_else(|| missing("path"))?;
             // refuse before touching any session: the main worktree (or a stranger path) must keep its terminals
             let known = axelstra_core::git::worktree_list(std::path::Path::new(&pr.path))?;
             let gone = crate::projects::norm_path(path);

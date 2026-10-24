@@ -108,7 +108,7 @@ pub async fn voice_download(app: AppHandle) -> Result<(), String> {
             let got: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
             if got != want {
                 let _ = std::fs::remove_file(&part);
-                return Err(format!("{f}: o ficheiro descarregado não corresponde ao hash esperado"));
+                return Err(format!("{f}: the downloaded file does not match the expected hash"));
             }
             std::fs::rename(&part, &target).map_err(|e| e.to_string())?;
         }
@@ -135,7 +135,7 @@ pub async fn voice_transcribe(app: AppHandle, request: Request<'_>) -> Result<St
         let mut cur = voice.lang.lock().unwrap();
         if rec.is_none() || *cur != lang {
             if !installed(&dir) {
-                return Err("modelo de voz não instalado".into());
+                return Err("voice model not installed".into());
             }
             let p = |f: &str| dir.join(f).to_string_lossy().into_owned();
             let cfg = WhisperConfig {

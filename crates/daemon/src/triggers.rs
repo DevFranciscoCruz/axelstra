@@ -315,9 +315,19 @@ pub struct Outcome {
 }
 
 fn wait_text(l: Limit) -> String {
+    wait_coded(l).text
+}
+
+/// `wait_text` with its message code, which the event carries for the UI.
+fn wait_coded(l: Limit) -> axelstra_core::msg::Coded {
+    use axelstra_core::msg::Coded;
     match l {
-        Limit::Cooldown(s) => format!("rate limited: worktree cooldown, {s}s left"),
-        Limit::PerHour(s) => format!("rate limited: project hourly maximum, {s}s left"),
+        Limit::Cooldown(s) => {
+            Coded::new("triggers.cooldown", format!("rate limited: worktree cooldown, {s}s left"), &[("secs", s.to_string())])
+        }
+        Limit::PerHour(s) => {
+            Coded::new("triggers.hourly_max", format!("rate limited: project hourly maximum, {s}s left"), &[("secs", s.to_string())])
+        }
     }
 }
 
@@ -383,7 +393,7 @@ fn consider(
         detail,
     };
     // decide and record under the lock, so `triggers.set` cannot be overwritten and two ticks cannot both fire
-    let (decision, outcome) = {
+    let (decision, outcome, limit) = {
         let _g = STORE_LOCK.lock_recover();
         let mut cfg = load(store);
         let t = cfg.entry(project.id.clone()).or_default();
@@ -422,7 +432,7 @@ fn consider(
                     eprintln!("triggers: cannot save {}: {e:#}", store.display());
                     return None;
                 }
-                (d, None)
+                (d, None, None)
             }
             Decision::Limited(l) => {
                 let id = format!("{key}|{}|{}", st.head_sha, if matches!(l, Limit::Cooldown(_)) { "c" } else { "h" });
@@ -442,7 +452,7 @@ fn consider(
                     },
                 );
                 let _ = save(store, &cfg);
-                (d, Some(mk("limited", detail)))
+                (d, Some(mk("limited", detail)), Some(l))
             }
             Decision::Skip(_) => return None,
         }
@@ -450,7 +460,12 @@ fn consider(
     let params = json!({"project": project.id, "worktree": key, "branch": branch, "sha": st.head_sha, "checks": names.join(", ")});
     if let Some(o) = outcome {
         audit.record_system(AUDIT_METHOD, &params, &Err(o.detail.clone()));
-        push_event(json!({"kind": "ci_fix_limited", "project": project.id, "worktree": w.path, "branch": branch, "detail": o.detail}));
+        let mut ev = json!({"kind": "ci_fix_limited", "project": project.id, "worktree": w.path, "branch": branch, "detail": o.detail});
+        if let Some(l) = limit {
+            ev["detail_code"] = json!(wait_coded(l).code);
+            ev["detail_params"] = wait_coded(l).params_json();
+        }
+        push_event(ev);
         return Some(o);
     }
     debug_assert_eq!(decision, Decision::Fire);
@@ -466,7 +481,13 @@ fn consider(
         Err(e) => {
             let msg = format!("{e:#}");
             audit.record_system(AUDIT_METHOD, &params, &Err(format!("could not start the fix task: {msg}")));
-            push_event(json!({"kind": "ci_fix_failed", "project": project.id, "worktree": w.path, "branch": branch, "detail": msg}));
+            let mut ev = json!({"kind": "ci_fix_failed", "project": project.id, "worktree": w.path, "branch": branch, "detail": msg});
+            // only a bare coded error is translated; with context around it the English text says more
+            if let Some(c) = axelstra_core::msg::find(&e).filter(|_| e.chain().count() == 1) {
+                ev["detail_code"] = json!(c.code);
+                ev["detail_params"] = c.params_json();
+            }
+            push_event(ev);
             mk("failed", msg)
         }
     })
