@@ -1,6 +1,7 @@
 import { Icon, hasIcon } from "./Icon";
 import { createPoller } from "./poller";
 import { Select } from "./Select";
+import { needsTypedName, removeRisks } from "./removeRisk";
 import { ask, askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import { call, getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession, dispatchOverlaps, worktreeRename, worktreeOverview, worktreeSweep, worktreeSetParent } from "./api";
@@ -450,15 +451,12 @@ Os ficheiros e worktrees não são apagados.`, { title: "Tirar projeto", kind: "
     if (removing.has(norm(path))) return showNotice(`A remover "${name}"…`);
     // what would be lost, so the question is not a blind "are you sure"
     const st = wtStatus()[norm(path)];
-    const risks: string[] = [];
-    if (st?.dirty) risks.push(`${st.dirty} ${st.dirty === 1 ? "ficheiro com alterações" : "ficheiros com alterações"} por guardar`);
-    if (st && st.ahead > 0) risks.push(st.upstream ? `${st.ahead} ${st.ahead === 1 ? "commit" : "commits"} por enviar` : `${st.ahead} ${st.ahead === 1 ? "commit" : "commits"} que só existem aqui (sem remoto)`);
     const live = sessionsOf(path).filter((x) => x.running).length;
-    if (live) risks.push(`${live} ${live === 1 ? "terminal ou agente a correr" : "terminais ou agentes a correr"}`);
+    const risks = removeRisks(st, live);
     const lost = risks.length ? `\n\nVais perder: ${risks.join("; ")}.` : "\n\nNão há alterações nem commits por enviar.";
     const ok = await ask(
-      `Remover o worktree "${name}"?${lost}\n\nA pasta e o branch são apagados e os terminais dele são fechados.`,
-      { title: "Remover worktree", kind: "danger" },
+      `Remover o worktree "${name}"?${lost}\n\nA pasta e o branch são apagados e os terminais dele são fechados.${needsTypedName(st) ? "\n\nPara confirmar, escreva o nome do worktree." : ""}`,
+      { title: "Remover worktree", kind: "danger", ...(needsTypedName(st) ? { typeToConfirm: name, okLabel: "Remover" } : {}) },
     );
     if (!ok || removing.has(norm(path))) return;
     removing.add(norm(path));
