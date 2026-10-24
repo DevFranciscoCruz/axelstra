@@ -1333,7 +1333,9 @@ mod tests {
         assert!(check_call("session.spawn", &json!({"program": "bash", "env": {"AXELSTRA_KEY": "x"}})).is_ok());
         assert!(check_call("session.spawn", &json!({"program": "bash", "env": {"LD_PRELOAD": "x"}})).is_err());
         assert!(check_call("fs.write", &json!({"path": "src/a.rs"})).is_ok());
-        for bad in ["", "../x", "/etc/passwd", "C:\\x", ".git/config", ".GIT\\hooks\\pre-commit", "a/.git/b", "a/../b"] {
+        // "C:\x" is a drive path only on Windows
+        let drive = ["C:\\x"].into_iter().filter(|_| cfg!(windows));
+        for bad in ["", "../x", "/etc/passwd", ".git/config", ".GIT\\hooks\\pre-commit", "a/.git/b", "a/../b"].into_iter().chain(drive) {
             assert!(check_call("fs.write", &json!({"path": bad})).is_err(), "{bad}");
         }
         assert!(check_call("fs.read", &json!({"path": "../x"})).is_ok());
