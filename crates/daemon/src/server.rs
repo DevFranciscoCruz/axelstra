@@ -36,6 +36,8 @@ struct Registry {
     /// where background orchestration runs connect back to this daemon
     pipe: String,
     token: String,
+    /// per-session capability tokens (env AXELSTRA_AGENT_TOKEN): a connection that presents one has role=agent
+    agent_tokens: Mutex<HashMap<String, u32>>,
     /// latest orchestration run per project id
     runs: Mutex<HashMap<String, Value>>,
     /// serializes read-modify-write of automations.json (UI saves vs the scheduler)
@@ -86,6 +88,7 @@ impl Registry {
             store,
             pipe,
             token,
+            agent_tokens: Default::default(),
             runs: Default::default(),
             auto_lock: Default::default(),
             flows: Default::default(),
@@ -149,6 +152,12 @@ impl Registry {
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
         let mut s = s.clone();
         s.env.push(("AXELSTRA_SESSION".into(), id.to_string()));
+        // the session's own credential: it identifies the connection as an agent, which cannot do the app-only calls
+        s.env.retain(|(k, _)| k != "AXELSTRA_AGENT_TOKEN");
+        if let Some(t) = new_agent_token() {
+            self.agent_tokens.lock_recover().insert(t.clone(), id);
+            s.env.push(("AXELSTRA_AGENT_TOKEN".into(), t));
+        }
         // `axelstra` works in every session without any setup: its folder goes first on the session's PATH
         if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())) {
             let mut paths = vec![dir];
@@ -169,6 +178,21 @@ impl Registry {
             self.metas.lock_recover().insert(id, m);
         }
         Ok(id)
+    }
+}
+
+fn new_agent_token() -> Option<String> {
+    let mut b = [0u8; 24];
+    getrandom::getrandom(&mut b).ok()?;
+    Some(b.iter().map(|x| format!("{x:02x}")).collect())
+}
+
+/// Calls that only the app (the user) may make; a connection with role=agent is refused them.
+fn agent_forbidden(method: &str, p: &Value) -> bool {
+    match method {
+        "computer.enable" => p["on"].as_bool() == Some(true),
+        "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" => true,
+        _ => false,
     }
 }
 
@@ -554,6 +578,8 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
     let mut authed = false;
     // set by a `hello` that says it comes from the CLI (what agents run); such a connection cannot switch screen control on
     let mut cli = false;
+    // set by a `hello` that presented a session's capability token: such a connection has role=agent
+    let mut agent = false;
     let mut subs: HashMap<u32, Arc<AtomicBool>> = HashMap::new();
 
     loop {
@@ -579,7 +605,7 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
                 // a bug in one handler must not take every terminal down with the daemon
                 let res = tokio::task::block_in_place(|| {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        dispatch(&req, &reg, &tx, &mut subs, &mut authed, &mut cli, &token, &mut after)
+                        dispatch(&req, &reg, &tx, &mut subs, &mut authed, &mut cli, &mut agent, &token, &mut after)
                     }))
                     .unwrap_or_else(|_| Err(anyhow::anyhow!("erro interno do daemon em {} (ver crash.log)", req.method)))
                 });
@@ -741,6 +767,7 @@ fn dispatch(
     subs: &mut HashMap<u32, Arc<AtomicBool>>,
     authed: &mut bool,
     cli: &mut bool,
+    agent: &mut bool,
     token: &str,
     after: &mut Vec<Box<dyn FnOnce() + Send>>,
 ) -> Result<Value> {
@@ -752,15 +779,20 @@ fn dispatch(
         *reg.plist.lock_recover() = None;
         crate::overview::invalidate();
     }
+    if *agent && agent_forbidden(&req.method, p) {
+        anyhow::bail!("{} is not allowed to agents: it is done by the user in the app", req.method);
+    }
     let sid = || -> Result<u32> { Ok(p.get("id").and_then(Value::as_u64).ok_or_else(|| anyhow::anyhow!("missing id"))? as u32) };
     let session = || -> Result<Arc<Session>> { reg.get(sid()?).ok_or_else(|| anyhow::anyhow!("no such session")) };
     match req.method.as_str() {
         "hello" => {
-            if p.get("token").and_then(Value::as_str) != Some(token) {
+            let agent_ok = p.get("agent_token").and_then(Value::as_str).is_some_and(|t| reg.agent_tokens.lock_recover().contains_key(t));
+            if !agent_ok && p.get("token").and_then(Value::as_str) != Some(token) {
                 anyhow::bail!("bad token");
             }
             *authed = true;
-            *cli = p.get("client").and_then(Value::as_str) == Some("cli");
+            *agent = agent_ok;
+            *cli = agent_ok || p.get("client").and_then(Value::as_str) == Some("cli");
             Ok(json!({"proto": PROTO, "instance": *INSTANCE}))
         }
         "session.spawn" => {
@@ -1335,6 +1367,8 @@ fn dispatch(
             let name = format!("ui-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs());
             let max = p["max"].as_u64().unwrap_or(3).clamp(1, 8) as usize;
             let trust = p["trust_acceptance"].as_bool().unwrap_or(false);
+            // `bypass*` cards run only against the fingerprint of the cards the user confirmed (orch::trust_info)
+            let pin: Option<String> = p["pin"].as_str().map(String::from);
             // overriding the agent command is for tests and custom agents; the same
             // client can already spawn any process, so this grants nothing new
             let agent: Option<Vec<String>> = p["agent"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
@@ -1354,7 +1388,11 @@ fn dispatch(
                     runner: Some(Arc::new(runner)),
                 };
                 // the UI sets this only after the user confirmed the acceptance commands
-                let res = if trust { axelstra_core::orch::run_trusted(&opts) } else { axelstra_core::orch::run(&opts) };
+                let res = match &pin {
+                    Some(pin) => axelstra_core::orch::run_pinned(&opts, pin),
+                    None if trust => axelstra_core::orch::run_trusted(&opts),
+                    None => axelstra_core::orch::run(&opts),
+                };
                 let v = match res {
                     Ok(r) => json!({"state": "done", "name": n2, "integ_branch": r.integ_branch,
                         "integ_wt": r.integ_wt, "merged": r.merged, "failed": r.failed,

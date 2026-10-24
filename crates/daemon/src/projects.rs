@@ -82,6 +82,24 @@ fn slug(s: &str) -> String {
     t.trim_matches('-').to_string()
 }
 
+/// Folders that must never become a project: a filesystem root, the user's home or a system directory
+/// (a project is where agents work and where files are listed, written and deleted).
+pub fn forbidden_root(p: &Path) -> bool {
+    let norm = |p: &Path| p.to_string_lossy().replace('\\', "/").trim_start_matches("//?/").trim_end_matches('/').to_ascii_lowercase();
+    let n = norm(p);
+    if p.parent().is_none() || n.is_empty() || (n.len() == 2 && n.ends_with(':')) {
+        return true;
+    }
+    if ["USERPROFILE", "HOME"].iter().filter_map(|k| std::env::var_os(k)).any(|h| norm(Path::new(&h)) == n) {
+        return true;
+    }
+    // a top-level system folder: /etc, C:/Windows, C:/Program Files...
+    let unix_sys = ["etc", "usr", "bin", "sbin", "lib", "var", "boot", "dev", "proc", "sys", "system", "library", "private"];
+    let win_sys = ["windows", "program files", "program files (x86)", "programdata", "users"];
+    let top = if n.as_bytes().get(1) == Some(&b':') { n[2..].trim_start_matches('/') } else { n.trim_start_matches('/') };
+    !top.contains('/') && (unix_sys.contains(&top) || win_sys.contains(&top))
+}
+
 pub fn add(store: &Path, path: &str) -> Result<Project> {
     // a folder outside any repository is accepted as it is: the project can start from prompts and `git init` later
     let root = match git::repo_root(Path::new(path)) {
@@ -89,6 +107,9 @@ pub fn add(store: &Path, path: &str) -> Result<Project> {
         Err(_) if Path::new(path).is_dir() => git::canon(Path::new(path))?,
         Err(e) => return Err(e).with_context(|| format!("{path} is not a folder")),
     };
+    if forbidden_root(&root) {
+        anyhow::bail!("{} cannot be a project: it is a filesystem root, the home folder or a system folder", root.display());
+    }
     let root_s = root.to_string_lossy().to_string();
     let _g = STORE_LOCK.lock_recover();
     let mut v = load_for_update(store)?;
@@ -682,5 +703,21 @@ mod parent_tests {
         m.insert("b".to_string(), "a".to_string());
         assert!(reaches(&m, "a", "zzz"));
         assert!(!reaches(&BTreeMap::new(), "a", "b"));
+    }
+}
+
+#[cfg(test)]
+mod root_tests {
+    use super::forbidden_root;
+    use std::path::Path;
+
+    #[test]
+    fn roots_and_system_folders_are_refused() {
+        for bad in ["/", "/etc", "/usr/", "C:/", "C:/Windows", "c:/program files", "D:/Users", "//?/C:/Windows"] {
+            assert!(forbidden_root(Path::new(bad)), "{bad}");
+        }
+        for ok in ["/home/a/proj", "/usr/local/src/proj", "C:/Users/a/proj", "D:/dev/app"] {
+            assert!(!forbidden_root(Path::new(ok)), "{ok}");
+        }
     }
 }
