@@ -135,7 +135,15 @@ export function createSidebarActions() {
     const live = sessionsOf(path).filter((x) => x.running).length;
     const blocked = rebaseBlocker(name, wtStatus()[norm(path)], live);
     if (blocked) return void toast({ text: blocked, kind: "warn" });
-    if (!(await ask(T.rebase.ask(name, base), { title: T.rebase.title, kind: "warning", okLabel: T.rebase.ok, cancelLabel: T.cancel }))) return;
+    if (
+      !(await ask(T.rebase.ask(name, base), {
+        title: T.rebase.title,
+        kind: "warning",
+        okLabel: T.rebase.ok,
+        cancelLabel: T.cancel,
+      }))
+    )
+      return;
     if (rebasing.has(norm(path))) return;
     rebasing.add(norm(path));
     showNotice(T.rebase.running(name, base));

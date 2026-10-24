@@ -10,7 +10,14 @@ import { Button, CheckboxField, Field, Input, Select } from "./ui";
 type Patch = Partial<Record<keyof BudgetLimit, number | boolean | undefined>>;
 
 /** The two limit fields and the auto-pause switch of one budget. A field that does not parse is refused and put back. */
-function LimitRow(props: { title: string; hint?: string; limit: BudgetLimit | undefined; onChange: (p: Patch) => void; onRemove?: () => void; removeLabel?: string }) {
+function LimitRow(props: {
+  title: string;
+  hint?: string;
+  limit: BudgetLimit | undefined;
+  onChange: (p: Patch) => void;
+  onRemove?: () => void;
+  removeLabel?: string;
+}) {
   const commit = (key: "daily" | "weekly", el: HTMLInputElement) => {
     const n = parseTokens(el.value);
     if (n === undefined) {
@@ -36,10 +43,22 @@ function LimitRow(props: { title: string; hint?: string; limit: BudgetLimit | un
       </Show>
       <div class="set-fields">
         <Field label={B.daily} hint={B.limitHint}>
-          <Input type="text" inputmode="text" value={formatLimit(props.limit?.daily)} spellcheck={false} onChange={(e) => commit("daily", e.currentTarget)} />
+          <Input
+            type="text"
+            inputmode="text"
+            value={formatLimit(props.limit?.daily)}
+            spellcheck={false}
+            onChange={(e) => commit("daily", e.currentTarget)}
+          />
         </Field>
         <Field label={B.weekly} hint={B.limitHint}>
-          <Input type="text" inputmode="text" value={formatLimit(props.limit?.weekly)} spellcheck={false} onChange={(e) => commit("weekly", e.currentTarget)} />
+          <Input
+            type="text"
+            inputmode="text"
+            value={formatLimit(props.limit?.weekly)}
+            spellcheck={false}
+            onChange={(e) => commit("weekly", e.currentTarget)}
+          />
         </Field>
       </div>
       <CheckboxField checked={props.limit?.auto_pause === true} onChange={(v) => props.onChange({ auto_pause: v })}>
@@ -53,7 +72,8 @@ function LimitRow(props: { title: string; hint?: string; limit: BudgetLimit | un
 /** Settings block: daily and weekly token limits for all worktrees and for single ones, each with an opt-in auto-pause. */
 export function BudgetsSection(props: { budgets: Budgets | undefined; onSave: (b: Budgets) => void }) {
   const current = (): Budgets => props.budgets ?? {};
-  const all = () => projects().flatMap((p) => p.worktrees.map((w) => ({ path: w.path, label: `${p.name} / ${wtName(w.path)}` })));
+  const all = () =>
+    projects().flatMap((p) => p.worktrees.map((w) => ({ path: w.path, label: `${p.name} / ${wtName(w.path)}` })));
   const own = () => Object.keys(current().worktrees ?? {});
   const labelOf = (path: string) => all().find((w) => norm(w.path) === norm(path))?.label ?? wtName(path);
   const free = () => all().filter((w) => !own().some((k) => norm(k) === norm(w.path)));
@@ -62,7 +82,12 @@ export function BudgetsSection(props: { budgets: Budgets | undefined; onSave: (b
       <h4>{B.title}</h4>
       <p class="auto-note">{B.note}</p>
       <Show when={props.budgets !== undefined} fallback={<div class="auto-note">{B.oldDaemon}</div>}>
-        <LimitRow title={B.defaultRow} hint={B.defaultHint} limit={current().default} onChange={(p) => props.onSave(withLimit(current(), "default", p))} />
+        <LimitRow
+          title={B.defaultRow}
+          hint={B.defaultHint}
+          limit={current().default}
+          onChange={(p) => props.onSave(withLimit(current(), "default", p))}
+        />
         <h5 class="bud-sub">{B.perWorktree}</h5>
         <p class="auto-note">{B.perWorktreeNote}</p>
         <For each={own()}>
@@ -76,7 +101,14 @@ export function BudgetsSection(props: { budgets: Budgets | undefined; onSave: (b
             />
           )}
         </For>
-        <Show when={free().length > 0} fallback={<Show when={all().length === 0}><div class="auto-note">{B.noWorktrees}</div></Show>}>
+        <Show
+          when={free().length > 0}
+          fallback={
+            <Show when={all().length === 0}>
+              <div class="auto-note">{B.noWorktrees}</div>
+            </Show>
+          }
+        >
           <Select
             value=""
             label={B.addWorktreeLabel}

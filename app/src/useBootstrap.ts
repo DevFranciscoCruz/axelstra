@@ -150,12 +150,18 @@ export function useBootstrap() {
     );
     // what the CI-fix trigger did (started a fix task, or held back by a limit)
     const triggers = createPoller(
-      () => triggersEvents().then(handleTriggerEvents).catch((e) => console.debug("triggers.events", e)),
+      () =>
+        triggersEvents()
+          .then(handleTriggerEvents)
+          .catch((e) => console.debug("triggers.events", e)),
       15000,
     );
     // token budgets the daemon saw cross 80% or 100%: one toast and one bell entry each
     const budget = createPoller(
-      () => budgetEvents().then((ev) => handleBudgetEvents(ev, wtName)).catch((e) => console.debug("budget.events", e)),
+      () =>
+        budgetEvents()
+          .then((ev) => handleBudgetEvents(ev, wtName))
+          .catch((e) => console.debug("budget.events", e)),
       20000,
     );
     const onFocus = () => {

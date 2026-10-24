@@ -9,7 +9,10 @@ export const locationLabel = (c: Pick<ReviewComment, "path" | "line">): string =
 
 /** The text as shown in the list: blank lines collapsed, cut at `max` characters (by code point) with an ellipsis. */
 export const displayBody = (body: string, max = 600): string => {
-  const t = body.replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  const t = body
+    .replace(/\r\n?/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   const chars = Array.from(t);
   return chars.length > max ? `${chars.slice(0, max).join("").trimEnd()}…` : t;
 };
@@ -42,14 +45,18 @@ export const threads = (list: ReviewComment[]): Thread[] => {
 };
 
 /** a review summary as one line: "bob pediu alterações" */
-export const reviewLine = (r: Pick<ReviewSummary, "author" | "state">): string => `${r.author} ${C.reviewState[r.state] ?? C.reviewState.commented}`;
+export const reviewLine = (r: Pick<ReviewSummary, "author" | "state">): string =>
+  `${r.author} ${C.reviewState[r.state] ?? C.reviewState.commented}`;
 
 /** The daemon says this when nobody runs as the worktree's main agent. */
-export const isNoLeadError = (e: unknown): boolean => /no live lead/i.test(String((e as { message?: string })?.message ?? e));
+export const isNoLeadError = (e: unknown): boolean =>
+  /no live lead/i.test(String((e as { message?: string })?.message ?? e));
 
 /** The worktree whose branch is the PR's head branch, if any: comments can only be sent to an agent that works there. */
-export const worktreeForPr = (item: Pick<GhItem, "branch">, worktrees: Pick<Worktree, "path" | "branch">[]): string | null =>
-  item.branch ? (worktrees.find((w) => w.branch === item.branch)?.path ?? null) : null;
+export const worktreeForPr = (
+  item: Pick<GhItem, "branch">,
+  worktrees: Pick<Worktree, "path" | "branch">[],
+): string | null => (item.branch ? (worktrees.find((w) => w.branch === item.branch)?.path ?? null) : null);
 
 /** What the confirm step shows: the text exactly as the daemon will deliver it. */
 export type SendStep =
