@@ -524,6 +524,8 @@ button.icon:hover {
 .m-row { display: flex; gap: 8px; }
 .m-row label, .m-full { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-sm); color: var(--muted); flex: 1; min-width: 0; }
 .m-actions { display: flex; gap: 8px; align-items: center; }
+.clean-list { margin: 8px 0 0; padding-left: 18px; font-size: var(--fs-sm); max-height: 160px; overflow: auto; }
+.clean-list .warn { color: var(--warn); }
 
 
 /* dialog buttons: same size and shape, the secondary one outlined instead of the browser grey */

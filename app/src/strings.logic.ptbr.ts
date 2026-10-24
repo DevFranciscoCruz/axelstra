@@ -25,6 +25,13 @@ export const ptBRL: Widen<typeof ptL> = {
     noBackup: "Este daemon ainda não suporta backups. Atualize e reinicie o Axelstra.",
     restorePath: "Escolha a pasta do backup a restaurar",
     copyDiag: "Copiar diagnóstico",
+    cleanTitle: "Limpeza automática",
+    cleanNote:
+      "Remove sozinha o que já foi integrado: worktrees, branches ax/*, pastas órfãs, backups e registros antigos. O que tem alterações ou trabalho por integrar nunca é excluído.",
+    cleanNow: "Limpar agora",
+    cleanNothing: "Nada para limpar.",
+    cleanRemoved: "Removido",
+    cleanWarning: "Aviso",
     diagCopied: "Diagnóstico copiado para a área de transferência.",
   },
   actionHint: "ação",

@@ -24,6 +24,13 @@ export const enL: Widen<typeof ptL> = {
     noBackup: "This daemon does not support backups yet. Update and restart Axelstra.",
     restorePath: "Choose the folder of the backup to restore",
     copyDiag: "Copy diagnostics",
+    cleanTitle: "Automatic clean-up",
+    cleanNote:
+      "Removes by itself what is already integrated: worktrees, ax/* branches, orphan folders, old backups and records. Anything with changes or unintegrated work is never deleted.",
+    cleanNow: "Clean now",
+    cleanNothing: "Nothing to clean.",
+    cleanRemoved: "Removed",
+    cleanWarning: "Warning",
     diagCopied: "Diagnostics copied to the clipboard.",
   },
   actionHint: "action",

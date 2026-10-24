@@ -26,6 +26,13 @@ export const ptL = {
     noBackup: "Este daemon ainda não suporta cópias de segurança. Atualiza e reinicia o Axelstra.",
     restorePath: "Escolhe a pasta da cópia a restaurar",
     copyDiag: "Copiar diagnóstico",
+    cleanTitle: "Limpeza automática",
+    cleanNote:
+      "Remove sozinha o que já está integrado: worktrees, branches ax/*, pastas órfãs, cópias e registos antigos. O que tem alterações ou trabalho por integrar nunca se apaga.",
+    cleanNow: "Limpar agora",
+    cleanNothing: "Nada para limpar.",
+    cleanRemoved: "Removido",
+    cleanWarning: "Aviso",
     diagCopied: "Diagnóstico copiado para a área de transferência.",
   },
   actionHint: "ação",
