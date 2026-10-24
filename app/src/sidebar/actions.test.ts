@@ -70,7 +70,10 @@ describe("remove worktree flow", () => {
   });
 
   it("running sessions are killed and removed before the worktree", async () => {
-    h.sessions = [{ id: 7, running: true }, { id: 8, running: false }];
+    h.sessions = [
+      { id: 7, running: true },
+      { id: 8, running: false },
+    ];
     await createSidebarActions().dropWorktree("p", "/w/x", "feat-x");
     expect(h.calls).toEqual(["kill 7", "rmsession 7", "rmsession 8", "rmwt /w/x"]);
     expect(h.notices.at(-1)).toContain("feat-x");

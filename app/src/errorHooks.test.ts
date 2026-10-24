@@ -37,11 +37,20 @@ describe("installErrorHooks", () => {
   it("forwards error and unhandledrejection events, even if send throws", () => {
     const target = new EventTarget();
     const got: ErrorReport[] = [];
-    installErrorHooks((r) => {
-      got.push(r);
-      throw new Error("send failed");
-    }, target as unknown as Window);
-    const err = Object.assign(new Event("error"), { error: new Error("oops"), message: "oops", filename: "a.js", lineno: 3, colno: 4 });
+    installErrorHooks(
+      (r) => {
+        got.push(r);
+        throw new Error("send failed");
+      },
+      target as unknown as Window,
+    );
+    const err = Object.assign(new Event("error"), {
+      error: new Error("oops"),
+      message: "oops",
+      filename: "a.js",
+      lineno: 3,
+      colno: 4,
+    });
     target.dispatchEvent(err);
     target.dispatchEvent(Object.assign(new Event("unhandledrejection"), { reason: "nope" }));
     expect(got).toHaveLength(2);

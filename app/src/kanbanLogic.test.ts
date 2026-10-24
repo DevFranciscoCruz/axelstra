@@ -3,11 +3,21 @@ import { isBypass, planStart, restorePayload } from "./kanbanLogic";
 import { needsTypedName, removeRisks } from "./removeRisk";
 import { typedMatches } from "./Confirm";
 
-const card = (id: string, mode: string, bypass = false, acceptance: string | null = null) => ({ id, agent: "claude", permission_mode: mode, bypass, acceptance });
+const card = (id: string, mode: string, bypass = false, acceptance: string | null = null) => ({
+  id,
+  agent: "claude",
+  permission_mode: mode,
+  bypass,
+  acceptance,
+});
 
 describe("planStart", () => {
   it("shows each card's mode, flags bypass and sends the pin", () => {
-    const p = planStart(2, { pin: "abc", cards: [card("a", "default"), card("b", "bypassPermissions", true, "make test")] }, []);
+    const p = planStart(
+      2,
+      { pin: "abc", cards: [card("a", "default"), card("b", "bypassPermissions", true, "make test")] },
+      [],
+    );
     expect(p.message).toContain("⚠ b: claude (bypassPermissions)");
     expect(p.message).toContain("a: claude (default)");
     expect(p.bypass).toEqual(["b"]);
@@ -30,8 +40,28 @@ describe("planStart", () => {
 
 describe("restorePayload", () => {
   it("keeps the id and every field", () => {
-    const p = restorePayload({ meta: { id: "k1", title: "T", status: "todo", agent: "claude", depends_on: ["k0"], priority: 2, acceptance: "ok" }, body: "b" });
-    expect(p).toEqual({ id: "k1", title: "T", body: "b", status: "todo", agent: "claude", priority: 2, depends_on: ["k0"], acceptance: "ok" });
+    const p = restorePayload({
+      meta: {
+        id: "k1",
+        title: "T",
+        status: "todo",
+        agent: "claude",
+        depends_on: ["k0"],
+        priority: 2,
+        acceptance: "ok",
+      },
+      body: "b",
+    });
+    expect(p).toEqual({
+      id: "k1",
+      title: "T",
+      body: "b",
+      status: "todo",
+      agent: "claude",
+      priority: 2,
+      depends_on: ["k0"],
+      acceptance: "ok",
+    });
   });
 });
 

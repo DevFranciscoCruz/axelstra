@@ -20,7 +20,16 @@ export const SCROLLBACK_HIDDEN = 2000;
 export async function openTermUrl(raw: string, confirmFirst: boolean) {
   const url = safeLinkUrl(raw);
   if (!url) return void showNotice(P.terminal.linkRefused(raw.slice(0, 80)));
-  if (confirmFirst && !(await ask(P.terminal.linkAsk(url), { title: P.terminal.linkTitle, kind: "warning", okLabel: P.terminal.open, cancelLabel: P.terminal.cancel }))) return;
+  if (
+    confirmFirst &&
+    !(await ask(P.terminal.linkAsk(url), {
+      title: P.terminal.linkTitle,
+      kind: "warning",
+      okLabel: P.terminal.open,
+      cancelLabel: P.terminal.cancel,
+    }))
+  )
+    return;
   void openUrl(url).catch(() => 0);
 }
 

@@ -6,7 +6,18 @@ import { MenuItem, isMenuKey, showMenu, showMenuAt } from "../ContextMenu";
 import { dotOfWorktree } from "../agentState";
 import { overlapTitle } from "../agentRow";
 import { P } from "../strings.panels";
-import { attention, flowState, isPinned, norm, prByBranch, prKey, selectedWorktree, sessionState, sessionsOf, wtStatus } from "../store";
+import {
+  attention,
+  flowState,
+  isPinned,
+  norm,
+  prByBranch,
+  prKey,
+  selectedWorktree,
+  sessionState,
+  sessionsOf,
+  wtStatus,
+} from "../store";
 import { AgentList } from "./AgentList";
 
 const T = P.sidebar;
@@ -60,7 +71,11 @@ export function WorktreeRow(props: {
             return;
           }
           // left folds a group, right opens it
-          if (props.kids > 0 && (e.target as HTMLElement).classList.contains("wt-open") && ((e.key === "ArrowLeft" && !props.folded) || (e.key === "ArrowRight" && props.folded))) {
+          if (
+            props.kids > 0 &&
+            (e.target as HTMLElement).classList.contains("wt-open") &&
+            ((e.key === "ArrowLeft" && !props.folded) || (e.key === "ArrowRight" && props.folded))
+          ) {
             e.preventDefault();
             props.onToggleFold();
           }
@@ -85,46 +100,107 @@ export function WorktreeRow(props: {
             <Icon name={props.folded ? "chevRight" : "chevDown"} size={11} />
           </Button>
         </Show>
-        <Button type="button" variant="row" size="bare" class="min-w-0 flex-1 gap-2" aria-current={isActive() ? "true" : undefined} onClick={props.onOpen}>
-          <StateDot state={dotOfWorktree({ queued: queued(), waiting: waiting(), working: working(), needs: needs(), live: live() })} />
+        <Button
+          type="button"
+          variant="row"
+          size="bare"
+          class="min-w-0 flex-1 gap-2"
+          aria-current={isActive() ? "true" : undefined}
+          onClick={props.onOpen}
+        >
+          <StateDot
+            state={dotOfWorktree({
+              queued: queued(),
+              waiting: waiting(),
+              working: working(),
+              needs: needs(),
+              live: live(),
+            })}
+          />
           <span class="name">{w().is_main ? mainBranch() : label()}</span>
           <Show when={!w().is_main && props.topic?.title && props.topic.title !== label()}>
-            <span class="wt-topic" title={props.topic!.title}>{props.topic!.title}</span>
+            <span class="wt-topic" title={props.topic!.title}>
+              {props.topic!.title}
+            </span>
           </Show>
           <Show when={props.topic?.archived}>
-            <Badge variant="quiet" title={T.archivedTip}>{T.archived}</Badge>
+            <Badge variant="quiet" title={T.archivedTip}>
+              {T.archived}
+            </Badge>
           </Show>
           <Show when={w().is_main && w().branch !== mainBranch()}>
-            <span class="off-main" title={T.offMain(label(), mainBranch())}><Icon name="warning" size={12} /></span>
+            <span class="off-main" title={T.offMain(label(), mainBranch())}>
+              <Icon name="warning" size={12} />
+            </span>
           </Show>
           <Show when={st()?.dirty}>
-            <Badge variant="quiet" title={T.dirtyTip(st()!.dirty)}><i class="size-1.5 flex-none rounded-full bg-current opacity-70" />{st()!.dirty}</Badge>
+            <Badge variant="quiet" title={T.dirtyTip(st()!.dirty)}>
+              <i class="size-1.5 flex-none rounded-full bg-current opacity-70" />
+              {st()!.dirty}
+            </Badge>
           </Show>
           <Show when={props.overlap}>
             {(t) => (
-              <Badge variant="overlap" role="img" title={t()} aria-label={t()}><Icon name="warning" size={11} /></Badge>
+              <Badge variant="overlap" role="img" title={t()} aria-label={t()}>
+                <Icon name="warning" size={11} />
+              </Badge>
             )}
           </Show>
           <Show when={st()?.ahead || st()?.behind}>
             <Badge variant="quiet" title={T.aheadBehind(st()!.ahead, st()!.behind)}>
-              {st()!.ahead ? <span class="inline-flex items-center gap-px"><Icon name="arrowUp" size={10} />{st()!.ahead}</span> : null}
-              {st()!.behind ? <span class="inline-flex items-center gap-px"><Icon name="arrowDown" size={10} />{st()!.behind}</span> : null}
+              {st()!.ahead ? (
+                <span class="inline-flex items-center gap-px">
+                  <Icon name="arrowUp" size={10} />
+                  {st()!.ahead}
+                </span>
+              ) : null}
+              {st()!.behind ? (
+                <span class="inline-flex items-center gap-px">
+                  <Icon name="arrowDown" size={10} />
+                  {st()!.behind}
+                </span>
+              ) : null}
             </Badge>
           </Show>
           <Show when={pr()}>
             <Badge
-              variant={pr()!.checks === "pass" ? "prOk" : pr()!.checks === "fail" ? "prErr" : pr()!.checks === "pending" ? "prPend" : "pr"}
+              variant={
+                pr()!.checks === "pass"
+                  ? "prOk"
+                  : pr()!.checks === "fail"
+                    ? "prErr"
+                    : pr()!.checks === "pending"
+                      ? "prPend"
+                      : "pr"
+              }
               title={T.prTip(pr()!.number, pr()!.title, pr()!.checks)}
             >
               #{pr()!.number}
-              {pr()!.checks === "pass" ? <Icon name="check" size={10} inline /> : pr()!.checks === "fail" ? <Icon name="x" size={10} inline /> : pr()!.checks === "pending" ? <Icon name="ellipsis" size={10} inline /> : null}
+              {pr()!.checks === "pass" ? (
+                <Icon name="check" size={10} inline />
+              ) : pr()!.checks === "fail" ? (
+                <Icon name="x" size={10} inline />
+              ) : pr()!.checks === "pending" ? (
+                <Icon name="ellipsis" size={10} inline />
+              ) : null}
             </Badge>
           </Show>
-          <Show when={props.folded && props.groupLive > 0} fallback={<Show when={live() > 0}><span class="count">{live()}</span></Show>}>
-            <span class="count group" title={T.groupLive(props.groupLive, props.kids)}>{props.groupLive}</span>
+          <Show
+            when={props.folded && props.groupLive > 0}
+            fallback={
+              <Show when={live() > 0}>
+                <span class="count">{live()}</span>
+              </Show>
+            }
+          >
+            <span class="count group" title={T.groupLive(props.groupLive, props.kids)}>
+              {props.groupLive}
+            </span>
           </Show>
           <Show when={isPinned(w().path)}>
-            <span class="pin" title={T.pinned}><Icon name="pin" size={11} /></span>
+            <span class="pin" title={T.pinned}>
+              <Icon name="pin" size={11} />
+            </span>
           </Show>
         </Button>
         <Button
@@ -163,12 +239,29 @@ export function WorktreeRow(props: {
 }
 
 /** A finished (integrated) worktree in the "Concluídos" group. */
-export function FinishedRow(props: { wt: Wt; menu: (label: string) => MenuItem[]; onOpen: () => void; onDrop: (label: string) => void }) {
+export function FinishedRow(props: {
+  wt: Wt;
+  menu: (label: string) => MenuItem[];
+  onOpen: () => void;
+  onDrop: (label: string) => void;
+}) {
   const label = () => props.wt.branch ?? P.sidebar.detached;
   const active = () => norm(selectedWorktree()) === norm(props.wt.path);
   return (
-    <div class="item wt finished" classList={{ active: active() }} onContextMenu={(e) => showMenu(e, props.menu(label()))} title={props.wt.path}>
-      <Button type="button" variant="row" size="bare" class="min-w-0 flex-1 gap-2" aria-current={active() ? "true" : undefined} onClick={props.onOpen}>
+    <div
+      class="item wt finished"
+      classList={{ active: active() }}
+      onContextMenu={(e) => showMenu(e, props.menu(label()))}
+      title={props.wt.path}
+    >
+      <Button
+        type="button"
+        variant="row"
+        size="bare"
+        class="min-w-0 flex-1 gap-2"
+        aria-current={active() ? "true" : undefined}
+        onClick={props.onOpen}
+      >
         <StateDot state="done" />
         <span class="name">{label()}</span>
       </Button>

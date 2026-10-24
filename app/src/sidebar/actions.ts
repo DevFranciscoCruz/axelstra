@@ -4,7 +4,17 @@ import { killSession, removeProject, removeSession, removeWorktree, worktreeSwee
 import { needsTypedName, removeRisks } from "../removeRisk";
 import { P } from "../strings.panels";
 import { S } from "../strings";
-import { norm, refreshProjects, refreshSessions, selectWorktree, selectedWorktree, sessionsOf, setError, showNotice, wtStatus } from "../store";
+import {
+  norm,
+  refreshProjects,
+  refreshSessions,
+  selectWorktree,
+  selectedWorktree,
+  sessionsOf,
+  setError,
+  showNotice,
+  wtStatus,
+} from "../store";
 
 const T = P.sidebar;
 
@@ -39,13 +49,19 @@ export function createSidebarActions() {
   /** frees the memory of a worktree without deleting it: its terminals and agents are closed */
   const sleepWorktree = async (path: string, name: string) => {
     const live = sessionsOf(path).filter((s) => s.running);
-    if (live.length > 0 && !(await ask(T.sleepAsk(name, live.length), { title: T.sleepTitle, kind: "warning" }))) return;
+    if (live.length > 0 && !(await ask(T.sleepAsk(name, live.length), { title: T.sleepTitle, kind: "warning" })))
+      return;
     await run(() => closeSessions(path));
   };
 
   /** the existing sweep removes every integrated worktree, of all projects: the question says so */
   const cleanFinished = async (names: string[], reload: () => void) => {
-    const ok = await ask(T.cleanAsk(names), { title: T.cleanTitle, kind: "danger", okLabel: T.remove, cancelLabel: T.cancel });
+    const ok = await ask(T.cleanAsk(names), {
+      title: T.cleanTitle,
+      kind: "danger",
+      okLabel: T.remove,
+      cancelLabel: T.cancel,
+    });
     if (!ok) return;
     try {
       const done = (await worktreeSweep()).filter((x) => x.removed).length;
@@ -59,7 +75,10 @@ export function createSidebarActions() {
   };
 
   const dropProject = async (id: string, name: string) => {
-    if (!(await ask(T.dropAsk(name), { title: T.dropTitle, kind: "warning", okLabel: T.dropOk, cancelLabel: T.cancel }))) return;
+    if (
+      !(await ask(T.dropAsk(name), { title: T.dropTitle, kind: "warning", okLabel: T.dropOk, cancelLabel: T.cancel }))
+    )
+      return;
     let gone = true;
     await run(async () => {
       try {

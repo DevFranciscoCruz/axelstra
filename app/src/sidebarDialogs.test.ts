@@ -28,7 +28,8 @@ describe("CreateWorktree dialog", () => {
     );
     return { r, onSubmit, onClose };
   };
-  const button = (label: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.includes(label)) as HTMLButtonElement;
+  const button = (label: string) =>
+    [...document.querySelectorAll("button")].find((b) => b.textContent?.includes(label)) as HTMLButtonElement;
 
   it("create is disabled until a name is typed, then submits", async () => {
     const { onSubmit } = mount("");
@@ -53,8 +54,19 @@ describe("CreateWorktree dialog", () => {
 describe("RenameWorktree dialog", () => {
   it("confirm stays off while the name is unchanged and shows the error", () => {
     const onSubmit = vi.fn();
-    render(() => createComponent(RenameWorktree, { current: "old", value: "old", error: "já existe", onInput: vi.fn(), onClose: vi.fn(), onSubmit }));
-    const ok = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("Mudar o nome")) as HTMLButtonElement;
+    render(() =>
+      createComponent(RenameWorktree, {
+        current: "old",
+        value: "old",
+        error: "já existe",
+        onInput: vi.fn(),
+        onClose: vi.fn(),
+        onSubmit,
+      }),
+    );
+    const ok = [...document.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Mudar o nome"),
+    ) as HTMLButtonElement;
     expect(ok.disabled).toBe(true);
     expect(document.querySelector("[role=alert]")?.textContent).toBe("já existe");
   });

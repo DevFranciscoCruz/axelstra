@@ -7,7 +7,16 @@ import { ago } from "../time";
 import { DOT_LABEL, dotOfSession } from "../agentState";
 import { agentRowInfo, agentRowLabel } from "../agentRow";
 import { P } from "../strings.panels";
-import { activeSession, closeSessionTab, norm, openSession, renameTab, selectedWorktree, sessionsOf, tabLabel } from "../store";
+import {
+  activeSession,
+  closeSessionTab,
+  norm,
+  openSession,
+  renameTab,
+  selectedWorktree,
+  sessionsOf,
+  tabLabel,
+} from "../store";
 
 const T = P.sidebar;
 
@@ -26,7 +35,13 @@ export function AgentList(props: { path: string; depth: number; hidden: boolean;
   return (
     <Show when={agents().length > 0}>
       <div class="wt-agents" style={props.depth > 0 ? { "margin-left": `${14 + props.depth * 14}px` } : undefined}>
-        <Button variant="link" size="bare" class="w-full justify-between px-1.5 pb-1 pt-0.5 text-xs" onClick={props.onToggle} aria-expanded={!props.hidden}>
+        <Button
+          variant="link"
+          size="bare"
+          class="w-full justify-between px-1.5 pb-1 pt-0.5 text-xs"
+          onClick={props.onToggle}
+          aria-expanded={!props.hidden}
+        >
           <span>{T.agentsCount(agents().length)}</span>
           <Icon name={props.hidden ? "chevRight" : "chevDown"} size={11} />
         </Button>
@@ -45,7 +60,12 @@ export function AgentList(props: { path: string; depth: number; hidden: boolean;
                         class="mx-1 my-0.5 h-auto min-w-0 flex-1 px-1.5 py-[3px] text-sm"
                         aria-label={T.agentName}
                         value={info().name}
-                        ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
+                        ref={(el) =>
+                          queueMicrotask(() => {
+                            el.focus();
+                            el.select();
+                          })
+                        }
                         onKeyDown={(e) => {
                           if (e.key === "Enter") finishRename(a.id, e.currentTarget.value);
                           else if (e.key === "Escape") finishRename(a.id, null);
@@ -78,17 +98,42 @@ export function AgentList(props: { path: string; depth: number; hidden: boolean;
                       }}
                     >
                       <StateDot state={dotOfSession(a)} />
-                      <span class="wt-agent-name">{a.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}{info().name}</span>
+                      <span class="wt-agent-name">
+                        {a.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}
+                        {info().name}
+                      </span>
                       <Show when={info().kind}>
-                        <span class="wt-agent-kind inline-flex items-center text-muted-foreground" title={info().kind} role="img" aria-label={T.agentKind(info().kind)}>{hasIcon(info().kind) ? <Icon name={info().kind} size={13} /> : info().kind}</span>
+                        <span
+                          class="wt-agent-kind inline-flex items-center text-muted-foreground"
+                          title={info().kind}
+                          role="img"
+                          aria-label={T.agentKind(info().kind)}
+                        >
+                          {hasIcon(info().kind) ? <Icon name={info().kind} size={13} /> : info().kind}
+                        </span>
                       </Show>
                       <Show when={info().worktree}>
-                        <span class="wt-agent-wt inline-flex items-center text-muted-foreground" title={info().worktree} role="img" aria-label={T.worktreeOf(info().worktree)}><Icon name="branch" size={12} /></span>
+                        <span
+                          class="wt-agent-wt inline-flex items-center text-muted-foreground"
+                          title={info().worktree}
+                          role="img"
+                          aria-label={T.worktreeOf(info().worktree)}
+                        >
+                          <Icon name="branch" size={12} />
+                        </span>
                       </Show>
                     </Button>
                   </Show>
                   <Show when={info().hasReport && renaming() !== a.id}>
-                    <Button type="button" variant="chip" size="chip" class="mr-1 flex-none px-[6px]" aria-label={T.reportOf(info().name)} title={T.openReport} onClick={() => openNote(a.id, info().name)}>
+                    <Button
+                      type="button"
+                      variant="chip"
+                      size="chip"
+                      class="mr-1 flex-none px-[6px]"
+                      aria-label={T.reportOf(info().name)}
+                      title={T.openReport}
+                      onClick={() => openNote(a.id, info().name)}
+                    >
                       <Icon name="file" size={12} />
                     </Button>
                   </Show>

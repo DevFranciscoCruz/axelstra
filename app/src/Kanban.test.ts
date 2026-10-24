@@ -3,13 +3,19 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createComponent } from "solid-js";
 
 const h = vi.hoisted(() => ({
-  trust: null as null | { pin: string; cards: { id: string; agent: string; permission_mode: string; bypass: boolean; acceptance: string | null }[] },
+  trust: null as null | {
+    pin: string;
+    cards: { id: string; agent: string; permission_mode: string; bypass: boolean; acceptance: string | null }[];
+  },
   answer: true,
   asked: [] as { message: string; opts: Record<string, unknown> }[],
   started: [] as unknown[][],
 }));
 
-const card = { meta: { id: "k1", title: "Fix it", status: "todo", agent: "claude", depends_on: [], priority: 0, acceptance: null }, body: "b" };
+const card = {
+  meta: { id: "k1", title: "Fix it", status: "todo", agent: "claude", depends_on: [], priority: 0, acceptance: null },
+  body: "b",
+};
 
 vi.mock("./api", () => ({
   kanbanList: vi.fn(async () => ({ cards: [card], broken: [] })),
@@ -62,7 +68,10 @@ const startButton = (el: HTMLElement) => el.querySelector<HTMLButtonElement>(".k
 
 describe("Kanban start orchestration", () => {
   it("bypass cards need the typed opt-in and the pin is sent", async () => {
-    h.trust = { pin: "pin123", cards: [{ id: "k1", agent: "claude", permission_mode: "bypassPermissions", bypass: true, acceptance: null }] };
+    h.trust = {
+      pin: "pin123",
+      cards: [{ id: "k1", agent: "claude", permission_mode: "bypassPermissions", bypass: true, acceptance: null }],
+    };
     const r = render(() => createComponent(Kanban, { project: "p" }));
     await settle();
     fireEvent.click(startButton(r.container));
@@ -74,7 +83,10 @@ describe("Kanban start orchestration", () => {
   });
 
   it("declining sends nothing", async () => {
-    h.trust = { pin: "x", cards: [{ id: "k1", agent: "claude", permission_mode: "default", bypass: false, acceptance: null }] };
+    h.trust = {
+      pin: "x",
+      cards: [{ id: "k1", agent: "claude", permission_mode: "default", bypass: false, acceptance: null }],
+    };
     h.answer = false;
     const r = render(() => createComponent(Kanban, { project: "p" }));
     await settle();

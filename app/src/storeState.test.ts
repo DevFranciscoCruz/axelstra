@@ -35,13 +35,25 @@ vi.mock("./api", () => ({
 
 const memory = () => {
   const m = new Map<string, string>();
-  return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), clear: () => m.clear() };
+  return {
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => void m.set(k, v),
+    removeItem: (k: string) => void m.delete(k),
+    clear: () => m.clear(),
+  };
 };
 const load = async () => {
   vi.resetModules();
   return await import("./store");
 };
-const sess = (id: number, worktree: string, over: Partial<SessionInfo> = {}): SessionInfo => ({ id, running: true, idle_ms: 9000, label: null, meta: { kind: "shell", worktree }, ...over });
+const sess = (id: number, worktree: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
+  id,
+  running: true,
+  idle_ms: 9000,
+  label: null,
+  meta: { kind: "shell", worktree },
+  ...over,
+});
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", memory());
@@ -93,9 +105,28 @@ describe("one view signal (F2)", () => {
 describe("sessions and projects keep identity when nothing changed (F4)", () => {
   it("keepSame returns the previous array for an identical list", async () => {
     const s = await load();
-    const prev = [{ id: 1, v: 1 }, { id: 2, v: 2 }];
-    expect(s.keepSame(prev, [{ id: 1, v: 1 }, { id: 2, v: 2 }], (x) => x.id)).toBe(prev);
-    const changed = s.keepSame(prev, [{ id: 1, v: 1 }, { id: 2, v: 3 }], (x) => x.id);
+    const prev = [
+      { id: 1, v: 1 },
+      { id: 2, v: 2 },
+    ];
+    expect(
+      s.keepSame(
+        prev,
+        [
+          { id: 1, v: 1 },
+          { id: 2, v: 2 },
+        ],
+        (x) => x.id,
+      ),
+    ).toBe(prev);
+    const changed = s.keepSame(
+      prev,
+      [
+        { id: 1, v: 1 },
+        { id: 2, v: 3 },
+      ],
+      (x) => x.id,
+    );
     expect(changed).not.toBe(prev);
     expect(changed[0]).toBe(prev[0]);
     expect(s.keepSame(prev, [{ id: 1, v: 1 }], (x) => x.id)).not.toBe(prev);
@@ -190,7 +221,9 @@ describe("persisted JSON is validated on load (F10)", () => {
 
   it("project prefs keep only well-formed entries", async () => {
     const s = await load();
-    expect(s.parsePrefs({ a: { agent: "codex", terse: "tiny" }, b: 3, c: { terse: "loud" }, d: [] })).toEqual({ a: { agent: "codex", terse: "tiny" } });
+    expect(s.parsePrefs({ a: { agent: "codex", terse: "tiny" }, b: 3, c: { terse: "loud" }, d: [] })).toEqual({
+      a: { agent: "codex", terse: "tiny" },
+    });
     expect(s.parsePrefs(null)).toEqual({});
   });
 });

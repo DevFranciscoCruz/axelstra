@@ -55,8 +55,10 @@ export const P = {
     offMain: (label: string, main: string) => `O worktree principal está em "${label}", não em ${main}`,
     dirtyTip: (n: number) => `${count(n, "ficheiro", "ficheiros")} com alterações por guardar`,
     aheadBehind: (a: number, b: number) => `${count(a, "commit à frente", "commits à frente")} e ${b} atrás do remoto`,
-    prTip: (n: number, title: string, checks?: string | null) => `PR #${n}: ${title}${checks ? ` (CI: ${checks})` : ""}`,
-    groupLive: (live: number, kids: number) => `${live} a correr neste grupo (${count(kids, "worktree", "worktrees")} dentro)`,
+    prTip: (n: number, title: string, checks?: string | null) =>
+      `PR #${n}: ${title}${checks ? ` (CI: ${checks})` : ""}`,
+    groupLive: (live: number, kids: number) =>
+      `${live} a correr neste grupo (${count(kids, "worktree", "worktrees")} dentro)`,
     pinned: "Fixado",
     moreActions: "Mais ações",
     removeWorktree: "Remover worktree",
@@ -78,8 +80,10 @@ export const P = {
     envCopied: (n: number) => ` · ${count(n, "ficheiro de ambiente copiado", "ficheiros de ambiente copiados")}`,
     envSkipped: (n: number) => ` · ${n} ficou de fora`,
     created: (name: string, copied: string, skipped: string) => `Worktree "${name}" criado${copied}${skipped}.`,
-    agentFailed: (name: string, why: string) => `O worktree "${name}" foi criado, mas o agente não arrancou (${why}). Abre-o a partir do separador +.`,
-    sleepAsk: (name: string, n: number) => `Pôr "${name}" a dormir?\n\n${count(n, "terminal ou agente a correr é fechado", "terminais e agentes a correr são fechados")}. O worktree e os ficheiros ficam como estão.`,
+    agentFailed: (name: string, why: string) =>
+      `O worktree "${name}" foi criado, mas o agente não arrancou (${why}). Abre-o a partir do separador +.`,
+    sleepAsk: (name: string, n: number) =>
+      `Pôr "${name}" a dormir?\n\n${count(n, "terminal ou agente a correr é fechado", "terminais e agentes a correr são fechados")}. O worktree e os ficheiros ficam como estão.`,
     sleepTitle: "Dormir",
     cleanAsk: (names: string[]) =>
       `Remover os worktrees concluídos (${names.length})?\n\n${names.join("\n")}\n\nA limpeza remove todos os worktrees já integrados, de todos os projetos.`,
@@ -92,7 +96,8 @@ export const P = {
     dropOk: "Tirar",
     removeAsk: (name: string, lost: string, typed: boolean) =>
       `Remover o worktree "${name}"?${lost}\n\nA pasta e o branch são apagados e os terminais dele são fechados.${typed ? "\n\nPara confirmar, escreve o nome do worktree." : ""}`,
-    removeLost: (risks: string[]) => (risks.length ? `\n\nVais perder: ${risks.join("; ")}.` : "\n\nNão há alterações nem commits por enviar."),
+    removeLost: (risks: string[]) =>
+      risks.length ? `\n\nVais perder: ${risks.join("; ")}.` : "\n\nNão há alterações nem commits por enviar.",
     removeTitle: "Remover worktree",
     // menus
     menu: {
@@ -136,11 +141,22 @@ export const P = {
       noMatch: "Nenhum contentor corresponde à pesquisa ou ao filtro.",
       none: "Ainda não há contentores. Cria um com docker run ou docker compose up e aparece aqui.",
     },
-    done: { removed: "Removido", killed: "Morto", stopped: "Parado", restarted: "Reiniciado", paused: "Em pausa", resumed: "Retomado", started: "Iniciado" },
+    done: {
+      removed: "Removido",
+      killed: "Morto",
+      stopped: "Parado",
+      restarted: "Reiniciado",
+      paused: "Em pausa",
+      resumed: "Retomado",
+      started: "Iniciado",
+    },
     removeAsk: {
-      plain: (n: string) => `Remover o contentor "${n}"? Os ficheiros que só existem dentro dele perdem-se. Os volumes ficam.`,
-      force: (n: string) => `Remover à força "${n}"? O contentor é morto sem aviso (SIGKILL) e apagado. Os ficheiros que só existem dentro dele perdem-se.`,
-      volumes: (n: string) => `Remover "${n}" e os seus volumes anónimos? Os dados guardados nesses volumes perdem-se. Volumes com nome ficam.`,
+      plain: (n: string) =>
+        `Remover o contentor "${n}"? Os ficheiros que só existem dentro dele perdem-se. Os volumes ficam.`,
+      force: (n: string) =>
+        `Remover à força "${n}"? O contentor é morto sem aviso (SIGKILL) e apagado. Os ficheiros que só existem dentro dele perdem-se.`,
+      volumes: (n: string) =>
+        `Remover "${n}" e os seus volumes anónimos? Os dados guardados nesses volumes perdem-se. Volumes com nome ficam.`,
     },
     removeTitle: "Remover contentor",
     forceTitle: "Remover à força",
@@ -149,25 +165,34 @@ export const P = {
     kill: "Matar",
     alreadyRunning: (l: string) => `"${l}" já está a correr.`,
     nothingRunning: (l: string) => `"${l}" não tem nada a correr.`,
-    stopGroupAsk: (n: number, l: string, names: string) => `Parar ${count(n, "contentor", "contentores")} de "${l}"?\n${names}`,
+    stopGroupAsk: (n: number, l: string, names: string) =>
+      `Parar ${count(n, "contentor", "contentores")} de "${l}"?\n${names}`,
     stopGroupTitle: "Parar grupo",
     deleteGroupAsk: (n: number, l: string, names: string) =>
       `Apagar ${count(n, "contentor", "contentores")} de "${l}", mesmo os que estão a correr?\n${names}\n\nOs ficheiros que só existem dentro deles perdem-se. Os volumes ficam.`,
     deleteGroupTitle: "Apagar grupo",
-    groupDone: (kind: "up" | "stop" | "rm", n: number, l: string) => `${kind === "up" ? "Iniciados" : kind === "stop" ? "Parados" : "Apagados"} ${n} em "${l}"`,
-    composeDownAsk: (p?: string) => `Parar e remover os contentores e redes do compose deste worktree (${p})? Os volumes ficam.`,
+    groupDone: (kind: "up" | "stop" | "rm", n: number, l: string) =>
+      `${kind === "up" ? "Iniciados" : kind === "stop" ? "Parados" : "Apagados"} ${n} em "${l}"`,
+    composeDownAsk: (p?: string) =>
+      `Parar e remover os contentores e redes do compose deste worktree (${p})? Os volumes ficam.`,
     composeDownTitle: "Compose down",
     composeDownOk: "Parar e remover",
     composeUp: "Compose iniciado",
     composeDown: "Compose parado",
     pruneAsk: {
-      containers: (n: number | null) => `Remover todos os contentores parados${n == null ? "" : ` (${n} agora)`}? Os ficheiros que só existem dentro deles perdem-se. Os volumes ficam.`,
+      containers: (n: number | null) =>
+        `Remover todos os contentores parados${n == null ? "" : ` (${n} agora)`}? Os ficheiros que só existem dentro deles perdem-se. Os volumes ficam.`,
       images: "Remover as imagens órfãs (sem nome nem etiqueta), que nenhum contentor usa? Imagens com nome ficam.",
-      volumes: "Remover os volumes anónimos que nenhum contentor usa? Os dados guardados neles perdem-se. Volumes com nome ficam.",
+      volumes:
+        "Remover os volumes anónimos que nenhum contentor usa? Os dados guardados neles perdem-se. Volumes com nome ficam.",
     },
     pruneTitle: "Limpar",
     pruneDone: "Limpeza feita.",
-    pruneMenu: { containers: "Remover contentores parados…", images: "Remover imagens sem nome…", volumes: "Remover volumes anónimos sem uso…" },
+    pruneMenu: {
+      containers: "Remover contentores parados…",
+      images: "Remover imagens sem nome…",
+      volumes: "Remover volumes anónimos sem uso…",
+    },
     pickWorktreeTab: "Escolhe um worktree para abrir o separador.",
     pickWorktreeShell: "Escolhe um worktree para abrir a shell.",
     menu: {
@@ -192,10 +217,24 @@ export const P = {
     removeImageTitle: "Remover imagem",
     imageRemoved: (n: string) => `Imagem removida: ${n}`,
     // logic
-    states: { running: "a correr", paused: "em pausa", restarting: "a reiniciar", created: "criado", exited: "parado", dead: "morto", unknown: "desconhecido" },
+    states: {
+      running: "a correr",
+      paused: "em pausa",
+      restarting: "a reiniciar",
+      created: "criado",
+      exited: "parado",
+      dead: "morto",
+      unknown: "desconhecido",
+    },
     ago: {
       now: "agora",
-      units: [["minuto", "minutos"], ["hora", "horas"], ["dia", "dias"], ["mês", "meses"], ["ano", "anos"]] as [string, string][],
+      units: [
+        ["minuto", "minutos"],
+        ["hora", "horas"],
+        ["dia", "dias"],
+        ["mês", "meses"],
+        ["ano", "anos"],
+      ] as [string, string][],
       since: (n: number, unit: string) => `há ${n} ${unit}`,
     },
     // detail
@@ -252,11 +291,13 @@ export const P = {
     // lists
     checking: "A verificar o Docker…",
     notInstalled: "O Docker não está instalado",
-    installHint: "Instala o Docker Desktop para ver e gerir contentores aqui. Depois de instalar, abre-o e volta a esta vista.",
+    installHint:
+      "Instala o Docker Desktop para ver e gerir contentores aqui. Depois de instalar, abre-o e volta a esta vista.",
     howInstall: "Como instalar o Docker Desktop",
     retry: "Tentar de novo",
     engineDown: "O motor do Docker não está a correr",
-    engineHint: "Abre o Docker Desktop e espera que fique pronto. Esta vista volta a tentar sozinha a cada 10 segundos.",
+    engineHint:
+      "Abre o Docker Desktop e espera que fique pronto. Esta vista volta a tentar sozinha a cada 10 segundos.",
     noCompose: "Este worktree não tem ficheiro compose (compose.yaml, docker-compose.yml…).",
     composeOf: "Compose deste worktree",
     composeProject: (f: string, p: string) => `${f} · projeto ${p}`,
@@ -277,7 +318,13 @@ export const P = {
   },
   kanban: {
     title: "Kanban",
-    cols: { backlog: "Ideias", todo: "Para fazer", "in-progress": "Em curso", "needs-review": "Rever", done: "Feito" } as Record<string, string>,
+    cols: {
+      backlog: "Ideias",
+      todo: "Para fazer",
+      "in-progress": "Em curso",
+      "needs-review": "Rever",
+      done: "Feito",
+    } as Record<string, string>,
     discardAsk: "Descartar as alterações a este cartão?",
     discardTitle: "Descartar",
     discard: "Descartar",
@@ -288,7 +335,8 @@ export const P = {
     runBypass: "Executar sem permissões",
     waitingReview: "aguarda revisão",
     unknownWt: "O worktree desta execução já não é conhecido: inicia a orquestração de novo.",
-    retryAsk: (t: string, acc: string) => `Integrar "${t}" outra vez? Corre o comando de aceitação na tua máquina:\n${acc}`,
+    retryAsk: (t: string, acc: string) =>
+      `Integrar "${t}" outra vez? Corre o comando de aceitação na tua máquina:\n${acc}`,
     retryTitle: "Integrar de novo",
     unknownWtShort: "worktree desconhecido",
     prAsk: (t: string) => `Enviar o branch de "${t}" e criar um PR no GitHub?`,
@@ -297,7 +345,8 @@ export const P = {
     runTip: "Cria um worktree de integração e despacha um agente por cartão em 'Para fazer'",
     running: "A executar…",
     runTodo: (n: number) => `Executar “Para fazer” (${n})`,
-    runningBanner: (name?: string, branch?: string) => `A executar ${name} – branch ${branch}. Os agentes aparecem como terminais nos worktrees task.`,
+    runningBanner: (name?: string, branch?: string) =>
+      `A executar ${name} – branch ${branch}. Os agentes aparecem como terminais nos worktrees task.`,
     doneBanner: (n: number, branch?: string) => `Terminou: ${count(n, "integrado", "integrados")} em ${branch}`,
     failedBanner: (list: string) => ` · falharam: ${list}`,
     reviewBanner: (list: string) => ` · rever: ${list}`,
@@ -326,8 +375,10 @@ export const P = {
     // logic
     defaultMode: "padrão",
     acceptance: (a: string) => ` · aceitação: ${a}`,
-    planHead: (n: number) => `Despachar ${count(n, "agente", "agentes")} para os cartões em "Para fazer"? Cada um corre num worktree isolado e o resultado é integrado num branch novo (orch/…). Nada é enviado para o remoto.`,
-    legacyCmds: (cmds: string) => `\n\nEstes comandos de aceitação vão correr na tua máquina:\n${cmds}\n\nSó confirma se confias nestes cartões.`,
+    planHead: (n: number) =>
+      `Despachar ${count(n, "agente", "agentes")} para os cartões em "Para fazer"? Cada um corre num worktree isolado e o resultado é integrado num branch novo (orch/…). Nada é enviado para o remoto.`,
+    legacyCmds: (cmds: string) =>
+      `\n\nEstes comandos de aceitação vão correr na tua máquina:\n${cmds}\n\nSó confirma se confias nestes cartões.`,
     bypassNote: (n: number, ids: string) =>
       `\n\n⚠ ${n === 1 ? "Este cartão corre" : "Estes cartões correm"} SEM pedir permissões (bypass): ${ids}. O agente pode alterar ficheiros e correr comandos sem supervisão.`,
     trustCmds: "\n\nOs comandos de aceitação correm na tua máquina. Só confirma se confias nestes cartões.",
@@ -339,7 +390,8 @@ export const P = {
     daily: (t: string) => `todos os dias às ${t}`,
     weekly: (d: string, t: string) => `${d} às ${t}`,
     unsavedDraft: "O rascunho tem alterações por guardar.",
-    runAsk: (name: string, when: string) => `Executar "${name}" agora?\n\nAbre já um worktree novo e põe o agente a trabalhar no pedido, fora do horário (${when}).`,
+    runAsk: (name: string, when: string) =>
+      `Executar "${name}" agora?\n\nAbre já um worktree novo e põe o agente a trabalhar no pedido, fora do horário (${when}).`,
     runTitle: "Executar agora",
     run: "Executar",
     cancel: "Cancelar",
@@ -426,7 +478,12 @@ export const P = {
   ship: {
     ci: { pass: "CI a passar", fail: "CI a falhar", pending: "CI a correr", none: "Sem CI" },
     check: { pass: "passou", fail: "falhou", pending: "a correr", skipped: "ignorado" },
-    review: { approved: "Aprovado", changes: "Alterações pedidas", review: "Falta revisão", none: "Sem revisão pedida" },
+    review: {
+      approved: "Aprovado",
+      changes: "Alterações pedidas",
+      review: "Falta revisão",
+      none: "Sem revisão pedida",
+    },
     merged: "Merge feito",
     closed: "Fechado sem merge",
     draft: "Rascunho",
@@ -437,10 +494,19 @@ export const P = {
     waitingChecks: "À espera dos checks",
     blocked: "Bloqueado (revisão ou regras do repositório)",
     computing: "A calcular…",
-    missing: { text: "O GitHub CLI (gh) não está instalado.", fix: "Instala o gh (https://cli.github.com) e corre `gh auth login` num terminal." },
-    auth: { text: "O gh não tem sessão iniciada no GitHub.", fix: "Corre `gh auth login` num terminal e depois atualiza." },
+    missing: {
+      text: "O GitHub CLI (gh) não está instalado.",
+      fix: "Instala o gh (https://cli.github.com) e corre `gh auth login` num terminal.",
+    },
+    auth: {
+      text: "O gh não tem sessão iniciada no GitHub.",
+      fix: "Corre `gh auth login` num terminal e depois atualiza.",
+    },
     nopr: { text: "Ainda não há PR para este branch.", fix: "Envia o branch e cria o PR com “Criar PR” acima." },
-    unreadable: { text: "Não foi possível ler o estado do PR.", fix: "Atualiza daqui a pouco; se persistir, confirma que `gh pr view` funciona neste worktree." },
+    unreadable: {
+      text: "Não foi possível ler o estado do PR.",
+      fix: "Atualiza daqui a pouco; se persistir, confirma que `gh pr view` funciona neste worktree.",
+    },
     mergeAsk: (n: number, title: string, branch: string, del: boolean) =>
       `Fazer merge (squash) do PR #${n}?\n\n${title}\n\nO branch "${branch}" entra no branch principal.${del ? " O branch remoto será apagado." : ""} Isto não se desfaz.`,
     autoAsk: (n: number, title: string) =>
@@ -468,7 +534,10 @@ export const P = {
   },
   orchestra: {
     title: "Orquestração",
-    state: { working: "a trabalhar", waiting: "espera resposta", idle: "parado", done: "terminou" } as Record<string, string>,
+    state: { working: "a trabalhar", waiting: "espera resposta", idle: "parado", done: "terminou" } as Record<
+      string,
+      string
+    >,
     session: (id: number) => `Sessão ${id}`,
     since: (m: number) => (m < 1 ? "" : m < 60 ? ` há ${m} min` : ` há ${Math.floor(m / 60)} h`),
     stopAsk: (name: string) => `Parar "${name}"? O que estiver a fazer é terminado.`,
@@ -488,7 +557,8 @@ export const P = {
   diff: {
     truncated: (n: number) => `… a mostrar só as primeiras ${n} linhas`,
     noAgent: "Nenhum agente a correr neste worktree. Abre um agente primeiro.",
-    review: (path: string, line: number | undefined, code: string, note: string) => `Revisão de ${path} (linha ${line}), código: \`${code}\`. ${note}`,
+    review: (path: string, line: number | undefined, code: string, note: string) =>
+      `Revisão de ${path} (linha ${line}), código: \`${code}\`. ${note}`,
     reload: "Recarregar",
     noText: "Sem diferenças de texto para mostrar",
     commentTip: "Comentar e enviar ao agente",
@@ -597,10 +667,12 @@ export const P = {
     close: "Fechar",
     setup: "Comando de setup",
     setupPlaceholder: "ex.: bun install (vazio = nenhum)",
-    setupNote: "Corre num terminal visível de cada worktree novo. Fica guardado só nesta app, nunca no repositório: um repositório clonado não consegue mandar o Axelstra correr comandos.",
+    setupNote:
+      "Corre num terminal visível de cada worktree novo. Fica guardado só nesta app, nunca no repositório: um repositório clonado não consegue mandar o Axelstra correr comandos.",
     copied: "Ficheiros copiados para worktrees novos",
     includePre: "Lista no ficheiro ",
-    includeMid: ", na raiz do projeto, os padrões (sintaxe do .gitignore) dos ficheiros ignorados pelo git a copiar do checkout principal, por exemplo ",
+    includeMid:
+      ", na raiz do projeto, os padrões (sintaxe do .gitignore) dos ficheiros ignorados pelo git a copiar do checkout principal, por exemplo ",
     includeOr: " ou ",
     includePost: ". Máximo de 50 ficheiros de 5 MB cada.",
     readFailed: "Não foi possível ler a lista.",

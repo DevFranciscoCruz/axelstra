@@ -138,7 +138,8 @@ const closeIf = (k: View["kind"]) => setView((v) => (v.kind === k ? TERMINAL : v
 export const openCommit = (): Commit | null => kindOf("commit")?.commit ?? null;
 export const setOpenCommit = (c: Commit | null) => (c ? setView({ kind: "commit", commit: c }) : closeIf("commit"));
 export const openFile = (): string | null => kindOf("file")?.path ?? null;
-export const setOpenFile = (p: string | null) => (p !== null ? setView({ kind: "file", path: p, line: null }) : closeIf("file"));
+export const setOpenFile = (p: string | null) =>
+  p !== null ? setView({ kind: "file", path: p, line: null }) : closeIf("file");
 export const openDiff = (): string | null => kindOf("diff")?.path ?? null;
 export const setOpenDiff = (p: string | null) => (p !== null ? setView({ kind: "diff", path: p }) : closeIf("diff"));
 /** line to put the cursor on when the open file was reached from a path link; null = top */
@@ -152,7 +153,9 @@ export const showDocker = () => view().kind === "docker";
 export const setShowDocker = (on: boolean) => (on ? setView({ kind: "docker" }) : closeIf("docker"));
 
 /** One place that picks what fills the main area: no argument = the terminal; the views exclude each other. */
-export const showView = (v: { diff?: string; file?: string; commit?: Commit; kanban?: boolean; docker?: boolean } = {}) =>
+export const showView = (
+  v: { diff?: string; file?: string; commit?: Commit; kanban?: boolean; docker?: boolean } = {},
+) =>
   setView(
     v.diff !== undefined
       ? { kind: "diff", path: v.diff }
@@ -179,7 +182,9 @@ export const [ports, setPorts] = createSignal<number[]>([]);
 /** project whose "new worktree" dialog is open: the sidebar shows it, the command palette can ask for it */
 export const [creatingWorktree, setCreatingWorktree] = createSignal<string | null>(null);
 /** a worktree the command palette asked to remove; the sidebar confirms and does it */
-export const [removeRequest, setRemoveRequest] = createSignal<{ project: string; path: string; name: string } | null>(null);
+export const [removeRequest, setRemoveRequest] = createSignal<{ project: string; path: string; name: string } | null>(
+  null,
+);
 
 /** agents may look at the screen and drive the mouse and keyboard (held by the daemon, off at every start) */
 export const [computerOn, setComputerOn] = createSignal(false);
@@ -192,11 +197,15 @@ export const togglePin = (path: string) => {
   setPins((cur) => (cur.includes(n) ? cur.filter((x) => x !== n) : [...cur, n]));
 };
 
-
 /** The new list, but with the old object wherever nothing changed: keyed lists then keep their DOM (tabs keep focus,
  *  icons do not reload) instead of being rebuilt on every poll. `sig` is what counts as a change (default: everything);
  *  pass one that leaves out fields that move on every poll. */
-export const keepSame = <T>(prev: T[], next: T[], key: (x: T) => string | number, sig: (x: T) => unknown = (x) => x): T[] => {
+export const keepSame = <T>(
+  prev: T[],
+  next: T[],
+  key: (x: T) => string | number,
+  sig: (x: T) => unknown = (x) => x,
+): T[] => {
   const old = new Map(prev.map((x) => [key(x), x] as const));
   const out = next.map((n) => {
     const o = old.get(key(n));
@@ -205,4 +214,3 @@ export const keepSame = <T>(prev: T[], next: T[], key: (x: T) => string | number
   // nothing changed at all: the old array itself, so signals and memos downstream do not run for nothing
   return out.length === prev.length && out.every((x, i) => x === prev[i]) ? prev : out;
 };
-

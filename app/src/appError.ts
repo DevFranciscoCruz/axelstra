@@ -31,4 +31,5 @@ export const errorText = (e: unknown): string => {
 };
 
 /** Wraps any failure of `method` as an AppError with a readable message. */
-export const toAppError = (method: string, e: unknown): AppError => (e instanceof AppError ? e : new AppError(method, errorText(e)));
+export const toAppError = (method: string, e: unknown): AppError =>
+  e instanceof AppError ? e : new AppError(method, errorText(e));

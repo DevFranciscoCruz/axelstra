@@ -10,7 +10,8 @@ const btn = (text: string) => {
   return b;
 };
 const tick = () => new Promise<void>((r) => queueMicrotask(r));
-const key = (k: string, init: KeyboardEventInit = {}) => window.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...init }));
+const key = (k: string, init: KeyboardEventInit = {}) =>
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...init }));
 
 const shellEl = () => document.querySelector("[data-app-shell]")!;
 
@@ -28,7 +29,17 @@ const mountApp = (onClose = () => {}, opts: { dirty?: boolean; closeOnBackdrop?:
     shell.append(opener);
     return [
       shell,
-      () => (open() ? createComponent(Modal, { label: "Teste", onClose, ...opts, get children() { return [btn("a"), btn("b")]; } }) : null),
+      () =>
+        open()
+          ? createComponent(Modal, {
+              label: "Teste",
+              onClose,
+              ...opts,
+              get children() {
+                return [btn("a"), btn("b")];
+              },
+            })
+          : null,
     ] as never;
   });
   return { ...r, setOpen, opener };
@@ -68,7 +79,11 @@ describe("Dialog is really modal", () => {
   });
 
   it("backdrop closes, unless dirty or opted out", async () => {
-    for (const [opts, closes] of [[{}, true], [{ dirty: true }, false], [{ closeOnBackdrop: false }, false]] as const) {
+    for (const [opts, closes] of [
+      [{}, true],
+      [{ dirty: true }, false],
+      [{ closeOnBackdrop: false }, false],
+    ] as const) {
       const onClose = vi.fn();
       const { unmount } = mountApp(onClose, opts);
       await tick();
@@ -83,10 +98,28 @@ describe("Dialog is really modal", () => {
     const lower = vi.fn();
     const upper = vi.fn();
     const [second, setSecond] = createSignal(false);
-    render(() => [
-      createComponent(Modal, { label: "Um", onClose: lower, get children() { return btn("x"); } }),
-      () => (second() ? createComponent(Modal, { label: "Dois", onClose: upper, get children() { return btn("y"); } }) : null),
-    ] as never);
+    render(
+      () =>
+        [
+          createComponent(Modal, {
+            label: "Um",
+            onClose: lower,
+            get children() {
+              return btn("x");
+            },
+          }),
+          () =>
+            second()
+              ? createComponent(Modal, {
+                  label: "Dois",
+                  onClose: upper,
+                  get children() {
+                    return btn("y");
+                  },
+                })
+              : null,
+        ] as never,
+    );
     await tick();
     setSecond(true);
     await tick();

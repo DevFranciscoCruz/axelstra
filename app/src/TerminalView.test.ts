@@ -62,12 +62,32 @@ vi.mock("@xterm/xterm", () => ({
     }
   },
 }));
-vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { fit() {} } }));
+vi.mock("@xterm/addon-fit", () => ({
+  FitAddon: class {
+    fit() {}
+  },
+}));
 vi.mock("@xterm/addon-unicode11", () => ({ Unicode11Addon: class {} }));
-vi.mock("@xterm/addon-search", () => ({ SearchAddon: class { clearDecorations() {} findNext() {} findPrevious() {} } }));
-vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class { onContextLoss() {} dispose() {} } }));
+vi.mock("@xterm/addon-search", () => ({
+  SearchAddon: class {
+    clearDecorations() {}
+    findNext() {}
+    findPrevious() {}
+  },
+}));
+vi.mock("@xterm/addon-webgl", () => ({
+  WebglAddon: class {
+    onContextLoss() {}
+    dispose() {}
+  },
+}));
 vi.mock("@xterm/addon-web-links", () => ({ WebLinksAddon: class {} }));
-vi.mock("./api", () => ({ fsStat: vi.fn(), rememberTermSize: vi.fn(), resizeSession: vi.fn(async () => undefined), writeSession: vi.fn(async () => undefined) }));
+vi.mock("./api", () => ({
+  fsStat: vi.fn(),
+  rememberTermSize: vi.fn(),
+  resizeSession: vi.fn(async () => undefined),
+  writeSession: vi.fn(async () => undefined),
+}));
 vi.mock("./store", () => ({ openFileAt: vi.fn(), selectedWorktree: () => "", showNotice: vi.fn() }));
 vi.mock("./Confirm", () => ({ ask: vi.fn(async () => true) }));
 

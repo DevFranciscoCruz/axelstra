@@ -38,9 +38,7 @@ export function planStart(n: number, trust: OrchTrust | null, legacyCmds: string
   }
   const bypass = bypassCards(trust.cards).map((c) => c.id);
   const cmds = trust.cards.filter((c) => c.acceptance).length;
-  const bypassNote = bypass.length
-    ? P.kanban.bypassNote(bypass.length, bypass.join(", "))
-    : "";
+  const bypassNote = bypass.length ? P.kanban.bypassNote(bypass.length, bypass.join(", ")) : "";
   return {
     message: `${head}\n\n${trustLines(trust.cards).join("\n")}${bypassNote}${cmds ? P.kanban.trustCmds : ""}`,
     warn: cmds > 0 || bypass.length > 0,

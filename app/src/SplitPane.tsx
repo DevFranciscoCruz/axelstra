@@ -37,7 +37,14 @@ export function SplitPane() {
         }}
       />
       <div class="split-pane group/split" style={{ flex: `0 0 ${frac() * 100}%` }}>
-        <Button variant="outline" size="bare" class="absolute right-2 top-1 z-[5] size-5 border-border/60 bg-popover leading-none text-muted-foreground opacity-0 transition-opacity focus-visible:opacity-100 group-hover/split:opacity-100" title={S.app.closeSplit} aria-label={S.app.closeSplit} onClick={() => setSplitSession(null)}>
+        <Button
+          variant="outline"
+          size="bare"
+          class="absolute right-2 top-1 z-[5] size-5 border-border/60 bg-popover leading-none text-muted-foreground opacity-0 transition-opacity focus-visible:opacity-100 group-hover/split:opacity-100"
+          title={S.app.closeSplit}
+          aria-label={S.app.closeSplit}
+          onClick={() => setSplitSession(null)}
+        >
           <Icon name="x" />
         </Button>
         <Show when={splitSession()} keyed>

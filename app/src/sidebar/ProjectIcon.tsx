@@ -7,10 +7,7 @@ export function ProjectIcon(props: { id: string; name: string; url?: string | nu
   const [repoLogo] = createResource(() => props.id, projectLogo);
   const src = () => repoLogo() ?? props.url;
   return (
-    <Show
-      when={src() && !broken()}
-      fallback={<span class="picon letter">{props.name.slice(0, 1).toUpperCase()}</span>}
-    >
+    <Show when={src() && !broken()} fallback={<span class="picon letter">{props.name.slice(0, 1).toUpperCase()}</span>}>
       <img class="picon" src={src()!} alt="" onError={() => setBroken(true)} />
     </Show>
   );

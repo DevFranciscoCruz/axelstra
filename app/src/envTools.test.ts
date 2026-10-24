@@ -58,7 +58,8 @@ describe("Welcome shows what is missing", () => {
     });
     const r = render(() => createComponent(Welcome, { onAddProject: vi.fn() }));
     await waitFor(() => expect(r.container.querySelector('[data-tool-state="missing"]')).not.toBeNull());
-    const state = (name: string) => [...r.container.querySelectorAll("li[data-tool-state]")].find((li) => li.textContent?.startsWith(name))!;
+    const state = (name: string) =>
+      [...r.container.querySelectorAll("li[data-tool-state]")].find((li) => li.textContent?.startsWith(name))!;
     expect(state("git").getAttribute("data-tool-state")).toBe("found");
     expect(state("git").textContent).toContain("2.45.1");
     expect(state("claude").getAttribute("data-tool-state")).toBe("missing");

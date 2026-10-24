@@ -18,7 +18,11 @@ vi.mock("@tauri-apps/api/event", () => ({
     const l = state.listeners.get(ev) ?? [];
     l.push(cb);
     state.listeners.set(ev, l);
-    return () => state.listeners.set(ev, (state.listeners.get(ev) ?? []).filter((x) => x !== cb));
+    return () =>
+      state.listeners.set(
+        ev,
+        (state.listeners.get(ev) ?? []).filter((x) => x !== cb),
+      );
   }),
 }));
 vi.mock("@tauri-apps/api/core", () => ({
@@ -46,7 +50,9 @@ vi.mock("@tauri-apps/api/core", () => ({
       case "session.pending":
         return [...state.pending];
       case "session.pending_remove":
-        state.pending = state.pending.filter((p) => p !== args.params.rec && JSON.stringify(p) !== JSON.stringify(args.params.rec));
+        state.pending = state.pending.filter(
+          (p) => p !== args.params.rec && JSON.stringify(p) !== JSON.stringify(args.params.rec),
+        );
         return {};
       case "session.list":
         return state.sessions;
@@ -63,7 +69,16 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { AppError } from "./appError";
-import { call, cancelNudge, nudge, restoreSessions, stopWatch, watchWorktree, writeSession, CALL_TIMEOUT_MS } from "./api";
+import {
+  call,
+  cancelNudge,
+  nudge,
+  restoreSessions,
+  stopWatch,
+  watchWorktree,
+  writeSession,
+  CALL_TIMEOUT_MS,
+} from "./api";
 
 beforeEach(() => {
   calls.length = 0;

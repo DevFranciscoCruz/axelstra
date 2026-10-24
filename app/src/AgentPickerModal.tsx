@@ -17,7 +17,13 @@ export function AgentPickerModal(props: { project: string | undefined; done: (ag
       <div class="m-heading">{S.app.newAgent}</div>
       <div class="m-full" onKeyDown={(e) => e.key === "Enter" && (e.ctrlKey || e.metaKey) && go()}>
         <Field label={S.app.agent} full>
-          <Select value={choice()} label={S.app.agent} iconOnly options={agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))} onChange={setChoice} />
+          <Select
+            value={choice()}
+            label={S.app.agent}
+            iconOnly
+            options={agentKeys().map((a) => ({ value: a, label: a, icon: hasIcon(a) ? a : undefined }))}
+            onChange={setChoice}
+          />
         </Field>
       </div>
       <div class="m-actions">

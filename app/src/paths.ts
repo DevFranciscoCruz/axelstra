@@ -2,7 +2,11 @@
 export const norm = (p?: string | null) => (p ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 
 /** last segment of a path with either slash style; trailing slashes ignored ("C:\a\b\\" -> "b") */
-export const basename = (p: string | null | undefined): string => (p ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
+export const basename = (p: string | null | undefined): string =>
+  (p ?? "")
+    .replace(/[\\/]+$/, "")
+    .split(/[\\/]/)
+    .pop() ?? "";
 
 /** a copy of `set` with `v` removed when it was in, added when it was not (checkbox-style toggles on a Set held in a signal) */
 export const toggleIn = <T>(set: ReadonlySet<T>, v: T): Set<T> => {

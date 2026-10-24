@@ -71,7 +71,11 @@ export const writeJson = (key: string, v: unknown): void => {
 };
 
 /** A signal that remembers itself: starts from the validated saved value (or `fallback`) and saves on every set. */
-export function createPersisted<T>(key: string, ok: (v: unknown) => v is T, fallback: T): [Accessor<T>, (v: T | ((prev: T) => T)) => T] {
+export function createPersisted<T>(
+  key: string,
+  ok: (v: unknown) => v is T,
+  fallback: T,
+): [Accessor<T>, (v: T | ((prev: T) => T)) => T] {
   const [get, set] = createSignal<T>(readJson(key, ok, fallback));
   return [
     get,

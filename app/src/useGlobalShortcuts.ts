@@ -2,7 +2,18 @@ import { onCleanup, onMount } from "solid-js";
 import type { SessionInfo } from "./api";
 import { isTextTarget, overlayOpen } from "./keyboard";
 import { S } from "./strings";
-import { activeSession, openSession, sessionState, sessions, setShowAgentSearch, setShowSettings, setShowShortcuts, showNotice, toggleRightPanel, toggleSidebar } from "./store";
+import {
+  activeSession,
+  openSession,
+  sessionState,
+  sessions,
+  setShowAgentSearch,
+  setShowSettings,
+  setShowShortcuts,
+  showNotice,
+  toggleRightPanel,
+  toggleSidebar,
+} from "./store";
 import { toggleVoice } from "./Voice";
 
 export type ShortcutDeps = {
@@ -59,7 +70,8 @@ export function createShortcutHandler({ tabs, showTab, reopenClosed }: ShortcutD
       const list = tabs();
       if (!list.length) return;
       const at = list.findIndex((t) => t.id === activeSession());
-      const pick = e.key === "Tab" ? list[(at + (e.shiftKey ? -1 : 1) + list.length) % list.length] : list[Number(e.key) - 1];
+      const pick =
+        e.key === "Tab" ? list[(at + (e.shiftKey ? -1 : 1) + list.length) % list.length] : list[Number(e.key) - 1];
       if (!pick) return;
       e.preventDefault();
       e.stopPropagation();
@@ -69,7 +81,9 @@ export function createShortcutHandler({ tabs, showTab, reopenClosed }: ShortcutD
     if (k === "j" && !e.shiftKey) {
       e.preventDefault();
       e.stopPropagation();
-      const waiting = sessions().filter((x) => x.meta?.kind === "agent" && x.meta.worktree && sessionState(x) === "waiting");
+      const waiting = sessions().filter(
+        (x) => x.meta?.kind === "agent" && x.meta.worktree && sessionState(x) === "waiting",
+      );
       if (!waiting.length) return showNotice(S.app.noWaiting);
       const next = waiting.find((x) => x.id > activeSession()!) ?? waiting[0];
       openSession(next.meta!.worktree!, next.id);

@@ -65,7 +65,12 @@ const trackAgents = (list: SessionInfo[]) => {
     if (s.meta?.kind !== "agent" || !wtPath) continue;
     // back to work: the earlier "needs a look" flag is stale
     if (state === "working") {
-      if (attention().has(norm(wtPath))) setAttention((cur) => { const n = new Set(cur); n.delete(norm(wtPath)); return n; });
+      if (attention().has(norm(wtPath)))
+        setAttention((cur) => {
+          const n = new Set(cur);
+          n.delete(norm(wtPath));
+          return n;
+        });
       continue;
     }
     if (prev !== "working") continue;
@@ -83,11 +88,18 @@ const trackAgents = (list: SessionInfo[]) => {
       state === "done"
         ? [`${who} terminou · ${name}`, `${who} acabou a tarefa na worktree "${name}". Abre para rever o resultado.`]
         : state === "waiting"
-          ? [`${who} precisa de ti · ${name}`, `${who} fez uma pergunta na worktree "${name}" e precisa da tua resposta para continuar.`]
-          : [`${who} parou · ${name}`, `${who} ficou parado na worktree "${name}" sem terminar. Abre para ver o que aconteceu.`];
+          ? [
+              `${who} precisa de ti · ${name}`,
+              `${who} fez uma pergunta na worktree "${name}" e precisa da tua resposta para continuar.`,
+            ]
+          : [
+              `${who} parou · ${name}`,
+              `${who} ficou parado na worktree "${name}" sem terminar. Abre para ver o que aconteceu.`,
+            ];
     void notify(head, body, wtPath, s.id, state === "waiting");
     // a session that merely went quiet is not worth a line in the centre (it is the common case, and not an error)
-    if (state === "done" || state === "waiting") pushNotification({ kind: state, worktree: wtPath, session: s.id, text: body });
+    if (state === "done" || state === "waiting")
+      pushNotification({ kind: state, worktree: wtPath, session: s.id, text: body });
   }
 };
 
@@ -109,7 +121,10 @@ const refreshFlows = async () => {
 
 /** A session as far as the UI can tell: idle_ms changes on every poll, but only its "working" side and the minute
  *  the labels show matter, so those stand in for it. */
-const sessionSig = (s: SessionInfo) => ({ ...s, idle_ms: s.idle_ms === undefined ? undefined : [s.idle_ms < WORKING_MS, Math.floor(s.idle_ms / 60000)] });
+const sessionSig = (s: SessionInfo) => ({
+  ...s,
+  idle_ms: s.idle_ms === undefined ? undefined : [s.idle_ms < WORKING_MS, Math.floor(s.idle_ms / 60000)],
+});
 
 const POLL_SESSIONS = "poll:sessions";
 const pollSessions = async () => {
@@ -120,7 +135,12 @@ const pollSessions = async () => {
     pruneTabState(list);
     // a worktree on screen is being looked at: a flag left from earlier (or set while the window was hidden) is stale
     const cur = selectedWorktree();
-    if (cur && !document.hidden && attention().has(norm(cur))) setAttention((a) => { const n = new Set(a); n.delete(norm(cur)); return n; });
+    if (cur && !document.hidden && attention().has(norm(cur)))
+      setAttention((a) => {
+        const n = new Set(a);
+        n.delete(norm(cur));
+        return n;
+      });
     setSessions((prev) => keepSame(prev, list, (s) => s.id, sessionSig));
     clearError(POLL_SESSIONS);
   } catch (e) {
@@ -154,7 +174,6 @@ export const watchDispatch = () => {
   };
 };
 
-
 /** worktree (normalized path) -> its sessions, built once per change of `sessions` instead of once per row and call */
 const sessionsByWorktree = createRoot(() =>
   createMemo(() => {
@@ -170,19 +189,23 @@ const sessionsByWorktree = createRoot(() =>
   }),
 );
 const NO_SESSIONS: SessionInfo[] = [];
-export const sessionsOf = (path: string | null): SessionInfo[] => (path ? sessionsByWorktree().get(norm(path)) ?? NO_SESSIONS : NO_SESSIONS);
-
+export const sessionsOf = (path: string | null): SessionInfo[] =>
+  path ? (sessionsByWorktree().get(norm(path)) ?? NO_SESSIONS) : NO_SESSIONS;
 
 const [wt, setWt] = createSignal<string | null>(readString("axelstra.worktree") || null);
 export const selectedWorktree = wt;
 export const selectWorktree = (path: string | null) => guarded(() => doSelect(path));
 const doSelect = (path: string | null) => {
   setWt(path);
-  if (path) setAttention((cur) => { const n = new Set(cur); n.delete(norm(path)); return n; });
+  if (path)
+    setAttention((cur) => {
+      const n = new Set(cur);
+      n.delete(norm(path));
+      return n;
+    });
   writeString("axelstra.worktree", path ?? ""); // "" = none selected
   setActiveSession(null);
   setSplitSession(null);
   showView();
   setChanges(null);
 };
-

@@ -63,7 +63,10 @@ export function buildPaletteActions(d: PaletteDeps) {
     orchestra: { run: () => setShowOrchestra(true) },
     dispatcher: { run: () => setShowDispatcher(true) },
     automations: { run: () => setShowAutomations(true) },
-    computer: { run: () => void d.toggleComputer(), label: d.computerOn() ? S.palette.computerOff : S.palette.computerOn },
+    computer: {
+      run: () => void d.toggleComputer(),
+      label: d.computerOn() ? S.palette.computerOff : S.palette.computerOn,
+    },
     restartDaemon: { run: () => void restartDaemonFlow() },
   };
   if (projects().length > 0)

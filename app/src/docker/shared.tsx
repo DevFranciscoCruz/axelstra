@@ -4,7 +4,10 @@ import { sessions, setError, showNotice } from "../store";
 import { P } from "../strings.panels";
 
 export type DTab = "info" | "logs" | "terminal" | "files";
-export const DTABS: [DTab, string][] = (["info", "logs", "terminal", "files"] as DTab[]).map((t) => [t, P.docker.tabs[t]]);
+export const DTABS: [DTab, string][] = (["info", "logs", "terminal", "files"] as DTab[]).map((t) => [
+  t,
+  P.docker.tabs[t],
+]);
 
 /** Small stroke icons the shared Icon set does not have. */
 const GLYPHS: Record<string, JSX.Element> = {
@@ -16,7 +19,18 @@ const GLYPHS: Record<string, JSX.Element> = {
 export function DIcon(props: { name: string }) {
   return (
     <Show when={GLYPHS[props.name]} fallback={<Icon name={props.name} size={14} />}>
-      <svg class="svg-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <svg
+        class="svg-icon"
+        width="14"
+        height="14"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
         {GLYPHS[props.name]}
       </svg>
     </Show>

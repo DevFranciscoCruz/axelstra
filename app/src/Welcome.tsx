@@ -17,23 +17,36 @@ const toolsNow = (): Promise<EnvTool[] | null> => {
 };
 type Wt = { path: string; branch: string | null; is_main: boolean };
 
-const Kbd = (props: { children: string }) => <kbd class="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-xs text-foreground">{props.children}</kbd>;
+const Kbd = (props: { children: string }) => (
+  <kbd class="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-xs text-foreground">{props.children}</kbd>
+);
 
 /**
  * The main area with nothing open. Without `worktrees`: no project yet, one button to add it.
  * With `worktrees`: a project exists but no worktree is selected; they are listed to pick, or a new one is made.
  */
-export function Welcome(props: { onAddProject: () => void; worktrees?: Wt[]; projectName?: string; onPick?: (path: string) => void; onNewWorktree?: () => void }) {
+export function Welcome(props: {
+  onAddProject: () => void;
+  worktrees?: Wt[];
+  projectName?: string;
+  onPick?: (path: string) => void;
+  onNewWorktree?: () => void;
+}) {
   const paletteKeys = () => K(commandById("palette")?.keys ?? "Ctrl+K");
   // what the daemon finds installed; without an answer (old daemon, no host) the hints stay as plain advice
   const [tools] = createResource(toolsNow);
   const toolOf = (id: string) => tools()?.find((t) => t.id === id);
   const shortcutKeys = () => commandById("shortcuts")?.keys ?? "?";
   return (
-    <section class="mx-auto flex h-full w-full max-w-[420px] flex-col items-center justify-center gap-5 p-8 text-center" aria-labelledby="welcome-title">
+    <section
+      class="mx-auto flex h-full w-full max-w-[420px] flex-col items-center justify-center gap-5 p-8 text-center"
+      aria-labelledby="welcome-title"
+    >
       <img src={logo} alt="" class="size-14" />
       <div class="flex flex-col gap-2">
-        <h1 id="welcome-title" class="text-2xl font-semibold text-foreground">{props.worktrees ? W.pickTitle : W.title}</h1>
+        <h1 id="welcome-title" class="text-2xl font-semibold text-foreground">
+          {props.worktrees ? W.pickTitle : W.title}
+        </h1>
         <p class="text-base text-muted-foreground">{props.worktrees ? W.pickFlow(props.projectName) : W.flow}</p>
       </div>
       <Show
@@ -51,7 +64,14 @@ export function Welcome(props: { onAddProject: () => void; worktrees?: Wt[]; pro
               <For each={wts()}>
                 {(w) => (
                   <li>
-                    <Button type="button" variant="row" size="bare" class="w-full gap-2 px-2 py-1.5" onClick={() => props.onPick?.(w.path)} title={w.path}>
+                    <Button
+                      type="button"
+                      variant="row"
+                      size="bare"
+                      class="w-full gap-2 px-2 py-1.5"
+                      onClick={() => props.onPick?.(w.path)}
+                      title={w.path}
+                    >
                       <Icon name="branch" size={13} />
                       <span class="min-w-0 flex-1 truncate">{w.branch ?? W.detached}</span>
                       <Show when={w.is_main}>
@@ -81,7 +101,9 @@ export function Welcome(props: { onAddProject: () => void; worktrees?: Wt[]; pro
                 <li data-tool-state={toolOf(n.name) ? (toolOf(n.name)!.found ? "found" : "missing") : "unknown"}>
                   <code class="text-foreground">{n.name}</code>:{" "}
                   <Show when={toolOf(n.name)} fallback={n.why}>
-                    {(t) => (t().found ? `${W.toolFound}${t().version ? ` ${t().version}` : ""}` : `${W.toolMissing}, ${n.why}`)}
+                    {(t) =>
+                      t().found ? `${W.toolFound}${t().version ? ` ${t().version}` : ""}` : `${W.toolMissing}, ${n.why}`
+                    }
                   </Show>
                 </li>
               )}

@@ -6,10 +6,25 @@ import { P } from "../strings.panels";
 import { ProjectIcon } from "./ProjectIcon";
 
 const T = P.sidebar;
-type Proj = { id: string; name: string; path: string; slug?: string | null; icon_url?: string | null; setup?: string | null };
+type Proj = {
+  id: string;
+  name: string;
+  path: string;
+  slug?: string | null;
+  icon_url?: string | null;
+  setup?: string | null;
+};
 
 /** The header of a project: fold toggle, icon, name and its buttons; the menu opens from right click or the menu key. */
-export function ProjectHead(props: { project: Proj; folded: boolean; menu: () => MenuItem[]; onFold: () => void; onNew: () => void; onSetup: () => void; onDrop: () => void }) {
+export function ProjectHead(props: {
+  project: Proj;
+  folded: boolean;
+  menu: () => MenuItem[];
+  onFold: () => void;
+  onNew: () => void;
+  onSetup: () => void;
+  onDrop: () => void;
+}) {
   const p = () => props.project;
   return (
     <div
@@ -37,11 +52,19 @@ export function ProjectHead(props: { project: Proj; folded: boolean; menu: () =>
         <Icon name={props.folded ? "chevRight" : "chevDown"} size={12} />
       </Button>
       <ProjectIcon id={p().id} name={p().name} url={p().icon_url} />
-      <span class="pname" title={p().slug ?? p().path}>{p().name}</span>
+      <span class="pname" title={p().slug ?? p().path}>
+        {p().name}
+      </span>
       <Button variant="icon" size="glyph" title={T.newWorktree} aria-label={T.newWorktree} onClick={props.onNew}>
         <Icon name="plus" />
       </Button>
-      <Button variant="icon" size="glyph" title={T.setupTip(p().setup)} aria-label={T.setupTip(p().setup)} onClick={props.onSetup}>
+      <Button
+        variant="icon"
+        size="glyph"
+        title={T.setupTip(p().setup)}
+        aria-label={T.setupTip(p().setup)}
+        onClick={props.onSetup}
+      >
         <Icon name="gear" />
       </Button>
       <Button variant="icon" size="glyph" title={T.dropTip} aria-label={T.dropLabel} onClick={props.onDrop}>
@@ -81,7 +104,10 @@ export function SetupEditor(props: {
               <Button
                 variant="secondary"
                 size="pill"
-                class={cn("border-border px-2.5 py-0.5 text-sm", props.text === `${m} install` && "border-primary text-primary")}
+                class={cn(
+                  "border-border px-2.5 py-0.5 text-sm",
+                  props.text === `${m} install` && "border-primary text-primary",
+                )}
                 title={m === props.pms.suggested ? T.pmSuggested : T.pmUse(m)}
                 onClick={() => props.setText(`${m} install`)}
               >

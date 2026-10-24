@@ -28,7 +28,10 @@ export const orderTabs = <T extends { id: number }>(list: T[], order: number[]):
     const i = order.indexOf(x.id);
     return i < 0 ? Infinity : i;
   };
-  return list.map((x, i) => [x, i] as const).sort(([a, i], [b, j]) => (at(a) === at(b) ? i - j : at(a) < at(b) ? -1 : 1)).map(([x]) => x);
+  return list
+    .map((x, i) => [x, i] as const)
+    .sort(([a, i], [b, j]) => (at(a) === at(b) ? i - j : at(a) < at(b) ? -1 : 1))
+    .map(([x]) => x);
 };
 /** the new order after dragging `id` before `target` (null = to the end), given the ids on screen in their current order */
 export const moveBefore = (order: number[], shown: number[], id: number, target: number | null): number[] => {
@@ -39,14 +42,16 @@ export const moveBefore = (order: number[], shown: number[], id: number, target:
   rest.splice(at, 0, id);
   return [...order.filter((x) => !shown.includes(x)), ...rest];
 };
-export const moveTab = (shown: number[], id: number, target: number | null) => setTabOrder((cur) => moveBefore(cur, shown, id, target));
+export const moveTab = (shown: number[], id: number, target: number | null) =>
+  setTabOrder((cur) => moveBefore(cur, shown, id, target));
 export const sortedTabs = <T extends { id: number }>(list: T[]) => orderTabs(list, tabOrder());
 
 /** tabs closed recently, newest last, so Ctrl+Shift+T can bring one back */
 export type ClosedTab = { label: string | null; meta: SessionInfo["meta"] };
 const CLOSED_MAX = 10;
 const [closedTabs, setClosedTabs] = createSignal<ClosedTab[]>([]);
-export const rememberClosed = (s: SessionInfo) => setClosedTabs((cur) => [...cur, { label: tabNames()[s.id] ?? s.label, meta: s.meta }].slice(-CLOSED_MAX));
+export const rememberClosed = (s: SessionInfo) =>
+  setClosedTabs((cur) => [...cur, { label: tabNames()[s.id] ?? s.label, meta: s.meta }].slice(-CLOSED_MAX));
 /** the most recently closed tab, taken off the list; null when there is none */
 export const popClosed = (): ClosedTab | null => {
   const cur = closedTabs();
@@ -57,7 +62,7 @@ export const popClosed = (): ClosedTab | null => {
 /** forgets names and positions of sessions that no longer exist */
 export const pruneTabState = (list: SessionInfo[]) => {
   const alive = new Set(list.map((s) => s.id));
-  if (Object.keys(tabNames()).some((k) => !alive.has(Number(k)))) setTabNames((cur) => Object.fromEntries(Object.entries(cur).filter(([k]) => alive.has(Number(k)))));
+  if (Object.keys(tabNames()).some((k) => !alive.has(Number(k))))
+    setTabNames((cur) => Object.fromEntries(Object.entries(cur).filter(([k]) => alive.has(Number(k)))));
   if (tabOrder().some((id) => !alive.has(id))) setTabOrder((cur) => cur.filter((id) => alive.has(id)));
 };
-

@@ -4,8 +4,28 @@ import { createComponent } from "solid-js";
 
 const h = vi.hoisted(() => ({ toasts: [] as { text: string; action?: { label: string; run: () => void } }[] }));
 
-const card = { meta: { id: "k1", title: "Fix it", status: "todo", agent: "claude", depends_on: ["k0"], priority: 2, acceptance: null }, body: "b" };
-const auto = { id: "a1", name: "Nightly", project: "p", agent: "claude", prompt: "x", schedule: { kind: "daily", time: "09:00" }, enabled: true, last_run: 0 };
+const card = {
+  meta: {
+    id: "k1",
+    title: "Fix it",
+    status: "todo",
+    agent: "claude",
+    depends_on: ["k0"],
+    priority: 2,
+    acceptance: null,
+  },
+  body: "b",
+};
+const auto = {
+  id: "a1",
+  name: "Nightly",
+  project: "p",
+  agent: "claude",
+  prompt: "x",
+  schedule: { kind: "daily", time: "09:00" },
+  enabled: true,
+  last_run: 0,
+};
 
 vi.mock("./api", () => ({
   kanbanList: vi.fn(async () => ({ cards: [card], broken: [] })),
@@ -68,7 +88,10 @@ describe("delete with undo", () => {
     expect(t.action?.label).toBe("Desfazer");
     t.action!.run();
     await settle();
-    expect(api.kanbanSave).toHaveBeenCalledWith("p", expect.objectContaining({ id: "k1", title: "Fix it", depends_on: ["k0"], priority: 2 }));
+    expect(api.kanbanSave).toHaveBeenCalledWith(
+      "p",
+      expect.objectContaining({ id: "k1", title: "Fix it", depends_on: ["k0"], priority: 2 }),
+    );
   });
 
   it("Automations: deleting toasts 'Desfazer', which saves the same object again", async () => {
