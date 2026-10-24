@@ -57,9 +57,6 @@
 
 
 }
-@media (prefers-reduced-motion: reduce) {.dk-chev { transition: none; }
-
- }
 .dk-row:focus-visible, .dk-list:focus-visible, .dk-pre:focus-visible { outline: 2px solid transparent; box-shadow: var(--ring); }
 .dk-row.sel:focus-visible { box-shadow: var(--ring-sel); }
 

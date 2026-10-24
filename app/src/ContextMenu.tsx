@@ -58,7 +58,6 @@ export const menuKey = (items: () => MenuItem[]) => (e: KeyboardEvent & { curren
 };
 
 /** Dropdown list under a button (a Select): same menu, announced as a listbox of options; `onClose` runs however it ends. */
-export const showListboxAt = (x: number, y: number, items: MenuItem[], minWidth: number, onClose: () => void) => openMenu({ x, y, items, minWidth, listbox: true, onClose });
 
 /** Mount once near the app root. Esc and Tab are taken here (window level) so the dialog under the menu keeps its own. */
 export function ContextMenu() {

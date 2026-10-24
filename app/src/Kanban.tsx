@@ -1,6 +1,5 @@
-import { Badge, Button, Field, Input, Textarea } from "./ui";
+import { Badge, Button, Field, Input, Select, Textarea } from "./ui";
 import { createPoller } from "./poller";
-import { Select } from "./Select";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";

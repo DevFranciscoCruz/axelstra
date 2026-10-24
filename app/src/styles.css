@@ -684,12 +684,6 @@ tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: v
 
 
 @keyframes ut-in { from { opacity: 0; transform: translateY(8px); } }
-@media (prefers-reduced-motion: reduce) {.update-toast { animation: none; }
-
- }
-
-
-
 /* ---- shared behaviour ---- */
 .resizer { position: absolute; top: 0; bottom: 0; width: 6px; margin-left: -3px; cursor: col-resize; z-index: 20; }
 .resizer:hover, body.resizing .resizer { background: var(--accent); opacity: .35; }
@@ -888,9 +882,6 @@ button.icon, button.x, button.cbtn { display: inline-flex; align-items: center; 
 
 
 /* a tab is a wrapper holding the tab button and, beside it, the close button */
-.tab-main { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
-.tab-main > span:not(.dot):not(.dtag) { overflow: hidden; text-overflow: ellipsis; }
-.tab-rename { width: 120px; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line-3); border-radius: var(--r-sm); padding: 0 4px; }
 .item.wt .wt-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 0; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .show-more { margin: 6px 8px; padding: 4px 10px; background: transparent; border: 1px solid var(--line-3); border-radius: var(--r-md); color: var(--text); font-size: var(--fs-md); }
 .show-more:hover { border-color: var(--accent); color: var(--accent); }

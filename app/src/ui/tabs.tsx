@@ -7,7 +7,7 @@ import { cn } from "./cn";
  *  `Tabs` is the root (`value`, `onChange`, `activationMode`: "automatic" selects as you arrow, "manual" only moves focus). */
 export const Tabs = K;
 
-export const tabsListVariants = cva("", {
+const tabsListVariants = cva("", {
   variants: {
     variant: {
       /** a strip of tabs along a bar */
@@ -19,7 +19,7 @@ export const tabsListVariants = cva("", {
   defaultVariants: { variant: "bar" },
 });
 
-export const tabsTriggerVariants = cva(
+const tabsTriggerVariants = cva(
   "cursor-pointer border-0 bg-transparent font-[inherit] outline-none focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring",
   {
     variants: {
