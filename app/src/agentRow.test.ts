@@ -10,7 +10,7 @@ const sess = (over: object = {}) => ({ id: 4, label: "Tarefa 2", meta: { kind: "
 describe("agent row", () => {
   it("shows the name, the kind tag and no worktree when it is the listed one", () => {
     const i = agentRowInfo(sess(), "c:/w/proj-a/");
-    expect(i).toEqual({ name: "Tarefa 2", kind: "claude", worktree: "", hasReport: true });
+    expect(i).toEqual({ name: "Tarefa 2", kind: "claude", worktree: "", hasReport: true, lead: false });
   });
   it("names the worktree of a worker that runs elsewhere", () => {
     expect(agentRowInfo(sess(), "C:/w/other").worktree).toBe("proj-a");

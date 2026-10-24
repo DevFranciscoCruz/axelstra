@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::{json, Value};
@@ -33,7 +34,7 @@ fn changes_and_diff() {
     sh(&repo, &["add", "-A"]);
     sh(&repo, &["commit", "-qm", "init"]);
 
-    let pipe = format!("{}-chg-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-chg-{}", common::base_pipe(), std::process::id());
     let token = "c".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {

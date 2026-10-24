@@ -1,0 +1,53 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const toast = vi.fn();
+const pushNotification = vi.fn();
+vi.mock("./toasts", () => ({ toast: (...a: unknown[]) => toast(...a) }));
+vi.mock("./notifications", () => ({ pushNotification: (...a: unknown[]) => pushNotification(...a) }));
+
+import { handleJanitorEvents, janitorText } from "./janitorEvents";
+
+const ev = (branch: string, into = "main", path = `/wt/${branch}`) => ({
+  project: "p",
+  path,
+  branch,
+  into,
+  why: "merged",
+  at: 1,
+});
+
+beforeEach(() => {
+  toast.mockReset();
+  pushNotification.mockReset();
+});
+
+describe("janitorText", () => {
+  it("drops the ax/ prefix", () => {
+    expect(janitorText(ev("ax/foo"))).toBe("worktree foo removido (integrado em main)");
+  });
+  it("keeps a branch without the prefix and names the target", () => {
+    expect(janitorText(ev("bar", "ax/baz"))).toBe("worktree bar removido (integrado em ax/baz)");
+  });
+});
+
+describe("handleJanitorEvents", () => {
+  it("toasts and notifies once per event, keyed by path", () => {
+    expect(handleJanitorEvents([ev("ax/a"), ev("ax/b", "ax/a")])).toBe(2);
+    expect(toast).toHaveBeenCalledTimes(2);
+    expect(toast).toHaveBeenNthCalledWith(1, {
+      text: "worktree a removido (integrado em main)",
+      kind: "info",
+      key: "janitor:/wt/ax/a",
+    });
+    expect(pushNotification).toHaveBeenNthCalledWith(2, {
+      kind: "merged",
+      worktree: "/wt/ax/b",
+      text: "worktree b removido (integrado em ax/a)",
+    });
+  });
+  it("does nothing for an empty list", () => {
+    expect(handleJanitorEvents([])).toBe(0);
+    expect(toast).not.toHaveBeenCalled();
+    expect(pushNotification).not.toHaveBeenCalled();
+  });
+});

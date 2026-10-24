@@ -1,4 +1,16 @@
 /** UI texts of the settings screen and the terminal, in one place and in pt-PT (gestor, ligar, ficheiro, ecrã). */
+/**
+ * Glossary (pt-PT). One word per thing, so the screens agree:
+ *   worktree (m./f. as in "o worktree"), branch, commit, PR (not "pull request"), agente, worker (agente auxiliar),
+ *   enviar (push) / obter (pull), integrar = merge ("integrado", not "merged"), descartar, remoto, daemon, terminal.
+ * Counts agree in number: use `plural(n, "worktree", "worktrees")`, never "worktree(s)" or a hand-made ternary.
+ */
+const rules = new Intl.PluralRules("pt-PT");
+/** `one` for exactly 1, `other` otherwise (pt-PT says "0 worktrees"). Returns the word only. */
+export const plural = (n: number, one: string, other: string): string => (rules.select(n) === "one" ? one : other);
+/** "1 worktree" / "3 worktrees" */
+export const count = (n: number, one: string, other: string): string => `${n} ${plural(n, one, other)}`;
+
 export const S = {
   settings: "Definições",
   close: "Fechar",
@@ -9,6 +21,7 @@ export const S = {
   restartConfirm: "Reiniciar o daemon fecha os terminais abertos; os agentes são retomados depois do reinício. Continuar?",
   restartTitle: "Reiniciar o daemon",
   restartFailed: "Não foi possível reiniciar o daemon: ",
+  daemonSilent: "o daemon não voltou a responder",
   oldDaemon: "O daemon em execução é de uma versão anterior e não conhece este pedido. Reinicia-o para carregar as definições.",
   loadFailed: "Não foi possível carregar as definições: ",
 
@@ -65,6 +78,146 @@ export const S = {
   diagMissing: "Ferramentas em falta",
   diagNoneMissing: "Nenhuma",
 
+  cancel: "Cancelar",
+  /** names of the known agent CLIs, by key; the others show their key */
+  agentNames: { claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI" } as Record<string, string>,
+  toolFailed: "Uma ferramenta externa (git, gh ou docker) falhou. Mensagem original:",
+
+  status: {
+    memTitle: "Memória usada pelo Axelstra",
+    memTip: (app: string, daemon: string, sessions: string) => `Memória do Axelstra\nAplicação: ${app}\nDaemon: ${daemon}\nTerminais e agentes: ${sessions}`,
+    awake: "Impedir que o computador adormeça",
+    awakeNA: "Não disponível neste sistema: falta o systemd-inhibit",
+    on: "Ligado",
+    off: "Desligado",
+    na: "n/d",
+    cpuTip: "CPU usada pelo Axelstra (app, daemon, terminais e agentes), em % do computador",
+    agentsRunning: (n: number) => count(n, "agente a correr", "agentes a correr"),
+    running: "A correr",
+    stopped: "Parados",
+    waiting: "A aguardar resposta",
+    none: "Nenhum",
+    wtOfProject: (n: number) => `${count(n, "worktree", "worktrees")} do projeto atual`,
+    worktrees: "Worktrees",
+    all: "Todos",
+    thisProject: "Este projeto",
+    total: "Total",
+    dirty: "Com alterações por guardar",
+    ahead: "Commits à frente do remoto",
+    behind: "Atrás do remoto",
+    merged: "Já integradas (seguras de remover)",
+    noAgent: "Sem agente a correr",
+    mergedHead: "Já integradas",
+    cleanTitle: "Limpar integradas",
+    remove: "Remover",
+    cleanAsk: (n: number, list: string) => `Remover ${count(n, "worktree já integrada", "worktrees já integradas")}, de todos os projetos?\n\n${list}`,
+    removed: (n: number) => count(n, "worktree removida", "worktrees removidas"),
+    noPorts: "Nenhuma porta de servidor aberta",
+    shortcutsHint: "atalhos",
+  },
+
+  notif: {
+    title: "Notificações",
+    labelUnread: (n: number) => `Notificações, ${n} por ler`,
+    clearAll: "Limpar tudo",
+    empty: "Sem notificações",
+    fresh: "novo",
+    done: "Terminou",
+    waiting: "Espera por ti",
+    ciFail: "CI a falhar",
+    ciPass: "CI a passar",
+    merged: "Integrado",
+    error: "Erro",
+  },
+
+  toast: {
+    close: "Fechar",
+    reconnecting: "A reconectar ao daemon…",
+    retryNow: "Tentar agora",
+  },
+
+  update: {
+    available: "Atualização disponível",
+    ready: (v: string) => `Versão ${v} pronta`,
+    sub: "Os terminais e agentes continuam a correr. Se preferires, a atualização instala ao fechar a app.",
+    later: "Mais tarde",
+    restart: "Reiniciar agora",
+    restarting: "A reiniciar…",
+    notes: "Novidades desta versão",
+  },
+
+  app: {
+    computerAsk: "Permitir que os agentes vejam o ecrã e controlem o rato e o teclado?\n\nPodem tirar capturas de qualquer janela e clicar ou escrever em teu nome. Fica ligado até o desligar aqui ou fechar a aplicação.",
+    computerTitle: "Controlo do ecrã",
+    allow: "Permitir",
+    noGit: "o git não está instalado ou não está no PATH (sem ele não há worktrees)",
+    noAgents: "nem o claude nem o codex foram encontrados (instala um deles para usar agentes)",
+    missing: (bits: string[]) => `Falta configurar: ${bits.join("; ")}.`,
+    restoreFailed: "Não foi possível restaurar as sessões: ",
+    restoreFailedList: (names: string[]) => `não foi possível restaurar: ${names.join(", ")}`,
+    daemonRestarted: "O daemon foi reiniciado; a restaurar as sessões…",
+    afterRestart: "Após o reinício do daemon",
+    onReopen: "Ao reabrir",
+    reconnectFailed: "Não foi possível reconectar ao daemon. Reinicia o Axelstra se persistir.",
+    noWaiting: "Nenhum agente está à espera de resposta.",
+    noClosed: "Nenhum separador fechado para reabrir.",
+    closeAsk: (name: string, agent: boolean) => `Fechar "${name}"? ${agent ? "O agente em execução é terminado." : "O terminal e o que corre nele são terminados."}`,
+    closeAgent: "Fechar agente",
+    closeTerminal: "Fechar terminal",
+    leftWidth: "Largura da lista de projetos",
+    rightWidth: "Largura do painel direito",
+    splitWidth: "Largura do terminal dividido",
+    newAgent: "Novo agente",
+    newAgentOf: (agent: string) => `Novo agente (${S.agentNames[agent] ?? agent})`,
+    agent: "Agente",
+    open: "Abrir",
+    showProjects: "Mostrar projetos (Ctrl+B)",
+    projects: "Projetos (Ctrl+B)",
+    tabs: "Separadores",
+    tabName: "Nome do separador",
+    closeCommit: "Fechar commit",
+    closeFile: "Fechar ficheiro",
+    closeDiff: "Fechar diff",
+    screen: "ecrã",
+    screenOnTip: "Os agentes podem ver o ecrã e controlar o rato e o teclado. Desliga em: paleta de comandos, «Controlo do ecrã»",
+    openPort: (port: number) => `Abrir http://localhost:${port} no navegador`,
+    voice: "Ditado por voz (Ctrl+Shift+M)",
+    split: "Dividir: ver dois terminais lado a lado",
+    newTerminal: "Novo terminal",
+    showRight: "Mostrar painel direito (Ctrl+Shift+B)",
+    noTerminals: "Sem terminais neste worktree.",
+    openAgent: "Abrir agente",
+    hintPalette: "paleta",
+    hintShortcuts: "atalhos",
+    hintProjects: "projetos",
+    hintRight: "painel direito",
+    closeSplit: "Fechar divisão",
+    sectionProjects: "projetos",
+    sectionTerminals: "terminais",
+    sectionRight: "painel direito",
+  },
+
+  palette: {
+    hideProjects: "Ocultar projetos",
+    showProjects: "Mostrar projetos",
+    hideRight: "Ocultar painel direito",
+    showRight: "Mostrar painel direito",
+    theme: (now: string) => `Mudar o tema (agora: ${now})`,
+    stopVoice: "Parar o ditado por voz",
+    computerOn: "Controlo do ecrã pelos agentes: ligar",
+    computerOff: "Controlo do ecrã pelos agentes: desligar",
+  },
+
+  // command palette
+  paletteTitle: "Paleta de comandos",
+  palettePlaceholder: "Ir para worktree ou executar ação…",
+  paletteResults: "Resultados",
+  paletteAction: "ação",
+  paletteEmpty: "Nada encontrado",
+  paletteNoMatch: (q: string) => `Nada corresponde a «${q}». Tenta outras palavras.`,
+  paletteFoot: "↑↓ escolher · Enter executar · Esc fechar · ? lista de atalhos",
+  detached: "(destacado)",
+
   // terminal
   attachFailed: "não foi possível ligar a esta sessão: ",
   findPlaceholder: "Procurar no terminal",
@@ -72,4 +225,13 @@ export const S = {
   findNext: "Seguinte",
   findClose: "Fechar pesquisa",
   fileMissing: (p: string) => `O ficheiro ${p} não existe nesta worktree.`,
+
+  // deletions: the notice names what went away; a failure names it too
+  fileDeleted: (n: string) => `Ficheiro apagado: ${n}`,
+  folderDeleted: (n: string) => `Pasta apagada: ${n}`,
+  cardDeleted: (n: string) => `Cartão apagado: ${n}`,
+  automationDeleted: (n: string) => `Automatização apagada: ${n}`,
+  worktreeRemoved: (n: string) => `Worktree removido: ${n}`,
+  projectRemoved: (n: string) => `Projeto tirado da lista: ${n}`,
+  deleteFailed: (n: string, e: unknown) => `Não foi possível apagar "${n}": ${String(e).replace(/^Error: /, "")}`,
 } as const;

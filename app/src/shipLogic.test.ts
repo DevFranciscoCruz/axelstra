@@ -33,7 +33,7 @@ describe("problemText", () => {
   it("tells how to fix gh problems in pt-PT", () => {
     expect(problemText({ problem: "auth", detail: "" }).fix).toContain("gh auth login");
     expect(problemText({ problem: "missing", detail: "" }).fix).toContain("gh auth login");
-    expect(problemText({ problem: "nopr", detail: "" }).text).toContain("pull request");
+    expect(problemText({ problem: "nopr", detail: "" }).text).toContain("PR");
     expect(problemText({ problem: "error", detail: "HTTP 502" }).text).toBe("HTTP 502");
   });
 });

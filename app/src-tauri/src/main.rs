@@ -34,6 +34,7 @@ struct State {
 #[cfg(all(windows, target_env = "msvc", debug_assertions))]
 mod debugcrt;
 mod gpu;
+mod logging;
 mod stats;
 mod voice;
 
@@ -41,11 +42,12 @@ fn connect() -> Result<Client> {
     let token = proto::load_or_create_token()?;
     let pipe = proto::pipe_name();
     if let Ok(mut c) = Client::connect(&pipe, &token) {
-        if c.proto >= proto::PROTO {
+        if c.proto >= proto::PROTO && c.security >= proto::SECURITY_MIN {
             return Ok(c);
         }
         // A daemon from before an update keeps running (so terminals and agents survive it). One that
-        // is too old for this app is replaced; its terminals come back through session restore.
+        // is too old for this app, or older than the oldest one with the current security fixes (it reports
+        // no `security` at all before they existed), is replaced; its terminals come back through session restore.
         let _ = c.call("daemon.shutdown", json!({}));
         drop(c);
         for _ in 0..40 {
@@ -69,7 +71,8 @@ fn connect() -> Result<Client> {
 fn start_daemon() -> Result<()> {
     let name = if cfg!(windows) { "axelstra.exe" } else { "axelstra" };
     let beside = std::env::current_exe()?.with_file_name(name);
-    let exe = if beside.exists() { beside } else { "axelstra".into() };
+    // never `axelstra` from PATH in a release: whatever sits first on PATH would run as the daemon, holding the token
+    let exe = if beside.exists() || !cfg!(debug_assertions) { beside } else { "axelstra".into() };
     let mut cmd = Command::new(exe);
     cmd.arg("daemon").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     #[cfg(windows)]
@@ -119,7 +122,8 @@ fn setting(key: &str) -> Value {
     std::fs::read_to_string(proto::data_dir().join("settings.json"))
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .map(|v| v[key].clone())
+        // the file is the envelope {"v":N,"data":{..}}; a file from an older daemon is the bare object
+        .map(|v| if v["v"].is_u64() && v["data"].is_object() { v["data"][key].clone() } else { v[key].clone() })
         .unwrap_or(Value::Null)
 }
 
@@ -168,6 +172,9 @@ const ALLOWED_METHODS: &[&str] = &[
     "computer.enable",
     "computer.status",
     "daemon.shutdown",
+    "backup.export",
+    "env.tools",
+    "notices.take",
     "dispatch.meta",
     "flow.list",
     "fs.create",
@@ -211,6 +218,7 @@ const ALLOWED_METHODS: &[&str] = &[
     "notes.export",
     "worktree.overview",
     "worktree.sweep",
+    "janitor.events",
     "notes.read_file",
     "notes.worktree",
     "worktree.set_parent",
@@ -222,13 +230,13 @@ const ALLOWED_METHODS: &[&str] = &[
     "kanban.save",
     "open.editor",
     "orch.limits",
+    "orch.trust_info",
     "orch.retry",
     "orch.start",
     "orch.status",
     "ping",
     "pm.detect",
     "ports.list",
-    "project.add",
     "project.list",
     "project.logo",
     "project.remove",
@@ -241,6 +249,7 @@ const ALLOWED_METHODS: &[&str] = &[
     "session.rename",
     "session.resize",
     "session.resources",
+    "session.screen",
     "session.spawn",
     "settings.get",
     "settings.set",
@@ -285,6 +294,8 @@ fn check_params(method: &str, params: &Value) -> Result<(), String> {
             }
             Ok(())
         }
+        // the UI never overrides the agent command: a page that did could run any program unsupervised
+        "orch.start" if !params["agent"].is_null() => Err("override de agente não permitido".into()),
         "fs.write" => {
             let path = params["path"].as_str().unwrap_or_default();
             let p = std::path::Path::new(path);
@@ -394,6 +405,45 @@ async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, par
     .map_err(|e| e.to_string())?
 }
 
+/// Asks for a folder in the native dialog. The path never passes through the webview: a compromised page could
+/// otherwise name any folder for `project.add` or `backup.restore`. `None` = cancelled.
+fn pick_folder(app: &tauri::AppHandle, title: &str, start: Option<std::path::PathBuf>) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut d = app.dialog().file().set_title(title);
+    if let Some(s) = start.filter(|s| s.is_dir()) {
+        d = d.set_directory(s);
+    }
+    match d.blocking_pick_folder() {
+        None => Ok(None),
+        Some(f) => f.into_path().map(|p| Some(p.to_string_lossy().into_owned())).map_err(|e| e.to_string()),
+    }
+}
+
+/// Native folder pick, then `project.add` with that path. Returns the daemon's project, or null when cancelled.
+#[tauri::command]
+async fn project_add_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = pick_folder(&app, &title, None)? else { return Ok(Value::Null) };
+        with_client(&st.control, false, |c| c.call("project.add", json!({"path": path}))).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Native pick of the backup folder (it opens on `<data dir>/backups`), then `backup.restore` with that path.
+/// Returns the daemon's answer, or null when cancelled.
+#[tauri::command]
+async fn backup_restore_pick(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, title: String) -> Result<Value, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(path) = pick_folder(&app, &title, Some(proto::data_dir().join("backups")))? else { return Ok(Value::Null) };
+        with_client(&st.control, false, |c| c.call("backup.restore", json!({"path": path}))).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Typing lag diagnosis: slow steps go to `<data dir>/lag.log` (shared with the daemon's own slow calls).
 fn lag_note(what: &str, took: std::time::Duration) {
     axelstra_daemon::lag::note(what, took, 40);
@@ -439,6 +489,10 @@ fn input_sender(st: &Arc<State>) -> &'static std::sync::mpsc::Sender<(u32, Vec<u
 
 #[tauri::command]
 fn session_write(state: tauri::State<'_, Arc<State>>, id: u32, data: String) -> Result<(), String> {
+    // keystrokes only go to a session this window has open (attached), not to any id a page can guess
+    if !state.attachments.lock().unwrap().get(&id).is_some_and(|m| !m.is_empty()) {
+        return Err(format!("sessão {id} não está anexada"));
+    }
     input_sender(state.inner()).send((id, data.into_bytes())).map_err(|e| e.to_string())
 }
 
@@ -686,6 +740,18 @@ async fn diagnostics(state: tauri::State<'_, Arc<State>>) -> Result<Value, Strin
     .map_err(|e| e.to_string())
 }
 
+/// Plain-text bundle for bug reports: version, OS, data dir, tail of the latest log and of crash.log.
+#[tauri::command]
+async fn diagnostics_bundle() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| logging::bundle(&proto::data_dir())).await.map_err(|e| e.to_string())
+}
+
+/// An error caught by the webview (window.onerror / unhandledrejection), written to the log file.
+#[tauri::command]
+fn log_frontend_error(kind: String, message: String, stack: Option<String>) {
+    logging::log_frontend(&kind, &message, stack.as_deref().unwrap_or(""));
+}
+
 /// Deletes pasted clipboard images older than a day.
 fn clean_pastes() {
     let dir = std::env::temp_dir().join("axelstra-paste");
@@ -791,6 +857,7 @@ fn update_apply(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>) -> R
 }
 
 fn main() {
+    logging::init(&proto::data_dir());
     gpu::prefer_best_gpu();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -818,6 +885,8 @@ fn main() {
             missing_tools,
             daemon_call,
             daemon_call_bg,
+            project_add_pick,
+            backup_restore_pick,
             session_write,
             lag_log,
             session_attach,
@@ -833,6 +902,8 @@ fn main() {
             notify_session,
             app_quit,
             diagnostics,
+            diagnostics_bundle,
+            log_frontend_error,
             stats::keep_awake,
             stats::mem_usage,
             voice::voice_status,
@@ -886,7 +957,7 @@ mod tests {
         }
     }
 
-    /// Every `call("x.y"` / `callBg("x.y"` in the frontend (an optional `<Type>` after the name is skipped).
+    /// Every `call("x.y"` / `callBg("x.y"` / `callOr("x.y"` in the frontend (an optional `<Type>` after the name is skipped).
     /// A call whose method is not a string literal is returned as `?file`, since the list cannot cover it.
     fn called_methods() -> BTreeSet<String> {
         let mut files = vec![];
@@ -896,7 +967,7 @@ mod tests {
         for f in files {
             let t = std::fs::read_to_string(&f).unwrap();
             let b = t.as_bytes();
-            for name in ["call", "callBg"] {
+            for name in ["call", "callBg", "callOr"] {
                 for (at, _) in t.match_indices(name) {
                     let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'$' || c == b'.';
                     if (at > 0 && ident(b[at - 1])) || !matches!(b.get(at + name.len()), Some(b'(' | b'<')) {
@@ -931,6 +1002,8 @@ mod tests {
                             let end = rest[1..].find(q).expect("unterminated string");
                             found.insert(rest[1..1 + end].to_string());
                         }
+                        // `callOr` forwards its own `method` parameter to `call`: the literal is at its callers
+                        _ if rest.starts_with("method,") => {}
                         _ => {
                             found.insert(format!("?{}", f.file_name().unwrap().to_string_lossy()));
                         }
@@ -971,6 +1044,20 @@ mod tests {
             assert!(check_call("fs.write", &json!({"path": bad})).is_err(), "{bad}");
         }
         assert!(check_call("fs.read", &json!({"path": "../x"})).is_ok());
+        assert!(check_call("orch.start", &json!({"project": "p", "max": 3})).is_ok());
+        assert!(check_call("orch.start", &json!({"project": "p", "agent": ["calc.exe"]})).is_err());
+    }
+
+    #[test]
+    fn path_taking_methods_only_through_the_native_pick() {
+        use super::check_call;
+        use serde_json::json;
+        assert!(!ALLOWED_METHODS.contains(&"project.add"));
+        assert!(!ALLOWED_METHODS.contains(&"backup.restore"));
+        assert!(check_call("project.add", &json!({"path": "/home/x/proj"})).is_err());
+        assert!(check_call("backup.restore", &json!({"path": "/tmp/evil"})).is_err());
+        assert!(check_call("project.list", &json!({})).is_ok());
+        assert!(check_call("backup.export", &json!({})).is_ok());
     }
 
     #[test]

@@ -1,5 +1,4 @@
 .notif { position: relative; display: inline-flex; }
-.notif-bell { position: relative; }
 .notif-badge { position: absolute; top: -3px; right: -4px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--r-lg); background: var(--accent); color: var(--on-accent); font-size: var(--fs-xs); font-weight: 700; line-height: 15px; text-align: center; }
 .notif-pop { position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: 340px; max-width: calc(100vw - 24px); max-height: 420px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line-ctl); border-radius: var(--r-lg); box-shadow: 0 8px 28px rgba(0, 0, 0, .45); }
 .notif-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid var(--line); }

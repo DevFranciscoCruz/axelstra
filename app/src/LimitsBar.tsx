@@ -1,6 +1,8 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { createPoller } from "./poller";
 import { ClaudeStatus, CodexLimits, CodexWindow, agentStatus, codexLimits } from "./api";
 import { activeSession, sessions } from "./store";
+import { P } from "./strings.panels";
 
 /** time until a reset: "1h 49m", "4d", "29d 23h" */
 export const until = (secs: number) => {
@@ -15,7 +17,7 @@ const kfmt = (n: number) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.ro
 
 const svg = { width: 14, height: 14, viewBox: "0 0 16 16", fill: "currentColor" } as const;
 const ClaudeIcon = () => (
-  <svg {...svg} style={{ color: "#d97757" }}>
+  <svg {...svg} class="claude-ico">
     <path d="M8 1l1.2 4.3L13.5 3l-2.3 4.2L15 8l-3.8.8 2.3 4.2-4.3-2.3L8 15l-1.2-4.3L2.5 13l2.3-4.2L1 8l3.8-.8L2.5 3l4.3 2.3z" />
   </svg>
 );
@@ -31,7 +33,7 @@ const Meter = (p: { pct?: number; label: string; tip: string }) => (
       <span class="lim-bar">
         <i classList={{ warn: p.pct! >= 70, bad: p.pct! >= 90 }} style={{ width: `${Math.min(100, p.pct!)}%` }} />
       </span>
-      <span>{Math.round(p.pct!)}% usado</span>
+      <span>{P.limits.used(Math.round(p.pct!))}</span>
       <Show when={p.label}>
         <span class="lim-dim">{p.label}</span>
       </Show>
@@ -61,24 +63,21 @@ export function LimitsBar() {
     const key = claudeKey();
     let alive = true;
     const load = () => {
-      if (document.hidden) return;
       setNow(Date.now() / 1000);
-      if (key) void agentStatus(key).then((v) => alive && v && setClaude(v)).catch(() => 0);
+      return key ? agentStatus(key).then((v) => alive && v && setClaude(v)).catch(() => 0) : undefined;
     };
     load();
-    const t = setInterval(load, 5000);
+    const t = createPoller(load, 5000);
     onCleanup(() => {
       alive = false;
-      clearInterval(t);
+      t.stop();
     });
   });
   createEffect(() => {
-    const load = () => {
-      if (!document.hidden) void codexLimits().then((v) => v && setCodex(v)).catch(() => 0);
-    };
-    load();
-    const t = setInterval(load, 30000);
-    onCleanup(() => clearInterval(t));
+    const load = () => codexLimits().then((v) => v && setCodex(v)).catch(() => 0);
+    void load();
+    const t = createPoller(load, 30000);
+    onCleanup(t.stop);
   });
 
   const five = () => claude()?.rate_limits?.five_hour;
@@ -92,7 +91,7 @@ export function LimitsBar() {
   return (
     <div class="limits">
       <Show when={ctxPct() !== undefined}>
-        <span class="lim" title={`Contexto da conversa: ${Math.round(ctxPct()!)}% de ${kfmt(ctxTotal())}`}>
+        <span class="lim" title={P.limits.ctxTip(Math.round(ctxPct()!), kfmt(ctxTotal()))}>
           <span class="lim-dim">ctx</span>
           <span class="lim-bar">
             <i classList={{ warn: ctxPct()! >= 70, bad: ctxPct()! >= 90 }} style={{ width: `${Math.min(100, ctxPct()!)}%` }} />
@@ -104,13 +103,13 @@ export function LimitsBar() {
       </Show>
       <Show when={five() || week()}>
         <ClaudeIcon />
-        <Meter pct={five()?.used_percentage} label={left(five())} tip="Claude: limite de 5 horas" />
-        <Meter pct={week()?.used_percentage} label={left(week())} tip="Claude: limite semanal" />
+        <Meter pct={five()?.used_percentage} label={left(five())} tip={P.limits.claude5h} />
+        <Meter pct={week()?.used_percentage} label={left(week())} tip={P.limits.claudeWeek} />
       </Show>
       <Show when={cx()?.primary || cx()?.secondary}>
         <CodexIcon />
-        <Meter pct={cx()?.primary?.used_percent} label={fmtSecs(codexSecs(cx()?.primary, cx()?.as_of))} tip="Codex: janela curta" />
-        <Meter pct={cx()?.secondary?.used_percent} label={fmtSecs(codexSecs(cx()?.secondary, cx()?.as_of))} tip="Codex: janela semanal" />
+        <Meter pct={cx()?.primary?.used_percent} label={fmtSecs(codexSecs(cx()?.primary, cx()?.as_of))} tip={P.limits.codexShort} />
+        <Meter pct={cx()?.secondary?.used_percent} label={fmtSecs(codexSecs(cx()?.secondary, cx()?.as_of))} tip={P.limits.codexWeek} />
       </Show>
     </div>
   );

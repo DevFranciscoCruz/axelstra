@@ -5,10 +5,9 @@ use anyhow::{bail, Result};
 use axelstra_core::git;
 use serde::Serialize;
 use serde_json::Value;
-use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(15);
 const MERGE_TIMEOUT: Duration = Duration::from_secs(45);
@@ -189,45 +188,21 @@ enum RunError {
     Other(String),
 }
 
-/// Runs gh with a fixed argv in `cwd`, killed after `limit`. Never prompts.
+/// Most of each stream kept from one gh call.
+const GH_MAX_OUT: usize = 4 << 20;
+
+/// Runs gh with a fixed argv in `cwd`, killed (with its children) after `limit`. Never prompts.
 fn gh(cwd: &Path, args: &[&str], limit: Duration) -> Result<Out, RunError> {
     let mut cmd = Command::new("gh");
-    let mut child = git::quiet(&mut cmd)
-        .current_dir(cwd)
-        .env("GH_PROMPT_DISABLED", "1")
-        .env("NO_COLOR", "1")
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { RunError::Missing } else { RunError::Other(e.to_string()) })?;
-    // drained on threads so a chatty gh cannot fill the pipe and stall before the deadline
-    let drain = |mut r: Box<dyn Read + Send>| {
-        std::thread::spawn(move || {
-            let mut s = String::new();
-            let mut b = Vec::new();
-            let _ = r.read_to_end(&mut b);
-            s.push_str(&String::from_utf8_lossy(&b));
-            s
-        })
-    };
-    let out_t = drain(Box::new(child.stdout.take().unwrap()));
-    let err_t = drain(Box::new(child.stderr.take().unwrap()));
-    let start = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(s)) => break s,
-            Ok(None) if start.elapsed() > limit => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(RunError::Timeout);
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(40)),
-            Err(e) => return Err(RunError::Other(e.to_string())),
-        }
-    };
-    Ok(Out { ok: status.success(), stdout: out_t.join().unwrap_or_default(), stderr: err_t.join().unwrap_or_default() })
+    cmd.current_dir(cwd).env("GH_PROMPT_DISABLED", "1").env("NO_COLOR", "1").args(args);
+    let o = axelstra_core::exec::run_capped(&mut cmd, limit, GH_MAX_OUT).map_err(|e| match e.downcast_ref::<std::io::Error>() {
+        Some(io) if io.kind() == std::io::ErrorKind::NotFound => RunError::Missing,
+        _ => RunError::Other(e.to_string()),
+    })?;
+    if o.timed_out {
+        return Err(RunError::Timeout);
+    }
+    Ok(Out { ok: o.success(), stdout: o.stdout_lossy(), stderr: o.stderr_lossy() })
 }
 
 fn problem(kind: &str, detail: impl Into<String>) -> Status {

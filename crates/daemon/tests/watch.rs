@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::{Client, Frame};
 use axelstra_daemon::server;
 use serde_json::json;
@@ -30,7 +31,7 @@ fn change_events_are_filtered_and_debounced() {
     sh(&repo, &["add", "-A"]);
     sh(&repo, &["commit", "-qm", "init"]);
 
-    let pipe = format!("{}-watch-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-watch-{}", common::base_pipe(), std::process::id());
     let token = "w".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {
@@ -91,4 +92,65 @@ fn change_events_are_filtered_and_debounced() {
     let _ = rx.try_iter().count();
     c.call("git.changes", json!({"worktree": wt})).unwrap();
     assert!(rx.recv_timeout(Duration::from_millis(2500)).is_err(), "git.changes must not trigger the watcher");
+}
+
+#[test]
+fn worktree_created_by_another_client_is_announced() {
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_secs(60));
+        eprintln!("watchdog: test stuck");
+        std::process::exit(1);
+    });
+
+    let root = std::env::temp_dir().join(format!("axelstra-wtev-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let repo = root.join("r");
+    std::fs::create_dir_all(&repo).unwrap();
+    sh(&repo, &["init", "-q", "-b", "main"]);
+    sh(&repo, &["config", "user.email", "t@t"]);
+    sh(&repo, &["config", "user.name", "t"]);
+    std::fs::write(repo.join("a.txt"), "x").unwrap();
+    sh(&repo, &["add", "-A"]);
+    sh(&repo, &["commit", "-qm", "init"]);
+
+    let pipe = format!("{}-wtev-{}", common::base_pipe(), std::process::id());
+    let token = "e".repeat(32);
+    let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
+    std::thread::spawn(move || {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(server::serve_with_store(p, t, s))
+            .unwrap();
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let mut cli = Client::connect(&pipe, &token).unwrap();
+    cli.call("project.add", json!({"path": &repo})).unwrap();
+    let projects = cli.call("project.list", json!({})).unwrap();
+    let (pid, wt) = (projects[0]["id"].clone(), projects[0]["worktrees"][0]["path"].clone());
+
+    // the app's stream
+    let mut app = Client::connect(&pipe, &token).unwrap();
+    app.call("watch.subscribe", json!({"worktree": wt})).unwrap();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        while let Ok(f) = app.read() {
+            if let Frame::Event(e) = f {
+                let _ = tx.send(e);
+            }
+        }
+    });
+
+    // the CLI (a different connection) creates a worktree: the app hears about it without asking
+    cli.call("worktree.create", json!({"project": pid, "name": "topic"})).unwrap();
+    let mut got = false;
+    while let Ok(e) = rx.recv_timeout(Duration::from_secs(5)) {
+        if e["event"] == "projects.changed" {
+            got = true;
+            break;
+        }
+    }
+    assert!(got, "worktree.create must emit projects.changed");
 }

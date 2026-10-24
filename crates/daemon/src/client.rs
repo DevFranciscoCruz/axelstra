@@ -121,10 +121,83 @@ fn is_timeout(e: &anyhow::Error) -> bool {
         .any(|io| matches!(io.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) || io.raw_os_error() == Some(995))
 }
 
-/// Bounds the blocking reads on one connection until `finish`.
+/// One watchdog thread for every deadline of the process: calls register `(handle, time)` and the thread cancels the
+/// pending I/O of the ones that run out. (It used to be one OS thread per call.)
+#[cfg(windows)]
+mod watchdog {
+    use std::sync::{Condvar, Mutex, Once};
+    use std::time::{Duration, Instant};
+
+    struct Entry {
+        id: u64,
+        at: Instant,
+        handle: isize,
+    }
+
+    struct State {
+        entries: Vec<Entry>,
+        next: u64,
+    }
+
+    static STATE: Mutex<State> = Mutex::new(State { entries: Vec::new(), next: 0 });
+    static WAKE: Condvar = Condvar::new();
+    static START: Once = Once::new();
+
+    fn lock() -> std::sync::MutexGuard<'static, State> {
+        STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub fn arm(handle: isize, limit: Duration) -> u64 {
+        START.call_once(|| {
+            std::thread::Builder::new().name("client-watchdog".into()).spawn(run).expect("watchdog thread");
+        });
+        let mut st = lock();
+        st.next += 1;
+        let id = st.next;
+        st.entries.push(Entry { id, at: Instant::now() + limit, handle });
+        drop(st);
+        WAKE.notify_all();
+        id
+    }
+
+    /// Returns true when the deadline had already fired (the I/O was cancelled).
+    pub fn disarm(id: u64) -> bool {
+        let mut st = lock();
+        let before = st.entries.len();
+        st.entries.retain(|e| e.id != id);
+        st.entries.len() == before
+    }
+
+    fn run() {
+        let mut st = lock();
+        loop {
+            let now = Instant::now();
+            // cancelling happens under the lock, so `disarm` cannot return while a cancel is about to land on a later
+            // call's I/O on the same handle
+            st.entries.retain(|e| {
+                if e.at <= now {
+                    unsafe { windows_sys::Win32::System::IO::CancelIoEx(e.handle as _, std::ptr::null()) };
+                    false
+                } else {
+                    true
+                }
+            });
+            st = match st.entries.iter().map(|e| e.at).min() {
+                Some(next) => {
+                    WAKE.wait_timeout(st, next.saturating_duration_since(Instant::now()))
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .0
+                }
+                None => WAKE.wait(st).unwrap_or_else(std::sync::PoisonError::into_inner),
+            };
+        }
+    }
+}
+
+/// Bounds the blocking I/O on one connection handle until `finish`.
 struct Deadline {
     #[cfg(windows)]
-    state: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+    id: u64,
     #[cfg(unix)]
     sock: std::os::unix::net::UnixStream,
 }
@@ -134,26 +207,11 @@ impl Deadline {
     fn start(conn: &Conn, limit: Duration) -> std::io::Result<Deadline> {
         use std::os::windows::io::AsRawHandle;
         let Conn::File(f) = conn;
-        let handle = f.as_raw_handle() as isize;
-        let state = std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
-        let st = state.clone();
-        std::thread::spawn(move || {
-            let (lock, cv) = &*st;
-            let done = lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let (done, _) = cv.wait_timeout_while(done, limit, |d| !*d).unwrap_or_else(std::sync::PoisonError::into_inner);
-            // still waiting after `limit`: abort the read. `finish` takes this lock, so it cannot run in between
-            // and a cancel never lands on a later call's read.
-            if !*done {
-                unsafe { windows_sys::Win32::System::IO::CancelIoEx(handle as _, std::ptr::null()) };
-            }
-        });
-        Ok(Deadline { state })
+        Ok(Deadline { id: watchdog::arm(f.as_raw_handle() as isize, limit) })
     }
 
     fn finish(self) {
-        let (lock, cv) = &*self.state;
-        *lock.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = true;
-        cv.notify_all();
+        watchdog::disarm(self.id);
     }
 }
 
@@ -163,11 +221,13 @@ impl Deadline {
         let Conn::Unix(s) = conn;
         let sock = s.try_clone()?;
         sock.set_read_timeout(Some(limit))?;
+        sock.set_write_timeout(Some(limit))?;
         Ok(Deadline { sock })
     }
 
     fn finish(self) {
         let _ = self.sock.set_read_timeout(None);
+        let _ = self.sock.set_write_timeout(None);
     }
 }
 
@@ -183,14 +243,42 @@ pub struct Client {
     pub timeout: Option<Duration>,
     /// a call timed out: the stream may hold a late reply, so this connection must not be reused
     broken: bool,
+    /// build id the daemon reported in `hello` (empty for a daemon from before it existed)
+    pub build: String,
+    /// `SECURITY_MIN` of the daemon (0 for a daemon from before it existed)
+    pub security: u64,
 }
+
+/// How long one write to the daemon may block (a daemon that stopped reading with a full pipe).
+const WRITE_LIMIT: Duration = Duration::from_secs(30);
 
 #[cfg(windows)]
 fn open(pipe: &str) -> Result<Conn> {
+    match open_pipe(pipe) {
+        // an older daemon (still running after an update) listens on the pre-SID name
+        Err(e) if pipe == pipe_name() && is_not_found(&e) => open_pipe(&legacy_pipe_name()).map_err(|_| e),
+        r => r,
+    }
+}
+
+#[cfg(windows)]
+fn is_not_found(e: &anyhow::Error) -> bool {
+    e.chain().filter_map(|c| c.downcast_ref::<std::io::Error>()).any(|io| io.kind() == std::io::ErrorKind::NotFound)
+}
+
+#[cfg(windows)]
+fn open_pipe(pipe: &str) -> Result<Conn> {
+    use std::os::windows::fs::OpenOptionsExt;
+    // SECURITY_IDENTIFICATION: whoever serves the pipe can learn who we are but not act as us
+    const SECURITY_IDENTIFICATION: u32 = 0x0001_0000;
     let mut tries = 0;
     loop {
-        match OpenOptions::new().read(true).write(true).open(pipe) {
-            Ok(f) => return Ok(Conn::File(f)),
+        match OpenOptions::new().read(true).write(true).security_qos_flags(SECURITY_IDENTIFICATION).open(pipe) {
+            Ok(f) => {
+                // the token goes to the pipe only after its server proved to be one of our own processes
+                crate::pipesec::verify_server_owner(&f).with_context(|| format!("not trusting the pipe {pipe}"))?;
+                return Ok(Conn::File(f));
+            }
             // ERROR_PIPE_BUSY: the daemon is between instances
             Err(e) if e.raw_os_error() == Some(231) && tries < 20 => {
                 tries += 1;
@@ -217,12 +305,35 @@ impl Client {
         Self::connect_as(pipe, token, Some("cli"))
     }
 
+    /// As an agent session does: presents the session's own credential (`AXELSTRA_AGENT_TOKEN`), which the daemon
+    /// answers with role=agent. The app-only calls are refused on such a connection.
+    pub fn connect_agent(pipe: &str, token: &str, agent_token: &str) -> Result<Client> {
+        Self::connect_with(pipe, token, Some("cli"), Some(agent_token.to_string()))
+    }
+
     fn connect_as(pipe: &str, token: &str, client: Option<&str>) -> Result<Client> {
+        let agent = if client == Some("cli") { std::env::var("AXELSTRA_AGENT_TOKEN").ok().filter(|t| !t.is_empty()) } else { None };
+        Self::connect_with(pipe, token, client, agent)
+    }
+
+    fn connect_with(pipe: &str, token: &str, client: Option<&str>, agent_token: Option<String>) -> Result<Client> {
         let f = open(pipe)?;
-        let mut c = Client { rd: f.try_clone()?, wr: f, next: 0, proto: 0, instance: 0, timeout: None, broken: false };
-        let hello = c.call("hello", json!({"token": token, "client": client}))?;
+        let mut c = Client {
+            rd: f.try_clone()?,
+            wr: f,
+            next: 0,
+            proto: 0,
+            instance: 0,
+            timeout: None,
+            broken: false,
+            build: String::new(),
+            security: 0,
+        };
+        let hello = c.call("hello", json!({"token": token, "client": client, "agent_token": agent_token}))?;
         c.proto = hello["proto"].as_u64().unwrap_or(1);
         c.instance = hello["instance"].as_u64().unwrap_or(0);
+        c.build = hello["build"].as_str().unwrap_or_default().to_string();
+        c.security = hello["security"].as_u64().unwrap_or(0);
         Ok(c)
     }
 
@@ -236,6 +347,8 @@ impl Client {
             instance: self.instance,
             timeout: self.timeout,
             broken: self.broken,
+            build: self.build.clone(),
+            security: self.security,
         })
     }
 
@@ -248,7 +361,7 @@ impl Client {
         self.next += 1;
         let id = self.next;
         let req = json!({"id": id, "method": method, "params": params});
-        self.wr.write_all(&encode(JSON, req.to_string().as_bytes())).map_err(|e| anyhow::Error::new(NotSent(e)))?;
+        self.write_bounded(&encode(JSON, req.to_string().as_bytes())).map_err(|e| anyhow::Error::new(NotSent(e)))?;
         let limit = self.timeout.unwrap_or_else(|| default_timeout(method));
         let deadline = Deadline::start(&self.rd, limit).ok();
         let res = self.reply(method, id);
@@ -263,6 +376,20 @@ impl Client {
             }
             r => r,
         }
+    }
+
+    /// Writes a whole frame within `WRITE_LIMIT`. A write that fails or is cut off may leave half a frame on the wire, so
+    /// the connection is not used again.
+    fn write_bounded(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        let deadline = Deadline::start(&self.wr, WRITE_LIMIT).ok();
+        let r = self.wr.write_all(bytes);
+        if let Some(d) = deadline {
+            d.finish();
+        }
+        if r.is_err() {
+            self.broken = true;
+        }
+        r
     }
 
     fn reply(&mut self, method: &str, id: u64) -> Result<Value> {
@@ -283,12 +410,12 @@ impl Client {
     pub fn send(&mut self, method: &str, params: Value) -> Result<()> {
         self.next += 1;
         let req = json!({"id": self.next, "method": method, "params": params});
-        self.wr.write_all(&encode(JSON, req.to_string().as_bytes()))?;
+        self.write_bounded(&encode(JSON, req.to_string().as_bytes()))?;
         Ok(())
     }
 
     pub fn send_input(&mut self, session: u32, data: &[u8]) -> Result<()> {
-        self.wr.write_all(&session_frame(INPUT, session, data))?;
+        self.write_bounded(&session_frame(INPUT, session, data))?;
         Ok(())
     }
 
@@ -299,9 +426,11 @@ impl Client {
         if len == 0 || len > MAX_FRAME {
             bail!("bad frame length {len}");
         }
-        let mut buf = vec![0u8; len];
+        let mut kind = [0u8; 1];
+        self.rd.read_exact(&mut kind)?;
+        let kind = kind[0];
+        let mut buf = vec![0u8; len - 1];
         self.rd.read_exact(&mut buf)?;
-        let kind = buf.remove(0);
         Ok(match kind {
             OUTPUT => {
                 let (session, d) = split_session(&buf).context("short output frame")?;

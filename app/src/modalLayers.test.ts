@@ -3,7 +3,7 @@ import { createComponent } from "solid-js";
 import { render } from "solid-js/web";
 import { ContextMenu, menuOpen, showMenuAt } from "./ContextMenu";
 import { Modal } from "./Modal";
-import { Select } from "./Select";
+import { Select } from "./ui";
 
 const key = (k: string) => window.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
 

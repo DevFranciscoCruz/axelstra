@@ -1,9 +1,20 @@
 import type { WtUsage } from "./usageFormat";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { projects, projectTerse } from "./store";
+import { AppError, toAppError } from "./appError";
+import { apiContext } from "./apiContext";
+import { norm } from "./paths";
 
-export type SessionMeta = { project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; note?: string; parent?: number; worker?: boolean; main?: boolean };
+/** Mirrors the Rust `meta` of a session (crates/daemon). `blank`, `interrupted` and `lost_workers` are set on entries of `session.pending`. */
+export type SessionMeta = {
+  project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; note?: string; parent?: number; worker?: boolean; main?: boolean; /** first agent of a worktree: named "main", parent of its tasks */ lead?: boolean;
+  /** a cleared / never used conversation: nothing to bring back */
+  blank?: boolean;
+  /** the agent was mid-task when the daemon stopped */
+  interrupted?: boolean;
+  /** workers this agent started that the restart stopped */
+  lost_workers?: string[];
+};
 export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean; /** worktree of the same project this one is grouped under */ parent?: string | null };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
@@ -16,12 +27,34 @@ export type Project = { id: string; name: string; path: string; worktrees: Workt
   remote?: string | null;
 };
 
+/** A call that gets no answer in this long fails (a stuck daemon must not leave the UI waiting for ever). */
+export const CALL_TIMEOUT_MS = 30_000;
+/** Methods that legitimately run git, gh, docker or a whole agent run: they get longer. */
+export const SLOW_TIMEOUT_MS = 5 * 60_000;
+const SLOW = /^(git\.|gh\.|docker\.|pm\.|orch\.|worktree\.(create|from_pr|remove|sweep|rename)|project\.(add|remove)|agent\.|fs\.grep|automation\.run|diagnostics)/;
+export const timeoutFor = (method: string) => (SLOW.test(method) ? SLOW_TIMEOUT_MS : CALL_TIMEOUT_MS);
+
+/** `p`, but failing with a readable AppError when it rejects or takes longer than the method's timeout. */
+const guard = <T>(method: string, p: Promise<T>): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, rej) => {
+    timer = setTimeout(() => rej(new AppError(method, `Sem resposta do daemon (${method}) ao fim de ${Math.round(timeoutFor(method) / 1000)} s.`)), timeoutFor(method));
+  });
+  return Promise.race([p, late]).catch((e) => Promise.reject(toAppError(method, e))).finally(() => clearTimeout(timer));
+};
+
 export const call = <T = unknown>(method: string, params: Record<string, unknown> = {}) =>
-  invoke<T>("daemon_call", { method, params });
+  guard(method, invoke<T>("daemon_call", { method, params }));
 
 /** same, on a second connection: for slow polling that must not hold up the interactive calls */
 export const callBg = <T = unknown>(method: string, params: Record<string, unknown> = {}) =>
-  invoke<T>("daemon_call_bg", { method, params });
+  guard(method, invoke<T>("daemon_call_bg", { method, params }));
+
+/** true when the running daemon is older than the app and lacks `method` */
+export const isUnknownMethod = (e: unknown) => /unknown method/i.test(e instanceof Error ? e.message : String(e));
+/** `call` that answers `fallback` instead of failing when the daemon does not know the method yet */
+export const callOr = <T>(method: string, params: Record<string, unknown>, fallback: T): Promise<T> =>
+  call<T>(method, params).catch((e) => (isUnknownMethod(e) ? fallback : Promise.reject(e)));
 
 import { Channel, invoke as tauriInvoke } from "@tauri-apps/api/core";
 export type Terse = "off" | "short" | "tiny";
@@ -31,11 +64,14 @@ export type Settings = {
   terse: Terse; rules: string | null; pm: string | null; installed: string[]; auto_install: boolean;
   /** absent on a daemon from before these keys existed */
   notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice;
+  /** UI choices the webview keeps (pins, folded groups, notifications...): `axelstra.*` key -> saved string */
+  ui?: Record<string, string>;
 };
 export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice };
 /** `terse` asks for the rules of that level (a project's own choice) instead of the saved one */
 export const getSettings = (terse?: Terse) => call<Settings>("settings.get", terse ? { terse } : {});
-export const setSettings = (patch: SettingsPatch) => call("settings.set", patch);
+/** `ui`: UI state to store (`null` removes a key), sent by uiState.ts only, so it is not part of what the Settings screen merges */
+export const setSettings = (patch: SettingsPatch & { ui?: Record<string, string | null> }) => call("settings.set", patch);
 
 /** Result of `fn`, remembered once it succeeded; a failure is not remembered, so the next call tries again. */
 const once = <T>(fn: () => Promise<T>) => {
@@ -66,6 +102,16 @@ export type Diagnostics = {
   missing_tools: string[];
 };
 export const diagnostics = () => tauriInvoke<Diagnostics>("diagnostics");
+/** Sends a webview error to the Rust log file. */
+export const logFrontendError = (r: { kind: string; message: string; stack: string }) => tauriInvoke<void>("log_frontend_error", r);
+/** Text bundle for bug reports (version, OS, data dir, log tails). */
+export const diagnosticsBundle = () => tauriInvoke<string>("diagnostics_bundle");
+/** Copies the diagnostics bundle to the clipboard and returns it. */
+export async function copyDiagnostics(): Promise<string> {
+  const text = await diagnosticsBundle();
+  await tauriInvoke("clipboard_write", { text });
+  return text;
+}
 
 /** Single-quotes `s` for the shell that will read the line: PowerShell doubles a quote (the typographic ones count too),
  * sh closes the string, escapes the quote and opens it again. */
@@ -103,7 +149,7 @@ export const launchDefaultAgent = async (
   worktree: string,
   agent: string,
   cli: string,
-  restore?: { key?: string; resume?: string; note?: string },
+  restore?: { key?: string; resume?: string; note?: string; lead?: boolean },
   pre?: { rules: string | null },
   terse?: Terse,
 ) => {
@@ -114,17 +160,16 @@ export const launchDefaultAgent = async (
   ]);
   const ps = /powershell|pwsh/i.test(program);
   // the main worktree is not a task: its agent gets no "Tarefa N" name and no task file
-  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-  const main = projects().find((p) => p.id === project)?.worktrees.some((w) => w.is_main && norm(w.path) === norm(worktree)) || undefined;
+  const main = apiContext.projects().find((p) => p.id === project)?.worktrees.some((w) => w.is_main && norm(w.path) === norm(worktree)) || undefined;
   // key is stable for the life of the tab; resume is the conversation id, which /clear replaces
   const key = restore ? restore.key : cli === "claude" ? crypto.randomUUID() : undefined;
   const resume = restore ? restore.resume ?? key : key;
   const line = agentLine(cli, resume, !!restore, ps, `${dir}/hooks.json`, rules);
   const run = ps ? [...args, "-NoExit", "-Command", line] : [...args, "-c", `${line}; exec ${shQuote(program, false)} -l`];
   const env = key ? { AXELSTRA_KEY: key, AXELSTRA_DIR: dir } : undefined;
-  const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent", agent: cli, resume, key, note: restore?.note, main }, env);
+  const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent", agent: cli, resume, key, note: restore?.note, main, lead: restore?.lead || undefined }, env);
   // only claude takes the rules as a system prompt: type them into the others once they have booted
-  if (rules && cli !== "claude" && !restore) void nudge(id, rules);
+  if (rules && cli !== "claude" && !restore) void nudge(id, rules).catch((e) => console.debug("nudge", e));
   return id;
 };
 
@@ -136,23 +181,45 @@ const sessionsShared = () => {
   return sharedList.p;
 };
 
-/** Types a note into a resumed agent once its screen has settled after booting. Fire and forget. */
-const nudge = async (id: number, text: string) => {
-  const start = Date.now();
-  await new Promise((r) => setTimeout(r, 4000));
-  while (Date.now() - start < 90000) {
-    const s = (await sessionsShared().catch(() => null))?.find((x) => x.id === id);
-    if (!s || !s.running) return;
-    if ((s.idle_ms ?? 0) >= 2500) break;
-    await new Promise((r) => setTimeout(r, 1000));
+/** nudges waiting or about to type, by session: closing the session or typing in it cancels the nudge */
+const nudges = new Map<number, AbortController>();
+/** Stops the pending nudge of a session (the user wrote in it, or it was closed). */
+export const cancelNudge = (id: number) => {
+  nudges.get(id)?.abort();
+  nudges.delete(id);
+};
+
+/** Types a note into a resumed agent once its screen has settled after booting. Fire and forget; gives up quietly when
+ *  the session is gone, was written to by the user meanwhile, or `cancelNudge` was called. */
+export const nudge = async (id: number, text: string) => {
+  cancelNudge(id);
+  const ac = new AbortController();
+  nudges.set(id, ac);
+  const wait = (ms: number) =>
+    new Promise<boolean>((done) => {
+      const t = setTimeout(() => done(!ac.signal.aborted), ms);
+      ac.signal.addEventListener("abort", () => (clearTimeout(t), done(false)), { once: true });
+    });
+  try {
+    const start = Date.now();
+    if (!(await wait(4000))) return;
+    while (Date.now() - start < 90000) {
+      const s = (await sessionsShared().catch(() => null))?.find((x) => x.id === id);
+      if (ac.signal.aborted || !s || !s.running) return;
+      if ((s.idle_ms ?? 0) >= 2500) break;
+      if (!(await wait(1000))) return;
+    }
+    if (ac.signal.aborted) return;
+    await rawWrite(id, text);
+    if (!(await wait(400))) return;
+    await rawWrite(id, "\r");
+  } finally {
+    if (nudges.get(id) === ac) nudges.delete(id);
   }
-  await writeSession(id, text);
-  await new Promise((r) => setTimeout(r, 400));
-  await writeSession(id, "\r");
 };
 
 /** What an agent should be told about the restart: it was mid-task, and/or workers it started were stopped. */
-export const restartNote = (interrupted: boolean, lost: string[]) => {
+const restartNote = (interrupted: boolean, lost: string[]) => {
   const parts: string[] = [];
   if (interrupted) parts.push("Axelstra was restarted and this conversation was resumed. You were in the middle of a task: continue where you left off.");
   if (lost.length) {
@@ -163,9 +230,11 @@ export const restartNote = (interrupted: boolean, lost: string[]) => {
   return parts.length ? `[axelstra] ${parts.join(" ")}` : "";
 };
 
-/** Brings back the sessions of a previous daemon run (reboot, installer): shells reopen, agents resume their conversation. */
-export const restoreSessions = async (): Promise<{ restored: number; skipped: number; failed: string[] }> => {
-  const pending = await call<{ program: string; args?: string[]; cwd?: string; label?: string; meta?: SessionMeta }[]>("session.pending");
+export type RestoreResult = { restored: number; skipped: number; failed: string[] };
+type PendingRec = { program: string; args?: string[]; cwd?: string; label?: string; meta?: SessionMeta; env?: Record<string, string> };
+
+const restoreOnce = async (): Promise<RestoreResult> => {
+  const pending = await call<PendingRec[]>("session.pending");
   let restored = 0;
   let skipped = 0;
   const failed: string[] = [];
@@ -180,19 +249,18 @@ export const restoreSessions = async (): Promise<{ restored: number; skipped: nu
     try {
       if (m?.kind === "agent" && m.agent && m.project && m.worktree) {
         // a cleared / never used conversation has nothing to bring back: no tab, no process
-        if ((m as { blank?: boolean }).blank) {
+        if (m.blank) {
           skipped++;
         } else {
-          const terse = projectTerse(m.project);
+          const terse = apiContext.terse(m.project);
           const rules = await rulesFor(terse);
-          const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume, note: m.note }, { rules }, terse);
-          const x = m as { interrupted?: boolean; lost_workers?: string[] };
-          const note = restartNote(!!x.interrupted, x.lost_workers ?? []);
-          if (note) void nudge(id, note).catch(() => 0);
+          const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume, note: m.note, lead: m.lead }, { rules }, terse);
+          const note = restartNote(!!m.interrupted, m.lost_workers ?? []);
+          if (note) void nudge(id, note).catch((e) => console.debug("nudge", e));
           restored++;
         }
       } else {
-        await spawnSession(r.program, r.args ?? [], r.label ?? undefined, r.cwd, m ?? undefined, (r as { env?: Record<string, string> }).env);
+        await spawnSession(r.program, r.args ?? [], r.label ?? undefined, r.cwd, m ?? undefined, r.env);
         restored++;
       }
     } catch {
@@ -200,44 +268,98 @@ export const restoreSessions = async (): Promise<{ restored: number; skipped: nu
       failed.push(r.label ?? m?.worktree ?? r.cwd ?? r.program);
     }
     // this entry is dealt with either way; the others stay listed until their turn, so a crash midway loses nothing
-    await call("session.pending_remove", { rec: r }).catch(() => 0);
+    await call("session.pending_remove", { rec: r }).catch((e) => console.debug("session.pending_remove", e));
   }
   return { restored, skipped, failed };
 };
 
+/** One restore at a time: it runs on mount and again on `daemon-restarted`, and two overlapping runs would both read the
+ *  same `session.pending` and start every agent twice. A call that arrives while one runs shares one trailing run (which
+ *  sees only what the first left, since each entry is removed as it is dealt with). */
+let restoring: Promise<RestoreResult> | null = null;
+let restoreTrailing: Promise<RestoreResult> | null = null;
+/** Brings back the sessions of a previous daemon run (reboot, installer): shells reopen, agents resume their conversation. */
+export const restoreSessions = (): Promise<RestoreResult> => {
+  if (!restoring) {
+    const p: Promise<RestoreResult> = restoreOnce().finally(() => {
+      if (restoring === p) restoring = null;
+    });
+    return (restoring = p);
+  }
+  return (restoreTrailing ??= restoring.then(
+    () => ((restoreTrailing = null), restoreSessions()),
+    () => ((restoreTrailing = null), restoreSessions()),
+  ));
+};
+
 /** Change events for the selected worktree: the daemon watches the files and tells us, so git runs only when needed. */
+type WatchHandlers = { onChanged: (worktree: string) => void; onSessions?: () => void; onProjects?: () => void };
+let handlers: WatchHandlers | null = null;
+let lastWorktree: string | null = null;
+let wanted = false;
 let watchReady: Promise<void> | null = null;
-type WatchArgs = { worktree: string | null; onChanged: (worktree: string) => void; onSessions?: () => void };
-let lastWatch: WatchArgs | null = null;
-let watchListening = false;
-const startWatch = (onChanged: (worktree: string) => void, onSessions?: () => void) => {
+let channel: Channel<{ event?: string; worktree?: string }> | null = null;
+let unlisteners: Promise<() => void>[] = [];
+
+/** Drops the current Channel: its late messages go nowhere. (Tauri has no close for a Channel; the host replaces its end on the next watch_start.) */
+const dropChannel = () => {
+  if (channel) channel.onmessage = () => {};
+  channel = null;
+  watchReady = null;
+};
+const startWatch = () => {
+  dropChannel();
   const ch = new Channel<{ event?: string; worktree?: string }>();
+  channel = ch;
+  // the handlers are read when a message arrives, so the newest ones from watchWorktree win
   ch.onmessage = (m) => {
-    if (m?.event === "fs.changed" && m.worktree) onChanged(m.worktree);
-    else if (m?.event === "session.changed") onSessions?.();
+    if (ch !== channel || !handlers) return;
+    if (m?.event === "fs.changed" && m.worktree) handlers.onChanged(m.worktree);
+    else if (m?.event === "session.changed") handlers.onSessions?.();
+    else if (m?.event === "projects.changed") handlers.onProjects?.();
   };
   return tauriInvoke<void>("watch_start", { onEvent: ch });
 };
-/** The watch connection died (Rust: "watch-ended") or the whole daemon was replaced ("daemon-restarted"): connect again for the same worktree. */
+/** The watch connection died (Rust: "watch-ended") or the whole daemon was replaced ("daemon-restarted"): connect again for the same worktree.
+ *  Events that arrive while a reconnection is already under way are the same event. */
+let reconnecting = false;
 const rewatch = () => {
-  watchReady = null;
-  const w = lastWatch;
-  if (w) void watchWorktree(w.worktree, w.onChanged, w.onSessions);
+  if (!wanted || !handlers || reconnecting) return;
+  reconnecting = true;
+  dropChannel();
+  void watchWorktree(lastWorktree, handlers.onChanged, handlers.onSessions, handlers.onProjects).finally(() => (reconnecting = false));
 };
-export const watchWorktree = async (worktree: string | null, onChanged: (worktree: string) => void, onSessions?: () => void) => {
-  lastWatch = { worktree, onChanged, onSessions };
-  if (!watchListening) {
-    watchListening = true;
-    for (const ev of ["watch-ended", "daemon-restarted"]) void listen(ev, rewatch).catch(() => (watchListening = false));
+export const watchWorktree = async (worktree: string | null, onChanged: (worktree: string) => void, onSessions?: () => void, onProjects?: () => void) => {
+  handlers = { onChanged, onSessions, onProjects };
+  lastWorktree = worktree;
+  wanted = true;
+  if (!unlisteners.length) {
+    unlisteners = ["watch-ended", "daemon-restarted"].map((ev) =>
+      listen(ev, rewatch).catch((e) => {
+        console.debug("listen", ev, e);
+        return () => {};
+      }),
+    );
   }
-  watchReady ??= startWatch(onChanged, onSessions);
+  const ready = (watchReady ??= startWatch());
   try {
-    await watchReady;
-    await tauriInvoke("watch_set", { worktree });
-  } catch {
+    await ready;
+    await tauriInvoke("watch_set", { worktree: lastWorktree });
+  } catch (e) {
     // daemon restarted or never reachable: reconnect on the next selection
-    watchReady = null;
+    console.debug("watch", e);
+    if (watchReady === ready) watchReady = null;
   }
+};
+/** Ends the watch for good: no listeners left, the Channel is dropped (app teardown, tests). */
+export const stopWatch = () => {
+  wanted = false;
+  handlers = null;
+  reconnecting = false;
+  dropChannel();
+  const l = unlisteners;
+  unlisteners = [];
+  for (const u of l) void u.then((f) => f());
 };
 
 export const listSessions = () => call<SessionInfo[]>("session.list");
@@ -272,19 +394,24 @@ export const dispatchOverlaps = () => callBg<Record<string, string[]>>("dispatch
 /** the name of a worktree folder/branch as the daemon renames it */
 export const worktreeRename = (path: string, name: string) => call<{ path?: string }>("worktree.rename", { path, name });
 
-export const killSession = (id: number) => call("session.kill", { id });
-export const removeSession = (id: number) => call("session.remove", { id });
+export const killSession = (id: number) => (cancelNudge(id), call("session.kill", { id }));
+export const removeSession = (id: number) => (cancelNudge(id), call("session.remove", { id }));
 export const resizeSession = (id: number, cols: number, rows: number) =>
   call("session.resize", { id, cols, rows });
-export const writeSession = (id: number, data: string) => invoke("session_write", { id, data });
+const rawWrite = (id: number, data: string) => invoke("session_write", { id, data }).catch((e) => Promise.reject(toAppError("session_write", e)));
+/** Text typed or pasted by the user (or a feature acting for them): a pending nudge into this session is dropped, it would interleave. */
+export const writeSession = (id: number, data: string) => (cancelNudge(id), rawWrite(id, data));
 
 export const listProjects = () => call<Project[]>("project.list");
-export const addProject = (path: string) => call<Project>("project.add", { path });
+/** A host command that opens a native dialog first: no timeout, since the user may browse for a long time. */
+const nativePick = <T>(method: string, cmd: string, title: string) => invoke<T>(cmd, { title }).catch((e) => Promise.reject(toAppError(method, e)));
+/** Native folder dialog on the Rust side, then `project.add` with the chosen folder; null when cancelled.
+ *  The webview never supplies the path (`project.add` is not in the host's allow-list). */
+export const pickAndAddProject = (title: string) => nativePick<Project | null>("project.add", "project_add_pick", title);
 export const projectLogo = (id: string) => call<{ data_url: string | null }>("project.logo", { id }).then((r) => r.data_url);
 export const setProjectSetup = (id: string, setup: string) => call("project.setup", { id, setup });
 export const detectPackageManagers = (id: string) => call<{ installed: string[]; suggested: string | null; package_json?: boolean }>("pm.detect", { id });
 export type DispatchMeta = Record<string, { title?: string; archived?: boolean; requests?: string[]; updated?: number }>;
-export const dispatchMeta = () => call<DispatchMeta>("dispatch.meta");
 export const removeProject = (id: string) => call("project.remove", { id });
 export type EnvSkip = { path: string; reason: string };
 /** worktree.create also says what .worktreeinclude copied into the new worktree and what it left out */
@@ -310,7 +437,7 @@ export type Schedule =
   | { kind: "weekly"; day: number; time: string };
 export type Automation = { id: string; name: string; project: string; agent: string; prompt: string; schedule: Schedule; enabled: boolean; last_run: number };
 export const listAutomations = () => call<{ automations: Automation[] }>("automation.list").then((r) => r.automations);
-export const saveAutomation = (a: Automation) => call<Automation>("automation.save", a as unknown as Record<string, unknown>);
+export const saveAutomation = (a: Automation) => call<Automation>("automation.save", { ...a });
 export const deleteAutomation = (id: string) => call("automation.delete", { id });
 export const runAutomation = (id: string) => call<{ session: number; worktree: string }>("automation.run", { id });
 export const openInEditor = (worktree: string, app: "code") => call("open.editor", { worktree, app });
@@ -390,8 +517,15 @@ export type OrchRun = {
   blocked?: string[];
   error?: string;
 };
-export const orchStart = (project: string, max = 3, trustAcceptance = false) =>
-  call<OrchRun>("orch.start", { project, max, trust_acceptance: trustAcceptance });
+/** `pin` (from orchTrustInfo) lets `bypass*` cards run, but only if the todo cards still hash to what the user confirmed */
+export const orchStart = (project: string, max = 3, trustAcceptance = false, pin?: string) =>
+  call<OrchRun>("orch.start", { project, max, trust_acceptance: trustAcceptance, ...(pin ? { pin } : {}) });
+
+/** What the user must confirm before a run: each todo card's agent, permission mode and acceptance command (mirrors orch::TrustInfo). */
+export type OrchTrustCard = { id: string; agent: string; permission_mode: string; bypass: boolean; acceptance: string | null };
+export type OrchTrust = { pin: string; cards: OrchTrustCard[] };
+/** Trust info of the project's todo cards for the Kanban confirm; null while the running daemon has no `orch.trust_info`. */
+export const orchTrustInfo = (project: string) => callOr<OrchTrust | null>("orch.trust_info", { project }, null);
 /** merges a needs-review card again after the user fixed its worktree */
 export const orchRetry = (project: string, id: string, trustAcceptance = false) =>
   call("orch.retry", { project, id, trust_acceptance: trustAcceptance });
@@ -525,3 +659,23 @@ export type HooksStatus = { installed: boolean; path: string };
 export type HooksInstall = { changed: boolean; path: string; backup: string | null };
 export const hooksStatus = () => call<HooksStatus>("hooks.status");
 export const hooksInstall = () => call<HooksInstall>("hooks.install");
+
+// ---- daemon methods newer than some running daemons: each degrades (null / empty) on "unknown method" ----
+/** Messages the daemon's store recorded (a corrupt file it recovered from, ...), taken once. Empty on an older daemon. */
+export const storeNotices = () => callOr<{ notices: string[] }>("notices.take", {}, { notices: [] }).then((r) => r.notices);
+/** One command line tool Axelstra uses, as the daemon finds it on its PATH. */
+export type EnvTool = { id: string; found: boolean; path: string | null; version: string | null };
+/** git, claude and gh with their versions; null on a daemon without `env.tools`. */
+export const envTools = () => callOr<{ tools: EnvTool[] } | null>("env.tools", {}, null).then((r) => r?.tools ?? null);
+/** Copies the daemon's state files (settings, projects, sessions, automations; never the token) into a new backup folder; null on a daemon without it. */
+export const backupExport = () => callOr<{ path: string } | null>("backup.export", {}, null);
+/** Native folder dialog for the backup folder, then `backup.restore` on it. `undefined` = cancelled; null = the daemon is too old. */
+export const pickAndRestoreBackup = (title: string): Promise<{ restored: string[] } | null | undefined> =>
+  nativePick<{ restored: string[] } | null>("backup.restore", "backup_restore_pick", title).then(
+    (r) => (r === null ? undefined : r),
+    (e) => (isUnknownMethod(e) ? null : Promise.reject(e)),
+  );
+
+export type JanitorEvent = { project: string; path: string; branch: string; into: string; why: string; at: number };
+/** Worktrees the automatic sweep removed since the last call (take semantics); an older daemon has none. */
+export const janitorEvents = () => callOr<{ events: JanitorEvent[] }>("janitor.events", {}, { events: [] }).then((r) => r.events ?? []);

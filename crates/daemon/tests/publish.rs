@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::json;
@@ -34,7 +35,7 @@ fn commit_and_push_to_local_remote() {
     sh(&repo, &["commit", "-qm", "init"]);
     sh(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]);
 
-    let pipe = format!("{}-pub-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-pub-{}", common::base_pipe(), std::process::id());
     let token = "u".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {

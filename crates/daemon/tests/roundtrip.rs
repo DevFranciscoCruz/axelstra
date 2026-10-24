@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::{Client, Frame};
 use axelstra_daemon::server;
 use serde_json::json;
@@ -26,13 +27,19 @@ fn start() -> (String, String) {
         eprintln!("watchdog: test stuck");
         std::process::exit(1);
     });
-    let pipe = format!("{}-test-{}-{:?}", axelstra_daemon::proto::pipe_name(), std::process::id(), std::thread::current().id())
+    let pipe = format!("{}-test-{}-{:?}", common::base_pipe(), std::process::id(), std::thread::current().id())
         .replace("ThreadId(", "")
         .replace(')', "");
     let token = "t".repeat(32);
     let (p, t) = (pipe.clone(), token.clone());
     std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap().block_on(server::serve(p, t)).unwrap();
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(server::serve_with_store(p, t, common::store("srv")))
+            .unwrap();
     });
     std::thread::sleep(Duration::from_millis(300));
     (pipe, token)

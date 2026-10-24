@@ -1,41 +1,17 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { Button, Input } from "./ui";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { Unicode11Addon } from "@xterm/addon-unicode11";
-import { SearchAddon } from "@xterm/addon-search";
-import { WebglAddon } from "@xterm/addon-webgl";
-import { WebLinksAddon } from "@xterm/addon-web-links";
-import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, onCleanup, onMount } from "solid-js";
 import { Icon } from "./Icon";
-import { fsStat, rememberTermSize, resizeSession, writeSession } from "./api";
-import { findPathLinks, resolvePathLink, type PathLink } from "./pathlinks";
+import { rememberTermSize, resizeSession, writeSession } from "./api";
 import { S } from "./strings";
 import { attachWithRetry, createSizeSync, createWriteBatcher } from "./termsize";
 import { THEMES, setTermPrefs, termPrefs, zoomFont } from "./termprefs";
-import { openFileAt, selectedWorktree, showNotice } from "./store";
+import { SCROLLBACK, createXterm } from "./terminal/createXterm";
+import { dropInside, onTermDrop } from "./terminal/dragDrop";
+import { quotePath, useClipboard } from "./terminal/useClipboard";
+import { useFind } from "./terminal/useFind";
+import { useWebgl } from "./terminal/useWebgl";
 import "./termui.css";
-
-/** a terminal that starts out of sight keeps less history until it is shown; the visible one keeps the full amount */
-const SCROLLBACK = 5000;
-const SCROLLBACK_HIDDEN = 2000;
-
-/** opens a clicked path: inside the selected worktree in the editor (at its line when the link has one), elsewhere in the file manager */
-async function openPathLink(link: PathLink) {
-  const wt = selectedWorktree();
-  if (!wt) return;
-  const r = resolvePathLink(link.path, wt);
-  if ("outside" in r) return void revealItemInDir(r.outside).catch(() => showNotice(S.fileMissing(r.outside)));
-  try {
-    await fsStat(wt, r.rel); // throws when the file does not exist
-  } catch {
-    showNotice(S.fileMissing(r.rel));
-    return;
-  }
-  openFileAt(r.rel, link.line);
-}
 
 /**
  * One xterm bound to one daemon session. Only the visible terminal is mounted:
@@ -43,68 +19,35 @@ async function openPathLink(link: PathLink) {
  */
 export function TerminalView(props: { id: number; focus?: boolean; active?: () => boolean; onExit?: (code: number | null) => void }) {
   let host!: HTMLDivElement;
-  let findInput: HTMLInputElement | undefined;
-  const [finding, setFinding] = createSignal(false);
+  const find = useFind();
 
   onMount(() => {
     const isActive = () => props.active?.() ?? true;
-    const prefs = termPrefs();
-    const term = new Terminal({
-      fontFamily: prefs.fontFamily,
-      fontSize: prefs.fontSize,
-      scrollback: isActive() ? SCROLLBACK : SCROLLBACK_HIDDEN,
-      cursorBlink: true,
-      allowProposedApi: true,
-      theme: THEMES[prefs.theme],
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    // the agents measure text with current Unicode widths (symbols, emoji): xterm's default Unicode 6 table wraps
-    // those lines differently and the cursor lands on the wrong row
-    term.loadAddon(new Unicode11Addon());
-    term.unicode.activeVersion = "11";
-    const search = new SearchAddon();
-    term.loadAddon(search);
-    term.loadAddon(new WebLinksAddon((_e, url) => void openUrl(url)));
-    term.registerLinkProvider({
-      provideLinks(y, cb) {
-        const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
-        const out = findPathLinks(line).map((l) => ({
-          text: l.text,
-          range: { start: { x: l.start + 1, y }, end: { x: l.start + l.text.length, y } },
-          activate: () => void openPathLink(l),
-        }));
-        cb(out.length ? out : undefined);
-      },
-    });
-    term.open(host);
-    // The GPU renderer costs memory per terminal and the browser allows only a few contexts: only the visible terminal has one.
-    let gl: WebglAddon | null = null;
-    const loadGl = () => {
-      if (gl) return;
-      try {
-        const g = new WebglAddon();
-        g.onContextLoss(() => {
-          g.dispose();
-          if (gl === g) gl = null;
-          // the fallback renderer measures cells a little differently: fit the grid again and repaint
-          requestAnimationFrame(() => {
-            if (gone) return;
-            refit();
-            term.refresh(0, term.rows - 1);
-          });
-        });
-        term.loadAddon(g);
-        gl = g;
-      } catch {
-        /* canvas renderer fallback */
-      }
+    const { term, fit, search } = createXterm(host, isActive());
+    find.bind(term, search);
+    let gone = false;
+
+    // see termsize.ts: the PTY must always end up with the size xterm shows
+    const visible = () => host.clientWidth > 0 && host.clientHeight > 0;
+    const sizeSync = createSizeSync({ size: () => term, visible, gone: () => gone, send: (c, r) => resizeSession(props.id, c, r) });
+    const pushSize = sizeSync.push;
+    // a hidden terminal (display: none) has no size: fitting it would shrink its PTY to nothing
+    const refit = () => {
+      if (!visible()) return;
+      fit.fit();
+      rememberTermSize(term.cols, term.rows);
+      pushSize();
     };
-    const dropGl = () => {
-      gl?.dispose();
-      gl = null;
-    };
-    if (isActive()) loadGl();
+
+    const gl = useWebgl(term, () =>
+      // the fallback renderer measures cells a little differently: fit the grid again and repaint
+      requestAnimationFrame(() => {
+        if (gone) return;
+        refit();
+        term.refresh(0, term.rows - 1);
+      }),
+    );
+    if (isActive()) gl.load();
     fit.fit();
 
     // output arrives in many small chunks: one write per frame (a hidden terminal can wait longer)
@@ -135,57 +78,23 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       pushSize();
     });
 
-    // WebView2 gates navigator.clipboard behind a permission prompt, so the clipboard
-    // goes through the native side. Images are saved to a temp PNG and typed as a path.
-    const quote = (p: string) => (/\s/.test(p) ? `"${p}"` : p);
-    const pasteFromClipboard = async () => {
-      try {
-        const c = await invoke<{ kind: string; value: string }>("clipboard_read");
-        if (c.kind === "image") term.paste(quote(c.value) + " ");
-        else if (c.kind === "text") term.paste(c.value);
-      } catch {
-        /* clipboard unavailable */
-      }
-    };
-    const copySelection = () => void invoke("clipboard_write", { text: term.getSelection() }).catch(() => 0);
-
-    const openFind = () => {
-      setFinding(true);
-      const sel = term.getSelection();
-      queueMicrotask(() => {
-        if (sel && findInput) findInput.value = sel.split("\n")[0];
-        findInput?.focus();
-        findInput?.select();
-      });
-    };
-    const closeFind = () => {
-      setFinding(false);
-      search.clearDecorations();
-      term.focus();
-    };
-    const runFind = (back: boolean, incremental = false) => {
-      const q = findInput?.value ?? "";
-      if (!q) return void search.clearDecorations();
-      if (back) search.findPrevious(q);
-      else search.findNext(q, { incremental });
-    };
-
+    const clip = useClipboard(term);
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
       const k = e.key.toLowerCase();
       if (e.ctrlKey && !e.altKey && k === "v") {
         e.preventDefault();
-        void pasteFromClipboard();
+        void clip.paste();
         return false;
       }
       if (e.ctrlKey && !e.altKey && k === "c" && term.hasSelection()) {
-        copySelection();
+        clip.copy();
         term.clearSelection();
         return false;
       }
       if (e.ctrlKey && !e.altKey && !e.shiftKey && k === "f") {
         e.preventDefault();
-        openFind();
+        find.open();
         return false;
       }
       // font zoom: Ctrl+= / Ctrl++ bigger, Ctrl+- smaller, Ctrl+0 back to the default; kept in the preferences
@@ -199,45 +108,17 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       }
       return true;
     });
-    // right click: copy a selection, otherwise paste (Windows Terminal behaviour)
-    const onCtx = (e: MouseEvent) => {
-      e.preventDefault();
-      if (term.hasSelection()) {
-        copySelection();
-        term.clearSelection();
-      } else void pasteFromClipboard();
-    };
-    host.addEventListener("contextmenu", onCtx);
+    host.addEventListener("contextmenu", clip.contextMenu);
 
-    // files dropped from the OS arrive as native events carrying paths
-    let unDrop: (() => void) | undefined;
-    let gone = false;
-    void getCurrentWebview()
-      .onDragDropEvent((ev) => {
-        if (ev.payload.type !== "drop") return;
-        const r = host.getBoundingClientRect();
-        const x = ev.payload.position.x / devicePixelRatio;
-        const y = ev.payload.position.y / devicePixelRatio;
-        if (x < r.left || x > r.right || y < r.top || y > r.bottom) return;
-        term.paste(ev.payload.paths.map(quote).join(" ") + " ");
-        term.focus();
-      })
-      .then((u) => (gone ? u() : (unDrop = u)));
+    // files dropped from the OS: one shared webview listener for all terminals, each takes the drops over itself
+    const unDrop = onTermDrop((p) => {
+      if (!dropInside(host, p.position)) return;
+      term.paste(p.paths.map(quotePath).join(" ") + " ");
+      term.focus();
+    });
 
     term.onData((d) => void writeSession(props.id, d));
-    // see termsize.ts: the PTY must always end up with the size xterm shows
-    const visible = () => host.clientWidth > 0 && host.clientHeight > 0;
-    const sizeSync = createSizeSync({ size: () => term, visible, gone: () => gone, send: (c, r) => resizeSession(props.id, c, r) });
-    const pushSize = sizeSync.push;
     term.onResize(sizeSync.resized);
-
-    // a hidden terminal (display: none) has no size: fitting it would shrink its PTY to nothing
-    const refit = () => {
-      if (!visible()) return;
-      fit.fit();
-      rememberTermSize(term.cols, term.rows);
-      pushSize();
-    };
     refit();
     const ro = new ResizeObserver(refit);
     ro.observe(host);
@@ -248,6 +129,7 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       term.options.theme = THEMES[p.theme];
       term.options.fontFamily = p.fontFamily;
       term.options.fontSize = p.fontSize;
+      term.options.screenReaderMode = p.screenReader;
       requestAnimationFrame(() => {
         try {
           term.clearTextureAtlas();
@@ -282,13 +164,13 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
     // while hidden it gives up its GPU context
     createEffect(() => {
       if (!isActive()) {
-        dropGl();
+        gl.drop();
         return;
       }
       if (term.options.scrollback !== SCROLLBACK) term.options.scrollback = SCROLLBACK;
       requestAnimationFrame(() => {
         if (gone) return;
-        loadGl();
+        gl.load();
         refit();
         term.refresh(0, term.rows - 1);
         if (props.focus !== false) term.focus();
@@ -299,50 +181,45 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       gone = true;
       batch.cancel();
       sizeSync.cancel();
-      unDrop?.();
-      host.removeEventListener("contextmenu", onCtx);
+      unDrop();
+      host.removeEventListener("contextmenu", clip.contextMenu);
       ro.disconnect();
       dpr?.removeEventListener("change", onDprChange);
       detach();
       term.dispose();
     });
-
-    // the find bar's handlers need the addon: kept on the host element for the JSX below
-    findHandlers = { run: runFind, close: closeFind };
   });
-
-  let findHandlers: { run: (back: boolean, incremental?: boolean) => void; close: () => void } | undefined;
 
   return (
     <div class="term-host" ref={host}>
-      <Show when={finding()}>
+      <Show when={find.finding()}>
         <div class="term-find" role="search" on:contextmenu={(e) => e.stopPropagation()}>
           <Input
-            ref={findInput}
+            ref={find.setInput}
             type="text"
             placeholder={S.findPlaceholder}
             aria-label={S.findPlaceholder}
             spellcheck={false}
-            onInput={() => findHandlers?.run(false, true)}
+            onInput={() => find.run(false, true)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                findHandlers?.run(e.shiftKey);
+                find.run(e.shiftKey);
               } else if (e.key === "Escape") {
                 e.preventDefault();
-                findHandlers?.close();
+                find.close();
               }
             }}
           />
-          <Button variant="ghost" size="icon" title={S.findPrev} aria-label={S.findPrev} onClick={() => findHandlers?.run(true)}>
+          <Button variant="ghost" size="icon" title={S.findPrev} aria-label={S.findPrev} onClick={() => find.run(true)}>
             <span class="flip">
               <Icon name="chevDown" />
             </span>
           </Button>
-          <Button variant="ghost" size="icon" title={S.findNext} aria-label={S.findNext} onClick={() => findHandlers?.run(false)}>
+          <Button variant="ghost" size="icon" title={S.findNext} aria-label={S.findNext} onClick={() => find.run(false)}>
             <Icon name="chevDown" />
           </Button>
-          <Button variant="ghost" size="icon" title={S.findClose} aria-label={S.findClose} onClick={() => findHandlers?.close()}>
+          <Button variant="ghost" size="icon" title={S.findClose} aria-label={S.findClose} onClick={() => find.close()}>
             <Icon name="x" />
           </Button>
         </div>

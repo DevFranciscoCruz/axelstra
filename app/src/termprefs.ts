@@ -2,10 +2,11 @@ import { createSignal } from "solid-js";
 import type { ITheme } from "@xterm/xterm";
 
 export type TermTheme = "dark" | "light";
-export type TermPrefs = { theme: TermTheme; fontFamily: string; fontSize: number };
+/** `screenReader`: xterm mirrors its output into an accessible DOM tree (costs speed, so it is off by default) */
+export type TermPrefs = { theme: TermTheme; fontFamily: string; fontSize: number; screenReader: boolean };
 
 export const DEFAULT_FONT = '"Cascadia Mono", Consolas, monospace';
-export const DEFAULT_PREFS: TermPrefs = { theme: "dark", fontFamily: DEFAULT_FONT, fontSize: 13 };
+export const DEFAULT_PREFS: TermPrefs = { theme: "dark", fontFamily: DEFAULT_FONT, fontSize: 13, screenReader: false };
 export const MIN_FONT = 8;
 export const MAX_FONT = 32;
 
@@ -45,9 +46,19 @@ export const parsePrefs = (raw: string | null | undefined): TermPrefs => {
       theme: o.theme === "light" ? "light" : "dark",
       fontFamily: typeof o.fontFamily === "string" && o.fontFamily.trim() ? o.fontFamily.trim() : DEFAULT_FONT,
       fontSize: typeof o.fontSize === "number" ? clampFont(o.fontSize) : DEFAULT_PREFS.fontSize,
+      screenReader: o.screenReader === true,
     };
   } catch {
     return { ...DEFAULT_PREFS };
+  }
+};
+
+/** the cursor blinks only when the user has not asked the system for less motion */
+export const cursorBlinks = () => {
+  try {
+    return !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return true;
   }
 };
 

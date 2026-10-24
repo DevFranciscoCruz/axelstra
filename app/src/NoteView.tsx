@@ -4,6 +4,7 @@ import { Modal } from "./Modal";
 import { ask } from "./Confirm";
 import { notesExport, notesRead, notesReadFile } from "./api";
 import { parseNote } from "./noteMd";
+import { P } from "./strings.panels";
 
 /** the task file that is open: an agent's session, or a file by project and name (an agent that already ended); null = closed */
 type Target = { session: number; name: string } | { project: string; name: string };
@@ -38,12 +39,12 @@ function Body(props: { target: Target }) {
     setBusy(true);
     try {
       const r = await notesExport(session!, overwrite);
-      setStatus({ ok: true, text: `Exportado para ${r.path}` });
+      setStatus({ ok: true, text: P.note.exported(r.path) });
     } catch (e) {
       const msg = String(e);
       if (!overwrite && /already exists/i.test(msg)) {
-        if (await ask("Já existe um relatório com este nome em .axelstra. Substituir?", { title: "Exportar", kind: "warning" })) return exportIt(true);
-        setStatus({ ok: false, text: "Ficheiro existente mantido." });
+        if (await ask(P.note.replaceAsk, { title: P.note.exportTitle, kind: "warning" })) return exportIt(true);
+        setStatus({ ok: false, text: P.note.kept });
       } else setStatus({ ok: false, text: msg });
     } finally {
       setBusy(false);
@@ -51,8 +52,8 @@ function Body(props: { target: Target }) {
   };
 
   return (
-    <Modal label={`Relatório de ${name}`} onClose={close} class="modal note-view">
-      <div class="m-title" style={{ "font-weight": "600" }}>Relatório · {name}</div>
+    <Modal label={P.note.label(name)} onClose={close} class="modal note-view">
+      <div class="m-title font-semibold">{P.note.heading(name)}</div>
       <Switch>
         <Match when={note.error}>
           <div class="note-err" role="alert">{String(note.error)}</div>
@@ -61,7 +62,7 @@ function Body(props: { target: Target }) {
           {(n) => (
             <>
               <div class="note-path" title={n().path}>{n().path}</div>
-              <div class="note-body" tabindex="0" role="document" aria-label={`Texto do relatório de ${name}`}>
+              <div class="note-body" tabindex="0" role="document" aria-label={P.note.textLabel(name)}>
                 <For each={parseNote(n().text)}>
                   {(b) =>
                     b.kind === "h" ? (
@@ -80,16 +81,16 @@ function Body(props: { target: Target }) {
           )}
         </Match>
         <Match when={true}>
-          <div class="note-p">A carregar…</div>
+          <div class="note-p">{P.note.loading}</div>
         </Match>
       </Switch>
       <Show when={status()}>
         {(s) => <div class="note-status" classList={{ bad: !s().ok }} role={s().ok ? "status" : "alert"}>{s().text}</div>}
       </Show>
-      <div class="m-actions" style={{ "justify-content": "flex-end" }}>
-        <Button size="sm" onClick={close}>Fechar</Button>
+      <div class="m-actions">
+        <Button size="sm" onClick={close}>{P.note.close}</Button>
         <Button variant="default" size="sm" hidden={session === null} disabled={busy() || !note()} onClick={() => void exportIt(false)}>
-          Exportar para o repositório
+          {P.note.exportBtn}
         </Button>
       </div>
     </Modal>

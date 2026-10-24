@@ -2,18 +2,18 @@
 
 # Axelstra
 
-Lightweight desktop workbench for parallel coding agents on git worktrees (Windows and macOS, Tauri + Rust).
+Lightweight desktop workbench for parallel coding agents on git worktrees (Windows and macOS, Tauri + Rust). The interface is in Portuguese (the strings are PT-PT/PT-BR style) and there is no language switch yet; the CLI, docs and commit messages are in English.
 
 <p align="center"><img src="assets/demo/demo.gif" width="820" alt="Axelstra tour: new worktree with an agent, notification, Ctrl+K, AI commit message, files and editor, Kanban, automations, dispatcher, sidebar groups and task reports, status bar overview, Docker, notification center and merge from the panel"></p>
 
 <sub>Scripted mock with fake data: source in [`assets/demo/index.html`](assets/demo/index.html), open it in a browser to watch it live. The tour: create a worktree and start an agent, get notified when another one finishes, jump with `Ctrl+K`, write the commit message with AI, browse and edit files, run the Kanban, scheduled automations and the dispatcher, then the sidebar groups with task reports, the status bar overview, the Docker screen, the notification center and the CI and merge flow in the right panel.</sub>
 
 - **Projects and worktrees:** one sidebar entry per repo, one worktree per task, each with its own terminals.
-- **Agents:** open Claude Code, Codex or Gemini in a worktree with one click; a dot shows working / idle / done and you get a notification when an agent stops.
+- **Agents:** open Claude Code, Codex or Gemini CLI in a worktree with one click; a dot shows working / idle / done and you get a notification when an agent stops. What each agent supports is in [Agent support](#agent-support).
 - **Terminals:** split view, command palette (`Ctrl+K`), dev-server ports shown as chips that open in the browser.
 - **Session restore:** terminals live in a background daemon. After a reboot or an update they reopen where they were, and Claude Code resumes its conversation (a `/clear` is followed, so you get the new one).
 - **Code:** file tree and editor, changes panel with diff and line comments sent to a running agent, commit box with an AI-suggested message, pull requests and issues (needs `gh`).
-- **Agent names and task reports:** each agent gets a name ("Tarefa 1", "Tarefa 2", ...) with its state dot in the sidebar. When one finishes, a *Relatório* button opens the note it wrote about what it did, what passed and what is left.
+- **Agent names and task reports:** the first agent of a worktree is its lead, named "main" and shown first; the tasks started there are "Tarefa 1", "Tarefa 2", ... Each has its state dot in the sidebar. When one finishes, a *Relatório* button opens the note it wrote about what it did, what passed and what is left.
 - **Worktree groups:** a worktree can have a parent, and its children are nested under it. Finished worktrees fold into a collapsed *Concluídos (N)* list with *Limpar*, *Mover para…* changes a worktree's parent, and each project collapses with its arrow.
 - **Worktree env files:** list the untracked files a new worktree needs (`.env`, local config) in a `.worktreeinclude` at the repo root; they are copied in when the worktree is created.
 - **Docker:** a *Docker* tab next to Kanban lists containers (compose groups with start, stop and restart for the whole group), state, ports that open in the browser, CPU and memory, with info, logs, terminal and files per container, plus volumes, images and networks.
@@ -24,12 +24,24 @@ Lightweight desktop workbench for parallel coding agents on git worktrees (Windo
 - **Worktree cleanup:** a background sweep removes `ax/*` worktrees once their work is merged (in `origin/main`, or its pull request merged on GitHub). It never touches a worktree with a live session, uncommitted changes or unmerged work. On by default; `axelstra worktree sweep --auto off` turns it off, `--dry-run` lists what it would remove.
 - **Automations:** scheduled agent runs in fresh worktrees (interval, daily, weekly).
 - **Voice:** dictate a prompt with `Ctrl+Shift+M`. Speech is recognized locally (Whisper, downloaded once, about 160 MB), stops by itself when you pause and goes straight to the active terminal.
-- **Orchestration:** a coordinator agent splits work across worktrees and ephemeral workers that report back and disappear. Agents learn it from the `/axelstration` skill (installed for Claude Code and Codex); see below.
+- **Orchestration:** main only dispatches; each theme gets one worktree with a lead agent that splits the work across ephemeral workers that report to it (worker -> lead -> main). Agents learn it from the `/axelstration` skill (installed for Claude Code and Codex); see below.
 - **Search and usage:** `Ctrl+Shift+F` searches past Claude and Codex conversations and resumes one; tokens spent by the active Claude conversation are shown next to the tabs, and a `Σ` chip lists the tokens (input, output, cache) each worktree has spent across its Claude and Codex conversations, read from their logs. Tokens only: no cost is estimated.
 - **Status bar:** keep-awake switch, memory used by Axelstra and its terminals, number of terminals, listening dev-server ports and the total agent tokens (hover for the per-worktree breakdown). The running-agents chip opens a list of agents that are running, stopped and waiting for an answer; the worktrees chip opens an overview (uncommitted, ahead and behind the remote, already merged, without an agent) with a button to clean the merged ones.
 - **Links:** URLs and file paths in terminal output are clickable (a path opens in the editor).
 - **Notifications:** when an agent finishes, stops or needs an answer. On Windows, clicking the toast opens that session. On macOS and Linux the notification is shown but clicking it does not select the session (the notification plugin has no click callback there); the worktree gets its attention dot instead.
 - **Layout:** `Ctrl+B` hides the project list, `Ctrl+Shift+B` the right panel (or use the panel buttons in the tab bar).
+
+## Agent support
+
+| | Claude Code | Codex | Gemini CLI |
+| --- | --- | --- | --- |
+| Launch from the app, one click | yes | yes | yes, flags unverified (taken from the official docs) |
+| Resume the previous conversation after a restart | yes (`--continue`, follows `/clear`) | yes (`resume --last`) | yes (`--resume latest`), unverified |
+| Status hooks (`axelstra hook`, exact waiting dot) | yes | no (the dot comes from the terminal screen) | no |
+| `/axelstration` skill installed | yes (`~/.claude/skills`) | yes (`~/.agents/skills`) | no |
+| Search past conversations and token usage | yes | yes | search only, unverified |
+
+Any other CLI on the `PATH` can be started as a plain terminal agent (`axelstra agent --agent <command>`), without resume, hooks or skill. The source of truth for launching and resuming is `crates/core/src/agents.rs`.
 
 ## Install
 
@@ -52,7 +64,7 @@ The first install is manual. Versions older than the first release with the upda
 
 ### Linux (experimental)
 
-Linux is not a supported platform yet. The release workflow builds a `.deb` and an AppImage in an experimental job that never blocks a release, and CI checks that the desktop host compiles on Ubuntu. Nobody has run the result on a Linux desktop, so expect rough edges. Known state:
+Linux is not a supported platform yet. The release workflow builds a `.deb` and an AppImage in an experimental job that never blocks a release, and CI checks that the desktop host compiles on Ubuntu (a Linux failure there does not fail CI, so check the job before relying on it). Nobody has run the result on a Linux desktop, so expect rough edges. Known state:
 
 - The files are not signed for the updater: a Linux install does not update itself, and `latest.json` has no Linux entry. Install each new release by hand.
 - Keep-awake uses `systemd-inhibit` when it is on `PATH`. Without it the switch shows `n/d` and does nothing.
@@ -124,7 +136,7 @@ Local builds are not signed for the updater, so they never produce update artifa
 
 ## Releasing
 
-`git tag vX.Y.Z && git push --tags` runs `.github/workflows/release.yml`. It runs the engine tests, the type check and the frontend tests, builds the Windows installer and the macOS app and `.dmg` (daemon as sidecar, both signed for the updater), and attaches them to the GitHub Release. An experimental Linux job (`.deb` and AppImage, unsigned for the updater, allowed to fail) adds its files afterwards. A last job merges the platform entries into `latest.json`, the manifest the app reads from `releases/latest/download/latest.json`. The version comes from the tag. The release notes are the commit subjects since the previous tag, so write them for the people who read the release; the same text shows in the update card.
+`git tag vX.Y.Z && git push --tags` runs `.github/workflows/release.yml`. It runs the engine tests, the type check and the frontend tests, builds the Windows installer and the macOS app and `.dmg` (daemon as sidecar, both signed for the updater), and attaches them to the GitHub Release. An experimental Linux job (`.deb` and AppImage, unsigned for the updater, allowed to fail) adds its files afterwards. A last job merges the platform entries into `latest.json`, the manifest the app reads from `releases/latest/download/latest.json`. The version comes from the tag. The release notes are generated from the commits since the previous tag with git-cliff (`cliff.toml`, plain list if it fails), so write subjects for the people who read the release; the same text shows in the update card. Key custody, protected environments and rollback are in [`docs/RELEASING.md`](docs/RELEASING.md) and [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md); scripts and tools in [`docs/TOOLS.md`](docs/TOOLS.md).
 
 The updater verifies every download against the public key in `app/src-tauri/tauri.conf.json`. The matching private key lives in the repo secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; losing it means existing installs can no longer update and must be reinstalled by hand.
 
@@ -144,3 +156,7 @@ Needs a paid Apple Developer account. Add these repository secrets and the next 
 | `APPLE_TEAM_ID` | the 10-character team id |
 
 The hardened runtime entitlements (microphone, webview JIT) are in `app/src-tauri/entitlements.plist`.
+
+## License
+
+[MIT](LICENSE).

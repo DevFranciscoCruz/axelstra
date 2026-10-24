@@ -147,7 +147,7 @@ pub fn save(repo: &Path, id: Option<&str>, title: &str, body: &str, status: Opti
         }
         meta.depends_on = deps;
     }
-    let front = serde_yaml::to_string(&meta)?;
+    let front = serde_norway::to_string(&meta)?;
     atomic_write(&path, &format!("---\n{}---\n\n{}\n", front, body.trim_end()))?;
     let t = std::fs::read_to_string(&path)?;
     card::parse(&t, &path)

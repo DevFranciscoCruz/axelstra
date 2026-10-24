@@ -2,7 +2,7 @@
 //! processes or anything they started.
 
 use anyhow::{Context, Result};
-use axelstra_core::{git, procs};
+use axelstra_core::procs;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::process::Command;
@@ -93,18 +93,23 @@ fn listening_table() -> Result<Vec<Port>> {
     Ok(all)
 }
 
+/// The port tools are polled every few seconds: a hung one must not pile up threads, and a huge table is cut.
+fn run_tool(cmd: &mut Command) -> Result<axelstra_core::exec::Captured> {
+    axelstra_core::exec::run_capped(cmd, std::time::Duration::from_secs(10), 8 << 20)
+}
+
 fn all_listening() -> Result<Vec<Port>> {
     if cfg!(windows) {
         #[cfg(windows)]
         if let Ok(v) = listening_table() {
             return Ok(v);
         }
-        let o = git::quiet(&mut Command::new("netstat")).args(["-ano", "-p", "TCP"]).output().context("run netstat")?;
-        Ok(parse_netstat(&String::from_utf8_lossy(&o.stdout)))
+        let o = run_tool(Command::new("netstat").args(["-ano", "-p", "TCP"])).context("run netstat")?;
+        Ok(parse_netstat(&o.stdout_lossy()))
     } else {
         // lsof exits 1 when nothing listens: not an error
-        let o = Command::new("lsof").args(["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pn"]).output().context("run lsof")?;
-        Ok(parse_lsof(&String::from_utf8_lossy(&o.stdout)))
+        let o = run_tool(Command::new("lsof").args(["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pn"])).context("run lsof")?;
+        Ok(parse_lsof(&o.stdout_lossy()))
     }
 }
 
@@ -113,7 +118,8 @@ pub fn listening(roots: &[u32]) -> Result<Vec<Port>> {
     if roots.is_empty() {
         return Ok(Vec::new());
     }
-    let mine = procs::with_descendants(roots);
+    // the table is shared with the other pollers (memory, lag) instead of dumped again here
+    let mine = procs::with_descendants_in(&procs::snapshot_cached(std::time::Duration::from_secs(2)), roots);
     let mut v: Vec<Port> = all_listening()?.into_iter().filter(|p| mine.contains(&p.pid)).collect();
     v.sort();
     let mut seen = HashSet::new();

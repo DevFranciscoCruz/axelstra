@@ -253,6 +253,9 @@ enum Cmd {
         /// Allow the cards' `acceptance` commands to run (they come from the repository: only for a repo you trust)
         #[arg(long)]
         trust_acceptance: bool,
+        /// Non-interactive confirmation for cards with a bypass permission_mode: the pin printed by `--trust-acceptance`
+        #[arg(long, requires = "trust_acceptance")]
+        confirm_bypass: Option<String>,
         /// Agent command, `{prompt_file}` is substituted. Everything after `--`.
         #[arg(last = true)]
         agent: Vec<String>,
@@ -377,6 +380,7 @@ mod dispatch;
 mod hook;
 mod lock;
 mod orchcmd;
+mod startconfirm;
 mod statusline;
 
 fn main() -> Result<()> {
@@ -393,10 +397,16 @@ fn main() -> Result<()> {
                     "{} panic: {info}\n",
                     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
                 );
+                // bounded: past 256 KiB the old log becomes crash.log.1 (replacing the previous one), so a panic loop
+                // cannot fill the disk
+                let log = proto::data_dir().join("crash.log");
+                if std::fs::metadata(&log).is_ok_and(|m| m.len() > 256 << 10) {
+                    let _ = std::fs::rename(&log, log.with_file_name("crash.log.1"));
+                }
                 let _ = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(proto::data_dir().join("crash.log"))
+                    .open(&log)
                     .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
             }));
             let token = proto::load_or_create_token()?;
@@ -461,7 +471,7 @@ fn main() -> Result<()> {
                 println!("{id}  agent={} deps={:?}", c.meta.agent, c.meta.depends_on);
             }
         }
-        Cmd::Start { repo, name, max, wt_root, daemon, trust_acceptance, agent } => {
+        Cmd::Start { repo, name, max, wt_root, daemon, trust_acceptance, confirm_bypass, agent } => {
             let repo = axelstra_core::git::canon(&repo)?;
             let wt_root = wt_root.unwrap_or_else(|| repo.parent().unwrap().join(".axelstra-wt"));
             let opts = orch::Options {
@@ -473,7 +483,7 @@ fn main() -> Result<()> {
                 poll_ms: 500,
                 runner: if daemon { Some(std::sync::Arc::new(axelstra_daemon::runner::DaemonRunner::connect_default()?)) } else { None },
             };
-            let r = if trust_acceptance { orch::run_trusted(&opts)? } else { orch::run(&opts)? };
+            let r = if trust_acceptance { startconfirm::run(&opts, confirm_bypass.as_deref())? } else { orch::run(&opts)? };
             println!("integration: {} ({})", r.integ_branch, r.integ_wt.display());
             println!("merged: {:?}", r.merged);
             for (id, why) in &r.failed {

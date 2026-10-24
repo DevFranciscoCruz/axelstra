@@ -1,7 +1,9 @@
+import { Loading } from "./Loading";
 import { For, Show, createResource } from "solid-js";
 import { gitShow } from "./api";
 import { parseDiff } from "./DiffView";
 import { openCommit, selectedWorktree } from "./store";
+import { P } from "./strings.panels";
 
 type FileDiff = { path: string; text: string };
 
@@ -22,7 +24,7 @@ function splitFiles(patch: string): FileDiff[] {
 
 export function CommitView() {
   const key = () => ({ wt: selectedWorktree(), sha: openCommit()?.sha });
-  const [patch] = createResource(key, async (k) => (k.wt && k.sha ? gitShow(k.wt, k.sha) : ""));
+  const [patch, { refetch }] = createResource(key, async (k) => (k.wt && k.sha ? gitShow(k.wt, k.sha) : ""));
   const files = () => splitFiles(patch() ?? "");
 
   return (
@@ -32,17 +34,14 @@ export function CommitView() {
         <span>{openCommit()?.subject}</span>
       </div>
       <div class="diff-body">
-        <Show when={!patch.loading} fallback={<div class="placeholder">A carregar…</div>}>
-          <For each={files()} fallback={<div class="placeholder">Commit sem alterações de texto</div>}>
+        <Show when={!patch.loading} fallback={<Loading onRetry={() => void refetch()} />}>
+          <For each={files()} fallback={<div class="placeholder">{P.commitView.noText}</div>}>
             {(f) => {
               const rows = parseDiff(f.text);
               return (
                 <>
                   <div class="cfile">{f.path}</div>
-                  <Show
-                    when={rows.length > 0}
-                    fallback={<div class="empty">Sem diferenças de texto (binário ou ficheiro vazio)</div>}
-                  >
+                  <Show when={rows.length > 0} fallback={<div class="empty">{P.commitView.noDiff}</div>}>
                     <table>
                       <tbody>
                         <For each={rows}>

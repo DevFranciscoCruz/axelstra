@@ -8,6 +8,7 @@ import { For, Show, createResource, createSignal } from "solid-js";
 import { Commit, FileChange, gitCommit, gitLog, gitPr, gitPush, gitSuggest } from "./api";
 import { showMenu } from "./ContextMenu";
 import { press } from "./a11y";
+import { P } from "./strings.panels";
 import {
   guarded,
   baseRef,
@@ -26,7 +27,7 @@ import {
   rightTab,
 } from "./store";
 
-const LABEL: Record<string, string> = { M: "alterado", A: "novo", D: "apagado", U: "conflito" };
+const LABEL = P.changes.status;
 
 const split = (p: string) => {
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
@@ -97,16 +98,16 @@ export function ChangesPanel() {
   const commitOnly = async () => {
     const r = await gitCommit(selectedWorktree()!, message());
     setMessage("");
-    return `Commit ${r.sha}`;
+    return P.changes.commit(r.sha);
   };
   const doCommit = () => act(commitOnly);
-  const confirmPush = () => ask(`Enviar o branch "${branch()}" para o remote origin?`, { title: "Push", kind: "warning" });
+  const confirmPush = () => ask(P.changes.pushAsk(branch()), { title: P.changes.pushTitle, kind: "warning" });
   const doPush = async () => {
     // pushing publishes the branch to the remote: always confirm
     if (!(await confirmPush())) return;
     await act(async () => {
       await gitPush(selectedWorktree()!);
-      return `Push de ${branch()} feito`;
+      return P.changes.pushed(branch());
     });
   };
   const doCommitPush = async () => {
@@ -114,11 +115,11 @@ export function ChangesPanel() {
     await act(async () => {
       const c = await commitOnly();
       await gitPush(selectedWorktree()!);
-      return `${c} e push de ${branch()}`;
+      return P.changes.commitAndPushed(c, branch());
     });
   };
   const doPr = async () => {
-    if (!(await ask(`Criar um pull request de "${branch()}" no GitHub?`, { title: "Pull request", kind: "warning" }))) return;
+    if (!(await ask(P.changes.prAsk(branch()), { title: P.changes.prTitle, kind: "warning" }))) return;
     await act(async () => {
       const url = await gitPr(selectedWorktree()!, prTitle(), "", changesMode() === "main" ? baseRef() : undefined);
       setPrOpen(false);
@@ -150,11 +151,11 @@ export function ChangesPanel() {
 
       <div class="sc-head">
         <Button variant="secondary" size="pill" class="border-border" disabled={busy()} onClick={() => setPrOpen(!prOpen())}>
-          <Icon name="branch" size={13} /> Criar PR
+          <Icon name="branch" size={13} /> {P.changes.createPr}
         </Button>
         <span class="grow" />
         <Button variant="icon" size="icon"
-          title="Atualizar" aria-label="Atualizar"
+          title={P.changes.refresh} aria-label={P.changes.refresh}
           onClick={() => {
             void refreshChanges();
             void refetchLog();
@@ -163,11 +164,11 @@ export function ChangesPanel() {
           <Icon name="refresh" />
         </Button>
         <Button variant="icon" size="icon"
-          title="Mais ações" aria-label="Mais ações"
+          title={P.changes.moreActions} aria-label={P.changes.moreActions}
           onClick={(e) =>
             showMenu(e, [
               {
-                label: "Por consolidar (vs HEAD)",
+                label: P.changes.modeHead,
                 icon: changesMode() === "head" ? "check" : "",
                 run: () => {
                   setChangesMode("head");
@@ -175,7 +176,7 @@ export function ChangesPanel() {
                 },
               },
               {
-                label: "Todo o branch (vs principal)",
+                label: P.changes.modeMain,
                 icon: changesMode() === "main" ? "check" : "",
                 run: () => {
                   setChangesMode("main");
@@ -183,7 +184,7 @@ export function ChangesPanel() {
                 },
               },
               { separator: true },
-              { label: "Push", icon: "arrowUp", run: () => doPush() },
+              { label: P.changes.push, icon: "arrowUp", run: () => doPush() },
             ])
           }
         >
@@ -191,21 +192,21 @@ export function ChangesPanel() {
         </Button>
       </div>
       <div class="sc-branch" title={branch()}>
-        <div class="sc-name">{branch() || "(destacado)"}</div>
+        <div class="sc-name">{branch() || P.changes.detached}</div>
         <div class="sc-base"><Icon name="arrowRight" size={11} /> {base()}</div>
       </div>
 
       <Show when={prOpen()}>
         <div class="prow sc-pr">
           <Input
-            placeholder="Título do pull request"
+            placeholder={P.changes.prPlaceholder}
             value={prTitle()}
             onInput={(e) => setPrTitle(e.currentTarget.value)}
             onKeyDown={(e) => e.key === "Enter" && prTitle().trim() && void doPr()}
             ref={(el) => queueMicrotask(() => el.focus())}
           />
           <Button size="sm" disabled={busy() || !prTitle().trim()} onClick={() => void doPr()}>
-            Criar
+            {P.changes.create}
           </Button>
         </div>
       </Show>
@@ -213,7 +214,7 @@ export function ChangesPanel() {
       <div class="sc-commit">
         <div class="sc-msg">
           <Textarea
-            placeholder={suggesting() ? "A gerar mensagem…" : K("Mensagem (Ctrl+Enter para fazer commit)")}
+            placeholder={suggesting() ? P.changes.generating : K(P.changes.messagePlaceholder)}
             rows={3}
             value={message()}
             onInput={(e) => setMessage(e.currentTarget.value)}
@@ -224,28 +225,28 @@ export function ChangesPanel() {
           <Button variant="icon" size="icon"
             class={cn("absolute bottom-1.5 right-1.5 text-primary disabled:text-muted-foreground", suggesting() && "animate-pulse")}
             disabled={suggesting() || busy() || files().length === 0}
-            title={files().length === 0 ? "Sem alterações para descrever" : "Sugerir mensagem com IA (usa o claude)"}
-            aria-label="Sugerir mensagem com IA"
+            title={files().length === 0 ? P.changes.suggestNone : P.changes.suggestTip}
+            aria-label={P.changes.suggestLabel}
             onClick={() => void suggest()}
           >
             <Icon name="sparkle" size={14} />
           </Button>
         </div>
         <div class="sc-split">
-          <Button variant="secondary" size="split" class="border-border" disabled={!canCommit()} title={canCommit() ? K("Commit (Ctrl+Enter)") : files().length === 0 ? "Sem alterações para commit" : message().trim() ? "A trabalhar…" : "Escreve uma mensagem"} onClick={() => void doCommit()}>
-            <Icon name="check" /> Commit
+          <Button variant="secondary" size="split" class="border-border" disabled={!canCommit()} title={canCommit() ? K(P.changes.commitTip) : files().length === 0 ? P.changes.commitNone : message().trim() ? P.changes.working : P.changes.writeMessage} onClick={() => void doCommit()}>
+            <Icon name="check" /> {P.changes.commitLabel}
           </Button>
           <Button
             variant="secondary"
             size="splitEnd"
             class="border-border"
             disabled={busy()}
-            title="Mais opções de commit" aria-label="Mais opções de commit"
+            title={P.changes.moreCommit} aria-label={P.changes.moreCommit}
             onClick={(e) =>
               showMenu(e, [
-                { label: "Commit", icon: "check", disabled: !canCommit(), run: () => doCommit() },
-                { label: "Commit e Push", icon: "arrowUp", disabled: !canCommit(), run: () => doCommitPush() },
-                { label: "Push", icon: "arrowUp", run: () => doPush() },
+                { label: P.changes.commitLabel, icon: "check", disabled: !canCommit(), run: () => doCommit() },
+                { label: P.changes.commitAndPush, icon: "arrowUp", disabled: !canCommit(), run: () => doCommitPush() },
+                { label: P.changes.push, icon: "arrowUp", run: () => doPush() },
               ])
             }
           >
@@ -266,12 +267,12 @@ export function ChangesPanel() {
       <div class="sc-body">
         <div class="sc-title" {...press(() => setShowChanges(!showChanges()))} aria-expanded={showChanges()}>
           <span class="chev"><Icon name={showChanges() ? "chevDown" : "chevRight"} /></span>
-          <span>ALTERAÇÕES</span>
+          <span>{P.changes.changesHead}</span>
           <span class="sc-count">{files().length}</span>
         </div>
         <Show when={showChanges()}>
           <div class="sc-files">
-            <For each={files()} fallback={<div class="empty">Sem alterações</div>}>
+            <For each={files()} fallback={<div class="empty">{P.changes.noChanges}</div>}>
               {(f: FileChange) => {
                 const [dir, name] = split(f.path);
                 return (
@@ -281,7 +282,7 @@ export function ChangesPanel() {
                       <span class="fn">{name}</span>
                       <span class="fd">{dir}</span>
                     </span>
-                    <Show when={!f.binary} fallback={<span class="fbin">bin</span>}>
+                    <Show when={!f.binary} fallback={<span class="fbin">{P.changes.bin}</span>}>
                       <span class="nums">
                         <Show when={f.added > 0}>
                           <span class="add">+{f.added}</span>
@@ -301,7 +302,7 @@ export function ChangesPanel() {
 
         <div class="sc-title" {...press(() => setShowCommits(!showCommits()))} aria-expanded={showCommits()}>
           <span class="chev"><Icon name={showCommits() ? "chevDown" : "chevRight"} /></span>
-          <span>COMMITS</span>
+          <span>{P.changes.commitsHead}</span>
           <span class="sc-count">{log()?.length ?? 0}</span>
         </div>
         <Show when={showCommits()}>
@@ -309,7 +310,7 @@ export function ChangesPanel() {
             <Show when={log.error}>
               <div class="empty">{String(log.error)}</div>
             </Show>
-            <For each={log() ?? []} fallback={<Show when={!log.loading}><div class="empty">{commitsBase() ? `Nada à frente de ${commitsBase()}` : "Sem commits"}</div></Show>}>
+            <For each={log() ?? []} fallback={<Show when={!log.loading}><div class="empty">{commitsBase() ? P.changes.nothingAhead(commitsBase()!) : P.changes.noCommits}</div></Show>}>
               {(c) => (
                 <div class="commit" classList={{ active: openCommit()?.sha === c.sha }} {...press(() => openCommitView(c))} title={c.subject}>
                   <div class="csubject">{c.subject}</div>
