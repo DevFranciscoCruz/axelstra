@@ -1,19 +1,8 @@
-/** Keyboard shortcuts the cheat sheet (?) lists: [keys, what it does] */
-export const SHORTCUTS: [string, string][] = [
-  ["Ctrl+K", "Paleta de comandos"],
-  ["Ctrl+,", "Definições"],
-  ["?", "Esta lista de atalhos"],
-  ["Ctrl+B", "Mostrar/ocultar projetos"],
-  ["Ctrl+Shift+B", "Mostrar/ocultar painel direito"],
-  ["Ctrl+Tab / Ctrl+Shift+Tab", "Separador seguinte / anterior"],
-  ["Ctrl+1 … Ctrl+9", "Ir para o separador n"],
-  ["Ctrl+Shift+T", "Reabrir o último separador fechado"],
-  ["Ctrl+J", "Ir para o próximo agente à espera de resposta"],
-  ["Ctrl+Shift+F", "Pesquisar conversas"],
-  ["Ctrl+Shift+M", "Ditado por voz"],
-  ["Duplo clique num separador", "Mudar o nome"],
-  ["Clique do meio num separador", "Fechar"],
-];
+import { cheatSheet } from "./commands";
+import { overlay } from "./store/overlay";
+
+/** Keyboard shortcuts the cheat sheet (?) lists, flat: [keys, what it does]. Built from the command registry. */
+export const SHORTCUTS: [string, string][] = cheatSheet().flatMap((g) => g.rows);
 
 /** true when a key press aimed at `el` is meant for a text field (input, editor), not for the terminal or the page */
 export const isTextTarget = (el: EventTarget | null): boolean => {
@@ -23,8 +12,9 @@ export const isTextTarget = (el: EventTarget | null): boolean => {
   return el.isContentEditable || !!el.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], .cm-editor");
 };
 
-/** a dialog or the palette is open: shortcuts that act on the page underneath must leave the keys alone */
-export const overlayOpen = (): boolean => !!document.querySelector('[role="dialog"], .pal-back');
+/** a dialog or the palette is open: shortcuts that act on the page underneath must leave the keys alone.
+ *  The shell's overlay signal answers first; the DOM check still covers what is not in it (confirm, the palette, sidebar dialogs). */
+export const overlayOpen = (): boolean => overlay() !== null || !!document.querySelector('[role="dialog"], .pal-back');
 
 /** the Mac keeps its shortcuts on Cmd where Windows and Linux use Ctrl */
 export const isMac = (platform: string = typeof navigator === "undefined" ? "" : navigator.platform || navigator.userAgent): boolean => /mac|iphone|ipad/i.test(platform);

@@ -1,4 +1,6 @@
+import { P } from "./strings.panels";
 import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import { createPoller } from "./poller";
 import { Icon } from "./Icon";
 import { SessionInfo, SessionRes, killSession, removeSession, sessionResources, workerLimits } from "./api";
 import { ask } from "./Confirm";
@@ -7,7 +9,7 @@ import { Badge, Button, Input } from "./ui";
 import { openSession, refreshSessions, sessionState, sessions, setShowOrchestra } from "./store";
 
 const baseName = (p?: string) => (p ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
-const STATE: Record<string, string> = { working: "a trabalhar", waiting: "espera resposta", idle: "parado", done: "terminou" };
+const STATE = P.orchestra.state;
 
 /** coordinators and the workers they started, with their state: the picture behind /axelstration */
 export function Orchestra() {
@@ -35,8 +37,8 @@ export function Orchestra() {
   };
   onMount(() => {
     void pollRes();
-    const t = setInterval(() => void pollRes(), 3000);
-    onCleanup(() => clearInterval(t));
+    const t = createPoller(pollRes, 3000);
+    onCleanup(t.stop);
   });
   const mb = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.round(n / 1024 ** 2)} MB`);
 
@@ -49,7 +51,7 @@ export function Orchestra() {
   const loners = () => sessions().filter((s) => s.meta?.kind === "agent" && !s.meta?.parent && kids(s.id).length === 0);
   const since = (ms?: number) => {
     const m = Math.floor((ms ?? 0) / 60000);
-    return m < 1 ? "" : m < 60 ? ` há ${m} min` : ` há ${Math.floor(m / 60)} h`;
+    return P.orchestra.since(m);
   };
   const workerCount =() => sessions().filter((s) => s.meta?.worker && s.running).length;
 
@@ -60,7 +62,7 @@ export function Orchestra() {
     openSession(wt, s.id);
   };
   const stop = async (s: SessionInfo) => {
-    if (!(await ask(`Parar "${s.label ?? `Sessão ${s.id}`}"? O que ele estiver a fazer é terminado.`, { title: "Parar worker", kind: "warning", okLabel: "Parar", cancelLabel: "Cancelar" }))) return;
+    if (!(await ask(P.orchestra.stopAsk(s.label ?? P.orchestra.session(s.id)), { title: P.orchestra.stopTitle, kind: "warning", okLabel: P.orchestra.stop, cancelLabel: P.orchestra.cancel }))) return;
     if (s.running) await killSession(s.id).catch(() => 0);
     await removeSession(s.id).catch(() => 0);
     await refreshSessions();
@@ -81,28 +83,28 @@ export function Orchestra() {
           <span class="dot" classList={{ work: st() === "working", wait: st() === "waiting", on: st() === "idle" }} />
           <span class="orch-name">
             {props.depth > 0 ? <Icon name="subArrow" size={11} inline /> : null}
-            {props.s.label ?? `Sessão ${props.s.id}`}
+            {props.s.label ?? P.orchestra.session(props.s.id)}
           </span>
           <span class="auto-note">
-            {baseName(props.s.meta?.worktree)} · {props.s.escalated ? "pediu ajuda" : STATE[st()]}
+            {baseName(props.s.meta?.worktree)} · {props.s.escalated ? P.orchestra.escalated : STATE[st()]}
             {st() === "working" ? "" : since(props.s.idle_ms)}
           </span>
           <Show when={res()[props.s.id]}>
-            <span class="auto-note" title="Memória e CPU de tudo o que esta sessão corre (do computador inteiro)">
+            <span class="auto-note" title={P.orchestra.resTip}>
               {mb(res()[props.s.id].mem)}
               {res()[props.s.id].cpu !== null ? ` · ${res()[props.s.id].cpu!.toFixed(res()[props.s.id].cpu! < 10 ? 1 : 0)}% CPU` : ""}
             </span>
           </Show>
           <Show when={(props.s.unread ?? 0) > 0}>
-            <Badge variant="quiet" title="Mensagens por ler"><Icon name="mail" size={11} inline /> {props.s.unread}</Badge>
+            <Badge variant="quiet" title={P.orchestra.unread}><Icon name="mail" size={11} inline /> {props.s.unread}</Badge>
           </Show>
           <span class="grow" />
           <Button size="sm" onClick={() => open(props.s)} disabled={!props.s.meta?.worktree}>
-            Abrir
+            {P.orchestra.open}
           </Button>
           <Show when={props.depth > 0}>
             <Button size="sm" variant="destructive" class="danger" onClick={() => void stop(props.s)}>
-              Parar
+              {P.orchestra.stop}
             </Button>
           </Show>
         </div>
@@ -112,10 +114,10 @@ export function Orchestra() {
   };
 
   return (
-    <Modal label="Orquestração" onClose={() => setShowOrchestra(false)} class="modal auto">
-      <div class="m-title" style={{ "font-weight": "600" }}>Orquestração</div>
+    <Modal label={P.orchestra.title} onClose={() => setShowOrchestra(false)} class="modal auto">
+      <div class="m-title" style={{ "font-weight": "600" }}>{P.orchestra.title}</div>
       <div class="orch-head auto-note">
-        {workerCount()} {workerCount() === 1 ? "worker a correr" : "workers a correr"} · limite
+        {P.orchestra.running(workerCount())}{P.orchestra.limit}
         <Input
           class="orch-limit w-16"
           type="number"
@@ -131,12 +133,12 @@ export function Orchestra() {
         <For each={roots()}>{(s) => <Row s={s} depth={0} />}</For>
         <For each={orphans()}>{(s) => <Row s={s} depth={1} />}</For>
         <Show when={loners().length > 0}>
-          <div class="auto-note" style={{ "margin-top": "10px" }}>Outros agentes</div>
+          <div class="auto-note" style={{ "margin-top": "10px" }}>{P.orchestra.others}</div>
           <For each={loners()}>{(s) => <Row s={s} depth={0} />}</For>
         </Show>
         <Show when={roots().length === 0 && orphans().length === 0 && loners().length === 0}>
           <div class="auto-note">
-            Ainda não há workers. Pede a um agente (Claude, Codex…) para usar <b>/axelstration</b> e eles aparecem aqui, por baixo de quem os lançou.
+            {P.orchestra.emptyPre}<b>/axelstration</b>{P.orchestra.emptyPost}
           </div>
         </Show>
       </div>

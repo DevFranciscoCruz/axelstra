@@ -41,8 +41,23 @@ export const showMenu = (e: MouseEvent, items: MenuItem[]) => {
 /** Menu at a fixed point (dropdowns open under their button). */
 export const showMenuAt = (x: number, y: number, items: MenuItem[], minWidth?: number) => openMenu({ x, y, items, minWidth });
 
+/** the menu key or Shift+F10: the keyboard way to ask for a context menu */
+export const isMenuKey = (e: { key: string; shiftKey: boolean }) => e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey);
+
+/**
+ * Opens `items()` under the focused element when the menu key is pressed. Spread on a focusable row: `onKeyDown={menuKey(() => items)}`.
+ * Returns true when the key was taken, so a row handler can chain its own keys.
+ */
+export const menuKey = (items: () => MenuItem[]) => (e: KeyboardEvent & { currentTarget: HTMLElement }) => {
+  if (!isMenuKey(e) || e.target !== e.currentTarget) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  const r = e.currentTarget.getBoundingClientRect();
+  showMenuAt(r.left + 24, r.bottom, items());
+  return true;
+};
+
 /** Dropdown list under a button (a Select): same menu, announced as a listbox of options; `onClose` runs however it ends. */
-export const showListboxAt = (x: number, y: number, items: MenuItem[], minWidth: number, onClose: () => void) => openMenu({ x, y, items, minWidth, listbox: true, onClose });
 
 /** Mount once near the app root. Esc and Tab are taken here (window level) so the dialog under the menu keeps its own. */
 export function ContextMenu() {

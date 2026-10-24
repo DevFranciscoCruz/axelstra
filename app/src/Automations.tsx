@@ -1,20 +1,20 @@
 import { For, Show, createResource, createSignal } from "solid-js";
 import { Icon } from "./Icon";
 import { Automation, agentOptions, agentWarning, agentsList, deleteAutomation, listAutomations, runAutomation, saveAutomation } from "./api";
-import { Select } from "./Select";
 import { Modal } from "./Modal";
 import { ask, askDiscard } from "./Confirm";
-import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations, showNotice } from "./store";
+import { projects, refreshProjects, refreshSessions, selectWorktree, setError, setShowAutomations, showNotice, toast } from "./store";
 import { S } from "./strings";
-import { Button, Field, Input, Textarea } from "./ui";
+import { P } from "./strings.panels";
+import { Button, Field, Input, Select, Textarea } from "./ui";
 
-const DAYS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
+const DAYS = P.automations.days;
 
 const describe = (a: Automation) => {
   const s = a.schedule;
-  if (s.kind === "interval") return `a cada ${s.minutes} min`;
-  if (s.kind === "daily") return `todos os dias às ${s.time}`;
-  return `${DAYS[s.day]} às ${s.time}`;
+  if (s.kind === "interval") return P.automations.everyMin(s.minutes);
+  if (s.kind === "daily") return P.automations.daily(s.time);
+  return P.automations.weekly(DAYS[s.day], s.time);
 };
 
 const blank = (project: string): Automation => ({
@@ -41,7 +41,7 @@ export function Automations() {
   };
   const dirty = () => draft() !== null && JSON.stringify(draft()) !== base();
   const leaveDraft = async () => {
-    if (dirty() && !(await askDiscard("O rascunho tem alterações por guardar."))) return;
+    if (dirty() && !(await askDiscard(P.automations.unsavedDraft))) return;
     setDraft(null);
   };
   const [msg, setMsg] = createSignal("");
@@ -65,9 +65,7 @@ export function Automations() {
     });
 
   const runNow = async (a: Automation) => {
-    const ok = await ask(`Executar "${a.name}" agora?
-
-Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horário (${describe(a)}).`, { title: "Executar agora", kind: "info", okLabel: "Executar", cancelLabel: "Cancelar" });
+    const ok = await ask(P.automations.runAsk(a.name, describe(a)), { title: P.automations.runTitle, kind: "info", okLabel: P.automations.run, cancelLabel: P.automations.cancel });
     if (ok) await doRun(a);
   };
   const doRun = (a: Automation) =>
@@ -86,11 +84,14 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
     });
 
   const remove = async (a: Automation) => {
-    const ok = await ask(`Apagar a automatização "${a.name}"?`, { title: "Apagar", kind: "warning", okLabel: "Apagar", cancelLabel: "Cancelar" });
-    if (!ok) return;
     try {
       await deleteAutomation(a.id);
-      showNotice(S.automationDeleted(a.name));
+      // the deleted object is kept: undo saves it again under the same id
+      toast({
+        text: S.automationDeleted(a.name),
+        kind: "info",
+        action: { label: P.automations.undo, run: () => void saveAutomation(a).then(() => refetch(), (e) => setError(S.deleteFailed(a.name, e))) },
+      });
       await refetch();
     } catch (e) {
       setError(S.deleteFailed(a.name, e));
@@ -98,27 +99,26 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
   };
 
   return (
-    <Modal label="Automatizações" class="modal auto" dirty={dirty()} onClose={() => (draft() ? void leaveDraft() : setShowAutomations(false))}>
+    <Modal label={P.automations.title} class="modal auto" dirty={dirty()} onClose={() => (draft() ? void leaveDraft() : setShowAutomations(false))}>
         <Show
           when={draft()}
           fallback={
             <>
               <div class="auto-head">
-                <strong>Automatizações</strong>
+                <strong>{P.automations.title}</strong>
                 <span class="grow" />
-                <Button variant="default" disabled={projects().length === 0} title={projects().length === 0 ? "Adiciona um projeto primeiro" : undefined} onClick={() => edit(blank(projects()[0].id))}>
-                  + Nova
+                <Button variant="default" disabled={projects().length === 0} title={projects().length === 0 ? P.automations.addFirst : undefined} onClick={() => edit(blank(projects()[0].id))}>
+                  {P.automations.new}
                 </Button>
-                <Button onClick={() => setShowAutomations(false)}>Fechar</Button>
+                <Button onClick={() => setShowAutomations(false)}>{P.automations.close}</Button>
               </div>
               <div class="auto-note">
-                Cada execução abre um worktree novo com o agente já a trabalhar no pedido. Só corre com o Axelstra aberto
-                (o daemon); execuções perdidas são ignoradas.
+                {P.automations.note}
               </div>
               <div class="auto-list">
                 <For each={list() ?? []} fallback={
                   <div class="placeholder empty">
-                    <div>Nenhuma automatização</div>
+                    <div>{P.automations.none}</div>
                   </div>
                 }>
                   {(a) => (
@@ -129,16 +129,16 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
                           {projectName(a.project)} · {a.agent} · {describe(a)}
                         </div>
                       </div>
-                      <Button size="icon" variant="ghost" title="Executar agora (fora do horário)" aria-label={`Executar agora: ${a.name}`} onClick={() => void runNow(a)}>
+                      <Button size="icon" variant="ghost" title={P.automations.runNowTip} aria-label={P.automations.runNowLabel(a.name)} onClick={() => void runNow(a)}>
                         <Icon name="bolt" />
                       </Button>
-                      <Button size="icon" variant="ghost" title={a.enabled ? "Desativar o agendamento" : "Ativar o agendamento"} aria-label={`${a.enabled ? "Desativar" : "Ativar"} o agendamento: ${a.name}`} onClick={() => void toggle(a)}>
+                      <Button size="icon" variant="ghost" title={a.enabled ? P.automations.disableTip : P.automations.enableTip} aria-label={P.automations.toggleLabel(a.enabled, a.name)} onClick={() => void toggle(a)}>
                         <Icon name={a.enabled ? "pause" : "play"} />
                       </Button>
-                      <Button size="icon" variant="ghost" title="Editar" aria-label="Editar" onClick={() => edit({ ...a })}>
+                      <Button size="icon" variant="ghost" title={P.automations.edit} aria-label={P.automations.edit} onClick={() => edit({ ...a })}>
                         <Icon name="pencil" />
                       </Button>
-                      <Button size="icon" variant="ghost" class="text-destructive" title="Apagar automatização" aria-label="Apagar automatização" onClick={() => void remove(a)}>
+                      <Button size="icon" variant="ghost" class="text-destructive" title={P.automations.delete} aria-label={P.automations.delete} onClick={() => void remove(a)}>
                         <Icon name="x" />
                       </Button>
                     </div>
@@ -152,30 +152,30 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
           {(d) => (
             <>
               <div class="auto-head">
-                <strong>{d().id ? "Editar automatização" : "Nova automatização"}</strong>
+                <strong>{d().id ? P.automations.editTitle : P.automations.newTitle}</strong>
               </div>
               <Input
                 class="m-title"
-                placeholder="Nome (ex.: Revisão da manhã)"
+                placeholder={P.automations.namePlaceholder}
                 value={d().name}
                 onInput={(e) => setDraft({ ...d(), name: e.currentTarget.value })}
                 ref={(el) => queueMicrotask(() => el.focus())}
               />
               <Textarea
                 class="m-body"
-                placeholder="O que o agente deve fazer em cada execução…"
+                placeholder={P.automations.promptPlaceholder}
                 value={d().prompt}
                 onInput={(e) => setDraft({ ...d(), prompt: e.currentTarget.value })}
               />
               <div class="m-row">
-                <Field label="Projeto">
+                <Field label={P.automations.project}>
                   <Select
                     value={d().project}
                     options={projects().map((p) => ({ value: p.id, label: p.name }))}
                     onChange={(v) => setDraft({ ...d(), project: v })}
                   />
                 </Field>
-                <Field label="Agente">
+                <Field label={P.automations.agent}>
                   <Select
                     value={d().agent}
                     iconOnly
@@ -186,13 +186,13 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
                 </Field>
               </div>
               <div class="m-row">
-                <Field label="Repetição">
+                <Field label={P.automations.repeat}>
                   <Select
                     value={d().schedule.kind}
                     options={[
-                      { value: "interval", label: "A cada N minutos" },
-                      { value: "daily", label: "Todos os dias" },
-                      { value: "weekly", label: "Todas as semanas" },
+                      { value: "interval", label: P.automations.kinds.interval },
+                      { value: "daily", label: P.automations.kinds.daily },
+                      { value: "weekly", label: P.automations.kinds.weekly },
                     ]}
                     onChange={(k) =>
                       setDraft({
@@ -204,35 +204,41 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
                 </Field>
                 {(() => {
                   const s = () => d().schedule;
+                  // each field narrows the schedule by its kind: no casts
+                  const interval = () => { const x = s(); return x.kind === "interval" ? x : undefined; };
+                  const weekly = () => { const x = s(); return x.kind === "weekly" ? x : undefined; };
+                  const timed = () => { const x = s(); return x.kind === "interval" ? undefined : x; };
                   return (
                     <>
-                      <Show when={s().kind === "interval"}>
-                        <Field label="Minutos">
-                          <Input
-                            type="number"
-                            min="5"
-                            value={(s() as { minutes: number }).minutes}
-                            onInput={(e) => setDraft({ ...d(), schedule: { kind: "interval", minutes: Math.max(5, parseInt(e.currentTarget.value) || 5) } })}
-                          />
-                        </Field>
+                      <Show when={interval()}>
+                        {(x) => (
+                          <Field label={P.automations.minutes}>
+                            <Input
+                              type="number"
+                              min="5"
+                              value={x().minutes}
+                              onInput={(e) => setDraft({ ...d(), schedule: { kind: "interval", minutes: Math.max(5, parseInt(e.currentTarget.value) || 5) } })}
+                            />
+                          </Field>
+                        )}
                       </Show>
-                      <Show when={s().kind === "weekly"}>
-                        <Field label="Dia">
-                          <Select
-                            value={String((s() as { day: number }).day)}
-                            options={DAYS.map((n, idx) => ({ value: String(idx), label: n }))}
-                            onChange={(v) => setDraft({ ...d(), schedule: { ...(s() as { kind: "weekly"; day: number; time: string }), day: parseInt(v) } })}
-                          />
-                        </Field>
+                      <Show when={weekly()}>
+                        {(x) => (
+                          <Field label={P.automations.day}>
+                            <Select
+                              value={String(x().day)}
+                              options={DAYS.map((n, idx) => ({ value: String(idx), label: n }))}
+                              onChange={(v) => setDraft({ ...d(), schedule: { ...x(), day: parseInt(v) } })}
+                            />
+                          </Field>
+                        )}
                       </Show>
-                      <Show when={s().kind !== "interval"}>
-                        <Field label="Hora">
-                          <Input
-                            type="time"
-                            value={(s() as { time: string }).time}
-                            onInput={(e) => setDraft({ ...d(), schedule: { ...(s() as { kind: "daily"; time: string }), time: e.currentTarget.value } })}
-                          />
-                        </Field>
+                      <Show when={timed()}>
+                        {(x) => (
+                          <Field label={P.automations.time}>
+                            <Input type="time" value={x().time} onInput={(e) => setDraft({ ...d(), schedule: { ...x(), time: e.currentTarget.value } })} />
+                          </Field>
+                        )}
                       </Show>
                     </>
                   );
@@ -240,9 +246,9 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
               </div>
               <div class="m-actions">
                 <span class="cmt-msg grow" role="status" aria-live="polite">{msg()}</span>
-                <Button onClick={() => void leaveDraft()}>Cancelar</Button>
+                <Button onClick={() => void leaveDraft()}>{P.automations.cancel}</Button>
                 <Button variant="default" disabled={!d().name.trim() || !d().prompt.trim()} onClick={() => void save()}>
-                  Guardar
+                  {P.automations.save}
                 </Button>
               </div>
             </>

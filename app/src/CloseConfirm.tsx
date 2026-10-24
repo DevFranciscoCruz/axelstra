@@ -1,27 +1,14 @@
+import { count, plural } from "./strings";
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Modal } from "./Modal";
 import { sessions } from "./store";
 import { Button, CheckboxField } from "./ui";
+import { createPersistedFlag } from "./persist";
 
-const KEY = "axelstra.confirmClose";
-const wanted = () => {
-  try {
-    return localStorage.getItem(KEY) !== "0";
-  } catch {
-    return true;
-  }
-};
-
-const KEEP = "axelstra.keepBackground";
-const keepWanted = () => {
-  try {
-    return localStorage.getItem(KEEP) === "1";
-  } catch {
-    return false;
-  }
-};
+const [wanted, setWanted] = createPersistedFlag("axelstra.confirmClose", true);
+const [keepWanted, setKeepWanted] = createPersistedFlag("axelstra.keepBackground", false);
 const quit = (keep = keepWanted()) => void invoke("app_quit", { keep });
 
 /** the host cancels every window close and asks here first; the terminals live in the daemon and survive */
@@ -39,12 +26,8 @@ export function CloseConfirm() {
   });
   const running = () => sessions().filter((s) => s.running).length;
   const confirm = () => {
-    try {
-      if (skip()) localStorage.setItem(KEY, "0");
-      localStorage.setItem(KEEP, keep() ? "1" : "0");
-    } catch {
-      /* preference only */
-    }
+    if (skip()) setWanted(false);
+    setKeepWanted(keep());
     quit(keep());
   };
   return (
@@ -55,8 +38,8 @@ export function CloseConfirm() {
           {running() === 0
             ? "Não há sessões em execução."
             : keep()
-              ? `${running()} ${running() === 1 ? "sessão continua" : "sessões continuam"} a correr em segundo plano (e consomem recursos) até voltar a abrir a aplicação.`
-              : `${running()} ${running() === 1 ? "sessão é fechada" : "sessões são fechadas"} e nada fica a consumir. ${running() === 1 ? "Volta" : "Voltam"} quando abrir a aplicação outra vez; os agentes retomam a conversa.`}
+              ? `${count(running(), "sessão continua", "sessões continuam")} a correr em segundo plano (e consomem recursos) até voltar a abrir a aplicação.`
+              : `${count(running(), "sessão é fechada", "sessões são fechadas")} e nada fica a consumir. ${plural(running(), "Volta", "Voltam")} quando abrir a aplicação outra vez; os agentes retomam a conversa.`}
         </div>
         <CheckboxField checked={keep()} onChange={setKeep}>Manter sessões e automatizações a correr em segundo plano</CheckboxField>
         <CheckboxField checked={skip()} onChange={setSkip}>Não perguntar novamente</CheckboxField>

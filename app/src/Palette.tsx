@@ -1,21 +1,31 @@
+import "./shell.css";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { moveIndex } from "./a11y";
 import { Modal } from "./Modal";
-import { findWorktree, projects, selectWorktree, selectedWorktree, setRightTab, setShowKanban } from "./store";
+import { createPersisted, isStringArray } from "./persist";
+import { pushRecent, rank } from "./paletteLogic";
+import { projects, selectWorktree } from "./store";
+import { S } from "./strings";
 import { Input } from "./ui";
 
-export type PaletteAction = { label: string; hint?: string; run: () => void };
+export type PaletteAction = { id?: string; label: string; hint?: string; run: () => void };
 
-type Item = { label: string; hint: string; run: () => void };
+type Item = { id: string; label: string; hint: string; run: () => void };
 
 /** more than this many matches is noise; typing narrows it */
 const MAX_SHOWN = 200;
 
-/** Ctrl/Cmd+K: jump to any worktree or run an action from one search box */
+const [recents, setRecents] = createPersisted<string[]>("axelstra.palette.recents", isStringArray, []);
+
+/** Ctrl/Cmd+K: jump to any worktree or run a command from one search box */
 export function Palette(props: { actions: () => PaletteAction[] }) {
   const [open, setOpen] = createSignal(false);
   const [q, setQ] = createSignal("");
   const [sel, setSel] = createSignal(0);
+  // Enter on an empty result list says so instead of doing nothing
+  const [nothing, setNothing] = createSignal(false);
+  // the pointer selects a row only when it moves: rows sliding under a still pointer (scrolling, arrowing) do not
+  let lastPoint = { x: -1, y: -1 };
 
   onMount(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -24,6 +34,7 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
         e.stopPropagation();
         setQ("");
         setSel(0);
+        setNothing(false);
         setOpen(!open());
       }
     };
@@ -33,33 +44,22 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
   });
 
   const items = createMemo<Item[]>(() => {
-    const out: Item[] = props.actions().map((a) => ({ label: a.label, hint: a.hint ?? "ação", run: a.run }));
-    // panels and the board belong to a worktree: offered only when one is open (global entries come from `actions`)
-    if (findWorktree(selectedWorktree())) {
-      out.push(
-        { label: "Ficheiros", hint: "painel", run: () => setRightTab("files") },
-        { label: "Alterações", hint: "painel", run: () => setRightTab("changes") },
-        { label: "PRs e problemas", hint: "painel", run: () => setRightTab("pulls") },
-        { label: "Kanban", hint: "vista", run: () => setShowKanban(true) },
-      );
-    }
+    const out: Item[] = props.actions().map((a) => ({ id: a.id ?? a.label, label: a.label, hint: a.hint ?? S.paletteAction, run: a.run }));
     for (const p of projects()) {
       for (const w of p.worktrees) {
-        const branch = w.is_main ? (p.default_branch ?? "main") : (w.branch ?? "(destacado)");
-        out.push({ label: `${p.name} / ${branch}`, hint: "worktree", run: () => selectWorktree(w.path) });
+        const branch = w.is_main ? (p.default_branch ?? "main") : (w.branch ?? S.detached);
+        out.push({ id: `wt:${w.path}`, label: `${p.name} / ${branch}`, hint: "worktree", run: () => selectWorktree(w.path) });
       }
     }
     return out;
   });
 
-  const shown = createMemo(() => {
-    const words = q().toLowerCase().split(/\s+/).filter(Boolean);
-    return items().filter((i) => words.every((w) => i.label.toLowerCase().includes(w))).slice(0, MAX_SHOWN);
-  });
+  const shown = createMemo(() => rank(items(), q(), recents(), MAX_SHOWN));
 
   createEffect(() => {
     shown();
     setSel(0);
+    setNothing(false);
   });
   // keep the highlighted row visible while arrowing through a long list
   createEffect(() => {
@@ -68,22 +68,27 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
   });
 
   const choose = (i: Item | undefined) => {
+    if (!i) {
+      setNothing(true);
+      return;
+    }
     setOpen(false);
-    i?.run();
+    setRecents((r) => pushRecent(r, i.id));
+    i.run();
   };
 
   // a modal dialog: Esc closes only this one (the dialog underneath stays), Tab stays inside, focus goes back on close
   return (
     <Show when={open()}>
-      <Modal label="Paleta de comandos" onClose={() => setOpen(false)} backClass="pal-back" class="pal">
+      <Modal label={S.paletteTitle} onClose={() => setOpen(false)} backClass="pal-back" class="pal">
         <Input
           class="pal-input"
           role="combobox"
           aria-expanded="true"
           aria-controls="pal-list"
           aria-activedescendant={shown().length ? `pal-${sel()}` : undefined}
-          aria-label="Paleta de comandos"
-          placeholder="Ir para worktree ou executar ação…"
+          aria-label={S.paletteTitle}
+          placeholder={S.palettePlaceholder}
           value={q()}
           onInput={(e) => setQ(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -96,16 +101,29 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
           }}
           ref={(el) => queueMicrotask(() => el.focus())}
         />
-        <div class="pal-list" id="pal-list" role="listbox" aria-label="Resultados">
-          <For each={shown()} fallback={<div class="pal-empty">Nada encontrado</div>}>
+        <div class="pal-list" id="pal-list" role="listbox" aria-label={S.paletteResults}>
+          <For each={shown()} fallback={<div class="pal-empty" role="status" classList={{ "text-destructive": nothing() }}>{nothing() ? S.paletteNoMatch(q()) : S.paletteEmpty}</div>}>
             {(i, idx) => (
-              <div class="pal-item" id={`pal-${idx()}`} role="option" aria-selected={idx() === sel()} classList={{ on: idx() === sel() }} onMouseEnter={() => setSel(idx())} onClick={() => choose(i)}>
+              <div
+                class="pal-item"
+                id={`pal-${idx()}`}
+                role="option"
+                aria-selected={idx() === sel()}
+                classList={{ on: idx() === sel() }}
+                onMouseMove={(e) => {
+                  if (e.clientX === lastPoint.x && e.clientY === lastPoint.y) return;
+                  lastPoint = { x: e.clientX, y: e.clientY };
+                  setSel(idx());
+                }}
+                onClick={() => choose(i)}
+              >
                 <span>{i.label}</span>
                 <span class="pal-hint">{i.hint}</span>
               </div>
             )}
           </For>
         </div>
+        <div class="pal-foot" aria-hidden="true">{S.paletteFoot}</div>
       </Modal>
     </Show>
   );

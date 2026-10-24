@@ -1,11 +1,13 @@
 import type { JSX } from "solid-js";
 
-/** Makes a clickable div/span reachable and operable from the keyboard. */
-export const press = (fn: (e: Event) => void, role: "button" | "tab" | "option" = "button"): JSX.HTMLAttributes<any> => ({
+/** Makes a clickable div/span reachable and operable from the keyboard. `extra` sees every key first (a row's own shortcuts, its menu key) so an explicit onKeyDown does not replace Enter/Space. */
+export const press = (fn: (e: Event) => void, role: "button" | "tab" | "option" = "button", extra?: (e: KeyboardEvent & { currentTarget: HTMLElement }) => void): Omit<JSX.HTMLAttributes<HTMLElement>, "ref"> => ({
   role,
   tabindex: 0,
   onClick: fn,
   onKeyDown: (e) => {
+    extra?.(e);
+    if (e.defaultPrevented) return;
     if (e.target !== e.currentTarget) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
@@ -60,17 +62,4 @@ export const moveIndex = (current: number, count: number, key: string): number |
     default:
       return null;
   }
-};
-
-/** Roving focus for a `role=tablist`: arrows, Home and End move focus between the tabs (wrapping), Enter or Space then picks one.
- * Spread on the list (`onKeyDown`); give each tab `tabindex={selected ? 0 : -1}`. Pass `select` for tabs that switch as you arrow. */
-export const tabKeys = (e: KeyboardEvent & { currentTarget: HTMLElement }, select = false) => {
-  const tabs = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]'));
-  const at = tabs.indexOf(document.activeElement as HTMLElement);
-  if (at < 0) return;
-  const to = nextRadio(at, tabs.length, e.key === "ArrowUp" || e.key === "ArrowDown" ? "" : e.key);
-  if (to === null) return;
-  e.preventDefault();
-  tabs[to].focus();
-  if (select) tabs[to].click();
 };
