@@ -91,3 +91,8 @@ appears on screen and no focus is stolen, while WebView2 keeps rendering (`Page.
 screen grab). `e2e.mjs` asserts the window bounds are off-screen. Both scripts use a temp data dir, a test pipe and a
 private WebView2 profile, and kill the app's whole process tree in `finally`, also on failure. `smoke.mjs` runs only the
 daemon, no window.
+
+In hidden mode the host shows the window with `SW_SHOWNOACTIVATE` (never activated, never focused) and `e2e.mjs`
+compares `GetForegroundWindow()` before and after: if the test changed it, the run fails with "stole the focus". The
+harness only ever touches its own app process (`taskkill /T` on its pid), never the user's windows. Resize and DPI checks
+use `Browser.setWindowBounds` on the off-screen test window.

@@ -1209,6 +1209,17 @@ fn show_main_window(app: &tauri::AppHandle) {
         let _ = w.set_focusable(false);
         let _ = w.set_skip_taskbar(true);
         let _ = w.set_position(tauri::PhysicalPosition::new(-32000, -32000));
+        #[cfg(windows)]
+        if let Ok(h) = w.hwnd() {
+            // shown without activating: the foreground window of the user stays where it is
+            unsafe {
+                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
+                    h.0 as _,
+                    windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNOACTIVATE,
+                );
+            }
+            return;
+        }
     }
     let _ = w.show();
 }
