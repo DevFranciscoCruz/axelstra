@@ -206,35 +206,41 @@ Abre já um worktree novo e põe o agente a trabalhar no pedido, fora do horári
                 </Field>
                 {(() => {
                   const s = () => d().schedule;
+                  // each field narrows the schedule by its kind: no casts
+                  const interval = () => { const x = s(); return x.kind === "interval" ? x : undefined; };
+                  const weekly = () => { const x = s(); return x.kind === "weekly" ? x : undefined; };
+                  const timed = () => { const x = s(); return x.kind === "interval" ? undefined : x; };
                   return (
                     <>
-                      <Show when={s().kind === "interval"}>
-                        <Field label="Minutos">
-                          <Input
-                            type="number"
-                            min="5"
-                            value={(s() as { minutes: number }).minutes}
-                            onInput={(e) => setDraft({ ...d(), schedule: { kind: "interval", minutes: Math.max(5, parseInt(e.currentTarget.value) || 5) } })}
-                          />
-                        </Field>
+                      <Show when={interval()}>
+                        {(x) => (
+                          <Field label="Minutos">
+                            <Input
+                              type="number"
+                              min="5"
+                              value={x().minutes}
+                              onInput={(e) => setDraft({ ...d(), schedule: { kind: "interval", minutes: Math.max(5, parseInt(e.currentTarget.value) || 5) } })}
+                            />
+                          </Field>
+                        )}
                       </Show>
-                      <Show when={s().kind === "weekly"}>
-                        <Field label="Dia">
-                          <Select
-                            value={String((s() as { day: number }).day)}
-                            options={DAYS.map((n, idx) => ({ value: String(idx), label: n }))}
-                            onChange={(v) => setDraft({ ...d(), schedule: { ...(s() as { kind: "weekly"; day: number; time: string }), day: parseInt(v) } })}
-                          />
-                        </Field>
+                      <Show when={weekly()}>
+                        {(x) => (
+                          <Field label="Dia">
+                            <Select
+                              value={String(x().day)}
+                              options={DAYS.map((n, idx) => ({ value: String(idx), label: n }))}
+                              onChange={(v) => setDraft({ ...d(), schedule: { ...x(), day: parseInt(v) } })}
+                            />
+                          </Field>
+                        )}
                       </Show>
-                      <Show when={s().kind !== "interval"}>
-                        <Field label="Hora">
-                          <Input
-                            type="time"
-                            value={(s() as { time: string }).time}
-                            onInput={(e) => setDraft({ ...d(), schedule: { ...(s() as { kind: "daily"; time: string }), time: e.currentTarget.value } })}
-                          />
-                        </Field>
+                      <Show when={timed()}>
+                        {(x) => (
+                          <Field label="Hora">
+                            <Input type="time" value={x().time} onInput={(e) => setDraft({ ...d(), schedule: { ...x(), time: e.currentTarget.value } })} />
+                          </Field>
+                        )}
                       </Show>
                     </>
                   );

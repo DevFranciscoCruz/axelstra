@@ -3,7 +3,7 @@ import { createPoller } from "./poller";
 import { needsTypedName, removeRisks } from "./removeRisk";
 import { ask, askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup } from "solid-js";
-import { call, getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession, dispatchOverlaps, worktreeRename, worktreeOverview, worktreeSweep, worktreeSetParent } from "./api";
+import { call, getSettings, detectPackageManagers, projectLogo, createWorktree, launchDefaultAgent, openInEditor, setProjectSetup, defaultShell, spawnSession, writeSession, removeProject, removeWorktree, killSession, removeSession, dispatchOverlaps, worktreeRename, worktreeSweep, worktreeSetParent } from "./api";
 import { groupRunning, isFinished, layout, wtKey } from "./wtGroups";
 import { Modal } from "./Modal";
 import { pickProject } from "./projectActions";
@@ -66,7 +66,11 @@ import {
   openSession,
   tabLabel,
   renameTab,
+  overview,
+  refreshOverview,
+  watchOverview,
 } from "./store";
+import { createPersisted, isStringArray } from "./persist";
 
 function ProjectIcon(props: { id: string; name: string; url?: string | null }) {
   const [broken, setBroken] = createSignal(false);
@@ -114,76 +118,39 @@ export function Sidebar() {
   const topic = (path: string) => dispatchTopics()[norm(path)];
   // worktrees whose agent list is folded away
   const AGENTS_KEY = "axelstra.agentsHidden";
-  const [agentsHidden, setAgentsHidden] = createSignal<ReadonlySet<string>>(
-    (() => {
-      try {
-        return new Set<string>(JSON.parse(localStorage.getItem(AGENTS_KEY) ?? "[]"));
-      } catch {
-        return new Set<string>();
-      }
-    })(),
-  );
+  const [agentsHiddenList, setAgentsHiddenList] = createPersisted(AGENTS_KEY, isStringArray, [] as string[]);
+  const agentsHidden = createMemo<ReadonlySet<string>>(() => new Set(agentsHiddenList()));
   const toggleAgents = (path: string) => {
     const next = new Set(agentsHidden());
     const k = norm(path);
     if (!next.delete(k)) next.add(k);
-    setAgentsHidden(next);
-    try {
-      localStorage.setItem(AGENTS_KEY, JSON.stringify([...next]));
-    } catch {
-      /* preference only */
-    }
+    setAgentsHiddenList([...next]);
   };
   // worktrees whose branch is merged and clean, as the daemon's overview lists them (a few seconds old at most)
-  const [mergedWts, setMergedWts] = createSignal<ReadonlySet<string>>(new Set());
-  let overviewBusy = false;
-  const loadMerged = () => {
-    if (overviewBusy) return;
-    overviewBusy = true;
-    worktreeOverview()
-      .then((ov) => setMergedWts(new Set(ov.flatMap((x) => x.merged.map((m) => wtKey(m.path))))), () => 0)
-      .finally(() => (overviewBusy = false));
-  };
+  const mergedWts = createMemo<ReadonlySet<string>>(() => new Set(overview().flatMap((x) => x.merged.map((m) => wtKey(m.path)))));
+  const loadMerged = () => void refreshOverview();
+  onCleanup(watchOverview());
   createEffect(() => {
     projects();
     loadMerged();
   });
-  const overviewPoller = createPoller(loadMerged, 15000);
-  onCleanup(overviewPoller.stop);
   // parents whose children are folded away, and the projects whose "Concluídos" group is open
   const GROUPS_KEY = "axelstra.groupsFolded";
-  const [folded, setFolded] = createSignal<ReadonlySet<string>>(
-    (() => {
-      try {
-        return new Set<string>(JSON.parse(localStorage.getItem(GROUPS_KEY) ?? "[]"));
-      } catch {
-        return new Set<string>();
-      }
-    })(),
-  );
+  const [foldedList, setFoldedList] = createPersisted(GROUPS_KEY, isStringArray, [] as string[]);
+  const folded = createMemo<ReadonlySet<string>>(() => new Set(foldedList()));
   // a whole project folded to its header
   const projKey = (id: string) => `project:${id}`;
   const projFolded = (id: string) => folded().has(projKey(id));
   const toggleProject = (id: string) => {
     const next = new Set(folded());
     if (!next.delete(projKey(id))) next.add(projKey(id));
-    setFolded(next);
-    try {
-      localStorage.setItem(GROUPS_KEY, JSON.stringify([...next]));
-    } catch {
-      /* preference only */
-    }
+    setFoldedList([...next]);
   };
   const toggleFold = (path: string) => {
     const next = new Set(folded());
     const k = wtKey(path);
     if (!next.delete(k)) next.add(k);
-    setFolded(next);
-    try {
-      localStorage.setItem(GROUPS_KEY, JSON.stringify([...next]));
-    } catch {
-      /* preference only */
-    }
+    setFoldedList([...next]);
   };
   const [doneOpen, setDoneOpen] = createSignal<ReadonlySet<string>>(new Set());
   const toggleDone = (project: string) => {
