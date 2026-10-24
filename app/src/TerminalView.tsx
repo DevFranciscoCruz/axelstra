@@ -15,7 +15,7 @@ import { findPathLinks, resolvePathLink, safeLinkUrl, type PathLink } from "./pa
 import { ask } from "./Confirm";
 import { S } from "./strings";
 import { attachWithRetry, createSizeSync, createWriteBatcher } from "./termsize";
-import { THEMES, setTermPrefs, termPrefs, zoomFont } from "./termprefs";
+import { THEMES, cursorBlinks, setTermPrefs, termPrefs, zoomFont } from "./termprefs";
 import { openFileAt, selectedWorktree, showNotice } from "./store";
 import "./termui.css";
 
@@ -64,7 +64,8 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       fontFamily: prefs.fontFamily,
       fontSize: prefs.fontSize,
       scrollback: isActive() ? SCROLLBACK : SCROLLBACK_HIDDEN,
-      cursorBlink: true,
+      cursorBlink: cursorBlinks(),
+      screenReaderMode: prefs.screenReader,
       allowProposedApi: true,
       linkHandler: { activate: (_e, uri) => void openTermUrl(uri, true), allowNonHttpProtocols: false },
       theme: THEMES[prefs.theme],
@@ -260,6 +261,7 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
       term.options.theme = THEMES[p.theme];
       term.options.fontFamily = p.fontFamily;
       term.options.fontSize = p.fontSize;
+      term.options.screenReaderMode = p.screenReader;
       requestAnimationFrame(() => {
         try {
           term.clearTextureAtlas();
