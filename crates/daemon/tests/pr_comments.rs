@@ -1,5 +1,6 @@
 //! `gh.send_comment` needs a live lead in the worktree before it asks GitHub for anything, and `git.suggest_pr` refuses
 //! a base that git could read as an option.
+mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::{json, Value};

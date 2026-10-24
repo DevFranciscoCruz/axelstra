@@ -1,5 +1,6 @@
 //! The CI-fix trigger end to end with a fake `gh` and fake sessions: opt-in, one firing per commit, cooldown, hourly
 //! maximum, main excluded, audit log, and the `triggers.*` methods of a real daemon.
+mod common;
 use axelstra_core::git::Worktree;
 use axelstra_daemon::audit::Audit;
 use axelstra_daemon::checks::{Check, Status};
