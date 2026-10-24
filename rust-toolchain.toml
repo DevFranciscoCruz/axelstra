@@ -1,0 +1,6 @@
+# Pinned so a new Rust release cannot turn `clippy -D warnings` red on its own.
+# Bump on purpose: change the channel, fix the new lints, and keep CI on the same version.
+[toolchain]
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
