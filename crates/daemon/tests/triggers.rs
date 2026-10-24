@@ -141,7 +141,7 @@ fn fires_once_per_commit_in_the_failing_worktree_only() {
     env.fail("C:/r/wt-a", "a1");
     let out = r.tick(&env);
     assert_eq!(out.len(), 1, "{out:?}");
-    assert_eq!((out[0].kind, out[0].worktree.as_str(), out[0].sha.as_str()), ("fired", "c:/r/wt-a", "a1"));
+    assert_eq!((out[0].kind, out[0].worktree.as_str(), out[0].sha.as_str()), ("fired", if cfg!(any(windows, target_os = "macos")) { "c:/r/wt-a" } else { "C:/r/wt-a" }, "a1"));
     let spawned = env.spawned.borrow().clone();
     assert_eq!(spawned.len(), 1);
     assert_eq!(spawned[0].0, "C:/r/wt-a", "started in the failing worktree, never main or the PR worktree");

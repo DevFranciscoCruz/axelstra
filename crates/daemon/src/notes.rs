@@ -548,7 +548,9 @@ mod tests {
     #[test]
     fn notes_are_found_by_the_worktree_in_their_header() {
         let root = dir("bywt");
-        let mut a = Some(json!({"project": "p-bywt", "worktree": "C:/x/Wt-A", "kind": "agent", "agent": "claude"}));
+        // Windows and macOS compare paths without case, Linux does not
+        let header = if cfg!(any(windows, target_os = "macos")) { "C:/x/Wt-A" } else { "C:/x/wt-a" };
+        let mut a = Some(json!({"project": "p-bywt", "worktree": header, "kind": "agent", "agent": "claude"}));
         let mut b = Some(json!({"project": "p-bywt", "worktree": "C:/x/wt-b", "kind": "agent", "agent": "claude"}));
         on_spawn(&root, Some("claude"), &mut a, Some("faz A"), false);
         on_spawn(&root, Some("claude"), &mut b, None, false);

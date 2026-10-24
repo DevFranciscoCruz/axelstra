@@ -891,7 +891,7 @@ mod tests {
         add_codex(
             &mut out,
             &[
-                (r"\\?\c:\WT\a/".into(), codex.clone()),
+                (if cfg!(any(windows, target_os = "macos")) { r"\\?\c:\WT\a/" } else { r"\\?\C:\wt\a/" }.into(), codex.clone()),
                 (r"C:\wt\a\nested\sub".into(), codex.clone()),
                 (r"C:\wt\ab".into(), codex.clone()),
                 (r"D:\elsewhere".into(), codex),
