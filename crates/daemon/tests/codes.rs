@@ -4,7 +4,6 @@ mod common;
 use axelstra_daemon::client::{Client, Remote};
 use axelstra_daemon::server;
 use serde_json::json;
-use std::time::Duration;
 
 #[test]
 fn a_coded_error_keeps_its_code_and_params_through_the_wire() {

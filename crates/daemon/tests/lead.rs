@@ -5,7 +5,6 @@ use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::{json, Value};
 use std::path::Path;
-use std::time::Duration;
 
 fn shell() -> (String, Vec<String>) {
     if cfg!(windows) {
