@@ -393,10 +393,16 @@ fn main() -> Result<()> {
                     "{} panic: {info}\n",
                     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
                 );
+                // bounded: past 256 KiB the old log becomes crash.log.1 (replacing the previous one), so a panic loop
+                // cannot fill the disk
+                let log = proto::data_dir().join("crash.log");
+                if std::fs::metadata(&log).is_ok_and(|m| m.len() > 256 << 10) {
+                    let _ = std::fs::rename(&log, log.with_file_name("crash.log.1"));
+                }
                 let _ = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(proto::data_dir().join("crash.log"))
+                    .open(&log)
                     .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
             }));
             let token = proto::load_or_create_token()?;

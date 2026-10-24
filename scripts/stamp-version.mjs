@@ -6,8 +6,10 @@
 //   --root <dir>                                        repo root (default: the parent of scripts/)
 //
 // Fields: Cargo.toml [workspace.package] version, app/package.json, app/src-tauri/tauri.conf.json.
+// Cargo.lock: the workspace's own packages (the ones without a `source`) are stamped too, so the lockfile a tagged
+// build starts from already matches and `cargo build --locked` does not fail on it.
 // Only the version value is rewritten; the rest of each file stays byte for byte.
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +22,29 @@ export const FIELDS = [
   { file: "app/package.json", re: JSON_RE },
   { file: "app/src-tauri/tauri.conf.json", re: JSON_RE },
 ];
+
+// A [[package]] block of Cargo.lock; a workspace-local package has no `source` line.
+const LOCK_BLOCK_RE = /(\[\[package\]\]\r?\nname = "[^"]*"\r?\nversion = ")([^"]*)("\r?\n)((?:(?!\[\[package\]\])[^\n]*\n?)*)/g;
+
+export function lockVersions(root) {
+  const path = join(root, "Cargo.lock");
+  if (!existsSync(path)) return [];
+  const out = [];
+  for (const m of readFileSync(path, "utf8").matchAll(LOCK_BLOCK_RE)) {
+    if (!/^source = /m.test(m[4])) out.push({ name: /name = "([^"]*)"/.exec(m[1])[1], version: m[2] });
+  }
+  return out;
+}
+
+function stampLock(root, from, to) {
+  const path = join(root, "Cargo.lock");
+  if (!existsSync(path)) return;
+  const text = readFileSync(path, "utf8");
+  const next = text.replace(LOCK_BLOCK_RE, (all, head, ver, mid, rest) =>
+    !/^source = /m.test(rest) && ver === from ? `${head}${to}${mid}${rest}` : all,
+  );
+  if (next !== text) writeFileSync(path, next);
+}
 
 export function read(root) {
   return FIELDS.map(({ file, re }) => {
@@ -35,7 +60,12 @@ export function check(root) {
   if (distinct.size !== 1) {
     throw new Error(`version fields disagree: ${fields.map((f) => `${f.file}=${f.version}`).join(", ")}`);
   }
-  return fields[0].version;
+  const version = fields[0].version;
+  const stale = lockVersions(root).filter((p) => p.version !== version);
+  if (stale.length) {
+    throw new Error(`Cargo.lock disagrees with Cargo.toml (${version}): ${stale.map((p) => `${p.name}=${p.version}`).join(", ")}`);
+  }
+  return version;
 }
 
 export function versionOfTag(tag) {
@@ -46,12 +76,14 @@ export function versionOfTag(tag) {
 
 export function stamp(root, tag) {
   const version = versionOfTag(tag);
+  const before = check(root);
   for (const { file, re } of FIELDS) {
     const path = join(root, file);
     const text = readFileSync(path, "utf8");
     if (!re.test(text)) throw new Error(`${file}: no version field found`);
     writeFileSync(path, text.replace(re, `$1${version}$3`));
   }
+  stampLock(root, before, version);
   const got = check(root);
   if (got !== version) throw new Error(`tag ${tag} != stamped version ${got}`);
   return version;
@@ -84,6 +116,8 @@ function selfTest() {
       put("app/src-tauri/tauri.conf.json", json(t));
     };
 
+    const lock = (a, b) =>
+      `version = 4\n\n[[package]]\nname = "app"\nversion = "${a}"\ndependencies = [\n "serde",\n]\n\n[[package]]\nname = "serde"\nversion = "1.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n\n[[package]]\nname = "core"\nversion = "${b}"\n`;
     seed("0.1.0", "0.1.0", "0.1.0");
     assert(check(dir) === "0.1.0", "agreeing fields pass");
 
@@ -99,6 +133,20 @@ function selfTest() {
     seed("0.1.0", "0.1.0", "0.1.0");
     for (const bad of ["1.2.3", "v1.2", "v1.2.3-rc1", "vx", ""]) throws(() => stamp(dir, bad), /bad tag/, `bad tag "${bad}"`);
     assert(check(dir) === "0.1.0", "a bad tag leaves the files untouched");
+
+    // Cargo.lock: only the packages without a source follow the version
+    seed("0.1.0", "0.1.0", "0.1.0");
+    put("Cargo.lock", lock("0.1.0", "0.1.0"));
+    assert(check(dir) === "0.1.0", "lock in step passes");
+    assert(lockVersions(dir).length === 2, "the registry package is not one of the workspace's");
+    put("Cargo.lock", lock("0.1.0", "0.1.0").replace(/\n/g, "\r\n"));
+    assert(lockVersions(dir).length === 2, "a CRLF lockfile is read too");
+    put("Cargo.lock", lock("0.1.0", "0.0.9"));
+    throws(() => check(dir), /Cargo\.lock disagrees.*core=0\.0\.9/, "lock drift detected");
+    put("Cargo.lock", lock("0.1.0", "0.1.0"));
+    stamp(dir, "v2.0.0");
+    assert(readFileSync(join(dir, "Cargo.lock"), "utf8") === lock("2.0.0", "2.0.0").replace('"1.0.0"', '"1.0.0"'), "lock: workspace packages stamped, registry ones untouched");
+    rmSync(join(dir, "Cargo.lock"));
 
     put("Cargo.toml", "[workspace]\n");
     throws(() => check(dir), /Cargo\.toml: no version field/, "missing field");
