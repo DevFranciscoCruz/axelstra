@@ -3,18 +3,160 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Badge, Button } from "./ui";
 import { Icon } from "./Icon";
 import { For, Show, createResource, createSignal } from "solid-js";
-import { GhItem, ghList, worktreeFromPr } from "./api";
+import { GhItem, ReviewComment, ghComments, ghList, ghSendComment, worktreeFromPr } from "./api";
+import { SendStep, commentHints, confirmKey, displayBody, isNoLeadError, locationLabel, reviewLine, threads, worktreeForPr } from "./prComments";
+import "./pulls.css";
 import { RightTabs } from "./RightTabs";
 import { P } from "./strings.panels";
 import { findWorktree, refreshProjects, selectWorktree, selectedWorktree, setError, rightTab , showNotice } from "./store";
 
 const CHECK: Record<string, [string, string]> = { pass: ["check", P.pulls.checks.pass], fail: ["x", P.pulls.checks.fail], pending: ["ellipsis", P.pulls.checks.pending] };
 const REVIEW = P.pulls.review;
+const C = P.pulls.comments;
+
+/** The review comments of one PR, read when the list is opened. Sending one to the agent shows the exact text first. */
+function ReviewComments(props: { item: GhItem; project: string; worktree: string | null }) {
+  const [open, setOpen] = createSignal(false);
+  const [data, { refetch }] = createResource(open, async (o) => (o ? ghComments(props.project, props.item.number) : null));
+  const [send, setSend] = createSignal<SendStep>({ step: "idle" });
+  const n = () => props.item.number;
+  const listId = () => `prc-${n()}`;
+  // the comment the send flow is on, if any
+  const active = () => {
+    const s = send();
+    return s.step === "idle" ? null : s.comment;
+  };
+  const confirmText = () => {
+    const s = send();
+    return s.step === "confirm" || s.step === "sending" ? s.text : "";
+  };
+
+  const fail = (e: unknown) => {
+    setError(isNoLeadError(e) ? C.noLead : String(e));
+    setSend({ step: "idle" });
+  };
+  // the text comes from the daemon, built from GitHub's current version of the comment: it is what will be delivered
+  const begin = async (c: ReviewComment) => {
+    const wt = props.worktree;
+    if (!wt || send().step !== "idle") return;
+    setSend({ step: "loading", comment: c.id });
+    try {
+      const r = await ghSendComment(wt, props.project, n(), c.id, true);
+      setSend({ step: "confirm", comment: c.id, text: r.text });
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const confirm = async () => {
+    const s = send();
+    const wt = props.worktree;
+    if (s.step !== "confirm" || !wt) return;
+    setSend({ step: "sending", comment: s.comment, text: s.text });
+    try {
+      await ghSendComment(wt, props.project, n(), s.comment, false);
+      showNotice(C.sent(n()));
+      setSend({ step: "idle" });
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const key = (e: KeyboardEvent) => {
+    // a focused button keeps its own Enter
+    if ((e.target as HTMLElement).tagName === "BUTTON") return;
+    const a = confirmKey(send(), e.key);
+    if (!a) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (a === "send") void confirm();
+    else setSend({ step: "idle" });
+  };
+
+  const Row = (p: { c: ReviewComment; reply?: boolean }) => (
+    <li class="prc" classList={{ reply: p.reply }}>
+      <div class="prc-head">
+        <span class="prc-author">{p.c.author}</span>
+        <span class="prc-loc mono" title={locationLabel(p.c)}>{locationLabel(p.c)}</span>
+        <For each={commentHints(p.c)}>{(h) => <Badge>{h}</Badge>}</For>
+        <span class="grow" />
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!props.worktree || send().step !== "idle"}
+          title={props.worktree ? C.sendTip : C.noWorktree}
+          aria-label={`${C.send}: ${p.c.author}, ${locationLabel(p.c)}`}
+          onClick={() => void begin(p.c)}
+        >
+          {send().step === "loading" && active() === p.c.id ? "…" : C.send}
+        </Button>
+      </div>
+      <div class="prc-body">{displayBody(p.c.body)}</div>
+      <Show when={(send().step === "confirm" || send().step === "sending") && active() === p.c.id}>
+        <div class="prc-confirm" role="group" aria-label={C.confirmTitle} tabindex="-1" onKeyDown={key} ref={(el) => queueMicrotask(() => el.focus())}>
+          <div class="muted">{C.confirmIntro}</div>
+          <pre class="prc-text" tabindex="0" aria-label={C.confirmTitle}>{confirmText()}</pre>
+          <div class="prc-actions">
+            <Button size="sm" variant="default" disabled={send().step === "sending"} onClick={() => void confirm()}>{C.confirmOk}</Button>
+            <Button size="sm" variant="outline" disabled={send().step === "sending"} onClick={() => setSend({ step: "idle" })}>{C.confirmCancel}</Button>
+            <span class="muted">{C.confirmHint}</span>
+          </div>
+        </div>
+      </Show>
+    </li>
+  );
+
+  return (
+    <div class="prc-wrap">
+      <Button variant="link" size="bare" aria-expanded={open()} aria-controls={listId()} title={C.toggleTip} onClick={() => setOpen(!open())}>
+        <Icon name={open() ? "chevDown" : "chevRight"} size={11} /> {C.toggle}
+      </Button>
+      <Show when={open()}>
+        <div id={listId()} role="region" aria-label={C.list(n())}>
+          <Show when={!data.loading} fallback={<div class="muted prc-note">{C.loading}</div>}>
+            <Show when={!data.error} fallback={<div class="placeholder">{String(data.error?.message ?? data.error)}<Button size="sm" onClick={() => void refetch()}>{P.pulls.refresh}</Button></div>}>
+              <Show when={data()}>
+                {(d) => (
+                  <>
+                    <Show when={!props.worktree}>
+                      <div class="muted prc-note">{C.noWorktree}</div>
+                    </Show>
+                    <Show when={d().reviews.length}>
+                      <ul class="prc-list" aria-label={C.reviewsHead}>
+                        <For each={d().reviews}>
+                          {(r) => (
+                            <li class="prc">
+                              <div class="prc-head"><span class="prc-author">{reviewLine(r)}</span></div>
+                              <div class="prc-body">{displayBody(r.body)}</div>
+                            </li>
+                          )}
+                        </For>
+                      </ul>
+                    </Show>
+                    <ul class="prc-list" aria-label={C.list(n())}>
+                      <For each={threads(d().comments)} fallback={<Show when={!d().reviews.length}><li class="muted prc-note">{C.none}</li></Show>}>
+                        {(t) => (
+                          <>
+                            <Row c={t.root} />
+                            <For each={t.replies}>{(r) => <Row c={r} reply />}</For>
+                          </>
+                        )}
+                      </For>
+                    </ul>
+                  </>
+                )}
+              </Show>
+            </Show>
+          </Show>
+        </div>
+      </Show>
+    </div>
+  );
+}
 
 /** Open pull requests and issues of the selected project, read through the GitHub CLI. */
 export function PullsPanel() {
   const [kind, setKind] = createSignal<"pr" | "issue">("pr");
   const project = () => findWorktree(selectedWorktree())?.project.id ?? null;
+  const worktrees = () => findWorktree(selectedWorktree())?.project.worktrees ?? [];
   const [items, { refetch }] = createResource(
     () => ({ p: project(), k: kind() }),
     async ({ p, k }): Promise<GhItem[]> => (p ? ghList(p, k) : []),
@@ -99,6 +241,9 @@ export function PullsPanel() {
                       <Icon name="external" />
                     </Button>
                   </div>
+                  <Show when={kind() === "pr" && project()}>
+                    <ReviewComments item={i} project={project()!} worktree={worktreeForPr(i, worktrees())} />
+                  </Show>
                 </div>
               )}
             </For>
