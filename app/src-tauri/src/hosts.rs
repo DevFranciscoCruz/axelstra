@@ -1025,4 +1025,116 @@ mod tests {
         assert!(is_auth_error("Host key verification failed."));
         assert!(!is_auth_error("ssh: connect to host h port 22: Connection refused"));
     }
+
+    /// Against a real remote daemon: `AXELSTRA_TEST_HOST_SPEC=ssh:... AXELSTRA_TEST_HOST_PROJECT=/remote/git/repo
+    /// cargo test -p axelstra-app real_remote -- --ignored --nocapture` (isolated data dir, see docs/TESTING.md).
+    #[test]
+    #[ignore]
+    fn real_remote() {
+        let (Ok(spec), Ok(project)) = (std::env::var("AXELSTRA_TEST_HOST_SPEC"), std::env::var("AXELSTRA_TEST_HOST_PROJECT")) else {
+            panic!("set AXELSTRA_TEST_HOST_SPEC and AXELSTRA_TEST_HOST_PROJECT")
+        };
+        let h = Remote::new(Def { id: "rt".into(), name: "rt".into(), spec, slot: 5, bin: std::env::var("AXELSTRA_TEST_HOST_BIN").ok() });
+        lock(&HOSTS).push(h.clone());
+        h.connect_now().expect("connect");
+        assert_eq!(h.state(), St::Ok);
+        println!("hello: {}", h.describe());
+        let none = |_: &str, _: Value| -> Result<Value> { anyhow::bail!("no local daemon in this test") };
+        let go = |m: &str, p: Value| route(m, p, false, false, &none);
+
+        let mut added = with_remote(&h, Which::Control, false, |c| c.call("project.add", json!({"path": project}))).unwrap();
+        tag_project("rt", 5, &mut added);
+        println!("project.add: {added}");
+        let pid = added["id"].as_str().unwrap().to_string();
+        let ppath = added["path"].as_str().unwrap().to_string();
+        assert!(pid.starts_with("@rt:") && ppath.starts_with("@rt:/"));
+
+        let list = list_host(&h, "project.list").unwrap();
+        assert!(list.as_array().unwrap().iter().any(|p| p["id"] == pid && p["host"] == "rt"), "{list}");
+        let fan = route("project.list", json!({}), false, true, &|_, _| Ok(json!([]))).unwrap();
+        assert!(fan.as_array().unwrap().iter().any(|p| p["id"] == pid), "{fan}");
+
+        let ls = go("fs.list", json!({"worktree": ppath, "path": ""})).unwrap();
+        println!("fs.list: {ls}");
+        assert!(ls["entries"].as_array().unwrap().iter().any(|e| e["name"] == "README.md"));
+        let rd = go("fs.read", json!({"worktree": ppath, "path": "README.md"})).unwrap();
+        assert!(rd["text"].as_str().unwrap().contains("hello"));
+        let w = go(
+            "fs.write",
+            json!({"worktree": ppath, "path": "viaapp.txt", "text": "x
+", "eol": "lf", "bom": false}),
+        )
+        .unwrap();
+        println!("fs.write: {w}");
+        let ch = go("git.changes", json!({"worktree": ppath})).unwrap();
+        println!("git.changes: {ch}");
+        assert!(ch["files"].as_array().unwrap().iter().any(|f| f["path"] == "viaapp.txt"), "{ch}");
+        let c = go("git.commit", json!({"worktree": ppath, "message": "via app"})).unwrap();
+        assert!(c["sha"].as_str().is_some());
+        let log = go("git.log", json!({"worktree": ppath})).unwrap();
+        assert!(log["commits"].as_array().unwrap().len() >= 2, "{log}");
+
+        // a worktree of the remote project
+        let wt = go("worktree.create", json!({"project": pid, "name": "wtest"})).unwrap();
+        println!("worktree.create: {wt}");
+        let wpath = wt["path"].as_str().unwrap().to_string();
+        assert!(wpath.starts_with("@rt:/"));
+
+        // a terminal in it
+        let sp = go("session.spawn", json!({"program": "sh", "args": [], "label": "t", "cwd": wpath, "cols": 80, "rows": 24, "meta": {"worktree": wpath, "project": pid, "kind": "shell"}})).unwrap();
+        let sid = sp["id"].as_u64().unwrap() as u32;
+        assert_eq!(split_gid(sid).0, 5);
+        let sess = route("session.list", json!({}), false, true, &|_, _| Ok(json!([]))).unwrap();
+        assert!(sess.as_array().unwrap().iter().any(|x| x["id"] == sid && x["meta"]["worktree"] == wpath), "{sess}");
+        let mut st = h.connect_stream().unwrap();
+        let (_, raw) = split_gid(sid);
+        st.call("session.subscribe", json!({"id": raw})).unwrap();
+        with_remote(&h, Which::Input, true, |c| {
+            c.send_input(
+                raw,
+                b"echo remote-$((6*7))
+",
+            )
+        })
+        .unwrap();
+        let mut seen = String::new();
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(10) && !seen.contains("remote-42") {
+            if let Ok(Frame::Output { data, .. }) = st.read() {
+                seen.push_str(&String::from_utf8_lossy(&data));
+            }
+        }
+        assert!(seen.contains("remote-42"), "terminal output: {seen}");
+        go("session.kill", json!({"id": sid})).unwrap();
+        go("worktree.remove", json!({"path": wpath, "project": pid})).ok();
+        // refused for a remote project
+        assert!(go("docker.open_shell", json!({"worktree": ppath})).is_err());
+        // a lost link marks the host and the next call says so
+        h.drop_connections();
+        println!("done");
+    }
+
+    /// A link that dies and comes back: run it, then stop and start the remote (see the M7b report for the script).
+    #[test]
+    #[ignore]
+    fn real_reconnect() {
+        let spec = std::env::var("AXELSTRA_TEST_HOST_SPEC").expect("AXELSTRA_TEST_HOST_SPEC");
+        let h = Remote::new(Def { id: "rc".into(), name: "rc".into(), spec, slot: 6, bin: None });
+        lock(&HOSTS).push(h.clone());
+        keep(h.clone());
+        let mut seen: Vec<&'static str> = vec![];
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(170) {
+            let st = h.state().name();
+            if seen.last() != Some(&st) {
+                println!("{:>5.1}s {st} {:?}", t.elapsed().as_secs_f32(), h.describe()["error"]);
+                seen.push(st);
+            }
+            if seen.iter().filter(|s| **s == "ok").count() >= 2 && seen.contains(&"lost") {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        panic!("states seen: {seen:?}");
+    }
 }

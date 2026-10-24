@@ -130,15 +130,67 @@ fixes `client:"cli"`, so the token never leaves the remote and a remote caller c
 point is not the transport but the premise that "a process the daemon does not own is the user": see "What this does
 not protect".
 
+## The app: host registry and routing (M7b)
+
+The app (Tauri host, `app/src-tauri/src/hosts.rs`) keeps a **registry of named hosts**, `local` being implicit:
+`{id, name, spec, slot, bin?}` in `settings.json` under `hosts` (max 16). The id is `[a-z][a-z0-9-]{0,23}`, the slot 1-127;
+the daemon validates the list again (`settings.set`, `crates/daemon/src/hosts.rs`: spec through `RemoteSpec::parse`, never
+the test-only `Exec`) and **refuses `hosts` to the agent role** (`agent_forbidden`). The page cannot change the registry
+either: `settings.set` with `hosts` is refused by the host's `check_params`; only the Tauri commands `host_add` /
+`host_remove` write it, each after a **native confirmation dialog**. `project_add_remote` is confirmed the same way.
+
+Routing. Every daemon runs unchanged and keeps its own plain paths and ids. The host rewrites at the boundary, so the
+page sees one flat world:
+
+- a remote project's paths and project id carry the prefix `@<host>:` (`@lab:/home/me/proj`, project id `@lab:abc`), added to
+  results and **stripped from params** under the keys `worktree(s) project cwd root main parent repo dir path(s) id` (a commit
+  message that looks like a prefix is not touched; relative paths are not prefixed);
+- a remote session id is `slot << 24 | id` (so ids stay unique and `session_write`/attach/kill know the host from the id);
+- a call whose params name one host goes to that host's daemon (`control` or `bg` connection); local params are untouched;
+  params that mix two hosts are refused. `project.list`, `session.list` and `session.pending` fan out to every connected host
+  (8 s cap each, a host that is down only loses its own rows); `worktree.status`, `agent.worktree_usage` and `budget.status`
+  split their path lists per host and join the arrays;
+- terminals: `session_attach` opens its own bridge connection to the session's host and subscribes there; keystrokes use one
+  writer thread **per host**, so a slow link never delays typing in a local terminal;
+- events (`fs.changed`, `session.changed`, `projects.changed`, `session.exit`) come over one event connection per host and are
+  forwarded, tagged, into the page's single event channel; `watch_set` points the stream at the host of the worktree.
+
+Connection state per host (`idle | connecting | ok | lost | auth`, event `host-state`, command `hosts_list`): one keeper thread per
+host connects at startup and again after a loss (waits grow 5 s ... 60 s; a refused login retries every 60 s). The event
+connection is always open and its end is how a dead link is noticed (`ServerAliveInterval`). `daemon-restarted` is emitted
+when a host's daemon is a new run (first contact included) so the page restores that host's saved sessions. `host_reconnect`
+retries immediately. Errors keep ssh's own words (`Permission denied`, `Host key verification failed` are classed `auth`).
+
+Connections per host: control, bg, input (opened on first use), the event connection and one per attached terminal; each is a
+separate `ssh`/`wsl.exe` child (no ControlMaster: unavailable on Windows OpenSSH). Authentication is the user's ssh
+configuration (keys/agent, `BatchMode=yes`), nothing is stored by Axelstra.
+
+Security summary: the daemon token never leaves its machine (the bridge authenticates locally); `ssh`/`wsl.exe` are started with
+an argv built from a strictly validated spec; the registry is writable only by the user (native confirmation, agent role
+refused in the daemon, webview refused in the host); the agent role has no way to route: the daemon never connects to other
+hosts and the routing exists only in the app's host process. Remote bridge connections are role `user` (see "Auth and roles").
+A compromised page can still *use* a registered host (open its folders as projects, run commands in its terminals), as it can
+on this machine; the registry itself and the `ssh` program line it cannot choose.
+
+### Not supported for remote projects (honest list)
+
+Refused with a clear message: Docker (`docker.*`), screen control (`computer.*`), "open in editor/Explorer" (`open.*`),
+automations (`automation.*`: they live in the local daemon), hooks/backup/workspace export/settings (local). Not routed: the
+agent usage/limits/search views (`agent.usage`, `agent.search`, `agent.status`, `codex.limits`) show **this machine's** logs;
+`orch`/`kanban`/`triggers` of a remote project do run on its host (not exercised in the real tests). The page's path-based
+native features (drag and drop of files, clipboard images) put **local** paths into a remote terminal. A remote daemon
+is not started, installed or updated by the app. The registry is read at app start; editing `settings.json` by hand needs
+a restart. No live PTY continuity across a dropped link (the sessions survive on the host; terminals re-attach).
+
 ## Implementation status
 
-- Done: `RemoteSpec` (`remote.rs`), `Client::connect_remote` / `Conn::Child` with deadlines that kill the child, stderr in
-  errors, kill on drop; `axelstra bridge`; global `--host` / `AXELSTRA_HOST` (refused in agent sessions);
-  `AXELSTRA_REMOTE_BIN`. Tested without ssh or WSL through the test-only `RemoteSpec::Exec`.
-- Windows detail: the bridge reads the daemon pipe with `PeekNamedPipe` polling, because a pending synchronous `ReadFile`
-  blocks a `WriteFile` on the same pipe file and the relay would stall on the first request.
-- Not done: the app (host registry, per-host `Client` routing, host badge, "add remote project"). The app holds one
-  control connection plus watch/stream connections through `with_client`; routing them per host, and the allow-list and
-  agent-role decisions for new methods, need their own pass.
-- Not verified: real `ssh` and `wsl.exe` (`--exec` PATH behaviour, binary-safe stdout through `wsl.exe`): this machine has
-  OpenSSH but no ssh server to reach and only the `docker-desktop` WSL distro. Windows or macOS remotes.
+- Done: `RemoteSpec`, `Client::connect_remote`, `axelstra bridge`, `--host`; the host registry, routing, state, UI
+  (see above); `host.info` / `host.browse` (PROTO 19); `Client::kill_child`.
+- Verified for real on this Windows machine (see the test log in the M7b report): **WSL** (a Debian rootfs imported
+  with `wsl --import`, axelstra built for Linux in a Debian container, daemon running inside the distro) and **SSH** (a Debian
+  container running `sshd` with key auth and a throwaway key, daemon inside), both through the app host's routing code
+  (`cargo test -p axelstra-app real_remote -- --ignored` with `AXELSTRA_TEST_HOST_SPEC` / `AXELSTRA_TEST_HOST_PROJECT`):
+  connect + hello, `project.add`, `project.list` fan-out, `fs.list/read/write`, `git.changes/commit/log`, `worktree.create/remove`,
+  terminal spawn + live output stream + input, `session.list`, `session.kill`, refusal of `docker.*`.
+- Not verified: macOS and Windows-OpenSSH remotes, the GUI itself against a remote host (the page logic is covered by unit
+  tests only), long-lived links (reconnect after a real network drop), ssh password/2FA (unsupported by design).
