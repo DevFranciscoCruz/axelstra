@@ -3,8 +3,10 @@
 //! WSL is needed. The "remote machine" is this one, with its own data dir (token file) and pipe name.
 
 use axelstra_daemon::client::Client;
+use axelstra_daemon::proto;
 use axelstra_daemon::remote::RemoteSpec;
-use axelstra_daemon::{proto, server};
+#[cfg(not(unix))]
+use axelstra_daemon::server;
 use serde_json::json;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -36,17 +38,41 @@ fn env() -> &'static Env {
         let token = "b".repeat(32);
         std::fs::create_dir_all(proto::try_data_dir().unwrap()).unwrap();
         std::fs::write(proto::token_path(), &token).unwrap();
-        let (pipe, store) = (proto::pipe_name(), root.join("projects.json"));
-        std::thread::spawn(move || {
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(server::serve_with_store(pipe, token, store))
-                .unwrap();
-        });
-        std::thread::sleep(Duration::from_millis(500));
+        // Unix: the daemon is a process of its own. Served in this process, the bridge (our child) would descend from
+        // the daemon and be taken for an orphaned agent; a real bridge is never below the daemon.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_axelstra"));
+            cmd.arg("daemon").env("AXELSTRA_IDLE_EXIT_SECS", "120").stdin(std::process::Stdio::null());
+            // SAFETY: only prctl between fork and exec; the daemon must not outlive the test run
+            #[cfg(target_os = "linux")]
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL as libc::c_ulong, 0, 0, 0);
+                    Ok(())
+                });
+            }
+            cmd.spawn().unwrap();
+            let end = Instant::now() + Duration::from_secs(10);
+            while !Path::new(&proto::pipe_name()).exists() && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let (pipe, store) = (proto::pipe_name(), root.join("projects.json"));
+            std::thread::spawn(move || {
+                tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(server::serve_with_store(pipe, token, store))
+                    .unwrap();
+            });
+            std::thread::sleep(Duration::from_millis(500));
+        }
         Env { root }
     })
 }
