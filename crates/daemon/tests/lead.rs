@@ -1,5 +1,6 @@
 //! The lead of a worktree: its first agent is named "main", takes no "Tarefa N" number, reports to the project main
 //! and is the default parent of every task started in that worktree. A restart keeps the roles.
+mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::{json, Value};
@@ -16,7 +17,7 @@ fn shell() -> (String, Vec<String>) {
 
 fn start(root: &Path, tag: &str) -> Client {
     std::fs::create_dir_all(root).unwrap();
-    let pipe = format!("{}-lead-{tag}-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-lead-{tag}-{}", common::base_pipe(), std::process::id());
     let token = "d".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {

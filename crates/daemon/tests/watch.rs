@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::{Client, Frame};
 use axelstra_daemon::server;
 use serde_json::json;
@@ -30,7 +31,7 @@ fn change_events_are_filtered_and_debounced() {
     sh(&repo, &["add", "-A"]);
     sh(&repo, &["commit", "-qm", "init"]);
 
-    let pipe = format!("{}-watch-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-watch-{}", common::base_pipe(), std::process::id());
     let token = "w".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {
@@ -112,7 +113,7 @@ fn worktree_created_by_another_client_is_announced() {
     sh(&repo, &["add", "-A"]);
     sh(&repo, &["commit", "-qm", "init"]);
 
-    let pipe = format!("{}-wtev-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-wtev-{}", common::base_pipe(), std::process::id());
     let token = "e".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {

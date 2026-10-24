@@ -117,8 +117,19 @@ mod unix {
 mod tests {
     use super::*;
 
+    /// Locks live under the data dir: point it at a temp dir first, never the real one (docs/TESTING.md).
+    fn isolate() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let d = std::env::temp_dir().join(format!("axelstra-test-lock-{}", std::process::id()));
+            std::fs::create_dir_all(&d).unwrap();
+            std::env::set_var("AXELSTRA_DATA_DIR", d);
+        });
+    }
+
     #[test]
     fn a_second_holder_waits_until_the_first_lets_go() {
+        isolate();
         let name = format!("t{}", std::process::id());
         let (a, _) = acquire(&name, 1, Duration::from_secs(1)).unwrap();
         assert!(acquire(&name, 1, Duration::from_millis(600)).is_err());
@@ -135,6 +146,7 @@ mod tests {
 
     #[test]
     fn two_slots_allow_two_holders() {
+        isolate();
         let name = format!("s{}", std::process::id());
         let (a, _) = acquire(&name, 2, Duration::from_secs(1)).unwrap();
         let (b, _) = acquire(&name, 2, Duration::from_secs(1)).unwrap();

@@ -592,6 +592,7 @@ pub async fn serve(pipe: String, token: String) -> Result<()> {
 
 /// Same as `serve`, with an explicit projects file (tests must not touch the user's).
 pub async fn serve_with_store(pipe: String, token: String, store: std::path::PathBuf) -> Result<()> {
+    crate::proto::refuse_real_when_testing(&pipe, store.parent().unwrap_or(std::path::Path::new("")))?;
     origin::adopt_orphans();
     let reg = Arc::new(Registry::new(store, pipe.clone(), token.clone()));
     let dir = reg.saved.parent().map(std::path::Path::to_path_buf).unwrap_or_default();

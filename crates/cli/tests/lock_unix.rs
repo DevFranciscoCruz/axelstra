@@ -7,7 +7,11 @@ use std::time::{Duration, Instant};
 
 fn axelstra(data: &Path) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_axelstra"));
-    c.env("HOME", data).env("XDG_DATA_HOME", data).stdout(Stdio::null()).stderr(Stdio::null());
+    c.env("HOME", data)
+        .env("XDG_DATA_HOME", data)
+        .env("AXELSTRA_DATA_DIR", data.join("axelstra"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     c
 }
 

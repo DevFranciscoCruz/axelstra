@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::{Client, Frame};
 use axelstra_daemon::server;
 use serde_json::{json, Value};
@@ -33,7 +34,7 @@ fn messages_ask_done_escalate_and_the_worker_limit() {
     });
     let root = std::env::temp_dir().join(format!("axelstra-bus-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
-    let pipe = format!("{}-bus-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-bus-{}", common::base_pipe(), std::process::id());
     let token = "c".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {

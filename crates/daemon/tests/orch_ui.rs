@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::json;
@@ -29,7 +30,7 @@ fn ui_flow_cards_to_merged_branch() {
     sh(&repo, &["add", "-A"]);
     sh(&repo, &["commit", "-qm", "init"]);
 
-    let pipe = format!("{}-oui-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-oui-{}", common::base_pipe(), std::process::id());
     let token = "o".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {

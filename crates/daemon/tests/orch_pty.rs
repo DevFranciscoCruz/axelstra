@@ -1,5 +1,6 @@
 //! The orchestrator driving agents through daemon PTY sessions.
 
+mod common;
 use axelstra_core::git;
 use axelstra_core::orch::{self, Options};
 use axelstra_daemon::client::Client;
@@ -23,11 +24,17 @@ fn agents_run_in_daemon_sessions_and_get_cleaned_up() {
         std::process::exit(1);
     });
 
-    let pipe = format!("{}-orch-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-orch-{}", common::base_pipe(), std::process::id());
     let token = "k".repeat(32);
     let (p, t) = (pipe.clone(), token.clone());
     std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap().block_on(server::serve(p, t)).unwrap();
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(server::serve_with_store(p, t, common::store("srv")))
+            .unwrap();
     });
     std::thread::sleep(Duration::from_millis(300));
 

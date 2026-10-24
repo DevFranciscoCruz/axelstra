@@ -1,3 +1,4 @@
+mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
 use serde_json::json;
@@ -24,7 +25,7 @@ fn finished_worker_reports_to_parent_and_disappears() {
     });
     let root = std::env::temp_dir().join(format!("axelstra-reap-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
-    let pipe = format!("{}-reap-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-reap-{}", common::base_pipe(), std::process::id());
     let token = "b".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {
