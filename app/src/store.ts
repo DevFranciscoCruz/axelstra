@@ -13,6 +13,9 @@ import { isRecord, isStringArray, readJson } from "./persist";
 import type { OverviewProject } from "./statusGroups";
 import { dismissKey, dismissPrefix, dismissToast, latestText, toast, toasts } from "./toasts";
 
+// the dialogs of the shell are one signal (store/overlay.ts); the old per-dialog names stay here
+export * from "./store/overlay";
+
 // `norm` lives in paths.ts (one for api and store); it stays importable from here
 export { norm, friendlyError, toast, toasts, dismissToast };
 export type { ToastInput } from "./toasts";
@@ -39,8 +42,6 @@ export const AGENTS: Record<string, string> = { claude: "claude", codex: "codex"
 export const canonAgent = (a: string) => (a === "chatgpt" ? "codex" : a);
 /** names of the agents the pickers list: only the agent CLIs found on the PATH (empty until the daemon answers) */
 export const [agentKeys, setAgentKeys] = createSignal<string[]>([]);
-/** project whose settings dialog (worktree env files, setup command) is open */
-export const [showProjectSettings, setShowProjectSettings] = createSignal<string | null>(null);
 /** `ids` are the daemon's ids of the installed agents; without the list, the two built-ins */
 export const setInstalledAgents = (ids: string[] | null) => {
   const keys = ids ?? ["claude", "codex"];
@@ -292,13 +293,6 @@ export const [creatingWorktree, setCreatingWorktree] = createSignal<string | nul
 /** a worktree the command palette asked to remove; the sidebar confirms and does it */
 export const [removeRequest, setRemoveRequest] = createSignal<{ project: string; path: string; name: string } | null>(null);
 
-/** the automations dialog */
-export const [showAutomations, setShowAutomations] = createSignal(false);
-export const [showSettings, setShowSettings] = createSignal(false);
-export const [showDispatcher, setShowDispatcher] = createSignal(false);
-export const [showShortcuts, setShowShortcuts] = createSignal(false);
-export const [showAgentSearch, setShowAgentSearch] = createSignal(false);
-export const [showOrchestra, setShowOrchestra] = createSignal(false);
 /** agents may look at the screen and drive the mouse and keyboard (held by the daemon, off at every start) */
 export const [computerOn, setComputerOn] = createSignal(false);
 
