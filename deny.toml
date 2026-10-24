@@ -34,9 +34,7 @@ allow = [
   "BSL-1.0",
   "CDLA-Permissive-2.0", # webpki-roots, webpki-root-certs
 ]
-# The workspace crates declare no license (the repo has none; adding one is the owner's decision), so
-# `cargo deny check licenses` reports them as unlicensed. Once their manifests say `publish = false`
-# this setting skips them; until then CI runs `cargo deny check advisories bans sources`.
+# Workspace crates declare MIT and publish = false; `private` also skips any unlicensed private crate.
 private = { ignore = true }
 
 [bans]
