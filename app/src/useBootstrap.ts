@@ -1,6 +1,15 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { createEffect, on, onCleanup, onMount } from "solid-js";
-import { agentsList, computerStatus, janitorEvents, listPorts, restoreSessions, stopWatch, storeNotices, watchWorktree } from "./api";
+import {
+  agentsList,
+  computerStatus,
+  janitorEvents,
+  listPorts,
+  restoreSessions,
+  stopWatch,
+  storeNotices,
+  watchWorktree,
+} from "./api";
 import { errorText } from "./appError";
 import { handleJanitorEvents } from "./janitorEvents";
 import { createPoller } from "./poller";
