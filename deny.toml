@@ -1,0 +1,49 @@
+# cargo-deny policy. CI runs `cargo deny check` and tools/check-deny-expiry.mjs.
+[graph]
+all-features = true
+
+[advisories]
+# Unmaintained and unsound notices stay warnings (same as the old cargo-audit job); vulnerabilities fail.
+unmaintained = "none"
+yanked = "warn"
+# Each ignore carries an expiry in its reason: "expires YYYY-MM-DD".
+# tools/check-deny-expiry.mjs fails CI once a date has passed, so these get re-checked.
+# zip 4.6.1 comes only from tauri-plugin-updater 2.x (fixed in zip 9, which needs the 3.0 alpha of the plugin).
+# Ignored until the plugin ships a stable release on it; the updater only unpacks archives signed by us.
+ignore = [
+  { id = "RUSTSEC-2026-0367", reason = "zip via tauri-plugin-updater 2.x; expires 2027-01-31" },
+  { id = "RUSTSEC-2026-0368", reason = "zip via tauri-plugin-updater 2.x; expires 2027-01-31" },
+  { id = "RUSTSEC-2026-0369", reason = "zip via tauri-plugin-updater 2.x; expires 2027-01-31" },
+]
+
+[licenses]
+confidence-threshold = 0.9
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "Zlib",
+  "MPL-2.0",
+  "CC0-1.0",
+  "0BSD",
+  "BSL-1.0",
+  "CDLA-Permissive-2.0", # webpki-roots, webpki-root-certs
+]
+# The workspace crates declare no license (the repo has none; adding one is the owner's decision), so
+# `cargo deny check licenses` reports them as unlicensed. Once their manifests say `publish = false`
+# this setting skips them; until then CI runs `cargo deny check advisories bans sources`.
+private = { ignore = true }
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
