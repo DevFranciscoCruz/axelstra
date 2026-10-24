@@ -1014,14 +1014,24 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("r.jsonl");
         let first = r#"{"type":"session_meta","payload":{"cwd":"/w/ç"}}"#;
-        let last = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":50,"output_tokens":9}}}}"#;
+        let last =
+            r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":50,"output_tokens":9}}}}"#;
         // enough 2-byte characters that the 256 KiB cut lands inside one, in both parities
         for pad in ["ç", "xç"] {
-            let filler = format!("{{\"t\":\"{}\"}}
-", pad.repeat(200_000));
-            std::fs::write(&f, format!("{first}
+            let filler = format!(
+                "{{\"t\":\"{}\"}}
+",
+                pad.repeat(200_000)
+            );
+            std::fs::write(
+                &f,
+                format!(
+                    "{first}
 {filler}{last}
-")).unwrap();
+"
+                ),
+            )
+            .unwrap();
             let (cwd, u) = codex_file(&f).unwrap();
             assert_eq!(cwd.as_deref(), Some("/w/ç"));
             assert_eq!((u.input, u.output), (50, 9), "pad {pad}");

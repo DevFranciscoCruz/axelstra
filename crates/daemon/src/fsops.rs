@@ -502,7 +502,11 @@ mod tests {
         write(&d, "f.txt", "b", "lf", false, None).unwrap();
         assert_eq!(std::fs::read_to_string(d.join("f.txt")).unwrap(), "b");
         assert_eq!(std::fs::read_to_string(d.join("f.txt.axl-tmp")).unwrap(), "planted");
-        let left = std::fs::read_dir(&d).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with('.') && e.file_name().to_string_lossy().ends_with(".axl-tmp")).count();
+        let left = std::fs::read_dir(&d)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with('.') && e.file_name().to_string_lossy().ends_with(".axl-tmp"))
+            .count();
         assert_eq!(left, 0);
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -579,7 +583,8 @@ mod tests {
         std::fs::write(out.join("precious.txt"), "keep").unwrap();
         let link = wt.join("lnk");
         #[cfg(windows)]
-        let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&link).arg(&out).output().is_ok_and(|o| o.status.success());
+        let made =
+            std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&link).arg(&out).output().is_ok_and(|o| o.status.success());
         #[cfg(not(windows))]
         let made = dir_link(&out, &link).is_some();
         made.then_some(out)

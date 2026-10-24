@@ -572,9 +572,14 @@ pub fn action(action: &str, target: &str, force: bool, volumes: bool, wt: Option
                 Err(e) => (vec![e.to_string()], vec![]),
             };
             if action == "compose.up" && !refusals.is_empty() {
-                bail!("refusing compose up:
-- {}", refusals.join("
-- "));
+                bail!(
+                    "refusing compose up:
+- {}",
+                    refusals.join(
+                        "
+- "
+                    )
+                );
             }
             // down only stops what exists, so a finding there is reported, not blocking
             warnings.extend(refusals);
@@ -585,10 +590,15 @@ pub fn action(action: &str, target: &str, force: bool, volumes: bool, wt: Option
             // compose writes its progress to stderr
             let mut text = o.stderr_lossy();
             if !warnings.is_empty() {
-                text = format!("warnings:
+                text = format!(
+                    "warnings:
 - {}
-{text}", warnings.join("
-- "));
+{text}",
+                    warnings.join(
+                        "
+- "
+                    )
+                );
             }
             text
         }

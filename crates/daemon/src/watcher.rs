@@ -215,9 +215,19 @@ pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'sta
                         }
                         let kind = classify(p, &root, &gdir, &mut ignore);
                         // a folder that appeared (or moved in) and is not ignored gets watched too, with its subfolders
-                        if kind == Kind::Work && matches!(ev.kind, notify::EventKind::Create(_) | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))) && p.is_dir() {
+                        if kind == Kind::Work
+                            && matches!(
+                                ev.kind,
+                                notify::EventKind::Create(_) | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
+                            )
+                            && p.is_dir()
+                        {
                             for d in watch_dirs(p) {
-                                if watched.len() < MAX_WATCHES && !watched.contains(&d) && !ignore.is_ignored(&d, true) && w.watch(&d, RecursiveMode::NonRecursive).is_ok() {
+                                if watched.len() < MAX_WATCHES
+                                    && !watched.contains(&d)
+                                    && !ignore.is_ignored(&d, true)
+                                    && w.watch(&d, RecursiveMode::NonRecursive).is_ok()
+                                {
                                     watched.insert(d);
                                 }
                             }
@@ -332,8 +342,11 @@ mod tests {
         use std::sync::atomic::AtomicUsize;
         let d = tmpdir("live");
         assert!(git::run(&d, &["init", "-q"]).unwrap().ok);
-        put(&d.join(".gitignore"), "ignored/
-");
+        put(
+            &d.join(".gitignore"),
+            "ignored/
+",
+        );
         std::fs::create_dir_all(d.join("src")).unwrap();
         std::fs::create_dir_all(d.join("ignored")).unwrap();
         std::fs::create_dir_all(d.join("node_modules")).unwrap();
