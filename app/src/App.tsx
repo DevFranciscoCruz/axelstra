@@ -31,7 +31,8 @@ import { startDrag } from "./dragResize";
 import { basename } from "./paths";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
 import { LEFT, RIGHT, resizeTo, splitTo } from "./layout";
-import { K, isTextTarget, overlayOpen } from "./keyboard";
+import { K } from "./keyboard";
+import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
 import { PanelIcon } from "./PanelIcon";
@@ -245,74 +246,7 @@ export function App() {
       void refreshProjects();
     };
     window.addEventListener("focus", onFocus);
-    // Ctrl+B hides the project list, Ctrl+Shift+B the right panel; captured so the terminal never sees them.
-    // The ones that move around the page leave dialogs, the editor and text fields alone.
-    const onKey = (e: KeyboardEvent) => {
-      // "?" lists the shortcuts, but only where it is not a character being typed
-      if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (overlayOpen() || isTextTarget(e.target) || (e.target as HTMLElement | null)?.closest?.(".xterm")) return;
-        e.preventDefault();
-        setShowShortcuts(true);
-        return;
-      }
-      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-      const k = e.key.toLowerCase();
-      if (k === "," && !e.shiftKey) {
-        if (overlayOpen()) return;
-        e.preventDefault();
-        e.stopPropagation();
-        setShowSettings(true);
-        return;
-      }
-      if (k === "f" && e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        setShowAgentSearch(true);
-        return;
-      }
-      if (k === "m" && e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        void toggleVoice();
-        return;
-      }
-      if (overlayOpen() || isTextTarget(e.target)) return;
-      if (k === "t" && e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        void reopenClosed();
-        return;
-      }
-      // Ctrl+Tab / Ctrl+Shift+Tab cycle the tabs of this worktree, Ctrl+1..9 jump to one, Ctrl+J goes to the next agent waiting for an answer
-      if (e.key === "Tab" || (/^[1-9]$/.test(e.key) && !e.shiftKey)) {
-        const list = tabs();
-        if (!list.length) return;
-        const at = list.findIndex((t) => t.id === activeSession());
-        const pick = e.key === "Tab" ? list[(at + (e.shiftKey ? -1 : 1) + list.length) % list.length] : list[Number(e.key) - 1];
-        if (!pick) return;
-        e.preventDefault();
-        e.stopPropagation();
-        showTab(pick);
-        return;
-      }
-      if (k === "j" && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        const waiting = sessions().filter((x) => x.meta?.kind === "agent" && x.meta.worktree && sessionState(x) === "waiting");
-        if (!waiting.length) return showNotice(S.app.noWaiting);
-        const next = waiting.find((x) => x.id > activeSession()!) ?? waiting[0];
-        openSession(next.meta!.worktree!, next.id);
-        return;
-      }
-      if (k !== "b") return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.shiftKey) toggleRightPanel();
-      else toggleSidebar();
-    };
-    window.addEventListener("keydown", onKey, true);
     onCleanup(() => {
-      window.removeEventListener("keydown", onKey, true);
       fast.stop();
       mid.stop();
       slow.stop();
@@ -497,6 +431,8 @@ export function App() {
       setError(String(e));
     }
   };
+
+  useGlobalShortcuts({ tabs, showTab, reopenClosed });
 
   // tab being renamed (double click), tab being dragged and the one it hovers
   const [renaming, setRenaming] = createSignal<number | null>(null);
