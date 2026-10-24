@@ -101,7 +101,7 @@ pub fn forbidden_root(p: &Path) -> bool {
     if p.parent().is_none() || n.is_empty() || (n.len() == 2 && n.ends_with(':')) {
         return true;
     }
-    if ["USERPROFILE", "HOME"].iter().filter_map(|k| std::env::var_os(k)).any(|h| norm(Path::new(&h)) == n) {
+    if ["USERPROFILE", "HOME"].iter().filter_map(std::env::var_os).any(|h| norm(Path::new(&h)) == n) {
         return true;
     }
     // a top-level system folder: /etc, C:/Windows, C:/Program Files...
