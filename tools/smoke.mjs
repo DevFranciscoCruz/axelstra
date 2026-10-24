@@ -32,6 +32,7 @@ const env = {
   XDG_DATA_HOME: join(home, "share"),
   USERNAME: `axsmoke${process.pid}`,
   USER: `axsmoke${process.pid}`,
+  AXELSTRA_TEST_PIPE: `axsmoke${process.pid}`, // the pipe is named by SID now, USERNAME no longer isolates it
 };
 const cli = (...args) => spawnSync(bin, args, { env, encoding: "utf8", timeout: 20000 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

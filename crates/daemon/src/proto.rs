@@ -53,10 +53,14 @@ pub fn split_session(payload: &[u8]) -> Option<(u32, &[u8])> {
 
 /// Where the daemon listens: a named pipe on Windows, a Unix socket elsewhere. The Windows name carries the user's SID,
 /// not a name taken from the environment: `%USERNAME%` is anyone's to set, a SID is not.
+/// `AXELSTRA_TEST_PIPE` (letters and digits) appends a suffix so the smoke and E2E scripts get a pipe of their own
+/// instead of the developer's daemon; it only moves where a process listens or connects, the owner check still applies.
 #[cfg(windows)]
 pub fn pipe_name() -> String {
+    let suffix: String = std::env::var("AXELSTRA_TEST_PIPE").unwrap_or_default().chars().filter(char::is_ascii_alphanumeric).collect();
+    let suffix = if suffix.is_empty() { suffix } else { format!("-t{suffix}") };
     match crate::pipesec::current_user_sid() {
-        Ok(sid) => format!(r"\\.\pipe\axelstra-{sid}"),
+        Ok(sid) => format!(r"\\.\pipe\axelstra-{sid}{suffix}"),
         Err(_) => legacy_pipe_name(),
     }
 }
