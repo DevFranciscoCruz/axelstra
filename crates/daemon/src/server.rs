@@ -12,6 +12,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 mod session;
+mod worktrees;
 
 /// Identifies this daemon run: a client that sees it change knows the daemon restarted (its sessions are gone).
 static INSTANCE: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
@@ -977,6 +978,7 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
     }
     match req.method.split('.').next().unwrap_or_default() {
         "session" => session::call(c),
+        "worktree" | "project" | "pm" | "janitor" | "dispatch" | "ports" => worktrees::call(c),
         _ => legacy(c),
     }
 }
@@ -1009,7 +1011,6 @@ fn legacy(c: &mut Ctx) -> Result<Value> {
             *cli = agent_session.is_some() || p.get("client").and_then(Value::as_str) == Some("cli");
             Ok(hello_info())
         }
-        "worktree.overview" => Ok(tokio::task::block_in_place(|| crate::overview::cached(&reg.store, &|path| reg.worktree_busy(path)))),
         "agent.status" => {
             let key = p["key"].as_str().unwrap_or_default();
             if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
@@ -1018,23 +1019,6 @@ fn legacy(c: &mut Ctx) -> Result<Value> {
             let file = reg.saved.parent().unwrap_or(std::path::Path::new("")).join("status").join(format!("{key}.json"));
             let status = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
             Ok(json!({"status": status}))
-        }
-        "worktree.sweep" => {
-            let dry = p["dry_run"].as_bool().unwrap_or(false);
-            let done = tokio::task::block_in_place(|| crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path), dry));
-            Ok(json!({"swept": done}))
-        }
-        "janitor.auto" => {
-            // on unless the user turned it off: the file records the opt-out
-            let flag = reg.saved.with_file_name("janitor.off");
-            if let Some(on) = p["on"].as_bool() {
-                if on {
-                    let _ = std::fs::remove_file(&flag);
-                } else {
-                    let _ = std::fs::write(&flag, "1");
-                }
-            }
-            Ok(json!({"on": !flag.exists()}))
         }
         "flow.set" => {
             let id = p["flow"].as_str().unwrap_or_default().to_string();
@@ -1187,27 +1171,6 @@ fn legacy(c: &mut Ctx) -> Result<Value> {
             write_json(&reg.saved.with_file_name("settings.json"), &saved)?;
             Ok(json!({}))
         }
-        "dispatch.meta" => {
-            // titles and archive flags the dispatcher keeps per worktree (see `axelstra dispatch`)
-            let f = reg.saved.with_file_name("dispatch.json");
-            Ok(std::fs::read_to_string(f).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).unwrap_or_else(|| json!({})))
-        }
-        "worktree.status" => {
-            // only paths the daemon knows; the list comes from the UI and git runs in each
-            let list: Vec<String> =
-                p["paths"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
-            let norm = |s: &str| s.replace('\\', "/").to_ascii_lowercase();
-            let out = tokio::task::block_in_place(|| {
-                let mut allowed = std::collections::HashSet::new();
-                for pr in crate::projects::load(&reg.store) {
-                    for w in axelstra_core::git::worktree_list(std::path::Path::new(&pr.path)).unwrap_or_default() {
-                        allowed.insert(norm(&w.path));
-                    }
-                }
-                list.iter().take(64).filter(|w| allowed.contains(&norm(w))).map(|w| crate::wtstatus::status_cached(w)).collect::<Vec<_>>()
-            });
-            Ok(json!({"status": out}))
-        }
         "agent.search" => {
             let q = p["query"].as_str().unwrap_or_default().to_string();
             let max = p["max"].as_u64().unwrap_or(30).clamp(1, 200) as usize;
@@ -1224,40 +1187,6 @@ fn legacy(c: &mut Ctx) -> Result<Value> {
                 p["worktrees"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
             let usage = tokio::task::block_in_place(|| crate::agentlog::worktree_usage(&paths));
             Ok(json!({"usage": usage}))
-        }
-        "project.list" => {
-            if let Some((at, v)) = reg.plist.lock_recover().as_ref() {
-                if at.elapsed() < Duration::from_secs(3) {
-                    return Ok(v.clone());
-                }
-            }
-            let ps = crate::projects::load(&reg.store);
-            let v: Vec<Value> = ps
-                .iter()
-                .map(|pr| {
-                    let repo = std::path::Path::new(&pr.path);
-                    let mut wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();
-                    wts.retain(|w| w.is_main || w.path.replace('\\', "/").contains("/.axelstra-wt/"));
-                    let ident = axelstra_core::git::identity(repo);
-                    let parents = crate::projects::parent_paths(pr, &wts);
-                    let wts: Vec<Value> = wts
-                        .into_iter()
-                        .map(|w| {
-                            let parent = parents.get(&w.path).cloned();
-                            let mut v = serde_json::to_value(w).unwrap_or_default();
-                            if let Some(par) = parent {
-                                v["parent"] = json!(par);
-                            }
-                            v
-                        })
-                        .collect();
-                    json!({"id": pr.id, "name": ident.display_name, "path": pr.path, "worktrees": wts, "git": axelstra_core::git::is_repo(repo),
-                           "setup": pr.setup, "default_branch": axelstra_core::git::default_branch(repo), "slug": ident.slug, "icon_url": ident.icon_url, "remote": ident.remote})
-                })
-                .collect();
-            let all = Value::Array(v);
-            *reg.plist.lock_recover() = Some((std::time::Instant::now(), all.clone()));
-            Ok(all)
         }
         "git.changes" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
@@ -1280,11 +1209,6 @@ fn legacy(c: &mut Ctx) -> Result<Value> {
             let base = p["base"].as_str();
             let text = tokio::task::block_in_place(|| crate::changes::diff(&wt, path, base))?;
             Ok(json!({"diff": text}))
-        }
-        "project.logo" => {
-            let pr = crate::projects::find(&reg.store, p["id"].as_str().unwrap_or_default())?;
-            let logo = tokio::task::block_in_place(|| crate::projects::logo_data_url(std::path::Path::new(&pr.path)));
-            Ok(json!({"data_url": logo}))
         }
         "orch.start" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
@@ -1449,10 +1373,6 @@ fn legacy(c: &mut Ctx) -> Result<Value> {
                 })
             })
         }
-        "project.add" => {
-            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
-            Ok(serde_json::to_value(crate::projects::add(&reg.store, path)?)?)
-        }
         // one watch per connection (key u32::MAX in `subs`); a new subscribe replaces the old one
         "watch.subscribe" => {
             ensure_session_notifier(reg, tx, subs);
@@ -1477,89 +1397,6 @@ fn legacy(c: &mut Ctx) -> Result<Value> {
                 old.store(true, Ordering::SeqCst);
             }
             Ok(json!({}))
-        }
-        "project.setup" => {
-            let id = p["id"].as_str().ok_or_else(|| anyhow::anyhow!("missing id"))?;
-            crate::projects::set_setup(&reg.store, id, p["setup"].as_str().map(String::from))?;
-            Ok(json!({}))
-        }
-        "pm.detect" => {
-            let path =
-                p["id"].as_str().and_then(|id| crate::projects::find(&reg.store, id).ok()).map(|pr| std::path::PathBuf::from(pr.path));
-            let preferred = read_settings(&reg.saved)["pm"].as_str().map(String::from);
-            let (installed, suggested) =
-                tokio::task::block_in_place(|| crate::projects::package_managers(path.as_deref(), preferred.as_deref()));
-            let has_package_json = path.as_ref().map(|p| p.join("package.json").is_file()).unwrap_or(false);
-            Ok(json!({"installed": installed, "suggested": suggested, "package_json": has_package_json}))
-        }
-        "project.remove" => {
-            crate::projects::remove(&reg.store, p["id"].as_str().unwrap_or_default())?;
-            Ok(json!({}))
-        }
-        "worktree.create" => {
-            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
-            // a parent that is not a worktree of this project is refused before anything is created
-            let parent = p["parent"].as_str().map(str::trim).filter(|s| !s.is_empty());
-            if let Some(par) = parent {
-                crate::projects::check_parent(&pr, None, par)?;
-            }
-            let (wt, env) = tokio::task::block_in_place(|| crate::projects::worktree_create_report(&pr, name))?;
-            // also clears a link left by an earlier worktree at the same path
-            if let Err(e) = crate::projects::set_parent(&reg.store, &pr.id, &wt.path, parent) {
-                eprintln!("parent of {}: {e:#}", wt.path);
-            }
-            // the worktree plus what .worktreeinclude copied (env_copied) and left out (env_skipped)
-            let mut v = serde_json::to_value(wt)?;
-            v["env_copied"] = json!(env.copied);
-            v["env_skipped"] = json!(env.skipped);
-            Ok(v)
-        }
-        "worktree.set_parent" => {
-            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
-            let parent = p["parent"].as_str();
-            tokio::task::block_in_place(|| crate::projects::set_parent(&reg.store, &pr.id, path, parent))?;
-            Ok(json!({}))
-        }
-        "worktree.rename" => {
-            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
-            let name = p["name"].as_str().ok_or_else(|| anyhow::anyhow!("missing name"))?;
-            let busy = reg.worktree_working(path);
-            let wt = tokio::task::block_in_place(|| crate::projects::worktree_rename(&pr, path, name, busy))?;
-            let _ = crate::projects::rename_parent(&reg.store, &pr.id, path, &wt.path);
-            // the dispatcher's notes (title, requests) are keyed by path: they follow the folder
-            let f = reg.saved.with_file_name("dispatch.json");
-            let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
-            if let Some(mut meta) = std::fs::read_to_string(&f).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
-                if let Some(e) = meta.as_object_mut().and_then(|m| m.remove(&norm(path))) {
-                    meta[norm(&wt.path)] = e;
-                    write_atomic(&f, &serde_json::to_vec_pretty(&meta)?)?;
-                }
-            }
-            Ok(serde_json::to_value(wt)?)
-        }
-        "project.env_preview" => {
-            // what .worktreeinclude would copy into the next worktree, for the project settings dialog
-            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            Ok(serde_json::to_value(tokio::task::block_in_place(|| crate::wtenv::plan(std::path::Path::new(&pr.path)))?)?)
-        }
-        "dispatch.overlaps" => {
-            let f = reg.saved.with_file_name("dispatch.json");
-            Ok(tokio::task::block_in_place(|| crate::overlaps::overlaps(&reg.store, &f)))
-        }
-        "ports.list" => {
-            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
-            let norm = |s: &str| s.replace('\\', "/").to_ascii_lowercase();
-            let key = norm(&wt.to_string_lossy());
-            let ids: Vec<u32> = {
-                let metas = reg.metas.lock_recover();
-                metas.iter().filter(|(_, m)| m["worktree"].as_str().map(norm) == Some(key.clone())).map(|(id, _)| *id).collect()
-            };
-            let pids: Vec<u32> =
-                ids.iter().filter_map(|id| reg.get(*id)).filter(|s| s.try_wait().is_none()).filter_map(|s| s.pid()).collect();
-            Ok(json!({"ports": tokio::task::block_in_place(|| crate::ports::listening(&pids))?}))
         }
         "automation.list" => {
             let _g = reg.auto_lock.lock_recover();
@@ -1625,45 +1462,6 @@ fn legacy(c: &mut Ctx) -> Result<Value> {
             let kind = p["kind"].as_str().unwrap_or("pr").to_string();
             let items = tokio::task::block_in_place(|| crate::gh::list(std::path::Path::new(&pr.path), &kind))?;
             Ok(json!({"items": items}))
-        }
-        "worktree.from_pr" => {
-            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let n = p["number"].as_u64().ok_or_else(|| anyhow::anyhow!("missing number"))?;
-            let (wt, warning) = tokio::task::block_in_place(|| crate::projects::worktree_from_pr_report(&pr, n))?;
-            let mut v = serde_json::to_value(wt)?;
-            if let (Some(w), Some(o)) = (warning, v.as_object_mut()) {
-                o.insert("warning".into(), json!(w));
-            }
-            Ok(v)
-        }
-        "worktree.remove" => {
-            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
-            // refuse before touching any session: the main worktree (or a stranger path) must keep its terminals
-            let known = axelstra_core::git::worktree_list(std::path::Path::new(&pr.path))?;
-            let gone = crate::projects::norm_path(path);
-            match known.iter().find(|w| crate::projects::norm_path(&w.path) == gone) {
-                None => anyhow::bail!("not a worktree of this project"),
-                Some(w) if w.is_main => anyhow::bail!("cannot remove the main worktree"),
-                _ => {}
-            }
-            // a live session keeps its cwd open, which on Windows makes the folder impossible to remove: kill and
-            // wait for them first
-            let doomed: Vec<_> = {
-                let sessions = reg.sessions.lock_recover();
-                let metas = reg.metas.lock_recover();
-                sessions
-                    .iter()
-                    .filter(|(id, _)| {
-                        metas.get(id).and_then(|m| m["worktree"].as_str()).is_some_and(|w| crate::projects::norm_path(w) == gone)
-                    })
-                    .map(|(_, s)| s.clone())
-                    .collect()
-            };
-            tokio::task::block_in_place(|| kill_and_wait(&doomed, Duration::from_secs(5)));
-            tokio::task::block_in_place(|| crate::projects::worktree_remove(&pr, path))?;
-            let _ = crate::projects::forget_parent(&reg.store, &pr.id, path);
-            Ok(json!({}))
         }
         "hooks.status" => Ok(crate::hooks::status()?),
         "hooks.install" => tokio::task::block_in_place(crate::hooks::install),
