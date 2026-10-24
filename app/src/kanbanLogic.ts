@@ -1,4 +1,4 @@
-import { count } from "./strings";
+import { P } from "./strings.panels";
 import type { KCard, OrchTrust, OrchTrustCard } from "./api";
 
 /** `bypass*` modes (bypassPermissions, bypass-permissions…) run an agent with no supervision at all */
@@ -11,7 +11,7 @@ export const bypassCards = (cards: OrchTrustCard[]) => cards.filter((c) => c.byp
 export const trustLines = (cards: OrchTrustCard[]) =>
   cards.map((c) => {
     const flag = c.bypass || isBypass(c.permission_mode) ? "⚠ " : "";
-    return `${flag}${c.id}: ${c.agent} (${c.permission_mode || "padrão"})${c.acceptance ? ` · aceitação: ${c.acceptance}` : ""}`;
+    return `${flag}${c.id}: ${c.agent} (${c.permission_mode || P.kanban.defaultMode})${c.acceptance ? P.kanban.acceptance(c.acceptance) : ""}`;
   });
 
 export type StartPlan = {
@@ -27,10 +27,10 @@ export type StartPlan = {
 
 /** What the user is asked and what is sent on yes. `trust` is null when the daemon has no `orch.trust_info`. */
 export function planStart(n: number, trust: OrchTrust | null, legacyCmds: string[]): StartPlan {
-  const head = `Despachar ${count(n, "agente", "agentes")} para os cartões em "Para fazer"? Cada um corre num worktree isolado e o resultado é integrado num branch novo (orch/…). Nada é enviado para o remote.`;
+  const head = P.kanban.planHead(n);
   if (!trust) {
     return {
-      message: head + (legacyCmds.length ? `\n\nEstes comandos de aceitação vão correr na sua máquina:\n${legacyCmds.join("\n")}\n\nSó confirme se confia nestes cartões.` : ""),
+      message: head + (legacyCmds.length ? P.kanban.legacyCmds(legacyCmds.join("\n")) : ""),
       warn: legacyCmds.length > 0,
       bypass: [],
       trustAcceptance: legacyCmds.length > 0,
@@ -39,10 +39,10 @@ export function planStart(n: number, trust: OrchTrust | null, legacyCmds: string
   const bypass = bypassCards(trust.cards).map((c) => c.id);
   const cmds = trust.cards.filter((c) => c.acceptance).length;
   const bypassNote = bypass.length
-    ? `\n\n⚠ ${bypass.length === 1 ? "Este cartão corre" : "Estes cartões correm"} SEM pedir permissões (bypass): ${bypass.join(", ")}. O agente pode alterar ficheiros e correr comandos sem supervisão.`
+    ? P.kanban.bypassNote(bypass.length, bypass.join(", "))
     : "";
   return {
-    message: `${head}\n\n${trustLines(trust.cards).join("\n")}${bypassNote}${cmds ? "\n\nOs comandos de aceitação correm na sua máquina. Só confirme se confia nestes cartões." : ""}`,
+    message: `${head}\n\n${trustLines(trust.cards).join("\n")}${bypassNote}${cmds ? P.kanban.trustCmds : ""}`,
     warn: cmds > 0 || bypass.length > 0,
     bypass,
     trustAcceptance: cmds > 0,
