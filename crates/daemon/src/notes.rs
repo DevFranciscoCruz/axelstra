@@ -247,12 +247,12 @@ pub struct NoteInfo {
     pub modified: u64,
 }
 
-fn header_value<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+pub(crate) fn header_value<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     text.lines().take(8).find_map(|l| l.strip_prefix(&format!("- {key}: ")).map(str::trim))
 }
 
 /// Status and first lines of the Relatorio section of a task file.
-fn summarize(text: &str) -> (String, String) {
+pub(crate) fn summarize(text: &str) -> (String, String) {
     let body = text.split_once("\n## Relatorio").map(|(_, r)| r).unwrap_or_default();
     let status = if body.contains("- ok\n") {
         "ok"

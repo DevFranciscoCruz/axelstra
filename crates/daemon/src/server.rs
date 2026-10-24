@@ -178,9 +178,23 @@ impl Registry {
         keys.extend(self.pending.lock_recover().iter().filter_map(key_of));
         keys.extend(self.specs.lock_recover().values().filter_map(key_of));
         keys.extend(self.metas.lock_recover().values().filter_map(|m| m["key"].as_str().map(String::from)));
+        let mut notes: Vec<String> = vec![];
+        let note_of = |r: &Value| r["meta"]["note"].as_str().map(String::from);
+        let mut refs = String::new();
+        {
+            let pending = self.pending.lock_recover();
+            let specs = self.specs.lock_recover();
+            notes.extend(pending.iter().filter_map(note_of));
+            notes.extend(specs.values().filter_map(note_of));
+            refs.extend(pending.iter().chain(specs.values()).map(|r| r.to_string()));
+        }
+        notes.extend(self.metas.lock_recover().values().filter_map(|m| m["note"].as_str().map(String::from)));
         let mut out = vec![];
         if let Some(dir) = self.saved.parent() {
             crate::cleanup::leftovers(dir, &keys, dry, &mut out);
+            crate::cleanup::prompt_leftovers(dir, &refs, dry, &mut out);
+            let wts = crate::cleanup::live_worktrees(&crate::projects::load(&self.store));
+            crate::cleanup::worktree_leftovers(dir, wts.as_deref(), &notes, dry, &mut out);
         }
         out
     }
