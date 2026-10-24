@@ -47,6 +47,7 @@ import { TabBar } from "./TabBar";
 import { pickProject } from "./projectActions";
 import { ask } from "./Confirm";
 import { PullsPanel } from "./PullsPanel";
+import { TimelinePanel } from "./TimelinePanel";
 import { TerminalView } from "./TerminalView";
 import {
   activeSession,
@@ -493,7 +494,7 @@ export function App() {
       </main>
       <Show when={current() && showRightPanel()}>
         <Section name={S.app.sectionRight}>
-          <Show when={rightTab() === "files"} fallback={rightTab() === "pulls" ? <PullsPanel /> : <ChangesPanel />}>
+          <Show when={rightTab() === "files"} fallback={rightTab() === "pulls" ? <PullsPanel /> : rightTab() === "timeline" ? <TimelinePanel /> : <ChangesPanel />}>
             <FilesPanel />
           </Show>
         </Section>

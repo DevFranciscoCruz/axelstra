@@ -1,5 +1,6 @@
-import type { WtUsage } from "./usageFormat";
+import type { Timeline } from "./timelineLogic";
 import type { OverlapFiles, RebaseResult } from "./rebase";
+import type { WtUsage } from "./usageFormat";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AppError, toAppError } from "./appError";
@@ -397,10 +398,10 @@ export const notesRead = (session: number) => call<{ text: string; path: string;
 export const notesExport = (session: number, overwrite = false) => call<{ path: string }>("notes.export", { session, overwrite });
 /** worktree path -> the other worktrees that edit some of the same files */
 export const dispatchOverlaps = () => callBg<Record<string, string[]>>("dispatch.overlaps");
+export const dispatchOverlapFiles = () => callBg<OverlapFiles>("dispatch.overlap_files");
 /** the name of a worktree folder/branch as the daemon renames it */
 export const worktreeRename = (path: string, name: string) => call<{ path?: string }>("worktree.rename", { path, name });
 
-export const dispatchOverlapFiles = () => callBg<OverlapFiles>("dispatch.overlap_files");
 export const killSession = (id: number) => (cancelNudge(id), call("session.kill", { id }));
 export const removeSession = (id: number) => (cancelNudge(id), call("session.remove", { id }));
 export const resizeSession = (id: number, cols: number, rows: number) =>
@@ -448,10 +449,10 @@ export const saveAutomation = (a: Automation) => call<Automation>("automation.sa
 export const deleteAutomation = (id: string) => call("automation.delete", { id });
 export const runAutomation = (id: string) => call<{ session: number; worktree: string }>("automation.run", { id });
 export const openInEditor = (worktree: string, app: "code") => call("open.editor", { worktree, app });
+export const worktreeRebase = (project: string, path: string) => call<RebaseResult>("worktree.rebase", { project, path });
 export const removeWorktree = (project: string, path: string) => call("worktree.remove", { project, path });
 
 export type FileChange = {
-export const worktreeRebase = (project: string, path: string) => call<RebaseResult>("worktree.rebase", { project, path });
   path: string;
   status: string;
   untracked: boolean;
@@ -499,6 +500,7 @@ export type ShipStatus = {
   ci: "pass" | "fail" | "pending" | "none"; checks: CheckItem[];
   review: "approved" | "changes" | "review" | ""; mergeable: "yes" | "no" | "unknown"; merge_state: string; can_merge: boolean;
 };
+export const gitTimeline = (worktree: string, project: string, ci = false) => callBg<Timeline>("git.timeline", { worktree, project, ci });
 export const gitChecks = (worktree: string) => callBg<ShipStatus>("git.checks", { worktree });
 export const gitMerge = (worktree: string, auto: boolean, deleteBranch: boolean) =>
   call<{ output: string }>("git.merge", { worktree, auto, delete_branch: deleteBranch }).then((r) => r.output);

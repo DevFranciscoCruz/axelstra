@@ -41,7 +41,7 @@ export type PaletteDeps = {
   showSidebarNow: () => void;
 };
 
-const showPanel = (tab: "files" | "changes" | "pulls") => {
+const showPanel = (tab: "files" | "changes" | "pulls" | "timeline") => {
   setRightTab(tab);
   if (!showRightPanel()) toggleRightPanel();
 };

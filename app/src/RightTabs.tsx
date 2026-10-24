@@ -1,10 +1,11 @@
 import { Show } from "solid-js";
 import { Button, Tabs, TabsList, TabsTrigger } from "./ui";
 import { K } from "./keyboard";
+import { P } from "./strings.panels";
 import { PanelIcon } from "./PanelIcon";
 import { changes, rightTab, setRightTab, toggleRightPanel } from "./store";
 
-type RightTab = "files" | "changes" | "pulls";
+type RightTab = "files" | "changes" | "pulls" | "timeline";
 
 /** Tab strip shared by every right-hand panel. */
 export function RightTabs() {
@@ -21,6 +22,7 @@ export function RightTabs() {
         {tab("files", "Ficheiros")}
         {tab("changes", "Alterações")}
         {tab("pulls", "PRs")}
+        {tab("timeline", P.timeline.tab)}
       </TabsList>
       <span class="flex-1" />
       <Button variant="icon" size="icon" class="text-foreground" title={K("Esconder painel direito (Ctrl+Shift+B)")} aria-label={K("Esconder painel direito (Ctrl+Shift+B)")} onClick={toggleRightPanel}>

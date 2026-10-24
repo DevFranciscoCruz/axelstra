@@ -112,7 +112,7 @@ export const guarded = (fn: () => void) => {
 export const [fsTick, setFsTick] = createSignal(0);
 
 /** right panel tab */
-export const [rightTab, setRightTab] = createSignal<"files" | "changes" | "pulls">("files");
+export const [rightTab, setRightTab] = createSignal<"files" | "changes" | "pulls" | "timeline">("files");
 
 /** What fills the main area. One value, so two views can never be "open" at once. */
 export type View =
