@@ -5,7 +5,7 @@ import { ask } from "./Confirm";
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { AgentInfo, Board, KCard, agentOptions, agentWarning, agentsList, OrchRun, gitPr, gitPush, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchRetry, orchStart, orchStatus, orchTrustInfo } from "./api";
 import { Modal } from "./Modal";
-import { refreshProjects, selectWorktree, setError, setShowKanban, showNotice, toast } from "./store";
+import { refreshProjects, selectWorktree, setError, setShowKanban, toast } from "./store";
 import { planStart, restorePayload } from "./kanbanLogic";
 import { S } from "./strings";
 import { P } from "./strings.panels";

@@ -1,7 +1,7 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { createPersistedFlag } from "./persist";
 import { createPoller } from "./poller";
-import { S, count } from "./strings";
+import { S } from "./strings";
 import { invoke } from "@tauri-apps/api/core";
 import { findWorktree, openSession, overview, refreshOverview, refreshProjects, selectWorktree, selectedWorktree, sessionState, setShowShortcuts, sessions, showNotice, tabLabel, watchOverview } from "./store";
 import { worktreeSweep } from "./api";

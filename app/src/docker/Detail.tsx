@@ -1,4 +1,4 @@
-import { For, JSX, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   DockerContainer,
@@ -16,11 +16,10 @@ import { Icon } from "../Icon";
 import { Badge, Button, Checkbox, Input, cn } from "../ui";
 import { TerminalView } from "../TerminalView";
 import { createLatest, isRunning, isSecretKey, joinPath, portChips, searchLog, stateInfo } from "../dockerLogic";
-import { findWorktree, refreshSessions, selectedWorktree, sessions, setError, showNotice } from "../store";
+import { findWorktree, refreshSessions, selectedWorktree, sessions } from "../store";
 import { FAST_MS, nameOf, shells, DTab, DTABS } from "./shared";
 import { Empty } from "./Lists";
 import { P } from "../strings.panels";
-import { count } from "../strings";
 
 // ---- detail pane ----
 export function Detail(props: {
