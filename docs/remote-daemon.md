@@ -129,3 +129,16 @@ scripts writing to stdout would otherwise corrupt the first frame; (2) the bridg
 fixes `client:"cli"`, so the token never leaves the remote and a remote caller cannot pick its own marker. The weakest
 point is not the transport but the premise that "a process the daemon does not own is the user": see "What this does
 not protect".
+
+## Implementation status
+
+- Done: `RemoteSpec` (`remote.rs`), `Client::connect_remote` / `Conn::Child` with deadlines that kill the child, stderr in
+  errors, kill on drop; `axelstra bridge`; global `--host` / `AXELSTRA_HOST` (refused in agent sessions);
+  `AXELSTRA_REMOTE_BIN`. Tested without ssh or WSL through the test-only `RemoteSpec::Exec`.
+- Windows detail: the bridge reads the daemon pipe with `PeekNamedPipe` polling, because a pending synchronous `ReadFile`
+  blocks a `WriteFile` on the same pipe file and the relay would stall on the first request.
+- Not done: the app (host registry, per-host `Client` routing, host badge, "add remote project"). The app holds one
+  control connection plus watch/stream connections through `with_client`; routing them per host, and the allow-list and
+  agent-role decisions for new methods, need their own pass.
+- Not verified: real `ssh` and `wsl.exe` (`--exec` PATH behaviour, binary-safe stdout through `wsl.exe`): this machine has
+  OpenSSH but no ssh server to reach and only the `docker-desktop` WSL distro. Windows or macOS remotes.
