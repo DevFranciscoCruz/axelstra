@@ -1,4 +1,20 @@
 /target
+target-*/
+app/src-tauri/target
+app/src-tauri/binaries/
+
+# local secrets and noise
+.env*
+*.log
+.DS_Store
+
+# leftovers of interrupted writes and manual backups
+*.bad
+*.bad.*
+*.axl-tmp
+*.tmp
+
+# Intentionally ignored: .kanban/ and .axelstra/ hold per-checkout state written by the app and its
+# agents (boards, notes, hooks, session data). They are local to each worktree and must never be committed.
 .kanban/
 .axelstra/
-app/src-tauri/binaries/

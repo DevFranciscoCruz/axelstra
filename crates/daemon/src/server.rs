@@ -1,5 +1,5 @@
 use crate::proto::*;
-use crate::store::{read_json, write_atomic, LockRecover};
+use crate::store::{read_json, write_atomic, write_backed_up, LockRecover};
 use anyhow::Result;
 use axelstra_core::pty::{Session, Spawn};
 use serde::Deserialize;
@@ -70,7 +70,7 @@ impl Registry {
         ids.sort();
         v.extend(ids.iter().map(|i| specs[i].clone()));
         if let Ok(text) = serde_json::to_string(&v) {
-            let _ = write_atomic(&self.saved, text.as_bytes());
+            let _ = write_backed_up(&self.saved, text.as_bytes());
         }
     }
 
@@ -805,7 +805,10 @@ fn dispatch(
                 let sessions = reg.sessions.lock_recover();
                 let metas = reg.metas.lock_recover();
                 !metas.iter().any(|(id, m)| {
-                    m["kind"] == "agent" && m["main"] != true && m["project"].as_str() == Some(project.as_str()) && sessions.get(id).is_some_and(|s| s.try_wait().is_none())
+                    m["kind"] == "agent"
+                        && m["main"] != true
+                        && m["project"].as_str() == Some(project.as_str())
+                        && sessions.get(id).is_some_and(|s| s.try_wait().is_none())
                 })
             };
             let label = crate::notes::on_spawn(&crate::notes::root(&data_dir), p["label"].as_str(), &mut meta, p["goal"].as_str(), alone);
@@ -1154,7 +1157,7 @@ fn dispatch(
                 saved["auto_install"] = json!(b);
             }
             apply_ui_settings(&mut saved, p)?;
-            write_atomic(&reg.saved.with_file_name("settings.json"), &serde_json::to_vec_pretty(&saved)?)?;
+            write_backed_up(&reg.saved.with_file_name("settings.json"), &serde_json::to_vec_pretty(&saved)?)?;
             Ok(json!({}))
         }
         "dispatch.meta" => {
@@ -1669,7 +1672,9 @@ fn dispatch(
                 let metas = reg.metas.lock_recover();
                 sessions
                     .iter()
-                    .filter(|(id, _)| metas.get(id).and_then(|m| m["worktree"].as_str()).is_some_and(|w| crate::projects::norm_path(w) == gone))
+                    .filter(|(id, _)| {
+                        metas.get(id).and_then(|m| m["worktree"].as_str()).is_some_and(|w| crate::projects::norm_path(w) == gone)
+                    })
                     .map(|(_, s)| s.clone())
                     .collect()
             };
@@ -1793,7 +1798,12 @@ mod registry_tests {
         let reg = Registry::new(dir.join("projects.json"), "p".into(), "t".into());
         assert!(reg.pending.lock_recover().is_empty());
         reg.persist();
-        assert_eq!(std::fs::read_to_string(dir.join("sessions.json.bad")).unwrap(), "[{ broken");
+        let bad = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.file_name().unwrap().to_string_lossy().starts_with("sessions.json.bad."))
+            .expect("corrupt file kept as .bad.<ts>");
+        assert_eq!(std::fs::read_to_string(bad).unwrap(), "[{ broken");
         assert_eq!(std::fs::read_to_string(dir.join("sessions.json")).unwrap(), "[]");
         let _ = std::fs::remove_dir_all(&dir);
     }
