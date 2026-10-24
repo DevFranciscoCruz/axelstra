@@ -116,6 +116,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: CompCmd,
     },
+    /// Export or import the workspace configuration: projects, automations, settings, kanban cards
+    Workspace {
+        #[command(subcommand)]
+        cmd: workspace::WsCmd,
+    },
     /// Show or set the maximum number of workers running at once
     Limit { n: Option<usize> },
     /// Run a task graph from a JSON file: {"tasks":[{"id","worktree","agent"|"cmd","prompt","after":[..]}]}
@@ -382,6 +387,7 @@ mod lock;
 mod orchcmd;
 mod startconfirm;
 mod statusline;
+mod workspace;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -454,6 +460,7 @@ fn main() -> Result<()> {
             let c = Client::connect_cli(&proto::pipe_name(), &proto::load_or_create_token()?)?;
             dispatch::run(cmd, c)?;
         }
+        Cmd::Workspace { cmd } => workspace::run(cmd, None)?,
         Cmd::Lock { name, slots, timeout, command } => std::process::exit(lock::run(&name, slots, timeout, &command)?),
         Cmd::StatuslineTee => statusline::tee()?,
         Cmd::Hook { agent, event } => hook::dispatch(&agent, &event)?,
