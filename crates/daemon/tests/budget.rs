@@ -1,5 +1,6 @@
 //! Token budgets: the setting is validated and survives, a level crossing is reported once, an agent is interrupted
 //! only for a budget that opted in, and an agent cannot touch the limits.
+mod common;
 use axelstra_daemon::agentlog::claude_dir_name;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
