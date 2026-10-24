@@ -1,6 +1,6 @@
 import { ask, askSave } from "./Confirm";
 import { pushNotification } from "./notifications";
-import { LEFT, RIGHT, fitPanel } from "./layout";
+
 import { createMemo, createRoot, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { Changes, Commit, DispatchMeta, GhItem, Project, SessionInfo, Terse, Worktree, WtStatus, call, callBg, flowTasks, ghListBg, gitChanges, listProjects, listSessions, worktreeOverview, worktreeStatus } from "./api";
@@ -104,54 +104,7 @@ export const pickAgent = () =>
     });
   });
 
-/** left project list and right files/changes panel; remembered between runs */
-const flag = (k: string) => load(k) !== "0";
-const [leftOn, setLeftOn] = createSignal(flag("axelstra.left"));
-const [rightOn, setRightOn] = createSignal(flag("axelstra.right"));
-export const showSidebar = leftOn;
-export const showRightPanel = rightOn;
-export const toggleSidebar = () => {
-  setLeftOn(!leftOn());
-  save("axelstra.left", leftOn() ? "1" : "0");
-};
-export const toggleRightPanel = () => {
-  setRightOn(!rightOn());
-  save("axelstra.right", rightOn() ? "1" : "0");
-};
-
-/** panel widths in px (drag handles); remembered, clamped on use */
-const num = (k: string, d: number) => {
-  const n = Number(load(k));
-  return Number.isFinite(n) && n > 0 ? n : d;
-};
-const [leftRaw, setLeftRaw] = createSignal(num("axelstra.leftW", 260));
-const [rightRaw, setRightRaw] = createSignal(num("axelstra.rightW", 320));
-// the window size, so the saved widths shrink when the window does (and come back when it grows)
-const [winW, setWinW] = createSignal(typeof window === "undefined" ? 1400 : window.innerWidth);
-// one update per frame while the window is being dragged: each width change refits every terminal
-if (typeof window !== "undefined") {
-  let frame = 0;
-  window.addEventListener("resize", () => {
-    if (frame) return;
-    frame = requestAnimationFrame(() => {
-      frame = 0;
-      setWinW(window.innerWidth);
-    });
-  });
-}
-/** widths in use: what was saved, limited so the centre keeps a usable width */
-export const leftW = () => fitPanel(leftRaw(), LEFT, rightOn() ? rightRaw() : 0, winW());
-export const rightW = () => fitPanel(rightRaw(), RIGHT, leftOn() ? leftW() : 0, winW());
-export const setLeftW = (w: number) => {
-  const v = fitPanel(w, LEFT, rightOn() ? rightRaw() : 0, winW());
-  setLeftRaw(v);
-  save("axelstra.leftW", String(v));
-};
-export const setRightW = (w: number) => {
-  const v = fitPanel(w, RIGHT, leftOn() ? leftW() : 0, winW());
-  setRightRaw(v);
-  save("axelstra.rightW", String(v));
-};
+export * from "./store/layout";
 
 /** unsaved text in the open editor; anything that would close it asks first */
 export const [editorDirty, setEditorDirty] = createSignal(false);
@@ -191,24 +144,8 @@ export const [fsTick, setFsTick] = createSignal(0);
 
 export const [projects, setProjects] = createSignal<Project[]>([]);
 export const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
-/** The newest failure on screen ("" when none). Failures live in the toast list, one per key (see toasts.ts). */
-export const error = () => latestText("error");
-/** the app is reconnecting to the daemon (it was replaced or crashed): the UI says so until it is back */
-export const [daemonReconnecting, setDaemonReconnecting] = createSignal(false);
-/** a short informational message (not a failure): shown for a few seconds */
-export const notice = () => latestText("info");
-export const showNotice = (m: string) => void toast({ text: m, kind: "info" });
-
-const ACTION_KEY = "action:";
-/** Shows a failure. Two different failures stack; the same one again replaces itself. `setError("")` closes the action failures.
- *  `key` ties it to a poll, which clears only its own with `clearError(key)`. */
-export const setError = (m: string, key?: string) => {
-  if (!m) return dismissPrefix(ACTION_KEY);
-  const text = friendlyError(m);
-  toast({ text, kind: "error", key: key ?? `${ACTION_KEY}${text}`, record: !key });
-};
-/** a poll that works again takes down the failure it raised, and only that one */
-export const clearError = (key: string) => dismissKey(key);
+export * from "./store/notify";
+import { clearError, setError, showNotice } from "./store/notify";
 
 const [wt, setWt] = createSignal<string | null>(load("axelstra.worktree"));
 export const selectedWorktree = wt;
