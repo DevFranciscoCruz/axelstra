@@ -12,6 +12,13 @@
 /// 2: app.dir, session.pending, session.pending_clear. 6: settings.get / settings.set. 7: settings.get / settings.set carry shell, notify_sound, notify_mode. 8: session.rename. 9: git.suggest. 10: agent.worktree_usage. 11: docker.*. 12: agents.list, git.checks, git.merge, project.env_preview, worktree.rename, dispatch.overlaps, notes.*, worktree.overview, session.hint. 13: worktree.set_parent, notes.worktree, notes.read_file, worktree.create parent. 14: hooks.status, hooks.install.
 pub const PROTO: u64 = 14;
 
+/// Oldest daemon the app accepts for security reasons, whatever its `PROTO`: bump it when a release fixes something in
+/// the daemon that must not keep running after an update. The app restarts a daemon that reports less (or nothing).
+pub const SECURITY_MIN: u64 = 1;
+
+/// Identifies this build. `hello` and `ping` report it, so an app can tell a daemon left over from an older release.
+pub const BUILD_ID: &str = concat!(env!("CARGO_PKG_VERSION"), "+", env!("CARGO_PKG_NAME"));
+
 pub const MAX_FRAME: usize = 16 << 20;
 
 pub const JSON: u8 = 0;
@@ -54,17 +61,25 @@ pub fn pipe_name() -> String {
     data_dir().join("axelstra.sock").to_string_lossy().into_owned()
 }
 
-/// Per-user private state (token, project list, socket).
-pub fn data_dir() -> std::path::PathBuf {
-    let home = || std::env::var_os("HOME").map(std::path::PathBuf::from);
+/// Per-user private state (token, project list, socket), or why there is none: with no profile directory the
+/// shared temp dir would hold the daemon's secret, so there is no fallback to it.
+pub fn try_data_dir() -> anyhow::Result<std::path::PathBuf> {
+    let home = || std::env::var_os("HOME").filter(|h| !h.is_empty()).map(std::path::PathBuf::from);
+    let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
     let base = if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)
+        var("LOCALAPPDATA")
     } else if cfg!(target_os = "macos") {
         home().map(|h| h.join("Library").join("Application Support"))
     } else {
-        std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| home().map(|h| h.join(".local").join("share")))
+        var("XDG_DATA_HOME").or_else(|| home().map(|h| h.join(".local").join("share")))
     };
-    base.unwrap_or_else(std::env::temp_dir).join("axelstra")
+    base.map(|b| b.join("axelstra")).ok_or_else(|| anyhow::anyhow!("no per-user data directory (LOCALAPPDATA / HOME is not set)"))
+}
+
+/// Per-user private state (token, project list, socket). Reads that cannot name a directory get the temp dir (never
+/// anything secret: `load_or_create_token` and `ensure_data_dir` use `try_data_dir` and fail instead).
+pub fn data_dir() -> std::path::PathBuf {
+    try_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("axelstra"))
 }
 
 /// Shared secret, stored under the user's private profile dir.
@@ -74,7 +89,7 @@ pub fn token_path() -> std::path::PathBuf {
 
 /// Creates the data dir; on Unix it is private to the user (0700).
 pub fn ensure_data_dir() -> anyhow::Result<std::path::PathBuf> {
-    let d = data_dir();
+    let d = try_data_dir()?;
     std::fs::create_dir_all(&d)?;
     #[cfg(unix)]
     {
@@ -84,8 +99,19 @@ pub fn ensure_data_dir() -> anyhow::Result<std::path::PathBuf> {
     Ok(d)
 }
 
+/// Compares secrets without stopping at the first differing byte.
+pub fn ct_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let mut diff = (a.len() ^ b.len()) as u8;
+    for i in 0..a.len().max(b.len()) {
+        diff |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
+    }
+    diff == 0
+}
+
 pub fn load_or_create_token() -> anyhow::Result<String> {
-    let p = token_path();
+    let d = ensure_data_dir()?;
+    let p = d.join("token");
     if let Ok(t) = std::fs::read_to_string(&p) {
         let t = t.trim().to_string();
         if t.len() >= 32 {
@@ -95,12 +121,41 @@ pub fn load_or_create_token() -> anyhow::Result<String> {
     let mut b = [0u8; 24];
     getrandom::getrandom(&mut b).map_err(|e| anyhow::anyhow!("getrandom: {e}"))?;
     let t: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    ensure_data_dir()?;
-    std::fs::write(&p, &t)?;
+    // an unusable token file (short, empty) is replaced; the new one is born private, never world-readable even briefly
+    let _ = std::fs::remove_file(&p);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
     }
-    Ok(t)
+    match opts.open(&p) {
+        Ok(mut f) => {
+            use std::io::Write;
+            f.write_all(t.as_bytes())?;
+            Ok(t)
+        }
+        // another process won the race to create it: use its token
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let t = std::fs::read_to_string(&p)?.trim().to_string();
+            anyhow::ensure!(t.len() >= 32, "the token file is unusable: {}", p.display());
+            Ok(t)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ct_eq;
+
+    #[test]
+    fn constant_time_compare_matches_equality() {
+        assert!(ct_eq("abc", "abc"));
+        assert!(!ct_eq("abc", "abd"));
+        assert!(!ct_eq("abc", "ab"));
+        assert!(!ct_eq("", "a"));
+        assert!(ct_eq("", ""));
+    }
 }
