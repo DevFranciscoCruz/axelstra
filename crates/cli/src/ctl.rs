@@ -300,8 +300,11 @@ fn with_prompt_file(line: &str, file: &str, ps: bool) -> String {
 }
 
 /// The flags that put `agent`'s interactive TUI on a first prompt, each with a leading space ("" when it needs none).
+/// A session started with a prompt by an agent or a script is unattended, so the agent is also told to trust the
+/// folder (gemini would stop at "Do you trust the files in this folder?").
 fn prompt_flags(agent: &str) -> String {
-    axelstra_core::agents::get(agent).and_then(|a| a.interactive_prompt).unwrap_or(&[]).iter().map(|f| format!(" {f}")).collect()
+    let Some(a) = axelstra_core::agents::get(agent) else { return String::new() };
+    a.trust.iter().chain(a.interactive_prompt.unwrap_or(&[])).map(|f| format!(" {f}")).collect()
 }
 
 /// Starts a claude/codex session in `worktree` (visible in the app); returns its session id.
@@ -657,7 +660,7 @@ mod tests {
 
     #[test]
     fn gemini_needs_the_interactive_prompt_flag_the_others_do_not() {
-        assert_eq!(prompt_flags("gemini"), " -i");
+        assert_eq!(prompt_flags("gemini"), " --skip-trust -i");
         assert_eq!((prompt_flags("claude"), prompt_flags("codex"), prompt_flags("other")), (String::new(), String::new(), String::new()));
     }
 

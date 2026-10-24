@@ -4,7 +4,7 @@
 //! Flags checked against the installed CLI's own `--help` on this machine: claude 2.1.309 and codex-cli 0.154.0.
 //! gemini-cli 0.65.0 (installed in a throwaway prefix): `-i/--prompt-interactive` starts the TUI on a prompt, `-p/--prompt`
 //! is headless, `--approval-mode default|auto_edit|yolo|plan` is a choice list, `--resume latest|N|UUID` reopens a
-//! conversation of the current folder (no error when there is none). `--skip-trust` exists but is not passed (docs/AGENTS.md).
+//! conversation of the current folder (no error when there is none). `--skip-trust` trusts the folder for the session: passed to unattended runs only (docs/AGENTS.md).
 //! `codex --full-auto` no longer exists in 0.154, so codex uses `--sandbox workspace-write` instead.
 
 use anyhow::{bail, Result};
@@ -31,6 +31,9 @@ pub struct Agent {
     pub dangerous: Option<&'static [&'static str]>,
     /// args that continue the latest conversation, put before everything else; None: cannot resume
     pub resume: Option<&'static [&'static str]>,
+    /// args that make the agent trust the folder without asking, for runs nobody can answer (one-shot runs,
+    /// orchestrated workers, automations); empty: the agent has no such prompt. Never added to a tab the user opens.
+    pub trust: &'static [&'static str],
 }
 
 pub const TABLE: &[Agent] = &[
@@ -45,6 +48,7 @@ pub const TABLE: &[Agent] = &[
         unattended: &[],
         dangerous: Some(&["--dangerously-skip-permissions"]),
         resume: Some(&["--continue"]),
+        trust: &[],
     },
     Agent {
         id: "codex",
@@ -58,6 +62,7 @@ pub const TABLE: &[Agent] = &[
         dangerous: Some(&["--dangerously-bypass-approvals-and-sandbox"]),
         // a subcommand: `codex resume --last`
         resume: Some(&["resume", "--last"]),
+        trust: &[],
     },
     Agent {
         id: "gemini",
@@ -71,6 +76,9 @@ pub const TABLE: &[Agent] = &[
         unattended: &["--approval-mode", "auto_edit"],
         dangerous: Some(&["--approval-mode", "yolo"]),
         resume: Some(&["--resume", "latest"]),
+        // 0.65: "not running in a trusted directory" and exit 1 for `-p` in a folder not yet trusted, a dialog for `-i`;
+        // the flag trusts it for this session only (nothing is written to trustedFolders.json)
+        trust: &["--skip-trust"],
     },
 ];
 
@@ -185,6 +193,8 @@ impl Agent {
         if sub {
             v.extend(self.headless.iter().map(|s| s.to_string()));
         }
+        // a one-shot run cannot answer a trust prompt
+        v.extend(self.trust.iter().map(|s| s.to_string()));
         if unattended {
             v.extend(self.unattended.iter().map(|s| s.to_string()));
         }
@@ -200,11 +210,13 @@ impl Agent {
         v
     }
 
-    /// What a "start with this prompt" launcher runs: the TUI on the prompt, or a one-shot run for agents
-    /// that cannot take a prompt in the TUI.
+    /// What an unattended "start with this prompt" launcher (automations) runs: the TUI on the prompt, or a one-shot
+    /// run for agents that cannot take a prompt in the TUI. Nobody is there to answer a trust prompt.
     pub fn start_argv(&self, prompt: &str) -> Vec<String> {
         if self.interactive_prompt.is_some() {
-            self.interactive_argv(Some(prompt), false)
+            let mut v = self.interactive_argv(Some(prompt), false);
+            v.splice(1..1, self.trust.iter().map(|s| s.to_string()));
+            v
         } else {
             self.headless_argv(prompt, false, false)
         }
@@ -270,7 +282,7 @@ mod tests {
         let h = |id: &str, un, d| get(id).unwrap().headless_argv("P", un, d);
         assert_eq!(h("claude", true, false), s(&["claude", "-p", "P"]));
         assert_eq!(h("codex", true, false), s(&["codex", "exec", "--sandbox", "workspace-write", "P"]));
-        assert_eq!(h("gemini", true, false), s(&["gemini", "--approval-mode", "auto_edit", "-p", "P"]));
+        assert_eq!(h("gemini", true, false), s(&["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-p", "P"]));
     }
 
     #[test]
@@ -298,6 +310,9 @@ mod tests {
     #[test]
     fn start_argv_falls_back_to_one_shot() {
         assert_eq!(get("claude").unwrap().start_argv("P"), s(&["claude", "P"]));
+        // unattended launchers trust the folder for the session; a tab the user opens does not
+        assert_eq!(get("gemini").unwrap().start_argv("P"), s(&["gemini", "--skip-trust", "-i", "P"]));
+        assert_eq!(get("gemini").unwrap().interactive_argv(Some("P"), false), s(&["gemini", "-i", "P"]));
     }
 
     #[test]

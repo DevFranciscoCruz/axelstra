@@ -546,8 +546,9 @@ fn agent_command(agent: &str, permission_mode: &str, interactive: bool) -> Resul
     let ask = "Read .axelstra/prompt.md and do the task described there.";
     let mut v = if interactive && a.interactive_prompt.is_some() {
         let mut v = a.interactive_argv(Some(ask), false);
-        // the safe unattended flags go right after the program, before the prompt
-        v.splice(1..1, a.unattended.iter().map(|s| s.to_string()));
+        // the safe unattended flags go right after the program, before the prompt; a worker nobody watches cannot
+        // answer the agent's "trust this folder?" question either
+        v.splice(1..1, a.trust.iter().chain(a.unattended.iter()).map(|s| s.to_string()));
         v
     } else {
         a.headless_argv(ask, true, false)
@@ -733,8 +734,8 @@ mod tests {
         let x = agent_command("chatgpt", "auto", false).unwrap();
         assert_eq!(x, ["codex", "exec", "--sandbox", "workspace-write", p]);
         assert_eq!(agent_command("codex", "auto", true).unwrap(), ["codex", "--sandbox", "workspace-write", p]);
-        assert_eq!(agent_command("gemini", "auto", false).unwrap(), ["gemini", "--approval-mode", "auto_edit", "-p", p]);
-        assert_eq!(agent_command("gemini", "auto", true).unwrap(), ["gemini", "--approval-mode", "auto_edit", "-i", p]);
+        assert_eq!(agent_command("gemini", "auto", false).unwrap(), ["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-p", p]);
+        assert_eq!(agent_command("gemini", "auto", true).unwrap(), ["gemini", "--skip-trust", "--approval-mode", "auto_edit", "-i", p]);
         assert!(agent_command("rm", "auto", false).unwrap_err().to_string().contains("desconhecido"));
         assert!(agent_command("claude", "--evil", false).is_err());
     }

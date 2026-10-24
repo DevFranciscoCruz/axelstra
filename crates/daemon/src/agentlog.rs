@@ -256,7 +256,10 @@ fn gemini_project_dirs(root: &Path, registry: &[(String, String)], path: &str) -
 fn gemini_registry(root: &Path) -> Vec<(String, String)> {
     let Some(text) = root.parent().and_then(|g| std::fs::read_to_string(g.join("projects.json")).ok()) else { return vec![] };
     let Ok(v) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) else { return vec![] };
-    v["projects"].as_object().map(|m| m.iter().filter_map(|(k, s)| Some((k.clone(), s.as_str()?.to_string()))).collect()).unwrap_or_default()
+    v["projects"]
+        .as_object()
+        .map(|m| m.iter().filter_map(|(k, s)| Some((k.clone(), s.as_str()?.to_string()))).collect())
+        .unwrap_or_default()
 }
 
 /// Same folder spelled two ways: Gemini lower-cases a Windows root before it registers it, and slashes vary.
@@ -1057,9 +1060,17 @@ mod tests {
 
     #[test]
     fn gemini_rewind_and_removed_messages_leave_the_conversation() {
-        let rec = |id: &str, t: &str, c: &str| format!("{{\"id\":\"{id}\",\"timestamp\":\"2026-10-20T10:00:00Z\",\"type\":\"{t}\",\"content\":\"{c}\"}}\n");
+        let rec = |id: &str, t: &str, c: &str| {
+            format!("{{\"id\":\"{id}\",\"timestamp\":\"2026-10-20T10:00:00Z\",\"type\":\"{t}\",\"content\":\"{c}\"}}\n")
+        };
         let head = "{\"sessionId\":\"s\",\"projectHash\":\"h\",\"startTime\":\"2026-10-20T10:00:00Z\"}\n";
-        let base = format!("{head}{}{}{}{}", rec("1", "user", "um"), rec("2", "gemini", "dois"), rec("3", "user", "três"), rec("4", "gemini", "quatro"));
+        let base = format!(
+            "{head}{}{}{}{}",
+            rec("1", "user", "um"),
+            rec("2", "gemini", "dois"),
+            rec("3", "user", "três"),
+            rec("4", "gemini", "quatro")
+        );
         let rewound = format!("{base}{{\"$rewindTo\":\"3\"}}\n");
         assert_eq!(parse_gemini(&rewound, true).unwrap().messages.len(), 2);
         let removed = format!("{base}{{\"$patch\":{{\"removeIds\":[\"2\",\"4\"]}}}}\n");
@@ -1077,7 +1088,8 @@ mod tests {
         std::fs::create_dir_all(&chats).unwrap();
         std::fs::write(chats.join("session-2026-10-24T15-07-8831b7c4.jsonl"), GEMINI_REAL).unwrap();
         // Gemini lower-cases a Windows root in the registry
-        std::fs::write(root.join(".gemini").join("projects.json"), r#"{"projects":{"c:\\wt\\gem":"gem","c:\\wt\\other":"other"}}"#).unwrap();
+        std::fs::write(root.join(".gemini").join("projects.json"), r#"{"projects":{"c:\\wt\\gem":"gem","c:\\wt\\other":"other"}}"#)
+            .unwrap();
         let reg = gemini_registry(&tmp);
         assert_eq!(reg.len(), 2);
         let dirs = gemini_project_dirs(&tmp, &reg, r"C:\wt\gem\");
