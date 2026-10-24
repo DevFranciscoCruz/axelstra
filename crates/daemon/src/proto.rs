@@ -9,9 +9,9 @@
 
 /// Version of the app <-> daemon contract. A daemon outlives app updates, so the app only restarts
 /// a daemon older than this; bump it when the app starts calling something an old daemon lacks.
-/// 2: app.dir, session.pending, session.pending_clear. 6: settings.get / settings.set. 7: settings.get / settings.set carry shell, notify_sound, notify_mode. 8: session.rename. 9: git.suggest. 10: agent.worktree_usage. 11: docker.*. 12: agents.list, git.checks, git.merge, project.env_preview, worktree.rename, dispatch.overlaps, notes.*, worktree.overview, session.hint. 13: worktree.set_parent, notes.worktree, notes.read_file, worktree.create parent. 14: hooks.status, hooks.install. 15: notices.take, audit.list, backup.export, backup.restore, orch.trust_info, env.tools. 16: janitor.events. Not yet bumped: budget.status, budget.check, budget.events, and `budgets` in settings.get / settings.set.
+/// 2: app.dir, session.pending, session.pending_clear. 6: settings.get / settings.set. 7: settings.get / settings.set carry shell, notify_sound, notify_mode. 8: session.rename. 9: git.suggest. 10: agent.worktree_usage. 11: docker.*. 12: agents.list, git.checks, git.merge, project.env_preview, worktree.rename, dispatch.overlaps, notes.*, worktree.overview, session.hint. 13: worktree.set_parent, notes.worktree, notes.read_file, worktree.create parent. 14: hooks.status, hooks.install. 15: notices.take, audit.list, backup.export, backup.restore, orch.trust_info, env.tools. 16: janitor.events. 17: budget.status/check/events, dispatch.overlap_files, worktree.rebase, git.timeline. Not yet bumped: budget.status, budget.check, budget.events, and `budgets` in settings.get / settings.set.
 /// Not yet in a PROTO: dispatch.overlap_files, worktree.rebase.
-pub const PROTO: u64 = 16;
+pub const PROTO: u64 = 17;
 
 /// Oldest daemon the app accepts for security reasons, whatever its `PROTO`: bump it when a release fixes something in
 /// the daemon that must not keep running after an update. The app restarts a daemon that reports less (or nothing).
