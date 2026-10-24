@@ -48,7 +48,10 @@ test("img-src only allows the avatar hosts", () => {
   const hosts = directives(conf.app.security.csp)["img-src"].filter((s) => s.startsWith("http"));
   assert.deepEqual(hosts.sort(), ["https://avatars.githubusercontent.com", "https://github.com"]);
   // nothing in the app builds blob: images; add it back only with the code that needs it
-  assert.deepEqual(directives(conf.app.security.csp)["img-src"].filter((s) => !s.startsWith("http")), ["'self'", "data:"]);
+  assert.deepEqual(
+    directives(conf.app.security.csp)["img-src"].filter((s) => !s.startsWith("http")),
+    ["'self'", "data:"],
+  );
 });
 
 test("capability grants no broad defaults", () => {
