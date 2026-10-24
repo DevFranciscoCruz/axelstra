@@ -70,7 +70,7 @@ jobs:
       - name: Changelog (git-cliff)
         id: cliff
         continue-on-error: true
-        uses: orhun/git-cliff-action@v4 # TODO pin by SHA (not verifiable offline)
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4
         with:
           config: cliff.toml
           args: --latest --strip header
@@ -248,7 +248,7 @@ jobs:
         id: authenticode
         if: runner.os == 'Windows' && env.HAS_TRUSTED_SIGNING == 'true'
         continue-on-error: true
-        uses: azure/trusted-signing-action@v0.5.1 # TODO pin by SHA (not verifiable offline)
+        uses: azure/trusted-signing-action@0d74250c661747df006298d0fb49944c10f16e03 # v0.5.1
         with:
           endpoint: ${{ secrets.TS_ENDPOINT }}
           trusted-signing-account-name: ${{ secrets.TS_ACCOUNT }}
