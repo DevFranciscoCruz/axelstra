@@ -687,11 +687,20 @@ export const dockerAction = (action: DockerAction, o: { id?: string; force?: boo
 export const dockerOpenLogs = (worktree: string, id: string, project?: string) => call<{ id: number }>("docker.open_logs", { worktree, id, project }).then((r) => r.id);
 export const dockerOpenShell = (worktree: string, id: string, project?: string) => call<{ id: number }>("docker.open_shell", { worktree, id, project }).then((r) => r.id);
 
-/** Claude hooks that report agent state (needs input, done) to Axelstra, kept in ~/.claude/settings.json. */
-export type HooksStatus = { installed: boolean; path: string };
+/** Hooks that report agent state (needs input, done) to Axelstra, kept in the agent's own settings (~/.claude or ~/.gemini). */
+export type HookAgent = "claude" | "gemini";
+export const HOOK_AGENTS: readonly HookAgent[] = ["claude", "gemini"];
+export const hookSettingsPath = (agent: HookAgent) =>
+  agent === "gemini" ? "~/.gemini/settings.json" : "~/.claude/settings.json";
+export type HooksStatus = { installed: boolean; path: string; events?: string[]; problem?: string | null };
 export type HooksInstall = { changed: boolean; path: string; backup: string | null };
-export const hooksStatus = () => call<HooksStatus>("hooks.status");
-export const hooksInstall = () => call<HooksInstall>("hooks.install");
+export const hooksStatus = (agent: HookAgent = "claude") => call<HooksStatus>("hooks.status", { agent });
+export const hooksInstall = (agent: HookAgent = "claude") => call<HooksInstall>("hooks.install", { agent });
+/** Hook agents to show: claude always, the others only unless the agent list says they are not installed (unknown list: show all). */
+export const hookAgentsToShow = (list: AgentInfo[] | undefined): HookAgent[] =>
+  HOOK_AGENTS.filter(
+    (a) => a === "claude" || !list || list.length === 0 || list.some((x) => x.id === a && x.installed),
+  );
 
 // ---- daemon methods newer than some running daemons: each degrades (null / empty) on "unknown method" ----
 /** Messages the daemon's store recorded (a corrupt file it recovered from, ...), taken once. Empty on an older daemon. */

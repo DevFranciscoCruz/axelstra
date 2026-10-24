@@ -84,6 +84,7 @@ fn agent_role_cannot_use_app_only_calls() {
         ("project.add", json!({"path": std::env::temp_dir()})),
         ("project.setup", json!({"id": "x", "setup": "rm -rf /"})),
         ("hooks.install", json!({})),
+        ("hooks.install", json!({"agent": "gemini"})),
         ("orch.start", json!({"project": "x"})),
         ("backup.export", json!({})),
         ("backup.restore", json!({"path": "x"})),

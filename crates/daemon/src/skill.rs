@@ -1,7 +1,7 @@
 //! The `/axelstration` skill, shipped inside the binary and installed by the app. Like other agent tools it is a
 //! thin discovery stub (`SKILL.md`); the real guide is served by `axelstra skills get axelstration`, so the
 //! instructions always match the installed binary. The stub goes to the shared `~/.agents/skills` (read by
-//! Codex and others) and to `~/.claude/skills` (Claude Code).
+//! Codex, Gemini CLI and others) and to `~/.claude/skills` (Claude Code).
 use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 
@@ -31,7 +31,7 @@ fn home() -> Result<PathBuf> {
 fn targets(home: &std::path::Path) -> Vec<(PathBuf, Vec<PathBuf>)> {
     vec![
         (home.join(".claude").join("skills"), vec![home.join(".claude")]),
-        (home.join(".agents").join("skills"), vec![home.join(".agents"), home.join(".codex")]),
+        (home.join(".agents").join("skills"), vec![home.join(".agents"), home.join(".codex"), home.join(".gemini")]),
     ]
 }
 
@@ -63,4 +63,17 @@ pub fn install() -> Result<usize> {
 /// Explicit install (`axelstra install-skill`): every location, creating folders when needed.
 pub fn install_forced() -> Result<Vec<PathBuf>> {
     targets(&home()?).into_iter().map(|(skills, _)| write(skills)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_gemini_only_home_gets_the_shared_agents_skills_folder() {
+        let home = std::path::Path::new("h");
+        let t = targets(home);
+        let shared = t.iter().find(|(skills, _)| *skills == home.join(".agents").join("skills")).unwrap();
+        assert!(shared.1.contains(&home.join(".gemini")), "Gemini CLI reads ~/.agents/skills");
+    }
 }
