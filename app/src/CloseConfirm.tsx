@@ -4,24 +4,10 @@ import { listen } from "@tauri-apps/api/event";
 import { Modal } from "./Modal";
 import { sessions } from "./store";
 import { Button, CheckboxField } from "./ui";
+import { createPersistedFlag } from "./persist";
 
-const KEY = "axelstra.confirmClose";
-const wanted = () => {
-  try {
-    return localStorage.getItem(KEY) !== "0";
-  } catch {
-    return true;
-  }
-};
-
-const KEEP = "axelstra.keepBackground";
-const keepWanted = () => {
-  try {
-    return localStorage.getItem(KEEP) === "1";
-  } catch {
-    return false;
-  }
-};
+const [wanted, setWanted] = createPersistedFlag("axelstra.confirmClose", true);
+const [keepWanted, setKeepWanted] = createPersistedFlag("axelstra.keepBackground", false);
 const quit = (keep = keepWanted()) => void invoke("app_quit", { keep });
 
 /** the host cancels every window close and asks here first; the terminals live in the daemon and survive */
@@ -39,12 +25,8 @@ export function CloseConfirm() {
   });
   const running = () => sessions().filter((s) => s.running).length;
   const confirm = () => {
-    try {
-      if (skip()) localStorage.setItem(KEY, "0");
-      localStorage.setItem(KEEP, keep() ? "1" : "0");
-    } catch {
-      /* preference only */
-    }
+    if (skip()) setWanted(false);
+    setKeepWanted(keep());
     quit(keep());
   };
   return (

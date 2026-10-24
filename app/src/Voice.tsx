@@ -7,6 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 import { writeSession } from "./api";
 import { askDiscard } from "./Confirm";
 import { downloadErrorText, micErrorText, transcribeErrorText } from "./voiceErrors";
+import { createPersistedFlag } from "./persist";
 
 // Local dictation: the webview records 16 kHz mono audio, the Rust side transcribes it with Whisper
 // (sherpa-onnx, model downloaded on first use). Hands-free: recording stops by itself after a pause in
@@ -21,23 +22,7 @@ const [voiceError, setVoiceError] = createSignal("");
 const [needModel, setNeedModel] = createSignal(false);
 const [dlProgress, setDlProgress] = createSignal<number | null>(null);
 
-const AUTO_KEY = "axelstra.voice.autosend";
-const readAuto = () => {
-  try {
-    return localStorage.getItem(AUTO_KEY) !== "0";
-  } catch {
-    return true;
-  }
-};
-const [autoSend, setAutoSendSig] = createSignal(readAuto());
-const setAutoSend = (on: boolean) => {
-  setAutoSendSig(on);
-  try {
-    localStorage.setItem(AUTO_KEY, on ? "1" : "0");
-  } catch {
-    /* preference only */
-  }
-};
+const [autoSend, setAutoSend] = createPersistedFlag("axelstra.voice.autosend", true);
 
 /** terminal the text goes to; kept current by VoiceDraft, captured when recording starts */
 let currentTarget: number | null = null;
