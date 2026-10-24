@@ -8,18 +8,13 @@ import { Modal } from "./Modal";
 import { refreshProjects, selectWorktree, setError, setShowKanban, showNotice, toast } from "./store";
 import { planStart, restorePayload } from "./kanbanLogic";
 import { S } from "./strings";
+import { P } from "./strings.panels";
 import { press } from "./a11y";
 
 /** only cards are accepted by the columns: a terminal tab or a file dragged over is ignored */
 const CARD_MIME = "application/x-axelstra-card";
 
-const COLS: { id: string; label: string }[] = [
-  { id: "backlog", label: "Ideias" },
-  { id: "todo", label: "Para fazer" },
-  { id: "in-progress", label: "Em curso" },
-  { id: "needs-review", label: "Rever" },
-  { id: "done", label: "Feito" },
-];
+const COLS: { id: string; label: string }[] = ["backlog", "todo", "in-progress", "needs-review", "done"].map((id) => ({ id, label: P.kanban.cols[id] }));
 
 type Draft = { id?: string; title: string; body: string; status: string; depends: string; agent: string; priority: number };
 
@@ -51,7 +46,7 @@ export function Kanban(props: { project: string }) {
     const cmds = inCol("todo").filter((c) => c.meta.acceptance).map((c) => `${c.meta.id}: ${c.meta.acceptance}`);
     const trust = await orchTrustInfo(props.project).catch(() => null);
     const plan = planStart(n, trust, cmds);
-    if (!(await ask(plan.message, { title: "Executar orquestração", kind: plan.warn ? "warning" : "info", ...(plan.bypass.length ? { typeToConfirm: "bypass", okLabel: "Executar sem permissões" } : {}) }))) return;
+    if (!(await ask(plan.message, { title: P.kanban.runTitle, kind: plan.warn ? "warning" : "info", ...(plan.bypass.length ? { typeToConfirm: "bypass", okLabel: P.kanban.runBypass } : {}) }))) return;
     try {
       setRun(await orchStart(props.project, 3, plan.trustAcceptance, plan.pin));
       void refreshProjects();
@@ -100,7 +95,7 @@ export function Kanban(props: { project: string }) {
   const closeDraft = async () => {
     const d = draft();
     if (!d) return;
-    if (JSON.stringify(d) !== draftBase && !(await ask("Descartar as alterações a este cartão?", { title: "Descartar", kind: "warning", okLabel: "Descartar" }))) return;
+    if (JSON.stringify(d) !== draftBase && !(await ask(P.kanban.discardAsk, { title: P.kanban.discardTitle, kind: "warning", okLabel: P.kanban.discard }))) return;
     setDraft(null);
   };
 
@@ -129,14 +124,14 @@ export function Kanban(props: { project: string }) {
     if (!d?.id) return;
     const card = board().cards.find((c) => c.meta.id === d.id);
     // undo re-creates the card from what was on the board, so only ask up front when that copy is missing
-    if (!card && !(await ask(`Apagar o cartão "${d.title}"? O ficheiro é removido.`, { title: "Apagar", kind: "danger" }))) return;
+    if (!card && !(await ask(P.kanban.deleteAsk(d.title), { title: P.kanban.deleteTitle, kind: "danger" }))) return;
     try {
       await kanbanDelete(props.project, d.id);
       setDraft(null);
       toast({
         text: S.cardDeleted(d.title),
         kind: "info",
-        ...(card ? { action: { label: "Desfazer", run: () => void kanbanSave(props.project, restorePayload(card)).then(reload, (e) => setError(String(e))) } } : {}),
+        ...(card ? { action: { label: P.kanban.undo, run: () => void kanbanSave(props.project, restorePayload(card)).then(reload, (e) => setError(String(e))) } } : {}),
       });
       await reload();
     } catch (e) {
@@ -170,7 +165,7 @@ export function Kanban(props: { project: string }) {
     const i = Math.max(r.integ_wt.lastIndexOf("/"), r.integ_wt.lastIndexOf("\\"));
     return `${r.integ_wt.slice(0, i + 1)}${r.name}-${id}`;
   };
-  const reason = (id: string) => run().needs_review?.find((r) => r[0] === id)?.[1] ?? "aguarda revisão";
+  const reason = (id: string) => run().needs_review?.find((r) => r[0] === id)?.[1] ?? P.kanban.waitingReview;
   const act = async (fn: () => Promise<unknown>) => {
     try {
       await fn();
@@ -182,38 +177,38 @@ export function Kanban(props: { project: string }) {
   };
   const openWt = (id: string) => {
     const wt = taskWt(id);
-    if (!wt) return setErr("O worktree desta execução já não é conhecido: inicie a orquestração de novo.");
+    if (!wt) return setErr(P.kanban.unknownWt);
     setShowKanban(false);
     void selectWorktree(wt);
   };
   const retry = (c: KCard) =>
     act(async () => {
       const acc = c.meta.acceptance;
-      if (acc && !(await ask(`Integrar "${c.meta.title || c.meta.id}" outra vez? Corre o comando de aceitação na sua máquina:\n${acc}`, { title: "Integrar de novo", kind: "warning" }))) return;
+      if (acc && !(await ask(P.kanban.retryAsk(c.meta.title || c.meta.id, acc), { title: P.kanban.retryTitle, kind: "warning" }))) return;
       await orchRetry(props.project, c.meta.id, !!acc);
     });
   const openPr = (c: KCard) =>
     act(async () => {
       const wt = taskWt(c.meta.id);
-      if (!wt) throw new Error("worktree desconhecido");
-      if (!(await ask(`Enviar o branch de "${c.meta.title || c.meta.id}" e criar um PR no GitHub?`, { title: "PR", kind: "warning" }))) return;
+      if (!wt) throw new Error(P.kanban.unknownWtShort);
+      if (!(await ask(P.kanban.prAsk(c.meta.title || c.meta.id), { title: P.kanban.prTitle, kind: "warning" }))) return;
       await gitPush(wt);
-      setErr(`Pull request criado: ${await gitPr(wt, c.meta.title || c.meta.id, c.body)}`);
+      setErr(P.kanban.prCreated(await gitPr(wt, c.meta.title || c.meta.id, c.body)));
     });
 
   return (
     <div class="kanban">
       <div class="kbar">
-        <span class="ktitle">Kanban</span>
+        <span class="ktitle">{P.kanban.title}</span>
         <span class="grow" />
         <Button
           variant="default"
           class="primary"
-          title="Cria um worktree de integração e despacha um agente por cartão em 'Para fazer'"
+          title={P.kanban.runTip}
           disabled={inCol("todo").length === 0 || run().state === "running"}
           onClick={() => void start()}
         >
-          {run().state === "running" ? "A executar…" : `Executar “Para fazer” (${inCol("todo").length})`}
+          {run().state === "running" ? P.kanban.running : P.kanban.runTodo(inCol("todo").length)}
         </Button>
       </div>
       <Show when={err()}>
@@ -222,20 +217,20 @@ export function Kanban(props: { project: string }) {
       <Show when={run().state !== "idle"}>
         <div class="krun" classList={{ bad: run().state === "error" || (run().failed?.length ?? 0) > 0 }}>
           <Show when={run().state === "running"}>
-            A executar {run().name} – branch {run().integ_branch}. Os agentes aparecem como terminais nos worktrees task.
+            {P.kanban.runningBanner(run().name, run().integ_branch)}
           </Show>
           <Show when={run().state === "done"}>
-            Terminou: {run().merged?.length ?? 0} integrados em {run().integ_branch}
-            <Show when={(run().failed?.length ?? 0) > 0}> · falharam: {run().failed!.map((f) => `${f[0]} (${f[1]})`).join(", ")}</Show>
-            <Show when={(run().needs_review?.length ?? 0) > 0}> · rever: {run().needs_review!.map((f) => `${f[0]} (${f[1]})`).join(", ")}</Show>
-            <Show when={(run().blocked?.length ?? 0) > 0}> · bloqueados: {run().blocked!.join(", ")}</Show>
+            {P.kanban.doneBanner(run().merged?.length ?? 0, run().integ_branch)}
+            <Show when={(run().failed?.length ?? 0) > 0}>{P.kanban.failedBanner(run().failed!.map((f) => `${f[0]} (${f[1]})`).join(", "))}</Show>
+            <Show when={(run().needs_review?.length ?? 0) > 0}>{P.kanban.reviewBanner(run().needs_review!.map((f) => `${f[0]} (${f[1]})`).join(", "))}</Show>
+            <Show when={(run().blocked?.length ?? 0) > 0}>{P.kanban.blockedBanner(run().blocked!.join(", "))}</Show>
           </Show>
-          <Show when={run().state === "error"}>Orquestração falhou: {run().error}</Show>
+          <Show when={run().state === "error"}>{P.kanban.errorBanner(run().error)}</Show>
         </div>
       </Show>
       <Show when={board().broken.length > 0}>
         <div class="kerr">
-          Cartões ilegíveis (corrija o ficheiro em .kanban):{" "}
+          {P.kanban.broken}{" "}
           <For each={board().broken}>{(b) => <span title={b.error}>{b.file} </span>}</For>
         </div>
       </Show>
@@ -256,7 +251,7 @@ export function Kanban(props: { project: string }) {
               <div class="kcol-head">
                 <span>{col.label}</span>
                 <span class="kcount">{colCards(col.id).length}</span>
-                <Button variant="icon" size="icon" title="Novo cartão" aria-label="Novo cartão" onClick={() => edit(undefined, col.id)}>
+                <Button variant="icon" size="icon" title={P.kanban.newCard} aria-label={P.kanban.newCard} onClick={() => edit(undefined, col.id)}>
                   <Icon name="plus" />
                 </Button>
               </div>
@@ -279,25 +274,25 @@ export function Kanban(props: { project: string }) {
                         <div class="kcard-body">{c.body.trim().slice(0, 160)}</div>
                       </Show>
                       <div class="kchips">
-                        <Badge variant="agent" title="Agente">{c.meta.agent}</Badge>
+                        <Badge variant="agent" title={P.kanban.agent}>{c.meta.agent}</Badge>
                         <Show when={c.meta.priority !== 0}>
-                          <Badge variant={c.meta.priority > 0 ? "high" : "default"} title="Prioridade">
+                          <Badge variant={c.meta.priority > 0 ? "high" : "default"} title={P.kanban.priority}>
                             <Icon name={c.meta.priority > 0 ? "triUp" : "triDown"} size={9} inline /> {Math.abs(c.meta.priority)}
                           </Badge>
                         </Show>
                         <Show when={c.meta.depends_on.length > 0}>
-                          <Badge variant="agent" title={`Depende de ${c.meta.depends_on.join(", ")}`}>
+                          <Badge variant="agent" title={P.kanban.dependsOn(c.meta.depends_on.join(", "))}>
                             <Icon name="link" size={11} inline /> {c.meta.depends_on.length}
                           </Badge>
                         </Show>
-                        <Badge variant="id" title="Id do ficheiro .kanban">{c.meta.id}</Badge>
+                        <Badge variant="id" title={P.kanban.fileId}>{c.meta.id}</Badge>
                       </div>
                       <Show when={col.id === "needs-review"}>
-                        <div class="kcard-body">Motivo: {reason(c.meta.id)}</div>
-                        <div class="kchips" role="group" aria-label="Ações do cartão" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                          <Button size="sm" onClick={() => openWt(c.meta.id)}>Abrir worktree</Button>
-                          <Button size="sm" onClick={() => void retry(c)}>Tentar integrar de novo</Button>
-                          <Button size="sm" onClick={() => void openPr(c)}>Abrir PR</Button>
+                        <div class="kcard-body">{P.kanban.reason(reason(c.meta.id))}</div>
+                        <div class="kchips" role="group" aria-label={P.kanban.cardActions} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                          <Button size="sm" onClick={() => openWt(c.meta.id)}>{P.kanban.openWt}</Button>
+                          <Button size="sm" onClick={() => void retry(c)}>{P.kanban.retry}</Button>
+                          <Button size="sm" onClick={() => void openPr(c)}>{P.kanban.openPr}</Button>
                         </div>
                       </Show>
                       <div
@@ -313,7 +308,7 @@ export function Kanban(props: { project: string }) {
                         }}
                       >
                         <Button size="sm" aria-haspopup="menu" aria-expanded={menu() === c.meta.id} onClick={() => setMenu(menu() === c.meta.id ? null : c.meta.id)}>
-                          Mover para…
+                          {P.kanban.moveTo}
                         </Button>
                         <Show when={menu() === c.meta.id}>
                           <div role="menu" style={{ display: "flex", "flex-direction": "column", gap: "2px", "margin-top": "4px" }}>
@@ -338,30 +333,30 @@ export function Kanban(props: { project: string }) {
 
       <Show when={draft()}>
         {(d) => (
-          <Modal label={d().id ? "Editar cartão" : "Novo cartão"} dirty onClose={() => void closeDraft()}>
-              <div class="m-heading">{d().id ? "Editar cartão" : "Novo cartão"}</div>
+          <Modal label={d().id ? P.kanban.editCard : P.kanban.newCard} dirty onClose={() => void closeDraft()}>
+              <div class="m-heading">{d().id ? P.kanban.editCard : P.kanban.newCard}</div>
               <Input
                 class="text-lg"
-                placeholder="Título"
+                placeholder={P.kanban.titlePlaceholder}
                 value={d().title}
                 onInput={(e) => setDraft({ ...d(), title: e.currentTarget.value })}
                 ref={(el) => queueMicrotask(() => el.focus())}
               />
               <Textarea
                 class="min-h-40 flex-1 font-mono"
-                placeholder="Escreve livremente: o contexto, o que queres, critérios… O agente lê isto."
+                placeholder={P.kanban.bodyPlaceholder}
                 value={d().body}
                 onInput={(e) => setDraft({ ...d(), body: e.currentTarget.value })}
               />
               <div class="m-row">
-                <Field label="Estado">
+                <Field label={P.kanban.status}>
                   <Select
                     value={d().status}
                     options={COLS.map((c) => ({ value: c.id, label: c.label }))}
                     onChange={(v) => setDraft({ ...d(), status: v })}
                   />
                 </Field>
-                <Field label="Agente" hint={agentWarning(agents(), d().agent) || undefined}>
+                <Field label={P.kanban.agent} hint={agentWarning(agents(), d().agent) || undefined}>
                   <Select
                     value={d().agent}
                     iconOnly
@@ -369,7 +364,7 @@ export function Kanban(props: { project: string }) {
                     onChange={(v) => setDraft({ ...d(), agent: v })}
                   />
                 </Field>
-                <Field label="Prioridade">
+                <Field label={P.kanban.priority}>
                   <Input
                     type="number"
                     value={d().priority}
@@ -377,19 +372,19 @@ export function Kanban(props: { project: string }) {
                   />
                 </Field>
               </div>
-              <Field label="Depende de (ids separados por vírgula)" full>
+              <Field label={P.kanban.depends} full>
                 <Input value={d().depends} onInput={(e) => setDraft({ ...d(), depends: e.currentTarget.value })} />
               </Field>
               <div class="m-actions">
                 <Show when={d().id}>
                   <Button variant="destructive" onClick={() => void remove()}>
-                    Apagar
+                    {P.kanban.delete}
                   </Button>
                 </Show>
                 <span class="grow" />
-                <Button onClick={() => void closeDraft()}>Cancelar</Button>
+                <Button onClick={() => void closeDraft()}>{P.kanban.cancel}</Button>
                 <Button variant="default" disabled={!d().title.trim()} onClick={() => void save()}>
-                  Guardar
+                  {P.kanban.save}
                 </Button>
               </div>
           </Modal>
