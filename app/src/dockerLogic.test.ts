@@ -78,3 +78,20 @@ describe("images, logs and paths", () => {
     expect(joinPath("/", "..")).toBe("/");
   });
 });
+
+describe("F11 guards", () => {
+  it("createLatest accepts only the newest request", async () => {
+    const { createLatest } = await import("./dockerLogic");
+    const l = createLatest();
+    const a = l.next();
+    const b = l.next();
+    expect(l.isCurrent(a)).toBe(false);
+    expect(l.isCurrent(b)).toBe(true);
+  });
+  it("pruneShells forgets sessions that are gone", async () => {
+    const { pruneShells } = await import("./dockerLogic");
+    const m = new Map([["c1", 1], ["c2", 2], ["c3", 3]]);
+    pruneShells(m, [2]);
+    expect([...m]).toEqual([["c2", 2]]);
+  });
+});

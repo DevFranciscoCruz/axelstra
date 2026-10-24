@@ -6,11 +6,12 @@ import {
   dockerStats, dockerStatus, dockerVolumes,
 } from "./api";
 import { ask } from "./Confirm";
+import { createPoller } from "./poller";
 import { MenuItem, isMenuKey, showMenu, showMenuAt } from "./ContextMenu";
 import { Icon } from "./Icon";
 import { Badge, Button, Checkbox, Input, cn } from "./ui";
 import { TerminalView } from "./TerminalView";
-import { Filter, ago, filterContainers, groupByProject, imageUsers, isRunning, isSecretKey, joinPath, parseCreated, portChips, searchLog, stateInfo } from "./dockerLogic";
+import { Filter, ago, createLatest, pruneShells, filterContainers, groupByProject, imageUsers, isRunning, isSecretKey, joinPath, parseCreated, portChips, searchLog, stateInfo } from "./dockerLogic";
 import { findWorktree, keepSame, openSession, refreshSessions, selectedWorktree, sessions, setError, setShowDocker, showDocker, showNotice } from "./store";
 import "./docker.css";
 
@@ -60,6 +61,7 @@ const nameOf = (e: unknown) => String(e).replace(/^Error: /, "");
 const shells = new Map<string, number>();
 
 export function DockerView() {
+  createEffect(() => pruneShells(shells, sessions().filter((s) => s.running).map((s) => s.id)));
   const [nav, setNav] = createSignal<Nav>("containers");
   const [q, setQ] = createSignal("");
   const [filter, setFilter] = createSignal<Filter>("all");
@@ -761,10 +763,20 @@ function LogsTab(props: { c: DockerContainer; onOpenTab: () => void }) {
   const [follow, setFollow] = createSignal(true);
   const [query, setQuery] = createSignal("");
   let pre!: HTMLPreElement;
-  const load = () => dockerLogs(props.c.name, 500).then((t) => { setText(t); setErr(""); }, (e) => setErr(nameOf(e)));
-  void load();
-  const timer = setInterval(() => follow() && !document.hidden && void load(), FAST_MS);
-  onCleanup(() => clearInterval(timer));
+  // one request at a time (the poller skips a tick while one is out) and a token so an answer that arrives after
+  // the component moved on never overwrites a newer one
+  const latest = createLatest();
+  let gone = false;
+  const load = () => {
+    const t = latest.next();
+    return dockerLogs(props.c.name, 500).then(
+      (r) => { if (!gone && latest.isCurrent(t)) { setText(r); setErr(""); } },
+      (e) => { if (!gone && latest.isCurrent(t)) setErr(nameOf(e)); },
+    );
+  };
+  const poller = createPoller(() => follow() && load(), FAST_MS);
+  poller.now();
+  onCleanup(() => { gone = true; poller.stop(); });
   const lines = createMemo(() => searchLog(text(), query()));
   createEffect(() => {
     lines();
