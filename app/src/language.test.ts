@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-const sources = import.meta.glob<string>(["./*.tsx", "./strings.ts", "./store.ts", "./projectActions.ts", "./agentState.ts"], { query: "?raw", import: "default", eager: true });
+const sources = import.meta.glob<string>(["./*.tsx", "./strings.ts", "./strings.panels.ts", "./store.ts", "./projectActions.ts", "./agentState.ts"], { query: "?raw", import: "default", eager: true });
 // StatusBar is held to this list by its own work area
 const OTHERS = /StatusBar/;
 
