@@ -429,6 +429,14 @@ export const projectEnvPreview = (project: string) => call<EnvPreview>("project.
 export type GhItem = { number: number; title: string; author: string; url: string; state: string; draft: boolean; branch: string; checks: string; review: string };
 export const ghList = (project: string, kind: "pr" | "issue") => call<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
 export const ghListBg = (project: string, kind: "pr" | "issue") => callBg<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
+/** An inline review comment of a PR. Every text field was written by a reviewer: untrusted. */
+export type ReviewComment = { id: number; path: string; line: number; body: string; author: string; diff_hunk: string; created: string; url: string; in_reply_to: number; outdated: boolean; pr: number };
+/** A review as a whole (verdict plus its text); reviews without text are left out by the daemon. */
+export type ReviewSummary = { id: number; author: string; body: string; state: "approved" | "changes" | "commented" | "dismissed" | "pending"; created: string; url: string };
+export const ghComments = (project: string, number: number) => call<{ comments: ReviewComment[]; reviews: ReviewSummary[] }>("gh.comments", { project, number });
+/** `dryRun` only builds the text that would be sent (from GitHub's current version of the comment); nothing is delivered. */
+export const ghSendComment = (worktree: string, project: string, number: number, commentId: number, dryRun: boolean) =>
+  call<{ text: string; sent: boolean; session?: number }>("gh.send_comment", { worktree, project, number, comment_id: commentId, dry_run: dryRun });
 export const worktreeFromPr = (project: string, number: number) => call<Worktree>("worktree.from_pr", { project, number });
 export const listPorts = (worktree: string) => call<{ ports: { port: number; pid: number }[] }>("ports.list", { worktree }).then((r) => r.ports);
 export type Schedule =
@@ -480,6 +488,8 @@ export const fsWrite = (worktree: string, path: string, text: string, eol: strin
 export const gitCommit = (worktree: string, message: string) => call<{ sha: string }>("git.commit", { worktree, message });
 /** Commit message the user's `claude` CLI proposes for the pending changes (nothing is staged or committed). */
 export const gitSuggest = (worktree: string) => call<{ message: string }>("git.suggest", { worktree }).then((r) => r.message);
+/** Title and markdown description the user's `claude` CLI proposes for a PR of this worktree's branch against `base` (default branch when omitted). */
+export const gitSuggestPr = (worktree: string, base?: string) => call<{ title: string; body: string }>("git.suggest_pr", { worktree, base });
 export const gitPush = (worktree: string) => call<{ output: string }>("git.push", { worktree });
 export const gitPr = (worktree: string, title: string, body: string, base?: string) =>
   call<{ url: string }>("git.pr", { worktree, title, body, base }).then((r) => r.url);

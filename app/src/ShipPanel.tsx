@@ -1,13 +1,13 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Badge, Button, Checkbox } from "./ui";
+import { Badge, Button, Checkbox, Input, Textarea } from "./ui";
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { press } from "./a11y";
 import { ask } from "./Confirm";
 import { Icon } from "./Icon";
-import { CheckItem, ShipStatus, gitChecks, gitMerge } from "./api";
+import { CheckItem, ShipStatus, gitChecks, gitMerge, gitPr, gitSuggestPr } from "./api";
 import { push, shipEvents } from "./notifications";
-import { CHECK_LABEL, CI_LABEL, REVIEW_LABEL, SHIP_POLL_MS, autoMergeQuestion, canAutoMerge, mergeLabel, mergeQuestion, problemText, shouldPoll } from "./shipLogic";
-import { findWorktree, selectedWorktree } from "./store";
+import { CHECK_LABEL, CI_LABEL, GenEvent, REVIEW_LABEL, SHIP_POLL_MS, applySuggestion, autoMergeQuestion, canAutoMerge, canCreatePr, canGenerate, genInitial, genReduce, generateLabel, mergeLabel, mergeQuestion, problemText, shouldPoll } from "./shipLogic";
+import { findWorktree, selectedWorktree, setError, showNotice } from "./store";
 import "./ship.css";
 import { createPoller } from "./poller";
 import { P } from "./strings.panels";
@@ -29,8 +29,54 @@ export function ShipPanel() {
   const [open, setOpen] = createSignal(true);
   const [delBranch, setDelBranch] = createSignal(false);
   const [note, setNote] = createSignal<{ ok: boolean; text: string } | null>(null);
+  // the form that creates the PR while the branch has none
+  const [prTitle, setPrTitle] = createSignal("");
+  const [prBody, setPrBody] = createSignal("");
+  const [gen, setGen] = createSignal(genInitial);
+  const [creating, setCreating] = createSignal(false);
+  const genDo = (e: GenEvent) => setGen(genReduce(gen(), e));
   let focused = true;
   let inflight = false;
+
+  const generate = async () => {
+    const path = selectedWorktree();
+    if (!path || !canGenerate(gen(), true)) return;
+    genDo({ kind: "start" });
+    const seq = gen().seq;
+    try {
+      const r = await gitSuggestPr(path);
+      // another worktree was picked, or the form was reset, while the agent worked
+      if (selectedWorktree() !== path || gen().seq !== seq) return;
+      const next = applySuggestion({ title: prTitle(), body: prBody() }, r);
+      setPrTitle(next.title);
+      setPrBody(next.body);
+      genDo({ kind: "ok", seq });
+      showNotice(P.ship.newPr.generated);
+    } catch (e) {
+      if (selectedWorktree() !== path || gen().seq !== seq) return;
+      genDo({ kind: "fail", seq });
+      setError(String(e));
+    }
+  };
+
+  const createPr = async () => {
+    const path = selectedWorktree();
+    if (!path || !canCreatePr(prTitle(), creating())) return;
+    if (!(await ask(P.ship.newPr.ask(branch()), { title: P.changes.prTitle, kind: "warning" }))) return;
+    setCreating(true);
+    try {
+      const url = await gitPr(path, prTitle().trim(), prBody());
+      showNotice(P.ship.newPr.created(url));
+      setPrTitle("");
+      setPrBody("");
+      genDo({ kind: "reset" });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setCreating(false);
+      void load();
+    }
+  };
 
   const load = async () => {
     const path = selectedWorktree();
@@ -60,6 +106,9 @@ export function ShipPanel() {
     selectedWorktree();
     setSt(null);
     setNote(null);
+    setPrTitle("");
+    setPrBody("");
+    genDo({ kind: "reset" });
     void load();
   });
 
@@ -119,6 +168,7 @@ export function ShipPanel() {
             <Show
               when={!s().problem}
               fallback={
+                <>
                 <div class="ship-problem" classList={{ soft: s().problem === "nopr" }}>
                   <Show when={s().problem !== "nopr"}>
                     <span class="ship-icon" aria-hidden="true"><Icon name="warning" size={13} /></span>
@@ -128,6 +178,21 @@ export function ShipPanel() {
                     <div class="muted">{problemText(s()).fix}</div>
                   </div>
                 </div>
+                <Show when={s().problem === "nopr"}>
+                  <div class="ship-new">
+                    <Input value={prTitle()} placeholder={P.ship.newPr.title} aria-label={P.ship.newPr.title} onInput={(e) => setPrTitle(e.currentTarget.value)} />
+                    <Textarea rows={5} value={prBody()} placeholder={P.ship.newPr.body} aria-label={P.ship.newPr.body} onInput={(e) => setPrBody(e.currentTarget.value)} />
+                    <div class="ship-new-actions">
+                      <Button size="sm" variant="outline" disabled={!canGenerate(gen(), true)} aria-busy={gen().phase === "loading"} title={P.ship.newPr.generateTip} onClick={() => void generate()}>
+                        {generateLabel(gen())}
+                      </Button>
+                      <Button size="sm" variant="default" disabled={!canCreatePr(prTitle(), creating())} onClick={() => void createPr()}>
+                        {creating() ? P.ship.newPr.creating : P.ship.newPr.create}
+                      </Button>
+                    </div>
+                  </div>
+                </Show>
+                </>
               }
             >
               <div class="sc-title" {...press(() => setOpen(!open()))} aria-expanded={open()}>
