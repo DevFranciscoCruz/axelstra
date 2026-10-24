@@ -17,7 +17,7 @@ export function RightTabs() {
       id={`rtab-${id}`}
       aria-controls="rpanel"
       title={label}
-      class="min-w-0 flex-[0_1_auto] truncate"
+      class="shrink-0 whitespace-nowrap"
     >
       {label}
       <Show when={id === "changes" && n()}> {n()}</Show>
@@ -29,7 +29,7 @@ export function RightTabs() {
       onChange={(v) => setRightTab(v as RightTab)}
       class="flex gap-0.5 border-b border-[var(--line)] px-2 pt-1.5"
     >
-      <TabsList aria-label={U.rightTabs.label} class="min-w-0 flex-[0_1_auto] overflow-hidden">
+      <TabsList aria-label={U.rightTabs.label} class="min-w-0 flex-[0_1_auto] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {tab("files", U.rightTabs.files)}
         {tab("changes", U.rightTabs.changes)}
         {tab("pulls", U.rightTabs.prs)}
