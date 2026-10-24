@@ -244,7 +244,7 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
     match method {
         "computer.enable" => p["on"].as_bool() == Some(true),
         "project.add" | "project.setup" | "hooks.install" | "automation.save" | "orch.start" | "notices.take" | "audit.list"
-        | "backup.export" | "backup.restore" => true,
+        | "backup.export" | "backup.restore" | "gh.send_comment" => true,
         _ => false,
     }
 }

@@ -26,6 +26,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let text = tokio::task::block_in_place(|| crate::changes::diff(&wt, path, base))?;
             Ok(json!({"diff": text}))
         }
+        "git.suggest_pr" => {
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            let base = p["base"].as_str().map(String::from);
+            let t = tokio::task::block_in_place(|| crate::publish::suggest_pr(&wt, base.as_deref()))?;
+            Ok(serde_json::to_value(t)?)
+        }
         "git.commit" | "git.push" | "git.pr" | "git.suggest" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             let s = |k: &str| p[k].as_str().unwrap_or_default().to_string();
@@ -60,6 +66,47 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let items = tokio::task::block_in_place(|| crate::gh::list(std::path::Path::new(&pr.path), &kind))?;
             Ok(json!({"items": items}))
         }
+        "gh.comments" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let n = p["number"].as_u64().ok_or_else(|| anyhow::anyhow!("missing number"))?;
+            let (comments, reviews) = tokio::task::block_in_place(|| crate::gh::review_comments(std::path::Path::new(&pr.path), n))?;
+            Ok(json!({"comments": comments, "reviews": reviews}))
+        }
+        "gh.send_comment" => {
+            let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
+            crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let n = p["number"].as_u64().ok_or_else(|| anyhow::anyhow!("missing number"))?;
+            let id = p["comment_id"].as_u64().ok_or_else(|| anyhow::anyhow!("missing comment_id"))?;
+            // the lead is looked up first: no point asking GitHub when nobody can take the task
+            let dry = p["dry_run"].as_bool() == Some(true);
+            let lead = find_lead(reg, &wt.to_string_lossy());
+            if lead.is_none() && !dry {
+                anyhow::bail!("no live lead in this worktree: start its main agent first");
+            }
+            // the text is built here from what GitHub says now; nothing the client sent is forwarded
+            let c = tokio::task::block_in_place(|| crate::gh::fetch_comment(&wt, n, id))?;
+            let text = crate::gh::comment_task(n, &c);
+            let Some(lead) = lead.filter(|_| !dry) else { return Ok(json!({"text": text, "sent": false})) };
+            let target = reg.get(lead).ok_or_else(|| anyhow::anyhow!("no live lead in this worktree: start its main agent first"))?;
+            let m = reg.bus.send(None, lead, "message", &text, None, None);
+            reg.deliver_untrusted(lead, target, &crate::msgbus::notice(&m, "o utilizador (comentário de review)"));
+            Ok(json!({"text": text, "sent": true, "session": lead, "message": m.id}))
+        }
         m => anyhow::bail!("unknown method {m}"),
     }
+}
+
+/// The running lead session (meta `lead: true`) of the worktree at `path`.
+fn find_lead(reg: &Registry, path: &str) -> Option<u32> {
+    // one lock at a time, sessions before metas (the registry's order)
+    let alive: Vec<u32> = reg.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, _)| *id).collect();
+    let metas = reg.metas.lock_recover();
+    alive
+        .into_iter()
+        .filter(|id| {
+            metas.get(id).is_some_and(|m| {
+                m["lead"] == true && m["kind"] == "agent" && m["worktree"].as_str().is_some_and(|w| axelstra_core::paths::same(w, path))
+            })
+        })
+        .min()
 }

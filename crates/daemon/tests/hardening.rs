@@ -86,6 +86,8 @@ fn agent_role_cannot_use_app_only_calls() {
         ("orch.start", json!({"project": "x"})),
         ("backup.export", json!({})),
         ("backup.restore", json!({"path": "x"})),
+        // it types text into other agents
+        ("gh.send_comment", json!({"worktree": "x", "project": "x", "number": 1, "comment_id": 1})),
     ] {
         let e = agent.call(m, p).unwrap_err().to_string();
         assert!(e.contains("not allowed to agents"), "{m}: {e}");
