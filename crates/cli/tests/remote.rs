@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 struct Env {
     root: std::path::PathBuf,
+    #[cfg(unix)]
+    _daemon: std::process::Child,
 }
 
 /// One daemon for the whole file, on a pipe name of its own and a throwaway data dir. The environment is set before any
@@ -41,7 +43,7 @@ fn env() -> &'static Env {
         // Unix: the daemon is a process of its own. Served in this process, the bridge (our child) would descend from
         // the daemon and be taken for an orphaned agent; a real bridge is never below the daemon.
         #[cfg(unix)]
-        {
+        let daemon = {
             use std::os::unix::process::CommandExt;
             let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_axelstra"));
             cmd.arg("daemon").env("AXELSTRA_IDLE_EXIT_SECS", "120").stdin(std::process::Stdio::null());
@@ -53,12 +55,13 @@ fn env() -> &'static Env {
                     Ok(())
                 });
             }
-            cmd.spawn().unwrap();
+            let daemon = cmd.spawn().unwrap();
             let end = Instant::now() + Duration::from_secs(10);
-            while !Path::new(&proto::pipe_name()).exists() && Instant::now() < end {
+            while std::os::unix::net::UnixStream::connect(proto::pipe_name()).is_err() && Instant::now() < end {
                 std::thread::sleep(Duration::from_millis(50));
             }
-        }
+            daemon
+        };
         #[cfg(not(unix))]
         {
             let (pipe, store) = (proto::pipe_name(), root.join("projects.json"));
@@ -73,7 +76,11 @@ fn env() -> &'static Env {
             });
             std::thread::sleep(Duration::from_millis(500));
         }
-        Env { root }
+        Env {
+            root,
+            #[cfg(unix)]
+            _daemon: daemon,
+        }
     })
 }
 
