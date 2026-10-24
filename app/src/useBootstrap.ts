@@ -6,6 +6,7 @@ import {
   budgetEvents,
   janitorEvents,
   listPorts,
+  onDaemonEvent,
   restoreSessions,
   stopWatch,
   storeNotices,
@@ -16,7 +17,6 @@ import { errorText } from "./appError";
 import { handleBudgetEvents } from "./budgetEvents";
 import { handleJanitorEvents } from "./janitorEvents";
 import { handleTriggerEvents } from "./triggerEvents";
-import { createPoller } from "./poller";
 import { wtName } from "./Usage";
 import { S } from "./strings";
 import { onTauriEvent } from "./tauriEvents";
@@ -136,50 +136,39 @@ export function useBootstrap() {
         void refreshSessions().then(() => openSession(p.worktree, p.session));
       }),
     ];
-    // the daemon pushes `session.changed` (see watchWorktree below); this poll is only the safety net
-    const fast = createPoller(refreshSessions, 10000);
-    // git is the costly part: the change list only matters for the selected worktree, and the project
-    // list (worktrees, remote) changes rarely. Both also refresh when the window regains focus
-    // and after every action the user takes in the sidebar.
-    // safety net only: real changes arrive as daemon events (see watchWorktree below)
-    const mid = createPoller(refreshChanges, 60000);
-    const slow = createPoller(refreshProjects, 60000);
+    // No polling: the daemon pushes `session.changed`, `fs.changed`, `projects.changed` and the events below on the
+    // watch stream (see watchWorktree), and the stream catches up when it reconnects. The change list and the project
+    // list also refresh when the window regains focus and after every action the user takes in the sidebar.
     // worktrees the daemon's automatic sweep removed: tell the user and drop them from the sidebar
-    const janitor = createPoller(
-      () =>
-        janitorEvents()
-          .then((ev) => (handleJanitorEvents(ev) > 0 ? refreshProjects() : undefined))
-          .catch((e) => console.debug("janitor.events", e)),
-      15000,
-    );
+    const takeJanitor = () =>
+      janitorEvents()
+        .then((ev) => (handleJanitorEvents(ev) > 0 ? refreshProjects() : undefined))
+        .catch((e) => console.debug("janitor.events", e));
     // what the CI-fix trigger did (started a fix task, or held back by a limit)
-    const triggers = createPoller(
-      () =>
-        triggersEvents()
-          .then(handleTriggerEvents)
-          .catch((e) => console.debug("triggers.events", e)),
-      15000,
-    );
+    const takeTriggers = () =>
+      triggersEvents()
+        .then(handleTriggerEvents)
+        .catch((e) => console.debug("triggers.events", e));
     // token budgets the daemon saw cross 80% or 100%: one toast and one bell entry each
-    const budget = createPoller(
-      () =>
-        budgetEvents()
-          .then((ev) => handleBudgetEvents(ev, wtName))
-          .catch((e) => console.debug("budget.events", e)),
-      20000,
-    );
+    const takeBudget = () =>
+      budgetEvents()
+        .then((ev) => handleBudgetEvents(ev, wtName))
+        .catch((e) => console.debug("budget.events", e));
+    void takeJanitor();
+    void takeTriggers();
+    void takeBudget();
+    const offEvents = [
+      onDaemonEvent("janitor.events", () => void takeJanitor()),
+      onDaemonEvent("triggers.events", () => void takeTriggers()),
+      onDaemonEvent("budget.events", () => void takeBudget()),
+    ];
     const onFocus = () => {
       void refreshChanges();
       void refreshProjects();
     };
     window.addEventListener("focus", onFocus);
     onCleanup(() => {
-      fast.stop();
-      mid.stop();
-      slow.stop();
-      janitor.stop();
-      triggers.stop();
-      budget.stop();
+      offEvents.forEach((off) => off());
       stopWatch();
       window.removeEventListener("focus", onFocus);
       unlisten.forEach((u) => u());
@@ -197,28 +186,38 @@ export function useBootstrap() {
           void refreshChanges();
         }
       },
-      () => void refreshSessions(),
+      // a dev server that starts or stops prints, and printing then going quiet is a session change: no port polling
+      () => void refreshSessions().then(() => refreshPorts()),
       () => void refreshProjects(),
     );
   });
 
-  // dev servers started in this worktree's terminals; a process lookup, so only while something runs
+  // dev servers started in this worktree's terminals; a process lookup, so only while something runs and the window is seen.
+  // A server that starts or stops prints, and printing then going quiet is a session change: no polling.
+  let portsBusy = false;
   const refreshPorts = async () => {
     const w = selectedWorktree();
     if (!w || document.hidden || !sessionsOf(w).some((s) => s.running)) {
       if (ports().length) setPorts([]);
       return;
     }
+    // session events come in bursts: one lookup at a time is enough
+    if (portsBusy) return;
+    portsBusy = true;
     try {
       const p = (await listPorts(w)).map((x) => x.port);
       if (p.join() !== ports().join()) setPorts(p);
     } catch (e) {
       console.debug("ports.list", e);
+    } finally {
+      portsBusy = false;
     }
   };
   onMount(() => {
-    const t = createPoller(refreshPorts, 8000);
-    onCleanup(() => t.stop());
+    // coming back into view catches up on what changed while hidden
+    const vis = () => void refreshPorts();
+    document.addEventListener("visibilitychange", vis);
+    onCleanup(() => document.removeEventListener("visibilitychange", vis));
   });
   createEffect(
     on(selectedWorktree, () => {

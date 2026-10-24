@@ -87,6 +87,7 @@ export const ptBRS: Widen<typeof ptS> = {
 
   cancel: "Cancelar",
   agentNames: { claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI" },
+  agentDescs: { claude: "IA da Anthropic (Claude)", codex: "IA da OpenAI (GPT)", gemini: "IA do Google (Gemini)" },
   toolFailed: "Uma ferramenta externa (git, gh ou docker) falhou. Mensagem original:",
 
   status: {

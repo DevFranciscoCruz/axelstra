@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo } from "./api";
 
-const invoke = vi.hoisted(() => vi.fn(async (cmd: string, _args?: unknown) => (cmd === "notify_session" ? true : undefined)));
+const invoke = vi.hoisted(() =>
+  vi.fn(async (cmd: string, _args?: unknown) => (cmd === "notify_session" ? true : undefined)),
+);
 const sessionsNow = vi.hoisted(() => ({ list: [] as unknown[], calls: 0, gate: null as Promise<void> | null }));
 const projectsNow = vi.hoisted(() => ({ list: [] as unknown[] }));
 const changesNow = vi.hoisted(() => ({ answer: (_wt: string): Promise<unknown> => Promise.resolve(null) }));
@@ -54,7 +56,12 @@ const notified = async () => {
 // newer Node ships its own (unusable) localStorage that shadows jsdom's: use a plain in-memory one
 const memory = () => {
   const m = new Map<string, string>();
-  return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), clear: () => m.clear() };
+  return {
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => void m.set(k, v),
+    removeItem: (k: string) => void m.delete(k),
+    clear: () => m.clear(),
+  };
 };
 
 beforeEach(() => {
@@ -115,7 +122,7 @@ describe("attention flag and notifications", () => {
     await tick(store, agent({ idle_ms: 100 }));
     await tick(store, agent({ idle_ms: 9000 }));
     await settle();
-    expect(invoke.mock.calls.find((c) => c[0] === "notify_session")).toBeUndefined();
+    expect(invoke.mock.calls.find((c) => c[0] === "notify_session" && (c[1] as { waiting: boolean }).waiting)).toBeUndefined();
   });
 
   it("clears the flag when the agent starts working again", async () => {
@@ -137,23 +144,32 @@ describe("attention flag and notifications", () => {
     expect(store.attention().size).toBe(0);
   });
 
-  it("says the agent needs an answer when it stops on a question", async () => {
+  it("says what the agent asked when it sends a wait event", async () => {
     const store = await load();
     store.selectWorktree(OTHER);
     await tick(store, agent({ idle_ms: 100 }));
-    await tick(store, agent({ idle_ms: 9000, waiting: true }));
+    await tick(store, agent({ idle_ms: 9000, waiting: true, wait: { kind: "question", text: "Postgres ou SQLite?" } }));
     await settle();
     const call = invoke.mock.calls.find((c) => c[0] === "notify_session");
-    expect(String((call?.[1] as { body: string } | undefined)?.body)).toContain("precisa da tua resposta para continuar");
+    expect(String((call?.[1] as { body: string } | undefined)?.body)).toContain("Postgres ou SQLite?");
   });
 
   it("tells the host when the agent is waiting on the user", async () => {
     const store = await load();
     store.selectWorktree(OTHER);
     await tick(store, agent({ idle_ms: 100 }));
-    await tick(store, agent({ idle_ms: 9000, waiting: true }));
+    await tick(store, agent({ idle_ms: 9000, waiting: true, wait: { kind: "question", text: "Postgres ou SQLite?" } }));
     await settle();
     expect((invoke.mock.calls.find((c) => c[0] === "notify_session")?.[1] as { waiting: boolean }).waiting).toBe(true);
+  });
+
+  it("a waiting flag without an event is not announced as waiting", async () => {
+    const store = await load();
+    store.selectWorktree(OTHER);
+    await tick(store, agent({ idle_ms: 100 }));
+    await tick(store, agent({ idle_ms: 9000, waiting: true }));
+    await settle();
+    expect(invoke.mock.calls.find((c) => c[0] === "notify_session" && (c[1] as { waiting: boolean }).waiting)).toBeUndefined();
   });
 
   it("does not claim waiting for an agent that just stopped", async () => {
@@ -180,9 +196,19 @@ describe("keepSame", () => {
   it("reuses the old object when only ignored fields moved", async () => {
     const { keepSame } = await load();
     const a = { id: 1, idle: 5, name: "x" };
-    const out = keepSame([a], [{ id: 1, idle: 900, name: "x" }], (x) => x.id, (x) => ({ ...x, idle: 0 }));
+    const out = keepSame(
+      [a],
+      [{ id: 1, idle: 900, name: "x" }],
+      (x) => x.id,
+      (x) => ({ ...x, idle: 0 }),
+    );
     expect(out[0]).toBe(a);
-    const changed = keepSame([a], [{ id: 1, idle: 900, name: "y" }], (x) => x.id, (x) => ({ ...x, idle: 0 }));
+    const changed = keepSame(
+      [a],
+      [{ id: 1, idle: 900, name: "y" }],
+      (x) => x.id,
+      (x) => ({ ...x, idle: 0 }),
+    );
     expect(changed[0]).not.toBe(a);
   });
 
@@ -330,5 +356,50 @@ describe("friendlyError", () => {
     const out = friendlyError("not a git repository " + "x".repeat(300));
     expect(out).toContain("…)");
     expect(out.length).toBeLessThan(260);
+  });
+});
+
+describe("the view only moves by the user's own action", () => {
+  it("sessions and finished agents of another project do not change the selection", async () => {
+    const store = await load();
+    store.selectWorktree(WT);
+    store.setActiveSession(1);
+    // an agent in another project works, finishes and a new session appears there
+    await tick(store, agent({ id: 1, meta: { kind: "agent", agent: "claude", worktree: WT } }));
+    sessionsNow.list = [
+      agent({ id: 1 }),
+      agent({ id: 2, idle_ms: 0, meta: { kind: "agent", agent: "claude", worktree: OTHER } }),
+    ];
+    await store.refreshSessions();
+    sessionsNow.list = [
+      agent({ id: 1 }),
+      agent({ id: 2, running: false, meta: { kind: "agent", agent: "claude", worktree: OTHER } }),
+      agent({ id: 3, meta: { kind: "agent", worktree: OTHER } }),
+    ];
+    await store.refreshSessions();
+    await settle();
+    expect(store.selectedWorktree()).toBe(WT);
+    expect(store.activeSession()).toBe(1);
+  });
+  it("a flow that finishes after the user went elsewhere does not pull the view back", async () => {
+    const store = await load();
+    store.selectWorktree(WT);
+    const stamp = store.navStamp();
+    store.selectWorktree(OTHER); // the user clicked another worktree while something was being created
+    store.selectIfStill(stamp, "C:/work/proj-new");
+    store.openIfStill(stamp, "C:/work/proj-new", 9);
+    expect(store.selectedWorktree()).toBe(OTHER);
+    expect(store.activeSession()).toBe(null);
+  });
+  it("a flow the user did not interrupt still opens its result", async () => {
+    const store = await load();
+    store.selectWorktree(WT);
+    const stamp = store.navStamp();
+    store.selectIfStill(stamp, "C:/work/proj-new");
+    expect(store.selectedWorktree()).toBe("C:/work/proj-new");
+    const s2 = store.navStamp();
+    store.openIfStill(s2, "C:/work/proj-b", 9);
+    expect(store.selectedWorktree()).toBe("C:/work/proj-b");
+    expect(store.activeSession()).toBe(9);
   });
 });

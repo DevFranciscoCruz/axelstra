@@ -145,6 +145,12 @@ export const ptL = {
       body: (who: string, wt: string) =>
         `${who} fez uma pergunta na worktree "${wt}" e precisa da tua resposta para continuar.`,
     },
+    wait: {
+      permission: (who: string, wt: string, text: string) => `${who} pede permissão em ${wt}: ${text}`,
+      question: (who: string, wt: string, text: string) => `${who} tem uma pergunta em ${wt}: ${text}`,
+      permissionGeneric: (who: string, wt: string) => `${who} pede permissão em ${wt} e espera a tua resposta.`,
+      questionGeneric: (who: string, wt: string) => `${who} tem uma pergunta em ${wt} e espera a tua resposta.`,
+    },
     stalledHead: (who: string, wt: string) => `${who} sem atividade e sem reportar · ${wt}`,
     stopped: {
       head: (who: string, wt: string) => `${who} parou · ${wt}`,

@@ -39,6 +39,8 @@ pub enum Kind {
 const MAX_WATCHES: usize = 10_000;
 /// Events queued between the OS callback and the debouncing thread; a burst past it is folded into one "something changed".
 const QUEUE: usize = 4096;
+/// How often an idle watcher checks whether it was told to stop (nothing else wakes it).
+const STOP_CHECK: Duration = Duration::from_secs(5);
 
 /// The `.gitignore` files of a worktree, each applied to its own folder and below, as git does, plus
 /// `.git/info/exclude` for the root. Loaded lazily and kept until a `.gitignore` changes.
@@ -172,8 +174,12 @@ pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'sta
                 of.store(true, Ordering::SeqCst);
             }
         }
-        // the OS dropped events (inotify queue overflow, ReadDirectoryChanges buffer): rescan on the client side
-        Err(_) => of.store(true, Ordering::SeqCst),
+        // the OS dropped events (inotify queue overflow, ReadDirectoryChanges buffer): rescan on the client side;
+        // the empty event wakes the thread below to say so
+        Err(_) => {
+            of.store(true, Ordering::SeqCst);
+            let _ = tx.try_send(notify::Event::new(notify::EventKind::Other));
+        }
     })
     .map_err(|e| axelstra_core::coded!("watch.create_failed", "create watcher: {detail}", detail = e))?;
     let mut watched = std::collections::HashSet::new();
@@ -203,8 +209,10 @@ pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'sta
             if stop.load(Ordering::SeqCst) {
                 return;
             }
-            let wait = due.map(|d| d.saturating_duration_since(Instant::now())).unwrap_or(Duration::from_millis(500));
-            match rx.recv_timeout(wait.min(Duration::from_millis(500))) {
+            // asleep until the OS reports a change or the flush is due; `stop` has no wake-up of its own, so an idle
+            // watcher looks at it every STOP_CHECK
+            let wait = due.map(|d| d.saturating_duration_since(Instant::now())).unwrap_or(STOP_CHECK);
+            match rx.recv_timeout(wait.min(STOP_CHECK)) {
                 Ok(ev) => {
                     if matches!(ev.kind, notify::EventKind::Access(_)) {
                         continue;

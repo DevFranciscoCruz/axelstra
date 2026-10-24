@@ -94,6 +94,11 @@ fn a_restart_restores_the_lead_and_old_sessions_stay_as_they_were() {
     let root = std::env::temp_dir().join(format!("axelstra-lead-restore-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
+    // the worktrees exist: a saved session of a deleted one is pruned at start
+    let wt_a = root.join("wt-a").to_string_lossy().replace('\\', "/");
+    let old_wt = root.join("old").to_string_lossy().replace('\\', "/");
+    std::fs::create_dir_all(&wt_a).unwrap();
+    std::fs::create_dir_all(&old_wt).unwrap();
     // saved by a daemon: a lead and its task, plus a session from before leads existed (a lone "Tarefa 1")
     let rec = |label: &str, wt: &str, extra: Value| {
         let (prog, args) = shell();
@@ -104,9 +109,9 @@ fn a_restart_restores_the_lead_and_old_sessions_stay_as_they_were() {
         json!({"program": prog, "args": args, "label": label, "meta": meta})
     };
     let saved = json!({"v": 1, "data": [
-        rec("main", "C:/r/wt-a", json!({"lead": true})),
-        rec("Tarefa 1", "C:/r/wt-a", json!({})),
-        rec("Tarefa 1", "C:/r/old", json!({})),
+        rec("main", &wt_a, json!({"lead": true})),
+        rec("Tarefa 1", &wt_a, json!({})),
+        rec("Tarefa 1", &old_wt, json!({})),
     ]});
     std::fs::write(root.join("sessions.json"), saved.to_string()).unwrap();
     let mut c = start(&root, "b");

@@ -140,12 +140,27 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({"id": id}))
         }
         "session.list" => Ok(Value::Array(session_list(reg))),
-        // an agent's hook (`axelstra hook`) says what it is doing: waiting, idle or working
+        // an agent's hook (`axelstra hook`) says what it is doing: waiting, idle or working. A wait carries its kind
+        // (permission, question, idle_input) and the agent's own text; without a kind it is not a wait.
         "session.hint" => {
             let state = axelstra_core::waiting::HintState::parse(p["state"].as_str().unwrap_or_default())
                 .ok_or_else(|| axelstra_core::coded!("session.bad_state", "state must be waiting, idle or working"))?;
             session()?;
-            reg.hints.set(sid()?, state);
+            let id = sid()?;
+            // only the agent itself says it waits
+            if c.agent.is_some_and(|me| me != id) {
+                return Err(axelstra_core::coded!(
+                    "rpc.agent_own_session",
+                    "{method} is only allowed for the agent's own session",
+                    method = req.method
+                ));
+            }
+            let wait = p["kind"].as_str().and_then(axelstra_core::waiting::WaitKind::parse).map(|kind| axelstra_core::waiting::Wait {
+                kind,
+                text: axelstra_core::waiting::clean_text(p["text"].as_str().unwrap_or_default()),
+            });
+            reg.hints.set(id, state, wait);
+            reg.tell_parent_waiting(id);
             Ok(json!({}))
         }
         "session.subscribe" => {
@@ -164,14 +179,14 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     if !snap.is_empty() {
                         let _ = tx.blocking_send(session_frame(OUTPUT, id, &snap));
                     }
-                    let mut quiet_ticks = 0u32;
                     loop {
                         if stop.load(Ordering::SeqCst) {
                             return;
                         }
-                        match rx.recv_timeout(Duration::from_millis(200)) {
+                        // blocks until the session prints or its stream ends (`watch_exit` ends it when the program
+                        // is gone, even if ConPTY keeps the pipe open); the 5 s wake-up is the heartbeat below
+                        match rx.recv_timeout(STREAM_HEARTBEAT) {
                             Ok(d) => {
-                                quiet_ticks = 0;
                                 if tx.blocking_send(session_frame(OUTPUT, id, &d)).is_err() {
                                     return;
                                 }
@@ -179,14 +194,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                             Err(RecvTimeoutError::Timeout) => {
                                 // an empty frame every 5 quiet seconds: a client that stopped listening (its tab closed) wakes up,
                                 // sees it is detached and hangs up, instead of staying blocked until this session prints again
-                                quiet_ticks += 1;
-                                if quiet_ticks >= 25 {
-                                    quiet_ticks = 0;
-                                    if tx.blocking_send(session_frame(OUTPUT, id, &[])).is_err() {
-                                        return;
-                                    }
+                                if tx.blocking_send(session_frame(OUTPUT, id, &[])).is_err() {
+                                    return;
                                 }
-                                // ConPTY may keep the output pipe open after the process is gone
                                 if s.try_wait().is_some() {
                                     while let Ok(d) = rx.recv_timeout(Duration::from_millis(150)) {
                                         let _ = tx.blocking_send(session_frame(OUTPUT, id, &d));
@@ -277,7 +287,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "session.pending" => {
             let sid_dir = reg.saved.with_file_name("sid");
-            let mut v = reg.pending.lock_recover().clone();
+            // entries whose worktree was deleted meanwhile are dropped; at most RESTORE_BATCH are handed out
+            let mut v: Vec<Value> = reg.pending.lock_recover().clone();
+            let before = v.len();
+            v.retain(rec_alive);
+            if v.len() != before {
+                *reg.pending.lock_recover() = v.clone();
+                reg.persist();
+            }
+            v.truncate(RESTORE_BATCH);
             for rec in v.iter_mut() {
                 // the agent may have started a new conversation (/clear) since: resume the latest one
                 let Some(key) = rec["meta"]["key"].as_str().map(String::from) else { continue };

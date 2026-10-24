@@ -21,7 +21,9 @@ export type SessionMeta = {
 };
 /** Set by the daemon on an agent that went quiet without reporting: the notice in message-code form (see msg/agents.ts). */
 export type StallInfo = { minutes: number; code: string; params: Record<string, unknown>; text: string };
-export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; stalled?: boolean; stall?: StallInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
+/** Set by the daemon while an agent waits for the user, from the agent's own hook event or `axelstra ask`/`escalate`. */
+export type WaitInfo = { kind: "permission" | "question" | "idle_input"; text: string };
+export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; wait?: WaitInfo | null; stalled?: boolean; stall?: StallInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean; /** worktree of the same project this one is grouped under */ parent?: string | null };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   /** false for a plain folder that is not a git repository (yet) */
@@ -325,6 +327,19 @@ let watchReady: Promise<void> | null = null;
 let channel: Channel<{ event?: string; worktree?: string }> | null = null;
 let unlisteners: Promise<() => void>[] = [];
 
+/** Events the daemon pushes on the watch stream besides the file, session and project ones: the app takes what changed
+ *  when one arrives instead of asking on a timer. */
+export type DaemonEvent = "janitor.events" | "triggers.events" | "budget.events" | "dispatch.changed";
+const eventSubs = new Map<string, Set<() => void>>();
+/** Runs `fn` each time the daemon announces `name` (and after the stream reconnects, in case one was missed); returns the unsubscribe. */
+export const onDaemonEvent = (name: DaemonEvent, fn: () => void): (() => void) => {
+  let set = eventSubs.get(name);
+  if (!set) eventSubs.set(name, (set = new Set()));
+  set.add(fn);
+  return () => void set.delete(fn);
+};
+const fire = (name: string) => eventSubs.get(name)?.forEach((f) => f());
+
 /** Drops the current Channel: its late messages go nowhere. (Tauri has no close for a Channel; the host replaces its end on the next watch_start.) */
 const dropChannel = () => {
   if (channel) channel.onmessage = () => {};
@@ -341,6 +356,7 @@ const startWatch = () => {
     if (m?.event === "fs.changed" && m.worktree) handlers.onChanged(m.worktree);
     else if (m?.event === "session.changed") handlers.onSessions?.();
     else if (m?.event === "projects.changed") handlers.onProjects?.();
+    else if (m?.event) fire(m.event);
   };
   return tauriInvoke<void>("watch_start", { onEvent: ch });
 };
@@ -351,7 +367,13 @@ const rewatch = () => {
   if (!wanted || !handlers || reconnecting) return;
   reconnecting = true;
   dropChannel();
-  void watchWorktree(lastWorktree, handlers.onChanged, handlers.onSessions, handlers.onProjects).finally(() => (reconnecting = false));
+  void watchWorktree(lastWorktree, handlers.onChanged, handlers.onSessions, handlers.onProjects).finally(() => {
+    reconnecting = false;
+    // whatever happened while the stream was down is not coming as an event: look once
+    handlers?.onSessions?.();
+    handlers?.onProjects?.();
+    for (const name of eventSubs.keys()) fire(name);
+  });
 };
 export const watchWorktree = async (worktree: string | null, onChanged: (worktree: string) => void, onSessions?: () => void, onProjects?: () => void) => {
   handlers = { onChanged, onSessions, onProjects };
