@@ -232,6 +232,31 @@ try {
       windowsVirtualKeyCode: 27,
     });
   }
+
+  // 4. the right panel at its minimum width (300): every tab, the CI toggle of the timeline and the status bar
+  if (!process.env.VISUAL_SKIP_PANEL) {
+    await page.size(1280, 800);
+    await page.evaluate("localStorage.setItem('axelstra.right', '1'); localStorage.setItem('axelstra.rightW', '300')");
+    await setLocale(page, "pt-PT");
+    await page.evaluate(clickText("/feature-x/"));
+    await until("the right panel", () => page.evaluate("!!document.getElementById('rpanel')"));
+    const panelWidth = () =>
+      page.evaluate(
+        "(() => { const p = document.getElementById('rpanel'); const r = p.getBoundingClientRect(); const bad = [...p.querySelectorAll('*')].filter((e) => { const b = e.getBoundingClientRect(); return b.width && (b.right > r.right + 1 || b.left < r.left - 1); }).map((e) => e.tagName + '.' + e.className); return Math.round(r.width) + 'px, outside: ' + bad.slice(0, 5).join(' | '); })()",
+      );
+    for (const tab of ["files", "changes", "pulls", "timeline"]) {
+      await page.evaluate(`document.getElementById('rtab-${tab}')?.click()`);
+      await sleep(900);
+      await page.shot(`panel-${tab}`);
+      console.log(`panel ${tab}: ${await panelWidth()}`);
+    }
+    await page.evaluate(clickText("/^Incluir CI$/"));
+    await sleep(2500);
+    await page.shot("panel-timeline-ci");
+    console.log(`panel timeline-ci: ${await panelWidth()}`);
+    await page.evaluate("document.querySelector('.statusbar')?.scrollIntoView()");
+    await page.shot("statusbar");
+  }
   page.close();
 } catch (e) {
   failed = e;
