@@ -182,10 +182,87 @@ pub fn rotate(data_dir: &Path, dry: bool, out: &mut Vec<Value>) {
     }
 }
 
-/// Files of `sid/` and `scrollback/` whose session key is not in `keys` (no saved or live session refers to them) and
+fn old_enough(md: Option<std::fs::Metadata>) -> bool {
+    md.and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|a| a.as_secs() >= LEFTOVER_MIN_AGE_SECS)
+}
+
+fn delete_file(path: &Path, kind: &str, why: &str, dry: bool, out: &mut Vec<Value>) {
+    let ps = path.to_string_lossy().to_string();
+    match if dry { Ok(()) } else { std::fs::remove_file(path) } {
+        Ok(()) => out.push(item(None, &ps, "", kind, why, !dry, dry)),
+        Err(e) => out.push(warn(None, &ps, kind, format!("could not delete it: {e}"), dry)),
+    }
+}
+
+/// Normalized paths of every worktree git lists for `projects` (main checkouts included); `None` when any project
+/// cannot be listed, since then nothing can be judged gone.
+pub fn live_worktrees(projects: &[Project]) -> Option<Vec<String>> {
+    let mut v = vec![];
+    for p in projects {
+        v.extend(git::worktree_list(Path::new(&p.path)).ok()?.iter().map(|w| crate::projects::norm_path(&w.path)));
+    }
+    Some(v)
+}
+
+/// Task and report files in `notes/<project>/` (and its `arquivo/`) that nobody needs: those of a worktree git no
+/// longer lists (and whose folder is gone), and the empty ones (no report written) of a live worktree that no session
+/// refers to. `wts` comes from `live_worktrees`; `live_notes` are the note paths of saved and live sessions. Fresh files
+/// (under `LEFTOVER_MIN_AGE_SECS`), files with no readable `Worktree:` header and reports of live worktrees stay.
+pub fn worktree_leftovers(data_dir: &Path, wts: Option<&[String]>, live_notes: &[String], dry: bool, out: &mut Vec<Value>) {
+    let Some(wts) = wts else { return };
+    let live: Vec<String> = live_notes.iter().map(|n| crate::projects::norm_path(n)).collect();
+    let Ok(projects) = std::fs::read_dir(crate::notes::root(data_dir)) else { return };
+    for pd in projects.flatten().filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false)) {
+        for (dir, archived) in [(pd.path(), false), (pd.path().join("arquivo"), true)] {
+            let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+            for e in rd.flatten() {
+                let path = e.path();
+                if !path.is_file() || path.extension().is_none_or(|x| x != "md") || !old_enough(e.metadata().ok()) {
+                    continue;
+                }
+                if live.contains(&crate::projects::norm_path(&path.to_string_lossy())) {
+                    continue;
+                }
+                let Ok(text) = crate::notes::read(&path) else { continue };
+                let Some(wt) = crate::notes::header_value(&text, "Worktree") else { continue };
+                let why = if wts.contains(&crate::projects::norm_path(wt)) {
+                    if archived || crate::notes::summarize(&text).0 != "aberto" {
+                        continue;
+                    }
+                    "empty task file, no session works on it"
+                } else if Path::new(wt).exists() {
+                    continue; // folder still there (maybe an orphan not yet swept): its work may be unintegrated
+                } else {
+                    "its worktree is gone"
+                };
+                delete_file(&path, "note", why, dry, out);
+            }
+        }
+        if !dry {
+            // only succeeds on an empty folder
+            let _ = std::fs::remove_dir(pd.path().join("arquivo"));
+            let _ = std::fs::remove_dir(pd.path());
+        }
+    }
+}
+
+/// Prompt files (`prompts/<uuid>.txt`, read once by the shell when an agent starts) that no saved or live session
+/// command mentions (`refs` is their serialized text) and that are older than `LEFTOVER_MIN_AGE_SECS`.
+pub fn prompt_leftovers(data_dir: &Path, refs: &str, dry: bool, out: &mut Vec<Value>) {
+    let Ok(rd) = std::fs::read_dir(data_dir.join("prompts")) else { return };
+    for e in rd.flatten() {
+        let path = e.path();
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()).filter(|s| !s.is_empty()) else { continue };
+        if path.is_file() && old_enough(e.metadata().ok()) && !refs.contains(stem) {
+            delete_file(&path, "prompt", "no session refers to it", dry, out);
+        }
+    }
+}
+
+/// Files of `sid/`, `scrollback/` and `status/` whose session key is not in `keys` (no saved or live session refers to them) and
 /// that are older than `LEFTOVER_MIN_AGE_SECS`.
 pub fn leftovers(data_dir: &Path, keys: &[String], dry: bool, out: &mut Vec<Value>) {
-    for (sub, ext) in [("sid", "json"), ("scrollback", "txt")] {
+    for (sub, ext) in [("sid", "json"), ("scrollback", "txt"), ("status", "json"), ("status", "tmp")] {
         let Ok(rd) = std::fs::read_dir(data_dir.join(sub)) else { continue };
         for e in rd.flatten() {
             let path = e.path();
@@ -371,6 +448,90 @@ mod tests {
         let mut out = vec![];
         leftovers(&dir, &["owned".to_string()], false, &mut out);
         assert!(dir.join("sid/fresh.json").exists() && dir.join("sid/owned.json").exists() && !dir.join("sid/dead.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn age(path: &Path) {
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(LEFTOVER_MIN_AGE_SECS + 60);
+        std::fs::File::options().write(true).open(path).unwrap().set_modified(old).unwrap();
+    }
+
+    fn note(dir: &Path, name: &str, wt: &str, report: bool) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let p = dir.join(format!("{name}.md"));
+        let tail = if report { "\n### 2026-01-01 00:00 - ok\n\nfeito\n" } else { "" };
+        std::fs::write(
+            &p,
+            format!("# {name}\n\n- Agente: claude\n- Worktree: {wt}\n- Criado: x\n\n## Objetivo\n\nx\n\n## Relatorio\n{tail}"),
+        )
+        .unwrap();
+        p
+    }
+
+    #[test]
+    fn leftovers_of_dead_worktrees_go_and_live_fresh_or_unsure_ones_stay() {
+        let dir = std::env::temp_dir().join(format!("axl-clean-left-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let live_wt = dir.join("wt-live");
+        let folder_wt = dir.join("wt-folder");
+        std::fs::create_dir_all(&folder_wt).unwrap();
+        let wt_s = live_wt.to_string_lossy().to_string();
+        let wts = vec![crate::projects::norm_path(&wt_s)];
+        let pd = dir.join("notes").join("proj");
+        let gone = note(&pd, "Tarefa 1", "C:/no/such/wt-gone", true);
+        let fresh = note(&pd, "Tarefa 2", "C:/no/such/wt-gone", true);
+        let kept_report = note(&pd, "Tarefa 3", &wt_s, true);
+        let phantom = note(&pd, "Tarefa 4", &wt_s, false);
+        let owned = note(&pd, "Tarefa 5", &wt_s, false);
+        let folder = note(&pd, "Tarefa 6", &folder_wt.to_string_lossy(), true);
+        let nohdr = pd.join("loose.md");
+        std::fs::write(&nohdr, "# no header\n").unwrap();
+        let archived = note(&pd.join("arquivo"), "Tarefa 7 20260101-000000", "C:/no/such/wt-gone", true);
+        for f in [&gone, &kept_report, &phantom, &owned, &folder, &nohdr, &archived] {
+            age(f);
+        }
+        let live_notes = vec![owned.to_string_lossy().to_string()];
+        // status and prompts
+        std::fs::create_dir_all(dir.join("status")).unwrap();
+        std::fs::create_dir_all(dir.join("prompts")).unwrap();
+        let st = dir.join("status").join("dead.json");
+        let pr_dead = dir.join("prompts").join("aaaa-dead.txt");
+        let pr_used = dir.join("prompts").join("bbbb-used.txt");
+        let pr_new = dir.join("prompts").join("cccc-new.txt");
+        for f in [&st, &pr_dead, &pr_used, &pr_new] {
+            std::fs::write(f, "x").unwrap();
+        }
+        for f in [&st, &pr_dead, &pr_used] {
+            age(f);
+        }
+
+        let run = |dry: bool| {
+            let mut out = vec![];
+            leftovers(&dir, &[], dry, &mut out);
+            prompt_leftovers(&dir, "cat prompts/bbbb-used.txt", dry, &mut out);
+            worktree_leftovers(&dir, Some(&wts), &live_notes, dry, &mut out);
+            out
+        };
+        let out = run(true);
+        assert!(out.iter().all(|o| o["removed"] == false && o["dry_run"] == true), "{out:?}");
+        assert!(out.len() >= 5, "{out:?}");
+        for f in [&gone, &phantom, &archived, &st, &pr_dead] {
+            assert!(f.exists(), "a dry run removes nothing");
+        }
+        let out = run(false);
+        assert!(out.iter().all(|o| o.get("warning").is_none()), "{out:?}");
+        for f in [&gone, &phantom, &archived, &st, &pr_dead] {
+            assert!(!f.exists(), "{f:?} should be gone");
+        }
+        for f in [&fresh, &kept_report, &owned, &folder, &nohdr, &pr_used, &pr_new] {
+            assert!(f.exists(), "{f:?} should stay");
+        }
+        // no live worktree list (git failing): notes are never judged
+        let again = note(&pd, "Tarefa 8", "C:/no/such/wt-gone", true);
+        age(&again);
+        let mut out = vec![];
+        worktree_leftovers(&dir, None, &[], false, &mut out);
+        assert!(again.exists() && out.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
