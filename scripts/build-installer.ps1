@@ -14,6 +14,14 @@ $app = Join-Path $root "app"
 $env:CARGO_BUILD_JOBS = "$Jobs"
 if (-not $env:LIBCLANG_PATH -and (Test-Path "C:\Program Files\LLVM\bin")) { $env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin" }
 
+# build metadata embedded in the sidecar and the app (Settings > About, `axelstra --version`); the installer name does not change
+if (-not $env:AXELSTRA_GIT_SHA) {
+    $sha = (git -C $root rev-parse --short=7 HEAD 2>$null)
+    $env:AXELSTRA_GIT_SHA = if ($LASTEXITCODE -eq 0 -and $sha) { "$sha".Trim() } else { "unknown" }
+}
+if (-not $env:AXELSTRA_BUILD_DATE) { $env:AXELSTRA_BUILD_DATE = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd") }
+Write-Host "Build: commit $($env:AXELSTRA_GIT_SHA), date $($env:AXELSTRA_BUILD_DATE)"
+
 # the build should not make the computer sluggish
 (Get-Process -Id $PID).PriorityClass = "BelowNormal"
 

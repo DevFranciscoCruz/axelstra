@@ -55,6 +55,12 @@ through a throwaway `GIT_CONFIG_GLOBAL` (never the developer's gitconfig), and k
 App-level drivers (`tools/e2e.mjs`, `tools/visual.mjs`) set `AXELSTRA_TEST_HIDDEN=1` so the app window is created transparent
 and unfocusable (see `docs/E2E.md`). Never launch the real app from a test without it.
 
+## Build metadata in tests
+
+Tests that print or compare the version must not hard-code the commit or date: they change on every build. Compare
+against `axelstra_core::buildinfo::{VERSION, COMMIT, BUILT}`, or set `AXELSTRA_GIT_SHA`/`AXELSTRA_BUILD_DATE` for the build
+under test (see `docs/TOOLS.md`).
+
 ## Opening HTML from a terminal
 
 `files.resolve_html` (daemon) turns a path clicked in a terminal into a `file://` URL; the host command `open_html_file`

@@ -7,6 +7,9 @@ on:
   # the release workflow runs the whole of CI before it builds anything
   workflow_call:
 permissions: { contents: read }
+env:
+  # embedded in the binaries (axelstra_core::buildinfo); the date falls back to today in build.rs
+  AXELSTRA_GIT_SHA: ${{ substring(github.sha, 0, 7) }}
 jobs:
   # the three version fields (Cargo.toml workspace, package.json, tauri.conf.json) must agree, and the
   # stamp script that the release relies on must pass its own tests

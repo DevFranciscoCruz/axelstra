@@ -139,6 +139,13 @@ jobs:
         shell: bash
         run: |
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then node scripts/stamp-version.mjs --tag "$GITHUB_REF_NAME"; else node scripts/stamp-version.mjs --check; fi
+      # Build metadata shown in Settings > About and `axelstra --version`. The sha comes from the event (a
+      # shallow checkout has no usable `git rev-parse` fallback guarantee), the date is UTC.
+      - name: Build metadata
+        shell: bash
+        run: |
+          echo "AXELSTRA_GIT_SHA=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
+          echo "AXELSTRA_BUILD_DATE=$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo test --no-fail-fast -p axelstra-core -p axelstra-daemon -p axelstra
@@ -353,6 +360,13 @@ jobs:
         shell: bash
         run: |
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then node scripts/stamp-version.mjs --tag "$GITHUB_REF_NAME"; else node scripts/stamp-version.mjs --check; fi
+      # Build metadata shown in Settings > About and `axelstra --version`. The sha comes from the event (a
+      # shallow checkout has no usable `git rev-parse` fallback guarantee), the date is UTC.
+      - name: Build metadata
+        shell: bash
+        run: |
+          echo "AXELSTRA_GIT_SHA=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
+          echo "AXELSTRA_BUILD_DATE=$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Desktop toolkit

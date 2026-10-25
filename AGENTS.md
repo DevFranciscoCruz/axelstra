@@ -159,6 +159,14 @@ under `ui`), `automations.json`, each saved as a versioned envelope `{"v":N,"dat
 files into `backups/`, never the token. Cards use `serde_norway` (YAML). Tests must not write to the real one; point `LOCALAPPDATA`/`HOME`/`XDG_DATA_HOME` at a
 temp dir.
 
+## Build metadata
+
+`axelstra_core::buildinfo::{VERSION, COMMIT, BUILT}` come from `AXELSTRA_GIT_SHA` (7 chars, else `git rev-parse --short=7 HEAD`,
+else `unknown`) and `AXELSTRA_BUILD_DATE` (UTC `YYYY-MM-DD`, else today), set by `build-installer.ps1` and the workflows
+(`github.sha`; shallow checkouts need it). `hello`/`ping`/`host.info` carry `version`, `commit`, `built` (additive, no PROTO bump;
+missing = "unknown" in the app). Surfaces: `axelstra --version`/`-V`, `axelstra version --json`, footer, Settings > About
+(daemon-vs-app mismatch warning, *Copy info* for bug reports). Details: `docs/TOOLS.md`, `docs/RELEASING.md`.
+
 ## Versions and releases
 
 Versions live in three places (Cargo workspace, `app/package.json`, `tauri.conf.json`) and must

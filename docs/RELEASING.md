@@ -120,6 +120,16 @@ daemon code running. The intended rule: the daemon reports its build id in the p
 daemon whose build id differs from its own, in addition to restarting one whose `PROTO` is older. `PROTO`
 stays the hard compatibility floor; the build id is the freshness check.
 
+### Version, commit and date
+
+Separately from the build id, every binary carries `VERSION`, `COMMIT` and `BUILT` (`axelstra_core::buildinfo`).
+`ci.yml` sets `AXELSTRA_GIT_SHA` from `github.sha` and `release.yml` adds a "Build metadata" step (sha from
+`GITHUB_SHA`, date from `date -u`) before the sidecar and `tauri build` steps, in both the desktop and Linux jobs, so
+the daemon sidecar and the app embed the same values even on a shallow checkout. `scripts/build-installer.ps1` does the
+same locally. The daemon reports `version`, `commit` and `built` in `hello`/`ping`/`host.info` (additive, no `PROTO`
+bump); the app compares them with its own and Settings > About warns when the running daemon differs (an old daemon
+without the fields shows "unknown"). Its *Copy info* button gives users a block to paste in bug reports.
+
 Status: this section documents the design. The code side (daemon ping field, app comparison, restart banner)
 is a separate change; until it lands only `PROTO` triggers a restart.
 

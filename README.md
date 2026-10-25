@@ -64,6 +64,7 @@ The interface comes in Portuguese (pt-PT), Brazilian Portuguese and English, pic
 - **Backup and diagnostics:** Settings exports and restores the daemon's state (rotating copies are also kept) and copies a diagnostics report. A state file that cannot be read is set aside, never overwritten, and you are told.
 - **Audit log:** the commands agents send to the daemon are recorded and shown in the app.
 - **Languages:** pt-PT, English and pt-BR, switched live.
+- **Version and build info:** Settings > About shows the app version, commit and build date next to the same fields of the running daemon, and a *Copy info* button puts them (plus OS and protocol) on the clipboard for a bug report. The version is also in the footer. If the daemon is older than the app (it outlives updates), About warns about the mismatch; an old daemon that does not report the fields shows "unknown". On the command line: `axelstra --version` / `-V` prints version, commit and date; `axelstra version --json` prints them as JSON.
 - **Layout:** `Ctrl+B` hides the project list, `Ctrl+Shift+B` the right panel.
 
 ### Add project
@@ -197,6 +198,8 @@ sh scripts/prepare-sidecar.sh && cd app && npx tauri build --bundles dmg --confi
 # Linux (experimental)
 sh scripts/prepare-sidecar.sh && cd app && npx tauri build --config src-tauri/tauri.release.linux.conf.json
 ```
+
+The commit and build date shown by About and `axelstra --version` come from `AXELSTRA_GIT_SHA` (7-char sha) and `AXELSTRA_BUILD_DATE` (UTC `YYYY-MM-DD`), read when the crates compile. `scripts/build-installer.ps1` sets both; elsewhere they fall back to `git rev-parse --short=7 HEAD` (else `unknown`) and today's date.
 
 Local builds are not signed for the updater, so they never produce update artifacts. Heavy builds inside an Axelstra worktree go through `axelstra lock verify -- <cmd>`.
 

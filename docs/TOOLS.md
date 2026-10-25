@@ -29,7 +29,16 @@ purpose and fix the new lints in the same change.
 - `prepare-sidecar.sh` / `prepare-sidecar.ps1`: build the daemon binary and place it as the Tauri sidecar.
 - `build-installer.ps1`: **Windows only.** One command for the NSIS installer in steps (sidecar, frontend, bundle),
   printing time and peak memory per step. `-Version` overrides the version, `-Jobs` limits compile jobs.
-  Output: `target/release/bundle/nsis/Axelstra_<version>_x64-setup.exe`. Slow and heavy; do not run it for a code check.
+  It also sets `AXELSTRA_GIT_SHA` and `AXELSTRA_BUILD_DATE` (unless already set) so the sidecar and the app embed the same
+  commit and date; the installer name does not change. Output: `target/release/bundle/nsis/Axelstra_<version>_x64-setup.exe`. Slow and heavy; do not run it for a code check.
+
+## Build metadata
+
+`axelstra_core::buildinfo::{VERSION, COMMIT, BUILT}` are consts filled by `crates/core/build.rs` from `AXELSTRA_GIT_SHA`
+(short 7-char sha; fallback `git rev-parse --short=7 HEAD`, else `unknown`) and `AXELSTRA_BUILD_DATE` (UTC `YYYY-MM-DD`;
+fallback today). Cargo reruns the script when either variable changes. Shallow checkouts have no usable history, so CI
+sets the sha from `github.sha`. Shown by `axelstra --version` / `-V`, `axelstra version --json` and Settings > About.
+Set them yourself only to reproduce a release build: `AXELSTRA_GIT_SHA=abc1234 AXELSTRA_BUILD_DATE=2026-01-31 cargo build`.
 
 ## tools/
 
