@@ -265,6 +265,18 @@ const restartNote = (interrupted: boolean, lost: string[]) => {
 export type RestoreResult = { restored: number; skipped: number; failed: string[] };
 type PendingRec = { program: string; args?: string[]; cwd?: string; label?: string; meta?: SessionMeta; env?: Record<string, string> };
 
+/** True when the daemon already runs the session this pending entry describes: same agent key, or (no key) same program, cwd and label. */
+const alreadyRunning = async (r: PendingRec): Promise<boolean> => {
+  const live = await call<SessionInfo[]>("session.list").catch(() => null);
+  if (!Array.isArray(live)) return false;
+  const key = r.meta?.key;
+  return live.some((s) => {
+    if (!s.running) return false;
+    if (key) return s.meta?.key === key;
+    return !s.meta?.key && (s.label ?? null) === (r.label ?? null) && !!r.cwd && norm(s.meta?.worktree ?? "") === norm(r.cwd);
+  });
+};
+
 const restoreOnce = async (): Promise<RestoreResult> => {
   const pending = await call<PendingRec[]>("session.pending");
   let restored = 0;
@@ -279,7 +291,11 @@ const restoreOnce = async (): Promise<RestoreResult> => {
   for (const r of pending) {
     const m = r.meta;
     try {
-      if (m?.kind === "agent" && m.agent && m.project && m.worktree) {
+      // idempotent: a second restore (another window, a daemon swap mid-run, a lost pending_remove) finds the entry
+      // already alive in the daemon and only drops it from the list, instead of starting a twin
+      if (await alreadyRunning(r)) {
+        skipped++;
+      } else if (m?.kind === "agent" && m.agent && m.project && m.worktree) {
         // a cleared / never used conversation has nothing to bring back: no tab, no process
         if (m.blank) {
           skipped++;
