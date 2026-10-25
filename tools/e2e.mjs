@@ -251,6 +251,24 @@ ${dataDirReport()}`);
     page.evaluate("[...document.querySelectorAll('.xterm canvas')].some((c) => c.width > 0 && c.height > 0)"),
   );
   console.log("ok  session: the terminal has a sized canvas (the WebGL renderer drew)");
+  // timeline panel: the "Incluir CI" toggle must reload the timeline without any error toast or uncaught exception
+  problems.length = 0;
+  await until("the timeline tab", () =>
+    page.evaluate(
+      "(() => { const t = [...document.querySelectorAll('[role=tab]')].find((e) => e.textContent.trim() === 'Linha do tempo'); if (!t) return false; t.click(); return true; })()",
+    ),
+  );
+  const ciClick =
+    "(() => { const b = [...document.querySelectorAll('#rpanel button')].find((e) => e.textContent.trim() === 'Incluir CI'); if (!b) return null; b.click(); return b.getAttribute('aria-pressed'); })()";
+  await until("the timeline to load", () => page.evaluate("!!document.querySelector('#rpanel .rlist .pr')"));
+  const pressed = await until("the CI toggle", () => page.evaluate(ciClick));
+  if (pressed !== "true") throw new Error(`CI toggle aria-pressed is ${pressed} after one click`);
+  await sleep(2500);
+  const seen = await page.evaluate("document.body.innerText");
+  if (/call stack|Maximum/i.test(seen) || (await page.evaluate("!!document.querySelector('#rpanel [role=alert]')")))
+    throw new Error(`the CI toggle raised an error: ${seen.slice(0, 600)}`);
+  if (problems.length) throw new Error(`CI toggle problems: ${[...new Set(problems)].join(" | ")}`);
+  console.log("ok  timeline: the Incluir CI toggle raised no error");
   problems.length = 0; // the page reload above tears xterm down mid-layout; only what happens from here on counts
 
   // restore: close the window, the daemon keeps the session, a relaunch shows it again
