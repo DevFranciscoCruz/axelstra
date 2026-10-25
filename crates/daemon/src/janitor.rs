@@ -466,6 +466,18 @@ mod tests {
         (root, store, p)
     }
 
+    /// Takes only the events of the repo under `root`: the queue is process-wide and tests run in parallel.
+    fn take_events_under(root: &Path) -> Vec<Value> {
+        // the temp dir may be spelled 8.3 here and long in the event: the unique folder name matches either way
+        let tag = root.file_name();
+        let mut q = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
+        let (mine, rest): (Vec<Value>, Vec<Value>) = std::mem::take(&mut *q)
+            .into_iter()
+            .partition(|e| e["path"].as_str().is_some_and(|p| Path::new(p).components().any(|c| Some(c.as_os_str()) == tag)));
+        *q = rest;
+        mine
+    }
+
     const COMMIT: [&str; 8] = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m"];
 
     fn commit_in(dir: &Path, msg: &str) {
@@ -491,7 +503,7 @@ mod tests {
         assert!(Path::new(&top.path).exists(), "the top branch holds unmerged work");
         // its commits are still reachable: the base commit is in the top branch
         assert!(git::run(Path::new(&p.path), &["rev-parse", "--verify", "ax/top"]).unwrap().ok);
-        let ev = take_events();
+        let ev = take_events_under(&root);
         assert!(ev.iter().any(|e| e["branch"] == "ax/base" && e["into"] == "ax/top"), "{ev:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -546,6 +558,25 @@ mod tests {
             .unwrap()
     }
 
+    #[cfg(windows)]
+    fn open_without_delete_share(dir: &str) -> std::fs::File {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_SHARE_READ | FILE_SHARE_WRITE, no FILE_SHARE_DELETE
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(3)
+            .open(Path::new(dir).join("held.lock"))
+            .unwrap()
+    }
+
+    #[cfg(not(windows))]
+    fn open_without_delete_share(dir: &str) -> std::fs::File {
+        std::fs::File::create(Path::new(dir).join("held.lock")).unwrap()
+    }
+
     fn merged_worktree(tag: &str, name: &str) -> (std::path::PathBuf, std::path::PathBuf, Project, git::Worktree) {
         let (root, store, p) = repo_with_store(tag);
         let wt = projects::worktree_create(&p, name).unwrap();
@@ -590,7 +621,7 @@ mod tests {
         }
         assert!(!Path::new(&wt.path).exists());
         assert!(!branch_exists(&p, "ax/held"));
-        let ev = take_events();
+        let ev = take_events_under(&root);
         if cfg!(windows) {
             assert!(ev.iter().any(|e| e["code"] == "janitor.removed_closed" && e["params"]["sessions"] == "Tarefa 3"), "{ev:?}");
         }
@@ -606,6 +637,9 @@ mod tests {
     fn strict_removal_changes_nothing_when_the_folder_is_held() {
         let (root, _store, p, wt) = merged_worktree("strict", "strict");
         let mut child = holder(&wt.path);
+        // a file open without delete sharing inside the folder: Windows refuses to move the folder whatever its
+        // version does with a bare working directory (Server 2025 lets that one be renamed)
+        let _open = open_without_delete_share(&wt.path);
         let r = projects::worktree_remove_strict(&p, &wt.path);
         if cfg!(windows) {
             let e = r.as_ref().unwrap_err();
@@ -615,6 +649,7 @@ mod tests {
         }
         let _ = child.kill();
         let _ = child.wait();
+        drop(_open);
         if cfg!(windows) {
             projects::worktree_remove_strict(&p, &wt.path).unwrap();
         } else {
