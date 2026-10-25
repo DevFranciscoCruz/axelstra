@@ -293,7 +293,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             // entries whose worktree was deleted meanwhile are dropped; at most RESTORE_BATCH are handed out
             let mut v: Vec<Value> = reg.pending.lock_recover().clone();
             let before = v.len();
-            v.retain(rec_alive);
+            // a task that reported `done` before the restart is not brought back either
+            v.retain(|r| rec_alive(r) && r["meta"]["done"] != true);
             if v.len() != before {
                 *reg.pending.lock_recover() = v.clone();
                 reg.persist();
