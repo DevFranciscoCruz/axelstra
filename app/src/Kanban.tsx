@@ -6,16 +6,18 @@ import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { AgentInfo, Board, KCard, agentOptions, agentWarning, agentsList, OrchRun, gitPr, gitPush, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchRetry, orchStart, orchStatus, orchTrustInfo } from "./api";
 import { Modal } from "./Modal";
 import { refreshProjects, selectWorktree, setError, setShowKanban, toast } from "./store";
-import { planStart, restorePayload } from "./kanbanLogic";
+import { COL_IDS, applyPlan, colAt, columnCards, edgeDelta, indexAt, keyStep, planMove, planStart, posOf, restorePayload, type DropPos } from "./kanbanLogic";
 import { S } from "./strings";
 import { P } from "./strings.panels";
-import { press } from "./a11y";
 import { coded } from "./msg";
 
-/** only cards are accepted by the columns: a terminal tab or a file dragged over is ignored */
-const CARD_MIME = "application/x-axelstra-card";
+const COLS: { id: string; label: string }[] = COL_IDS.map((id) => ({ id, label: P.kanban.cols[id] }));
 
-const COLS: { id: string; label: string }[] = ["backlog", "todo", "in-progress", "needs-review", "done"].map((id) => ({ id, label: P.kanban.cols[id] }));
+/** a pointer drag starts after this many pixels, so a plain click still opens the card */
+const DRAG_SLOP = 5;
+
+/** `col` is "" while the pointer is outside every column (dropping there cancels) */
+type Drag = DropPos & { id: string; mode: "ptr" | "kbd" };
 
 type Draft = { id?: string; title: string; body: string; status: string; depends: string; agent: string; priority: number };
 
@@ -24,9 +26,11 @@ export function Kanban(props: { project: string }) {
   const [err, setErr] = createSignal("");
   const [agents, setAgents] = createSignal<AgentInfo[]>([]);
   const [draft, setDraft] = createSignal<Draft | null>(null);
-  const [over, setOver] = createSignal<string | null>(null);
-  const [dragId, setDragId] = createSignal<string | null>(null);
-  const [menu, setMenu] = createSignal<string | null>(null);
+  const [drag, setDrag] = createSignal<Drag | null>(null);
+  const [live, setLive] = createSignal("");
+  let colsEl: HTMLDivElement | undefined;
+  let ghostEl: HTMLDivElement | undefined;
+  let moving = false;
   let draftBase = "";
   const [run, setRun] = createSignal<OrchRun>({ state: "idle" });
 
@@ -74,16 +78,11 @@ export function Kanban(props: { project: string }) {
     void reload();
     void pollRun();
     // agents move cards while the orchestrator runs
-    const t = createPoller(() => draft() === null && Promise.all([reload(), pollRun()]), 3000);
+    const t = createPoller(() => draft() === null && !moving && drag() === null && Promise.all([reload(), pollRun()]), 3000);
     onCleanup(t.stop);
   });
 
   const inCol = (id: string) => board().cards.filter((c) => c.meta.status === id);
-  // cards with an unknown status would vanish: show them under "Ideias"
-  const known = new Set(COLS.map((c) => c.id));
-  const colCards = (id: string) =>
-    id === "backlog" ? board().cards.filter((c) => !known.has(c.meta.status) || c.meta.status === "backlog") : inCol(id);
-
   const edit = (c?: KCard, status = "backlog") => {
     setDraft(
       c
@@ -140,23 +139,207 @@ export function Kanban(props: { project: string }) {
     }
   };
 
-  const drop = async (status: string, e: DragEvent) => {
-    e.preventDefault();
-    setOver(null);
-    setDragId(null);
-    const id = e.dataTransfer?.getData(CARD_MIME);
-    if (!id) return;
-    await moveTo(id, status);
+  // cards with an unknown status would vanish: columnCards shows them under "Ideias"
+  const colLabel = (id: string) => COLS.find((c) => c.id === id)?.label ?? id;
+  const colCards = (id: string) => columnCards(board().cards, id);
+  const cardName = (id: string) => {
+    const c = board().cards.find((x) => x.meta.id === id);
+    return c?.meta.title || id;
   };
+  /** the column's cards without the dragged one: `index` counts in this list */
+  const without = (col: string, id: string) => colCards(col).filter((c) => c.meta.id !== id);
 
   const moveTo = async (id: string, status: string) => {
-    setMenu(null);
     try {
       await kanbanMove(props.project, id, status);
+      return true;
+    } catch (x) {
+      setErr(String(x));
+      return false;
+    }
+  };
+
+  /** status through kanbanMove (as before), order through the card's `priority` (see kanbanLogic), then one reload */
+  const commit = async (id: string, pos: DropPos, kbd: boolean) => {
+    const cards = board().cards;
+    const plan = planMove(cards, id, pos);
+    const total = without(pos.col, id).length + 1;
+    setLive(P.kanban.dropped(cardName(id), colLabel(pos.col), pos.index + 1, total));
+    if (!plan) return;
+    moving = true;
+    setBoard({ ...board(), cards: applyPlan(cards, id, plan) });
+    try {
+      if (!plan.status || (await moveTo(id, plan.status))) {
+        for (const p of plan.priorities) {
+          const c = cards.find((x) => x.meta.id === p.id);
+          if (c) await kanbanSave(props.project, { id: c.meta.id, title: c.meta.title, body: c.body, priority: p.priority });
+        }
+      }
     } catch (x) {
       setErr(String(x));
     }
+    moving = false;
     await reload();
+    // the card was re-created by the reload: give the keyboard user their place back
+    if (kbd) requestAnimationFrame(() => colsEl?.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`)?.focus());
+  };
+
+  const cancelDrag = () => {
+    const d = drag();
+    if (d) setLive(P.kanban.dragCancelled(cardName(d.id)));
+    setDrag(null);
+    endPointer();
+  };
+
+  // ---- pointer drag (no HTML5 DnD: WebView2 handles it poorly) ----
+  let down: { id: string; x: number; y: number; dx: number; dy: number; w: number } | null = null;
+  let px = 0;
+  let py = 0;
+  let raf = 0;
+  let suppressClick = false;
+
+  const colEls = () => Array.from(colsEl?.querySelectorAll<HTMLElement>(".kcol") ?? []);
+  const colRects = () =>
+    colEls().map((e) => {
+      const r = e.getBoundingClientRect();
+      return [r.left, r.right] as [number, number];
+    });
+  /** column and slot under a point; null outside the columns */
+  const hit = (x: number, y: number, id: string): DropPos | null => {
+    const b = colsEl?.getBoundingClientRect();
+    if (!b || y < b.top || y > b.bottom) return null;
+    const ci = colAt(colRects(), x);
+    if (ci === null) return null;
+    const mids = Array.from(colEls()[ci].querySelectorAll<HTMLElement>(".kcard"))
+      .filter((e) => e.dataset.id !== id)
+      .map((e) => {
+        const r = e.getBoundingClientRect();
+        return r.top + r.height / 2;
+      });
+    return { col: COLS[ci].id, index: indexAt(mids, y) };
+  };
+  const place = () => {
+    if (!ghostEl || !down) return;
+    ghostEl.style.setProperty("--gx", `${px - down.dx}px`);
+    ghostEl.style.setProperty("--gy", `${py - down.dy}px`);
+  };
+  const retarget = () => {
+    const d = drag();
+    if (!d || d.mode !== "ptr") return;
+    const t = hit(px, py, d.id) ?? { col: "", index: 0 };
+    if (t.col !== d.col || t.index !== d.index) setDrag({ ...d, ...t });
+  };
+  const tick = () => {
+    raf = 0;
+    const d = drag();
+    if (!d || d.mode !== "ptr" || !colsEl) return;
+    const b = colsEl.getBoundingClientRect();
+    const dx = edgeDelta(px, b.left, b.right);
+    if (dx) colsEl.scrollLeft += dx;
+    const ci = colAt(colRects(), px);
+    const cards = ci === null ? null : colEls()[ci].querySelector<HTMLElement>(".kcards");
+    if (cards) {
+      const r = cards.getBoundingClientRect();
+      const dy = edgeDelta(py, r.top, r.bottom);
+      if (dy) cards.scrollTop += dy;
+    }
+    retarget();
+    raf = requestAnimationFrame(tick);
+  };
+  const onMove = (e: PointerEvent) => {
+    if (!down) return;
+    px = e.clientX;
+    py = e.clientY;
+    if (!drag()) {
+      if (Math.hypot(px - down.x, py - down.y) < DRAG_SLOP) return;
+      setDrag({ id: down.id, col: "", index: 0, mode: "ptr" });
+      suppressClick = true;
+      raf = requestAnimationFrame(tick);
+    }
+    place();
+    retarget();
+  };
+  const onUp = () => {
+    const d = drag();
+    const id = down?.id;
+    endPointer();
+    if (!d || !id) return;
+    setDrag(null);
+    if (d.col) void commit(id, { col: d.col, index: d.index }, false);
+    else setLive(P.kanban.dragCancelled(cardName(id)));
+  };
+  const onEsc = (e: KeyboardEvent) => {
+    if (e.key !== "Escape" || drag()?.mode !== "ptr") return;
+    e.preventDefault();
+    e.stopPropagation();
+    cancelDrag();
+  };
+  function endPointer() {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", cancelDrag);
+    window.removeEventListener("keydown", onEsc, true);
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    down = null;
+    // the click that ends a drag must not open the card
+    setTimeout(() => (suppressClick = false), 50);
+  }
+  onCleanup(endPointer);
+  const onDown = (e: PointerEvent & { currentTarget: HTMLElement }, c: KCard) => {
+    if (e.button !== 0 || drag() || (e.target as HTMLElement).closest("button,a,input,textarea,select")) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    down = { id: c.meta.id, x: e.clientX, y: e.clientY, dx: e.clientX - r.left, dy: e.clientY - r.top, w: r.width };
+    px = e.clientX;
+    py = e.clientY;
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", cancelDrag);
+    window.addEventListener("keydown", onEsc, true);
+  };
+
+  // ---- keyboard drag: Space picks up, arrows move, Space drops, Esc cancels ----
+  const announcePos = (d: DropPos, id: string) => P.kanban.movedTo(colLabel(d.col), d.index + 1, without(d.col, id).length + 1);
+  const onCardKey = (e: KeyboardEvent & { currentTarget: HTMLElement }, c: KCard) => {
+    if (e.target !== e.currentTarget || e.ctrlKey || e.metaKey || e.altKey) return;
+    const id = c.meta.id;
+    const d = drag();
+    if (d?.mode === "kbd" && d.id === id) {
+      if (e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        setDrag(null);
+        void commit(id, d, true);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        cancelDrag();
+      } else if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
+        e.preventDefault();
+        const n = keyStep(d, e.key, COL_IDS, COL_IDS.map((k) => without(k, id).length));
+        setDrag({ ...d, ...n });
+        setLive(announcePos(n, id));
+      }
+      return;
+    }
+    if (d) return;
+    if (e.key === " ") {
+      e.preventDefault();
+      const p = posOf(board().cards, id);
+      if (!p) return;
+      setDrag({ id, ...p, mode: "kbd" });
+      setLive(P.kanban.grabbed(cardName(id), colLabel(p.col), p.index + 1, without(p.col, id).length + 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      edit(c);
+    }
+  };
+  const dropBefore = (col: string, id: string) => {
+    const d = drag();
+    return !!d && d.col === col && without(col, d.id)[d.index]?.meta.id === id;
+  };
+  const dropEnd = (col: string) => {
+    const d = drag();
+    return !!d && d.col === col && d.index >= without(col, d.id).length;
   };
 
   // a needs-review card keeps its task worktree: it sits next to the integration one
@@ -245,20 +428,24 @@ export function Kanban(props: { project: string }) {
           <For each={board().broken}>{(b) => <span title={coded(b.error_code, b.error_params, b.error)}>{b.file} </span>}</For>
         </div>
       </Show>
-      <div class="kcols">
+      <div class="sr-only" id="kanban-grab-hint">{P.kanban.grabHint}</div>
+      <div class="sr-only" role="status" aria-live="assertive" aria-atomic="true">{live()}</div>
+      <Show when={drag()?.mode === "ptr"}>
+        <div
+          class="kghost"
+          ref={(el) => {
+            ghostEl = el;
+            if (down) el.style.setProperty("--gw", `${down.w}px`);
+            place();
+          }}
+        >
+          <div class="kcard-title">{cardName(drag()!.id)}</div>
+        </div>
+      </Show>
+      <div class="kcols" classList={{ kdragging: drag()?.mode === "ptr" }} ref={colsEl}>
         <For each={COLS}>
           {(col) => (
-            <div
-              class="kcol"
-              classList={{ over: over() === col.id }}
-              onDragOver={(e) => {
-                if (!e.dataTransfer?.types.includes(CARD_MIME)) return;
-                e.preventDefault();
-                setOver(col.id);
-              }}
-              onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setOver(null)}
-              onDrop={(e) => void drop(col.id, e)}
-            >
+            <div class="kcol" classList={{ over: drag()?.col === col.id }}>
               <div class="kcol-head">
                 <span>{col.label}</span>
                 <span class="kcount">{colCards(col.id).length}</span>
@@ -266,19 +453,20 @@ export function Kanban(props: { project: string }) {
                   <Icon name="plus" />
                 </Button>
               </div>
-              <div class="kcards">
+              <div class="kcards" classList={{ "drop-end": dropEnd(col.id) }}>
                 <For each={colCards(col.id)}>
                   {(c) => (
                     <div
                       class={`kcard st-${col.id}`}
-                      classList={{ dragging: dragId() === c.meta.id }}
-                      draggable={true}
-                      onDragStart={(e) => {
-                        e.dataTransfer?.setData(CARD_MIME, c.meta.id);
-                        setDragId(c.meta.id);
-                      }}
-                      onDragEnd={() => setDragId(null)}
-                      {...press(() => edit(c))}
+                      classList={{ dragging: drag()?.id === c.meta.id, "drop-before": dropBefore(col.id, c.meta.id), grabbed: drag()?.mode === "kbd" && drag()?.id === c.meta.id }}
+                      data-id={c.meta.id}
+                      role="button"
+                      tabindex="0"
+                      aria-describedby="kanban-grab-hint"
+                      onPointerDown={(e) => onDown(e, c)}
+                      onClick={() => !suppressClick && edit(c)}
+                      onKeyDown={(e) => onCardKey(e, c)}
+                      onBlur={() => drag()?.mode === "kbd" && drag()?.id === c.meta.id && cancelDrag()}
                     >
                       <div class="kcard-title">{c.meta.title || c.meta.id}</div>
                       <Show when={c.body.trim()}>
@@ -306,33 +494,6 @@ export function Kanban(props: { project: string }) {
                           <Button size="sm" onClick={() => void openPr(c)}>{P.kanban.openPr}</Button>
                         </div>
                       </Show>
-                      <div
-                        class="relative" role="group"
-                        onClick={(e) => e.stopPropagation()}
-                        onFocusOut={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && menu() === c.meta.id && setMenu(null)}
-                        onKeyDown={(e) => {
-                          e.stopPropagation();
-                          if (e.key === "Escape" && menu() === c.meta.id) {
-                            setMenu(null);
-                            e.currentTarget.querySelector("button")?.focus();
-                          }
-                        }}
-                      >
-                        <Button size="sm" aria-haspopup="menu" aria-expanded={menu() === c.meta.id} onClick={() => setMenu(menu() === c.meta.id ? null : c.meta.id)}>
-                          {P.kanban.moveTo}
-                        </Button>
-                        <Show when={menu() === c.meta.id}>
-                          <div role="menu" class="flex flex-col gap-0.5 mt-1">
-                            <For each={COLS.filter((x) => x.id !== col.id)}>
-                              {(x, i) => (
-                                <Button size="sm" class="justify-start" role="menuitem" ref={(el) => queueMicrotask(() => i() === 0 && el.focus())} onClick={() => void moveTo(c.meta.id, x.id)}>
-                                  {x.label}
-                                </Button>
-                              )}
-                            </For>
-                          </div>
-                        </Show>
-                      </div>
                     </div>
                   )}
                 </For>

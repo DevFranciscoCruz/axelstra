@@ -558,7 +558,15 @@ button.danger { color: var(--danger); }
 .cfile { padding: 6px 10px; margin-top: 8px; background: var(--s3); font-family: "Cascadia Code", Consolas, monospace; font-size: var(--fs-md); position: sticky; top: 0; }
 .kcard { --accent-st: var(--muted); position: relative; background: linear-gradient(180deg, var(--s3), var(--s3)); border: 1px solid var(--line-2); border-left: 3px solid var(--accent-st); border-radius: var(--r-lg); padding: 9px 10px 8px; cursor: grab; box-shadow: 0 1px 2px rgba(0,0,0,.35); transition: transform .12s, box-shadow .12s, border-color .12s; display: flex; flex-direction: column; gap: 6px; }
 .kcard:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.45); border-color: var(--line-2); border-left-color: var(--accent-st); }
-.kcard.dragging { opacity: .45; transform: rotate(1.5deg); }
+.kcard { touch-action: none; user-select: none; }
+.kcard.dragging { opacity: .4; }
+.kcard.grabbed { outline: 2px solid var(--accent); outline-offset: 1px; }
+.kcard.drop-before::before, .kcards.drop-end::after { content: ""; display: block; height: 3px; border-radius: 2px; background: var(--accent); flex: none; }
+.kcard.drop-before::before { position: absolute; left: 0; right: 0; top: -5px; }
+.kcards.drop-end::after { margin-top: -3px; }
+.kdragging, .kdragging .kcard { cursor: grabbing; }
+.kdragging .kcard:hover { transform: none; }
+.kghost { position: fixed; left: 0; top: 0; z-index: 1000; width: var(--gw, 200px); transform: translate(var(--gx, 0px), var(--gy, 0px)) rotate(1.5deg); pointer-events: none; padding: 9px 10px; background: var(--s3); border: 1px solid var(--accent); border-radius: var(--r-lg); box-shadow: 0 8px 24px rgba(0,0,0,.55); opacity: .92; }
 .kcard.st-backlog { --accent-st: var(--muted); }
 .kcard.st-todo { --accent-st: var(--blue); }
 .kcard.st-in-progress { --accent-st: var(--warn); }
