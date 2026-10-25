@@ -660,7 +660,8 @@ fn term_dim(v: &Value, default: u16) -> u16 {
 
 /// What `hello` and `ping` say about this daemon, so the app can tell when it is older than it should be.
 fn hello_info() -> Value {
-    json!({"proto": PROTO, "instance": *INSTANCE, "build": BUILD_ID, "security": SECURITY_MIN})
+    json!({"proto": PROTO, "instance": *INSTANCE, "build": BUILD_ID, "security": SECURITY_MIN,
+        "version": axelstra_core::buildinfo::VERSION, "commit": axelstra_core::buildinfo::COMMIT, "built": axelstra_core::buildinfo::BUILT})
 }
 
 fn new_agent_token() -> Option<String> {

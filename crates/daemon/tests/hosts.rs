@@ -129,6 +129,9 @@ fn host_info_and_browse() {
     assert_eq!(info["sep"], std::path::MAIN_SEPARATOR.to_string());
     assert_eq!(info["proto"], axelstra_daemon::proto::PROTO);
     assert_eq!(info["build"], axelstra_daemon::proto::BUILD_ID);
+    assert_eq!(info["version"], axelstra_core::buildinfo::VERSION);
+    assert_eq!(info["commit"], axelstra_core::buildinfo::COMMIT);
+    assert_eq!(info["built"], axelstra_core::buildinfo::BUILT);
     assert!(info["home"].is_string() && info["user"].is_string() && info["hostname"].is_string());
     assert_eq!(info["shell"].is_null(), cfg!(windows) || std::env::var_os("SHELL").is_none());
 

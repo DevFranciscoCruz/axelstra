@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "axelstra", about = "Lightweight parallel-agent orchestrator")]
+#[command(name = "axelstra", about = "Lightweight parallel-agent orchestrator", version = version::short())]
 struct Cli {
     /// Talk to the daemon of another machine: `wsl:<distro>` or `ssh:[user@]host[:port]` (default: $AXELSTRA_HOST)
     #[arg(long, global = true)]
@@ -17,6 +17,11 @@ struct Cli {
 enum Cmd {
     /// Run the background daemon that owns terminal sessions
     Daemon,
+    /// Print the version, commit, build date and PROTO of this binary and of the running daemon
+    Version {
+        #[arg(long)]
+        json: bool,
+    },
     /// Relay a client on stdin/stdout to this machine's daemon (what `--host` runs over ssh/wsl; not for typing)
     #[command(hide = true)]
     Bridge,
@@ -406,6 +411,7 @@ mod orchcmd;
 mod remote;
 mod startconfirm;
 mod statusline;
+mod version;
 mod workspace;
 
 fn main() -> Result<()> {
@@ -413,6 +419,7 @@ fn main() -> Result<()> {
     let host = cli.host;
     match cli.cmd {
         Cmd::Bridge => remote::bridge()?,
+        Cmd::Version { json } => version::run(json, host.as_deref())?,
         Cmd::Daemon => {
             use axelstra_daemon::{proto, server};
             #[cfg(target_os = "macos")]

@@ -118,6 +118,7 @@ pub fn info() -> Value {
     let user = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default();
     json!({"os": os, "home": home().map(|h| display(&h)), "user": user, "hostname": hostname(), "shell": shell,
         "sep": std::path::MAIN_SEPARATOR.to_string(), "proto": crate::proto::PROTO, "build": crate::proto::BUILD_ID,
+        "version": axelstra_core::buildinfo::VERSION, "commit": axelstra_core::buildinfo::COMMIT, "built": axelstra_core::buildinfo::BUILT,
         "wsl_distros": wsl_distros(), "ssh_hosts": ssh_hosts()})
 }
 

@@ -39,6 +39,11 @@ fn hello_and_ping_report_the_build() {
     let ping = c.call("ping", json!({})).unwrap();
     assert_eq!(ping["build"], BUILD_ID);
     assert_eq!(ping["security"], SECURITY_MIN);
+    for v in [c.hello_result(), &ping] {
+        assert_eq!(v["version"], axelstra_core::buildinfo::VERSION);
+        assert_eq!(v["commit"], axelstra_core::buildinfo::COMMIT);
+        assert_eq!(v["built"], axelstra_core::buildinfo::BUILT);
+    }
 }
 
 #[test]

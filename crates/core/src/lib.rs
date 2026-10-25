@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod buildinfo;
 pub mod card;
 pub mod exec;
 pub mod git;
