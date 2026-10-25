@@ -18,7 +18,19 @@ fn today_utc() -> String {
 fn build_metadata() {
     println!("cargo:rerun-if-env-changed=AXELSTRA_GIT_SHA");
     println!("cargo:rerun-if-env-changed=AXELSTRA_BUILD_DATE");
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
+    // best effort: the git dir of a worktree is not `.git` (there it is a file)
+    let git_dir = std::process::Command::new("git")
+        .args(["rev-parse", "--absolute-git-dir"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    match git_dir {
+        Some(dir) => println!("cargo:rerun-if-changed={dir}/HEAD"),
+        None => println!("cargo:rerun-if-changed=../../.git/HEAD"),
+    }
     let given = |k: &str| std::env::var(k).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
     let sha = given("AXELSTRA_GIT_SHA")
         .map(|s| s.chars().take(7).collect::<String>())
