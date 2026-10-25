@@ -87,7 +87,11 @@ async function connect() {
       ws.send(JSON.stringify({ id, method, params }));
     });
   const evaluate = async (expression) => {
-    const r = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+    const r = await send("Runtime.evaluate", {
+      expression,
+      returnByValue: true,
+      awaitPromise: true,
+    });
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? "evaluate failed");
     return r.result.value;
   };
@@ -112,12 +116,30 @@ async function until(label, fn, ms = 30000) {
 }
 
 const key = async (page, k, code, vk, text) => {
-  await page.send("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", key: k, code, windowsVirtualKeyCode: vk, ...(text ? { text } : {}) });
-  await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk });
+  await page.send("Input.dispatchKeyEvent", {
+    type: text ? "keyDown" : "rawKeyDown",
+    key: k,
+    code,
+    windowsVirtualKeyCode: vk,
+    ...(text ? { text } : {}),
+  });
+  await page.send("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: k,
+    code,
+    windowsVirtualKeyCode: vk,
+  });
   await sleep(200);
 };
 const mouse = (page, type, x, y) =>
-  page.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
+  page.send("Input.dispatchMouseEvent", {
+    type,
+    x,
+    y,
+    button: "left",
+    buttons: type === "mouseReleased" ? 0 : 1,
+    clickCount: 1,
+  });
 /** a point inside an element: `frac` is the vertical position (0 top, 1 bottom) */
 const where = (page, sel, frac = 0.5) =>
   page.evaluate(
@@ -129,7 +151,8 @@ const order = (page, n) =>
 async function drag(page, from, to, { esc = false } = {}) {
   await mouse(page, "mouseMoved", from.x, from.y);
   await mouse(page, "mousePressed", from.x, from.y);
-  for (let i = 1; i <= 8; i++) await mouse(page, "mouseMoved", from.x + ((to.x - from.x) * i) / 8, from.y + ((to.y - from.y) * i) / 8);
+  for (let i = 1; i <= 8; i++)
+    await mouse(page, "mouseMoved", from.x + ((to.x - from.x) * i) / 8, from.y + ((to.y - from.y) * i) / 8);
   await sleep(200);
   if (!(await page.evaluate("!!document.querySelector('.kghost')"))) throw new Error("no ghost card while dragging");
   if (esc) await key(page, "Escape", "Escape", 27);
@@ -142,13 +165,17 @@ const file = (id) => readFileSync(join(repo, ".kanban", `${id}.md`), "utf8");
 const status = (id) => /^status: (\S+)/m.exec(file(id))?.[1];
 const prio = (id) => Number(/^priority: (-?\d+)/m.exec(file(id))?.[1] ?? 0);
 const expect = (label, got, want) => {
-  if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`${label}: got ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`);
+  if (JSON.stringify(got) !== JSON.stringify(want))
+    throw new Error(`${label}: got ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`);
   console.log(`ok  ${label}`);
 };
 
 let failed = null;
 try {
-  app = spawn(exe, [], { env, stdio: process.env.E2E_VERBOSE ? "inherit" : "ignore" });
+  app = spawn(exe, [], {
+    env,
+    stdio: process.env.E2E_VERBOSE ? "inherit" : "ignore",
+  });
   app.on("exit", (c) => (app.gone = c ?? "signal"));
   const page = await connect();
   await until("the UI to render", () => page.evaluate("document.getElementById('root')?.children.length > 0"));
@@ -159,14 +186,25 @@ try {
   git("init", "-q", "-b", "main");
   git("-c", "user.name=e2e", "-c", "user.email=e2e@example.invalid", "commit", "-q", "--allow-empty", "-m", "init");
   mkdirSync(join(repo, ".kanban"));
-  for (const [id, st] of [["a", "todo"], ["b", "todo"], ["c", "done"], ["d", "done"]])
-    writeFileSync(join(repo, ".kanban", `${id}.md`), `---\nid: ${id}\ntitle: Card ${id}\nstatus: ${st}\n---\n\nbody ${id}\n`);
+  for (const [id, st] of [
+    ["a", "todo"],
+    ["b", "todo"],
+    ["c", "done"],
+    ["d", "done"],
+  ])
+    writeFileSync(
+      join(repo, ".kanban", `${id}.md`),
+      `---\nid: ${id}\ntitle: Card ${id}\nstatus: ${st}\n---\n\nbody ${id}\n`,
+    );
   if (cli("add-project", repo).status !== 0) throw new Error("add-project failed");
   await page.send("Page.reload");
   await until("the project in the sidebar", () => page.evaluate("document.body.innerText.includes('repo')"));
-  const click = (js) => page.evaluate(`(() => { const el = ${js}; if (!el) return false; el.click(); return true; })()`);
+  const click = (js) =>
+    page.evaluate(`(() => { const el = ${js}; if (!el) return false; el.click(); return true; })()`);
   await until("the project selected", () =>
-    click("[...document.querySelectorAll('span,div')].find((e) => e.children.length === 0 && e.textContent.trim() === 'repo')"),
+    click(
+      "[...document.querySelectorAll('span,div')].find((e) => e.children.length === 0 && e.textContent.trim() === 'repo')",
+    ),
   );
   await until("the Kanban tab", () =>
     click("[...document.querySelectorAll('[role=tab],button')].find((e) => /^kanban$/i.test(e.textContent.trim()))"),
@@ -175,7 +213,9 @@ try {
   expect("the board lists the cards", [await order(page, 2), await order(page, 5)], ["a,b", "c,d"]);
   expect(
     "no 'Mover para' button is left",
-    await page.evaluate("[...document.querySelectorAll('.kcard button')].some((b) => /mover|move to/i.test(b.textContent))"),
+    await page.evaluate(
+      "[...document.querySelectorAll('.kcard button')].some((b) => /mover|move to/i.test(b.textContent))",
+    ),
     false,
   );
 
@@ -195,8 +235,14 @@ try {
 
   // 3. Esc cancels
   const before = [status("b"), prio("b")];
-  await drag(page, await where(page, card("b")), await where(page, card("c")), { esc: true });
-  expect("Esc cancels the drag", [status("b"), prio("b"), await page.evaluate("!!document.querySelector('.kghost')")], [...before, false]);
+  await drag(page, await where(page, card("b")), await where(page, card("c")), {
+    esc: true,
+  });
+  expect(
+    "Esc cancels the drag",
+    [status("b"), prio("b"), await page.evaluate("!!document.querySelector('.kghost')")],
+    [...before, false],
+  );
 
   // 4. dropping outside the columns cancels (over the top bar)
   await drag(page, await where(page, card("b")), { x: 200, y: 4 });
@@ -205,7 +251,11 @@ try {
   // 5. keyboard: b -> next column, announced, focus kept
   await page.evaluate(`document.querySelector('${card("b")}').focus()`);
   await key(page, " ", "Space", 32, " ");
-  expect("Space picks the card up and announces it", await page.evaluate("document.querySelector('[role=status][aria-live=assertive]').textContent.length > 0"), true);
+  expect(
+    "Space picks the card up and announces it",
+    await page.evaluate("document.querySelector('[role=status][aria-live=assertive]').textContent.length > 0"),
+    true,
+  );
   await key(page, "ArrowRight", "ArrowRight", 39);
   await key(page, " ", "Space", 32, " ");
   await sleep(1200);

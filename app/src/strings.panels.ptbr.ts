@@ -411,9 +411,11 @@ export const ptBRP: Widen<typeof ptP> = {
     retry: "Tentar integrar novamente",
     openPr: "Abrir PR",
     grabHint: "Espaço pega o cartão, as setas movem, Espaço solta, Esc cancela. Enter edita.",
-    grabbed: (t: string, col: string, pos: number, total: number) => `${t} pego. Coluna ${col}, posição ${pos} de ${total}. Setas movem, Espaço solta, Esc cancela.`,
+    grabbed: (t: string, col: string, pos: number, total: number) =>
+      `${t} pego. Coluna ${col}, posição ${pos} de ${total}. Setas movem, Espaço solta, Esc cancela.`,
     movedTo: (col: string, pos: number, total: number) => `Coluna ${col}, posição ${pos} de ${total}.`,
-    dropped: (t: string, col: string, pos: number, total: number) => `${t} solto na coluna ${col}, posição ${pos} de ${total}.`,
+    dropped: (t: string, col: string, pos: number, total: number) =>
+      `${t} solto na coluna ${col}, posição ${pos} de ${total}.`,
     dragCancelled: (t: string) => `Movimento de ${t} cancelado.`,
     titlePlaceholder: "Título",
     bodyPlaceholder: "Escreva livremente: o contexto, o que você quer, critérios… O agente lê isto.",

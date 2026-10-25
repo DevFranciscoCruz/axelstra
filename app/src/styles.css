@@ -561,7 +561,7 @@ button.danger { color: var(--danger); }
 .kcard { touch-action: none; user-select: none; }
 .kcard.dragging { opacity: .4; }
 .kcard.grabbed { outline: 2px solid var(--accent); outline-offset: 1px; }
-.kcard.drop-before::before, .kcards.drop-end::after { content: ""; display: block; height: 3px; border-radius: 2px; background: var(--accent); flex: none; }
+.kcard.drop-before::before, .kcards.drop-end::after { content: ""; display: block; height: 3px; border-radius: var(--r-sm); background: var(--accent); flex: none; }
 .kcard.drop-before::before { position: absolute; left: 0; right: 0; top: -5px; }
 .kcards.drop-end::after { margin-top: -3px; }
 .kdragging, .kdragging .kcard { cursor: grabbing; }

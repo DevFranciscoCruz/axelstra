@@ -78,7 +78,11 @@ export const cmpCards = (a: Ord, b: Ord) => b.priority - a.priority || (a.id < b
 
 /** the cards of one column in board order */
 export const columnCards = (cards: KCard[], col: string, cols: string[] = COL_IDS) =>
-  cards.filter((c) => colOf(c.meta.status, cols) === col).sort((a, b) => cmpCards({ id: a.meta.id, priority: a.meta.priority }, { id: b.meta.id, priority: b.meta.priority }));
+  cards
+    .filter((c) => colOf(c.meta.status, cols) === col)
+    .sort((a, b) =>
+      cmpCards({ id: a.meta.id, priority: a.meta.priority }, { id: b.meta.id, priority: b.meta.priority }),
+    );
 
 /** where a card would land: `col` and `index` among that column's cards without the dragged one (0..n) */
 export type DropPos = { col: string; index: number };
@@ -95,7 +99,10 @@ export const colAt = (rects: [number, number][], x: number): number | null => {
 /** keyboard step of a picked-up card; `lens[i]` = cards in column i without the dragged one. Home/End jump to the ends. */
 export function keyStep(pos: DropPos, key: string, cols: string[], lens: number[]): DropPos {
   const ci = Math.max(0, cols.indexOf(pos.col));
-  const to = (c: number, index: number): DropPos => ({ col: cols[c], index: Math.max(0, Math.min(index, lens[c] ?? 0)) });
+  const to = (c: number, index: number): DropPos => ({
+    col: cols[c],
+    index: Math.max(0, Math.min(index, lens[c] ?? 0)),
+  });
   switch (key) {
     case "ArrowUp":
       return to(ci, pos.index - 1);
@@ -150,12 +157,20 @@ export function planMove(cards: KCard[], id: string, pos: DropPos, cols: string[
     const old = columnCards(cards, from, cols).findIndex((c) => c.meta.id === id);
     if (old === index && !moveCol) return null;
   }
-  const cand = [cur, prev?.priority, next?.priority, prev ? prev.priority - 1 : undefined, next ? next.priority + 1 : undefined].filter((p): p is number => p !== undefined);
+  const cand = [
+    cur,
+    prev?.priority,
+    next?.priority,
+    prev ? prev.priority - 1 : undefined,
+    next ? next.priority + 1 : undefined,
+  ].filter((p): p is number => p !== undefined);
   const p = cand.find(fits);
   if (p !== undefined) return { status: moveCol ? pos.col : null, priorities: p === cur ? [] : [{ id, priority: p }] };
   const order = [...rest.slice(0, index).map((c) => c.meta), m.meta, ...rest.slice(index).map((c) => c.meta)];
   const top = Math.max(...order.map((c) => c.priority));
-  const priorities = order.map((c, i) => ({ id: c.id, priority: top - i })).filter((x) => x.priority !== order.find((c) => c.id === x.id)!.priority);
+  const priorities = order
+    .map((c, i) => ({ id: c.id, priority: top - i }))
+    .filter((x) => x.priority !== order.find((c) => c.id === x.id)!.priority);
   return { status: moveCol ? pos.col : null, priorities };
 }
 
@@ -164,7 +179,9 @@ export function applyPlan(cards: KCard[], id: string, plan: MovePlan): KCard[] {
   return cards.map((c) => {
     const pr = plan.priorities.find((x) => x.id === c.meta.id);
     const status = c.meta.id === id && plan.status ? plan.status : c.meta.status;
-    return pr || status !== c.meta.status ? { ...c, meta: { ...c.meta, status, priority: pr ? pr.priority : c.meta.priority } } : c;
+    return pr || status !== c.meta.status
+      ? { ...c, meta: { ...c.meta, status, priority: pr ? pr.priority : c.meta.priority } }
+      : c;
   });
 }
 

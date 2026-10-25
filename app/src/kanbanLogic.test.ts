@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { COL_IDS, applyPlan, cmpCards, colAt, columnCards, edgeDelta, indexAt, isBypass, keyStep, planMove, planStart, posOf, restorePayload } from "./kanbanLogic";
+import {
+  COL_IDS,
+  applyPlan,
+  cmpCards,
+  colAt,
+  columnCards,
+  edgeDelta,
+  indexAt,
+  isBypass,
+  keyStep,
+  planMove,
+  planStart,
+  posOf,
+  restorePayload,
+} from "./kanbanLogic";
 import type { KCard } from "./api";
 import { needsTypedName, removeRisks } from "./removeRisk";
 import { typedMatches } from "./Confirm";
@@ -89,7 +103,8 @@ const kc = (id: string, status: string, priority = 0): KCard => ({
 });
 const ids = (cards: KCard[], col: string) => columnCards(cards, col).map((c) => c.meta.id);
 /** the board after the plan is written: what the daemon would list */
-const after = (cards: KCard[], id: string, plan: ReturnType<typeof planMove>) => (plan ? applyPlan(cards, id, plan) : cards);
+const after = (cards: KCard[], id: string, plan: ReturnType<typeof planMove>) =>
+  plan ? applyPlan(cards, id, plan) : cards;
 
 describe("order", () => {
   it("sorts like the daemon: priority descending, then id", () => {
@@ -111,7 +126,10 @@ describe("pointer targets", () => {
     expect(indexAt([], 5)).toBe(0);
   });
   it("finds the column, null outside or in a gap", () => {
-    const r: [number, number][] = [[0, 100], [108, 200]];
+    const r: [number, number][] = [
+      [0, 100],
+      [108, 200],
+    ];
     expect(colAt(r, 50)).toBe(0);
     expect(colAt(r, 150)).toBe(1);
     expect(colAt(r, 104)).toBeNull();
@@ -185,7 +203,9 @@ describe("planMove", () => {
     const base = [kc("a", "todo", 1), kc("b", "todo", 1), kc("c", "todo", 1), kc("d", "todo", 0), kc("e", "done", 0)];
     for (const id of ["a", "b", "c", "d", "e"]) {
       for (const col of ["todo", "done"]) {
-        const rest = columnCards(base, col).filter((c) => c.meta.id !== id).map((c) => c.meta.id);
+        const rest = columnCards(base, col)
+          .filter((c) => c.meta.id !== id)
+          .map((c) => c.meta.id);
         for (let i = 0; i <= rest.length; i++) {
           const p = planMove(base, id, { col, index: i });
           const next = after(base, id, p);

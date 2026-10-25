@@ -414,9 +414,11 @@ export const ptP = {
     retry: "Tentar integrar de novo",
     openPr: "Abrir PR",
     grabHint: "Espaço pega no cartão, setas movem, Espaço larga, Esc cancela. Enter edita.",
-    grabbed: (t: string, col: string, pos: number, total: number) => `${t} pegado. Coluna ${col}, posição ${pos} de ${total}. Setas movem, Espaço larga, Esc cancela.`,
+    grabbed: (t: string, col: string, pos: number, total: number) =>
+      `${t} pegado. Coluna ${col}, posição ${pos} de ${total}. Setas movem, Espaço larga, Esc cancela.`,
     movedTo: (col: string, pos: number, total: number) => `Coluna ${col}, posição ${pos} de ${total}.`,
-    dropped: (t: string, col: string, pos: number, total: number) => `${t} largado na coluna ${col}, posição ${pos} de ${total}.`,
+    dropped: (t: string, col: string, pos: number, total: number) =>
+      `${t} largado na coluna ${col}, posição ${pos} de ${total}.`,
     dragCancelled: (t: string) => `Movimento de ${t} cancelado.`,
     titlePlaceholder: "Título",
     bodyPlaceholder: "Escreve livremente: o contexto, o que queres, critérios… O agente lê isto.",

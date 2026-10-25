@@ -408,9 +408,11 @@ export const enP: Widen<typeof ptP> = {
     retry: "Try merging again",
     openPr: "Open PR",
     grabHint: "Space picks the card up, arrows move it, Space drops it, Esc cancels. Enter edits.",
-    grabbed: (t: string, col: string, pos: number, total: number) => `${t} picked up. Column ${col}, position ${pos} of ${total}. Arrows move, Space drops, Esc cancels.`,
+    grabbed: (t: string, col: string, pos: number, total: number) =>
+      `${t} picked up. Column ${col}, position ${pos} of ${total}. Arrows move, Space drops, Esc cancels.`,
     movedTo: (col: string, pos: number, total: number) => `Column ${col}, position ${pos} of ${total}.`,
-    dropped: (t: string, col: string, pos: number, total: number) => `${t} dropped in column ${col}, position ${pos} of ${total}.`,
+    dropped: (t: string, col: string, pos: number, total: number) =>
+      `${t} dropped in column ${col}, position ${pos} of ${total}.`,
     dragCancelled: (t: string) => `Move of ${t} cancelled.`,
     titlePlaceholder: "Title",
     bodyPlaceholder: "Write freely: the context, what you want, criteria… The agent reads this.",
