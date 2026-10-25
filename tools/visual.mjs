@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { layoutProblems, resizeClient, windowInfo } from "./winrect.mjs";
 
 if (process.platform !== "win32") {
   console.log("visual: WebView2 only; skipping");
@@ -106,12 +107,13 @@ async function connect() {
     writeFileSync(join(out, `${name}.png`), Buffer.from(r.data, "base64"));
     console.log(`shot ${name}`);
   };
+  // a real resize of the host window: CDP Browser.setWindowBounds moves WebView2's inner window instead (see tools/winrect.mjs)
   const size = async (width, height) => {
-    const w = await send("Browser.getWindowForTarget");
-    await send("Browser.setWindowBounds", {
-      windowId: w.windowId,
-      bounds: { windowState: "normal", width, height },
-    });
+    const k = windowInfo(app.pid).dpi / 96;
+    resizeClient(app.pid, Math.round(width * k), Math.round(height * k));
+    await sleep(700); // the webview follows the host window asynchronously
+    const bad = layoutProblems(windowInfo(app.pid));
+    if (bad.length) throw new Error(`window layout is off after resizing: ${bad.join("; ")}`);
     await sleep(500);
   };
   return { send, evaluate, shot, size, close: () => ws.close() };
@@ -155,6 +157,50 @@ try {
   await until("the UI", () => page.evaluate("document.getElementById('root')?.children.length > 0"));
   await until("the daemon", () => cli("ls").status === 0);
   await page.size(1280, 800);
+
+  // 0. the Select dropdowns (dev gallery at #ui): agent logos in colour, rows aligned, light and dark, wide and small
+  if (process.env.VISUAL_SELECT) {
+    const key = async (k, code) => {
+      for (const type of ["keyDown", "keyUp"])
+        await page.send("Input.dispatchKeyEvent", {
+          type,
+          key: k,
+          code: k,
+          windowsVirtualKeyCode: code,
+        });
+    };
+    await page.evaluate("location.hash = '#ui'; location.reload()");
+    await sleep(1500);
+    await until("the gallery", () => page.evaluate("document.querySelectorAll('.select-btn').length > 0"));
+    for (const [w, h] of [
+      [1280, 800],
+      [800, 600],
+    ]) {
+      await page.size(w, h);
+      for (const theme of ["dark", "light"]) {
+        await page.evaluate(`document.documentElement.dataset.theme = '${theme}'`);
+        for (const [i, name] of ["plain", "agents"].entries()) {
+          await page.evaluate(
+            `document.querySelectorAll('.select-btn')[${i}].scrollIntoView({ block: 'center' }); document.querySelectorAll('.select-btn')[${i}].click()`,
+          );
+          await sleep(500);
+          const probe = await page.evaluate(
+            "(() => { const l = document.querySelector('[role=listbox]'); if (!l) return 'no listbox'; const c = l.parentElement.getBoundingClientRect(); const it = l.querySelector('[role=option]').getBoundingClientRect(); const cs = getComputedStyle(l); const ic = [...l.querySelectorAll('[data-agent]')].map((e) => e.dataset.agent + '=' + getComputedStyle(e).color).join(' '); return 'ul padL=' + cs.paddingLeft + ' item.left-content.left=' + Math.round(it.left - c.left) + ' ' + ic; })()",
+          );
+          console.log(`select ${name} ${theme} ${w}: ${probe}`);
+          await page.shot(`select-${name}-${theme}-${w}`);
+          await key("Escape", 27);
+          await sleep(300);
+        }
+      }
+    }
+    if (process.env.VISUAL_SELECT === "only") {
+      page.close();
+      throw Object.assign(new Error("select only"), { benign: true });
+    }
+    await page.evaluate("location.hash = ''; location.reload()");
+    await page.size(1280, 800);
+  }
 
   // 1. Welcome: no project yet
   for (const l of LOCALES) {
@@ -260,8 +306,8 @@ try {
   }
   page.close();
 } catch (e) {
-  failed = e;
-  console.error(`FAIL visual: ${e.stack ?? e}`);
+  if (!e.benign) failed = e;
+  if (!e.benign) console.error(`FAIL visual: ${e.stack ?? e}`);
 } finally {
   if (app) kill(app.pid);
   spawnSync(

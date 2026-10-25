@@ -1,11 +1,13 @@
 import { Select as K } from "@kobalte/core/select";
 import { Show, createEffect, createSignal, onCleanup } from "solid-js";
-import { Icon, hasIcon } from "../Icon";
+import { Icon } from "../Icon";
 import { holdLayer } from "../ContextMenu";
 import { cn } from "./cn";
 
-/** brand colour of the agent logos; other icons follow the text colour */
-const BRAND: Record<string, string> = { claude: "#d97757", codex: "#10a37f", gemini: "#4f8ff7" };
+/** agent logos wear their brand colour through `data-agent` (tokens `--brand-*` in styles.css, one set per theme);
+ *  the CSP forbids `style=`. Other icons follow the text colour. */
+const agentAttr = (icon: string | undefined) =>
+  icon === "claude" || icon === "codex" || icon === "gemini" ? icon : undefined;
 
 export type Option = {
   value: string;
@@ -62,23 +64,31 @@ export function Select(props: {
       itemComponent={(ip) => {
         const o = () => ip.item.rawValue;
         const sel = () => o().value === props.value;
-        const icon = () => o().icon ?? (sel() ? "check" : "");
         return (
           <K.Item
             item={ip.item}
             title={props.iconOnly && o().icon ? o().label : undefined}
-            class="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-base text-popover-foreground outline-none data-[highlighted]:bg-accent"
+            class="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-md px-2.5 py-1.5 text-base text-popover-foreground outline-none data-[highlighted]:bg-accent"
           >
-            <span
-              class="inline-flex w-4 flex-none items-center justify-center text-muted-foreground"
-              style={{ color: BRAND[icon()] }}
-            >
-              {hasIcon(icon()) ? <Icon name={icon()} size={13} /> : icon()}
-            </span>
-            <span class="flex min-w-0 flex-1 flex-col">
+            <Show when={o().icon}>
+              {(n) => (
+                <span
+                  class="inline-flex w-4 flex-none items-center justify-center text-muted-foreground"
+                  data-agent={agentAttr(n())}
+                >
+                  <Icon name={n()} size={13} />
+                </span>
+              )}
+            </Show>
+            <span class={cn("flex min-w-0 flex-col", !o().icon && "col-start-1")}>
               <K.ItemLabel class={cn(props.iconOnly && o().icon && "sr-only")}>{o().label}</K.ItemLabel>
               <Show when={o().desc}>
                 <K.ItemDescription class="text-xs text-muted-foreground">{o().desc}</K.ItemDescription>
+              </Show>
+            </span>
+            <span class="col-start-3 inline-flex w-4 items-center justify-center text-muted-foreground">
+              <Show when={sel()}>
+                <Icon name="check" size={13} />
               </Show>
             </span>
           </K.Item>
@@ -100,7 +110,7 @@ export function Select(props: {
       >
         <Show when={current()?.icon}>
           {(n) => (
-            <span class="inline-flex" style={{ color: BRAND[n()] }}>
+            <span class="inline-flex" data-agent={agentAttr(n())}>
               <Icon name={n()} size={logoOnly() ? 16 : 13} />
             </span>
           )}

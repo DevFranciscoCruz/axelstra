@@ -37,3 +37,25 @@
   --text-base: var(--fs-base);
   --text-lg: var(--fs-lg);
 }
+
+/* brand colour of the agent logos (Select, pickers); set through `data-agent` because the CSP forbids `style=` */
+@layer utilities {
+  [data-agent="claude"] {
+    color: var(--brand-claude);
+  }
+  [data-agent="codex"] {
+    color: var(--brand-codex);
+  }
+  [data-agent="gemini"] {
+    color: var(--brand-gemini);
+  }
+}
+
+/* the Select list is a bare `ul`: preflight is off, so the browser's own 40px indent must not push the rows right */
+@layer utilities {
+  [role="listbox"] {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+}

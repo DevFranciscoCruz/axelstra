@@ -58,10 +58,16 @@
   --sp-4: 16px;
   --left-w: 260px;
   --right-w: 320px;
+  --brand-claude: #d97757;
+  --brand-codex: #10a37f;
+  --brand-gemini: #4f8ff7;
   color-scheme: dark;
 }
 
 :root[data-theme="light"] {
+  --brand-claude: #b4532f;
+  --brand-codex: #0b7a5e;
+  --brand-gemini: #2f6fdc;
   --bg: #f4f5f8;
   --panel: #ffffff;
   --line: #d9dce3;
