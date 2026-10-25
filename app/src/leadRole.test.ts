@@ -37,11 +37,15 @@ describe("lead of a worktree in the sidebar", () => {
       waiting: false,
       working: false,
       stalled: false,
+      awaiting: false,
     });
     // lead working
     expect(worktreeSignals([a(1, { lead: true, state: "working" }), a(2)], stateOf).working).toBe(true);
     // a task asks something
     expect(worktreeSignals([a(1, { lead: true }), a(2, { state: "waiting" })], stateOf).waiting).toBe(true);
+    // an awaiting agent shows as awaiting, and is never stalled
+    const aw = { ...a(2), stalled: true, awaiting: { reason: "CI", since: 1, until: null } };
+    expect(worktreeSignals([a(1, { lead: true }), aw], stateOf)).toMatchObject({ stalled: false, awaiting: true });
     // a stalled task (or lead) shows on the worktree
     expect(worktreeSignals([a(1, { lead: true }), { ...a(2), stalled: true }], stateOf).stalled).toBe(true);
     expect(
@@ -56,6 +60,7 @@ describe("lead of a worktree in the sidebar", () => {
       waiting: false,
       working: true,
       stalled: false,
+      awaiting: false,
     });
     // ended sessions do not count
     expect(worktreeSignals([a(1, { lead: true, running: false }), a(2)], stateOf).live).toBe(1);

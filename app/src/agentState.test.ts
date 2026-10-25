@@ -4,13 +4,13 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => undefined }));
 vi.mock("./api", () => ({ call: async () => ({}), callBg: async () => ({}), listSessions: async () => [], listProjects: async () => [], worktreeStatus: async () => [], ghListBg: async () => [], gitChanges: async () => null, flowTasks: async () => [] }));
 
 import type { SessionInfo } from "./api";
-import { DOT_GLYPH, DOT_LABEL, dotOfSession, dotOfWorktree } from "./agentState";
+import { DOT_GLYPH, DOT_LABEL, dotOfSession, dotOfWorktree, dotTip } from "./agentState";
 
 const sess = (over: Partial<SessionInfo>): SessionInfo => ({ id: 1, running: true, meta: { kind: "agent" }, ...over }) as SessionInfo;
 
 describe("status dots", () => {
   it("every visible state has its own shape and its own words", () => {
-    const states = ["working", "idle", "waiting", "stalled", "done", "attention", "queued", "running"] as const;
+    const states = ["working", "idle", "waiting", "awaiting", "stalled", "done", "attention", "queued", "running"] as const;
     expect(new Set(states.map((s) => DOT_GLYPH[s])).size).toBe(states.length);
     expect(new Set(states.map((s) => DOT_LABEL[s])).size).toBe(states.length);
     expect(DOT_LABEL.none).toBe("");
@@ -44,5 +44,29 @@ describe("status dots", () => {
     expect(dotOfWorktree({ ...base, queued: true })).toBe("queued");
     expect(dotOfWorktree({ ...base, live: 2, stalled: true })).toBe("stalled");
     expect(dotOfWorktree({ ...base, live: 2, working: true, waiting: true, stalled: true })).toBe("stalled");
+  });
+  it("an agent awaiting something external is its own state: not idle, working, stalled or red waiting", () => {
+    const awaiting = { reason: "CI #3703", since: 1000, until: null };
+    expect(dotOfSession(sess({ idle_ms: 600000, awaiting }))).toBe("awaiting");
+    expect(dotOfSession(sess({ idle_ms: 100, awaiting }))).toBe("awaiting");
+    expect(dotOfSession(sess({ idle_ms: 600000, stalled: true, awaiting }))).toBe("awaiting");
+    expect(dotOfSession(sess({ idle_ms: 600000, awaiting: null }))).toBe("idle");
+    // a real question still wins, and a finished session is done
+    expect(dotOfSession(sess({ waiting: true, awaiting }))).toBe("waiting");
+    expect(dotOfSession(sess({ running: false, awaiting }))).toBe("done");
+    expect(dotOfSession(sess({ meta: { kind: "shell" }, awaiting }))).toBe("running");
+    const base = { queued: false, waiting: false, working: false, needs: false, live: 2 };
+    expect(dotOfWorktree({ ...base, awaiting: true })).toBe("awaiting");
+    expect(dotOfWorktree({ ...base, awaiting: true, needs: true })).toBe("awaiting");
+    expect(dotOfWorktree({ ...base, awaiting: true, working: true })).toBe("working");
+    expect(dotOfWorktree({ ...base, awaiting: true, waiting: true })).toBe("waiting");
+  });
+  it("the tooltip of an awaiting dot names the reason, the age and the deadline", () => {
+    const now = 1_000_000_000_000;
+    const s = sess({ awaiting: { reason: "CI #3703", since: now - 300_000, until: null } });
+    expect(dotTip(s, now)).toContain("CI #3703");
+    expect(dotTip({ ...s, awaiting: { reason: "deploy", since: now, until: now + 60_000 } }, now)).toContain("deploy");
+    expect(dotTip(sess({ idle_ms: 5 }), now)).toBeNull();
+    expect(dotTip({ ...s, waiting: true }, now)).toBeNull();
   });
 });

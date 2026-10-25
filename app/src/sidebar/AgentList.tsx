@@ -4,7 +4,7 @@ import { Button, Input } from "../ui";
 import { StateDot } from "../StateDot";
 import { openNote } from "../NoteView";
 import { ago } from "../time";
-import { DOT_LABEL, dotOfSession } from "../agentState";
+import { DOT_LABEL, dotOfSession, dotTip } from "../agentState";
 import { agentRowInfo, agentRowLabel } from "../agentRow";
 import { isLead, lacksLead, leadFirst } from "../leadRole";
 import { P } from "../strings.panels";
@@ -89,7 +89,7 @@ export function AgentList(props: {
           <For each={agents()}>
             {(a) => {
               const info = () => agentRowInfo(a, props.path, tabLabel(a));
-              const state = () => DOT_LABEL[dotOfSession(a)];
+              const state = () => dotTip(a) ?? DOT_LABEL[dotOfSession(a)];
               const active = () => activeSession() === a.id && norm(selectedWorktree()) === norm(props.path);
               return (
                 <div
@@ -150,7 +150,7 @@ export function AgentList(props: {
                         }
                       }}
                     >
-                      <StateDot state={dotOfSession(a)} />
+                      <StateDot state={dotOfSession(a)} tip={dotTip(a)} />
                       <span class="wt-agent-name">
                         {a.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}
                         {info().name}

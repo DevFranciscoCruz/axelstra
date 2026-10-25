@@ -1,6 +1,6 @@
 import { For, Show, createSignal } from "solid-js";
 import { SessionInfo } from "./api";
-import { dotOfSession } from "./agentState";
+import { dotOfSession, dotTip } from "./agentState";
 import { Icon } from "./Icon";
 import { basename } from "./paths";
 import { StateDot } from "./StateDot";
@@ -108,7 +108,7 @@ export function TabBar(props: Props) {
               editing={
                 props.renaming === s.id ? (
                   <>
-                    <StateDot state={dotOfSession(s)} />
+                    <StateDot state={dotOfSession(s)} tip={dotTip(s)} />
                     <Input
                       class="h-auto w-[120px] rounded-sm border-border bg-transparent px-1 py-0 text-inherit"
                       aria-label={S.app.tabName}
@@ -131,7 +131,7 @@ export function TabBar(props: Props) {
                 ) : undefined
               }
             >
-              <StateDot state={dotOfSession(s)} />
+              <StateDot state={dotOfSession(s)} tip={dotTip(s)} />
               <span>
                 {s.meta?.worker ? <Icon name="subArrow" size={11} inline /> : null}
                 {tabLabel(s)}

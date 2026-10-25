@@ -15,7 +15,9 @@ export const lacksLead = (agents: Pick<SessionInfo, "meta" | "running">[], isMai
 
 /** What the state dot of a worktree row reads from its agents. With a running lead the lead speaks for the worktree
  *  (working / idle), and a task only adds "waiting" because someone has to answer it; without a lead every agent counts. */
-export const worktreeSignals = <T extends Pick<SessionInfo, "meta" | "running"> & { stalled?: boolean }>(
+export const worktreeSignals = <
+  T extends Pick<SessionInfo, "meta" | "running"> & { stalled?: boolean; awaiting?: unknown },
+>(
   sessions: T[],
   stateOf: (s: T) => "working" | "waiting" | "idle" | "done",
 ) => {
@@ -24,6 +26,8 @@ export const worktreeSignals = <T extends Pick<SessionInfo, "meta" | "running"> 
   const waiting = running.some((s) => stateOf(s) === "waiting");
   const working = lead ? stateOf(lead) === "working" : running.some((s) => stateOf(s) === "working");
   // an agent that went quiet without reporting: any session of the worktree counts, the lead or a task
-  const stalled = running.some((s) => s.meta?.kind === "agent" && s.stalled === true);
-  return { live: running.length, waiting, working, stalled };
+  const stalled = running.some((s) => s.meta?.kind === "agent" && s.stalled === true && !s.awaiting);
+  // an agent that only waits for something external (CI, deploy): not working, not stalled, not a question
+  const awaiting = running.some((s) => s.meta?.kind === "agent" && !!s.awaiting);
+  return { live: running.length, waiting, working, stalled, awaiting };
 };

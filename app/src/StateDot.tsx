@@ -1,8 +1,8 @@
 import { DOT_GLYPH, DOT_LABEL, DotState } from "./agentState";
 
 /** Status dot: the colour stays, and each state also has its own shape plus a name for hover and screen readers. */
-export function StateDot(props: { state: DotState }) {
-  const label = () => DOT_LABEL[props.state];
+export function StateDot(props: { state: DotState; tip?: string | null }) {
+  const label = () => props.tip || DOT_LABEL[props.state];
   return (
     <span
       class="dot glyph"
@@ -10,6 +10,7 @@ export function StateDot(props: { state: DotState }) {
         on: props.state !== "none" && props.state !== "done",
         work: props.state === "working",
         wait: props.state === "waiting",
+        await: props.state === "awaiting",
         stall: props.state === "stalled",
         attn: props.state === "attention",
         queued: props.state === "queued",
