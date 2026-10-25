@@ -968,7 +968,13 @@ mod tests {
         out[0].add(&claude, "claude");
         let codex = Usage { input: 1, output: 2, cache_read: 3, cache_write: 0, messages: 1, context: 0 };
         // the verbatim prefix and the letter case only matter where paths compare that way
-        let loose = if cfg!(any(windows, target_os = "macos")) { r"\\?\c:\WT\a/" } else { r"\\?\C:/wt/a/" };
+        let loose = if cfg!(windows) {
+            r"\\?\c:\WT\a/"
+        } else if cfg!(target_os = "macos") {
+            r"\\?\c:/WT/a/"
+        } else {
+            r"\\?\C:/wt/a/"
+        };
         add_codex(
             &mut out,
             &[

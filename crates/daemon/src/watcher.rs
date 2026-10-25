@@ -161,7 +161,13 @@ fn git_dir(root: &Path) -> Result<PathBuf> {
 /// Starts watching `root`; `emit` runs (on the watcher thread) once per debounced batch.
 /// The thread ends when `stop` is set.
 pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'static) -> Result<()> {
+    // FSEvents reports real paths (`/private/var/...` for a `/var/...` folder), so events would never sit under a
+    // symlinked root; Windows keeps its path as given (canonicalize would add the `\?\` prefix)
+    #[cfg(target_os = "macos")]
+    let root = root.canonicalize().unwrap_or(root);
     let gdir = git_dir(&root).context("find git dir")?;
+    #[cfg(target_os = "macos")]
+    let gdir = gdir.canonicalize().unwrap_or(gdir);
     let mut ignore = Ignores::new(&root, &gdir);
 
     // bounded: a runaway writer cannot grow the queue without limit; what does not fit is remembered as one flag
