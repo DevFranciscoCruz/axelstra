@@ -31,7 +31,8 @@ fn fresh(tag: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!("axelstra-ws-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
-    root
+    // projects are stored under their canonical path (macOS /var -> /private/var, Windows 8.3 names): so are the maps
+    axelstra_core::git::canon(&root).unwrap()
 }
 
 fn card(id: &str) -> String {

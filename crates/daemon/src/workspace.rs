@@ -858,7 +858,8 @@ mod tests {
         let d = std::env::temp_dir().join(format!("axl-ws-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        d
+        // projects are stored under their canonical path (macOS /var -> /private/var, Windows 8.3 names): so are the maps
+        axelstra_core::git::canon(&d).unwrap()
     }
 
     /// A machine: a data dir with a projects.json at `<root>/data`.

@@ -146,6 +146,8 @@ fn host_info_and_browse() {
         std::fs::create_dir_all(d.join(n)).unwrap();
     }
     std::fs::write(d.join("file.txt"), "x").unwrap();
+    // the daemon answers with canonical paths (macOS /var -> /private/var, Windows 8.3 names), so compare against those
+    let d = axelstra_core::git::canon(&d).unwrap();
     let r = app.call("host.browse", json!({"path": d.to_string_lossy()})).unwrap();
     assert_eq!(names(&r), [("Alpha".to_string(), false), ("beta".into(), false), ("gamma".into(), false), ("repo".into(), true)]);
     assert!(r.get("truncated").is_none());

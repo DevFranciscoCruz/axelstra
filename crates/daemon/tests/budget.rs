@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 fn start(root: &Path, tag: &str) -> (String, String) {
     std::fs::create_dir_all(root).unwrap();
-    let pipe = format!("{}-budget-{tag}-{}", axelstra_daemon::proto::pipe_name(), std::process::id());
+    let pipe = format!("{}-budget-{tag}-{}", common::base_pipe(), std::process::id());
     let token = "d".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {
