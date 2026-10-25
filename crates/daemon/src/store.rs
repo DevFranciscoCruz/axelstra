@@ -29,18 +29,36 @@ const BACKUPS: usize = 3;
 /// persisted struct changes shape incompatibly.
 pub const CURRENT_VERSION: u32 = 1;
 
-static NOTICES: Mutex<Vec<(String, Option<axelstra_core::msg::Coded>)>> = Mutex::new(Vec::new());
+type Notice = (String, Option<axelstra_core::msg::Coded>);
+
+#[cfg(not(test))]
+static NOTICES: Mutex<Vec<Notice>> = Mutex::new(Vec::new());
+
+// Unit tests run in parallel threads and several drain the queue (`take_notices`); one shared queue lets a test
+// lose its notice to another test's drain. Each test thread gets its own queue (a test reads on the thread that
+// raised the notice).
+#[cfg(test)]
+thread_local! {
+    static NOTICES: std::cell::RefCell<Vec<Notice>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn push_notice(n: Notice) {
+    #[cfg(not(test))]
+    NOTICES.lock_recover().push(n);
+    #[cfg(test)]
+    NOTICES.with(|q| q.borrow_mut().push(n));
+}
 
 /// Records a message about lost or recovered state for the server/UI to show later (and logs it).
 pub fn notice(msg: String) {
     eprintln!("{msg}");
-    NOTICES.lock_recover().push((msg, None));
+    push_notice((msg, None));
 }
 
 /// Same, with a message code the UI translates (`c.text` is the English line the log and old frontends show).
 pub fn notice_coded(c: axelstra_core::msg::Coded) {
     eprintln!("{}", c.text);
-    NOTICES.lock_recover().push((c.text.clone(), Some(c)));
+    push_notice((c.text.clone(), Some(c)));
 }
 
 /// Takes (and clears) the notices recorded since the last call.
@@ -49,8 +67,11 @@ pub fn take_notices() -> Vec<String> {
 }
 
 /// Same, with the message code of each notice that has one.
-pub fn take_notice_items() -> Vec<(String, Option<axelstra_core::msg::Coded>)> {
-    std::mem::take(&mut *NOTICES.lock_recover())
+pub fn take_notice_items() -> Vec<Notice> {
+    #[cfg(not(test))]
+    return std::mem::take(&mut *NOTICES.lock_recover());
+    #[cfg(test)]
+    NOTICES.with(|q| std::mem::take(&mut *q.borrow_mut()))
 }
 
 /// Runs `op`, retrying a few times with short sleeps on Windows: an antivirus or indexer holding the target briefly
