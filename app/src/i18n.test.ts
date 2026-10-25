@@ -17,6 +17,8 @@ import { ptWS } from "./strings.workspace";
 import { enWS } from "./strings.workspace.en";
 import { ptU } from "./strings.ui";
 import { enU } from "./strings.ui.en";
+import { ptAP } from "./strings.sources";
+import { enAP } from "./strings.sources.en";
 
 afterEach(() => setLocale("pt-PT"));
 
@@ -66,7 +68,7 @@ describe("locale-aware plurals and numbers", () => {
 
 /** words that are the same in every language (names, protocol terms) and so legitimately equal in both dictionaries */
 const SAME =
-  /^(?:|[\s·/.:;,…()[\]{}<>+\-–—%|$#@*&=^~"'`«»\d]+|git|gh|PR|PRs|Docker|Kanban|Compose|CPU|ctx|Claude|Codex|Gemini|Axelstra|daemon|WSL|CMD|Bash|PowerShell|npm|pnpm|yarn|bun|token|tokens|Terminal|Shell|Worktrees?|PowerShell 7|Windows PowerShell|Claude Code|Gemini CLI|branch|commit|merge|push|pull|rebase|stash|diff|SSH|URL|HTTPS?|JSON|YAML|OK|Ok|ok|n\/a|Editor|Volumes|Info|Logs|Total|Checks|CI|base|bin|main|COMMITS|Auto-merge|Compose down|Commit \(Ctrl\+Enter\))$/i;
+  /^(?:|[\s·/.:;,…()[\]{}<>+\-–—%|$#@*&=^~"'`«»\d]+|git|gh|GitHub|PR|PRs|Docker|Kanban|Compose|CPU|ctx|Claude|Codex|Gemini|Axelstra|daemon|WSL|CMD|Bash|PowerShell|npm|pnpm|yarn|bun|token|tokens|Terminal|Shell|Worktrees?|PowerShell 7|Windows PowerShell|Claude Code|Gemini CLI|branch|commit|merge|push|pull|rebase|stash|diff|SSH|URL|HTTPS?|JSON|YAML|OK|Ok|ok|n\/a|Editor|Volumes|Info|Logs|Total|Checks|CI|base|bin|main|COMMITS|Auto-merge|Compose down|Commit \(Ctrl\+Enter\))$/i;
 
 type Pair = [string, object, object];
 const pairs: Pair[] = [
@@ -78,6 +80,7 @@ const pairs: Pair[] = [
   ["WS", ptWS, enWS],
   ["L", ptL, enL],
   ["U", ptU, enU],
+  ["AP", ptAP, enAP],
 ];
 
 const at = (o: unknown, path: string): unknown =>

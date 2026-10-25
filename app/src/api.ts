@@ -47,7 +47,7 @@ export type Project = { id: string; name: string; path: string; worktrees: Workt
 export const CALL_TIMEOUT_MS = 30_000;
 /** Methods that legitimately run git, gh, docker or a whole agent run: they get longer. */
 export const SLOW_TIMEOUT_MS = 5 * 60_000;
-const SLOW = /^(git\.|gh\.|docker\.|pm\.|orch\.|worktree\.(create|from_pr|remove|sweep|rename|integrate)|project\.(add|remove)|agent\.|fs\.grep|automation\.run|diagnostics)/;
+const SLOW = /^(git\.|gh\.|docker\.|pm\.|orch\.|worktree\.(create|from_pr|remove|sweep|rename|integrate)|project\.(add|remove|init)|agent\.|fs\.grep|automation\.run|diagnostics)/;
 export const timeoutFor = (method: string) => (SLOW.test(method) ? SLOW_TIMEOUT_MS : CALL_TIMEOUT_MS);
 
 /** `p`, but failing with a readable AppError when it rejects or takes longer than the method's timeout. */
@@ -865,7 +865,7 @@ export const triggersEvents = () => callOr<{ events: TriggerEvent[] }>("triggers
 // ---- remote hosts (M7b): the registry lives in the Tauri host, not in the daemon ----
 export type HostState = "idle" | "connecting" | "ok" | "lost" | "auth";
 export type HostInfo = { id: string; name: string; spec: string; slot: number; state: HostState; error?: string; /** message code of `error` when it is a single coded message */ error_code?: string; error_params?: Record<string, unknown>; proto?: number; build?: string };
-export type HostInfoReport = { os: string; home: string; user: string; hostname: string; shell: string; sep: string; proto: number; build: string };
+export type HostInfoReport = { os: string; home: string; user: string; hostname: string; shell: string; sep: string; proto: number; build: string; /** absent on a daemon from before Add project sources */ wsl_distros?: string[]; ssh_hosts?: string[] };
 export type BrowseEntry = { name: string; git: boolean };
 export type BrowseResult = { path: string; parent: string | null; home: string; entries: BrowseEntry[]; truncated?: boolean };
 export const hostsList = () => hostCmd<HostInfo[]>("hosts_list", "hosts_list");
@@ -876,3 +876,26 @@ export const hostReconnect = (id: string) => hostCmd<HostInfo>("host_reconnect",
 export const projectAddRemote = (host: string, path: string) => hostCmd<Project>("project_add_remote", "project_add_remote", { host, path });
 export const hostInfo = (host: string) => call<HostInfoReport>("host.info", { host });
 export const hostBrowse = (host: string, path?: string) => call<BrowseResult>("host.browse", path ? { host, path } : { host });
+
+// ---- Add project: more origins than a local folder (clone, GitHub, new, discovered) ----
+/** Native folder dialog on the Rust side (command `folder_pick`); the chosen path is for a folder the daemon creates (clone destination, new project parent). null = cancelled. */
+export const pickFolder = (title: string) => nativePick<string | null>("folder_pick", "folder_pick", title);
+export type Discovered = { path: string; name: string; branch?: string; source: "recent" | "scan" };
+/** git repositories found in the usual places that are not projects yet; an older daemon has none */
+export const projectDiscover = () => callOr<{ items: Discovered[] }>("project.discover", {}, { items: [] }).then((r) => r.items ?? []);
+/** adds one of the repositories `projectDiscover` listed (the daemon refuses any other path) */
+export const projectAddDiscovered = (path: string) => call<Project>("project.add_discovered", { path });
+export type CloneParams = { url: string; dest: string; branch?: string; depth?: number };
+/** starts a background `git clone`; poll `projectCloneStatus` with the id */
+export const projectClone = (p: CloneParams) => call<{ id: string }>("project.clone", p);
+export type CloneState = "running" | "done" | "failed" | "cancelled";
+export type CloneStatus = { state: CloneState; percent?: number; phase?: string; path?: string; project?: Project; error?: string; error_code?: string; error_params?: Record<string, unknown> };
+export const projectCloneStatus = (id: string) => callBg<CloneStatus>("project.clone_status", { id });
+export const projectCloneCancel = (id: string) => call<{ ok: boolean }>("project.clone_cancel", { id });
+export type GhRepo = { name_with_owner: string; description?: string | null; is_private: boolean; url: string; pushed_at?: string | null };
+export type GhRepos = { state: "ok" | "no_gh" | "not_authed"; repos: GhRepo[] };
+/** the user's GitHub repositories through `gh`; never fails for a missing or logged-out gh, it says so in `state` */
+export const ghRepos = (query?: string, limit = 100) => call<GhRepos>("gh.repos", { ...(query ? { query } : {}), limit });
+export type InitParams = { parent: string; name: string; readme?: boolean; gitignore?: boolean; commit?: boolean };
+/** creates parent/name, `git init` and the optional first files, then registers the project */
+export const projectInit = (p: InitParams) => call<Project>("project.init", p);

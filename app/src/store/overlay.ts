@@ -11,8 +11,8 @@ export type Overlay =
   | { kind: "addProject"; tab: AddProjectTab }
   | { kind: "projectSettings"; project: string };
 
-/** where the Add project dialog opens: the choice of source, or straight at the remote (WSL/SSH) form */
-export type AddProjectTab = "choose" | "remote";
+/** where the Add project dialog opens: "choose" = the origin used last time, or straight at one of the origins */
+export type AddProjectTab = "choose" | "local" | "clone" | "github" | "new" | "remote" | "discover";
 
 type Kind = Overlay["kind"];
 

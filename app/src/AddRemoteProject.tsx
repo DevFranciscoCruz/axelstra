@@ -1,9 +1,9 @@
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onMount } from "solid-js";
 import { AddHostForm } from "./AddHostForm";
 import { HostBadge, reconnectWithNotice } from "./HostBadge";
 import { Icon } from "./Icon";
 import { Modal } from "./Modal";
-import { BrowseResult, hostBrowse, projectAddRemote } from "./api";
+import { BrowseResult, hostBrowse, hostInfo, projectAddRemote } from "./api";
 import { errorText } from "./appError";
 import { breadcrumbs, classifyRemoteError, joinRemote, moveRow, pathProblem, sepOf } from "./hostLogic";
 import {
@@ -18,13 +18,14 @@ import {
 } from "./store";
 import { S } from "./strings";
 import { R } from "./strings.remote";
+import { AP } from "./strings.sources";
 import { Badge, Button, Field, Input, Select } from "./ui";
 
 const NEW = "__new__";
 type Failure = { text: string; detail: string };
 
-/** Pick a host (or add one), type or browse the folder on it, confirm. The Tauri host asks its own native confirmation and checks the folder exists. `onBack` (when embedded in the Add project dialog) adds a Back button. */
-export function AddRemoteForm(props: { onClose: () => void; onBack?: () => void }) {
+/** Pick a host (or add one, with the WSL distros and ssh hosts found on this machine as suggestions), type or browse the folder on it, confirm. The Tauri host asks its own native confirmation and checks the folder exists. `embedded` (inside the Add project dialog) drops the form's own title bar, the dialog has one. */
+export function AddRemoteForm(props: { onClose: () => void; embedded?: boolean }) {
   const [host, setHost] = createSignal(hosts().find((h) => h.state === "ok")?.id ?? hosts()[0]?.id ?? "");
   const [adding, setAdding] = createSignal(hosts().length === 0);
   const [path, setPath] = createSignal("");
@@ -34,6 +35,8 @@ export function AddRemoteForm(props: { onClose: () => void; onBack?: () => void 
   const [failure, setFailure] = createSignal<Failure | null>(null);
   const [pathError, setPathError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
+  const [prefill, setPrefill] = createSignal<{ name: string; spec: string; n: number } | null>(null);
+  const [found, setFound] = createSignal<{ spec: string; name: string; kind: "wsl" | "ssh" }[]>([]);
   let seq = 0;
   let pathInput: HTMLInputElement | undefined;
 
@@ -70,6 +73,20 @@ export function AddRemoteForm(props: { onClose: () => void; onBack?: () => void 
       if (mine === seq) setLoading(false);
     }
   };
+
+  // WSL distros and ssh hosts this machine knows: suggestions for a new host (an older daemon lacks the fields, none shown)
+  onMount(() => {
+    void hostInfo("local")
+      .then((i) =>
+        setFound([
+          ...(i?.wsl_distros ?? []).map((d) => ({ spec: `wsl:${d}`, name: d, kind: "wsl" as const })),
+          ...(i?.ssh_hosts ?? []).map((h) => ({ spec: `ssh:${h}`, name: h, kind: "ssh" as const })),
+        ]),
+      )
+      .catch((e) => console.debug("host.info", e));
+  });
+  const suggestions = (kind: "wsl" | "ssh") =>
+    found().filter((f) => f.kind === kind && !hosts().some((h) => h.spec === f.spec));
 
   // choosing another host starts again at its home directory
   createEffect(() => {
@@ -138,18 +155,13 @@ export function AddRemoteForm(props: { onClose: () => void; onBack?: () => void 
 
   return (
     <>
-      <div class="auto-head">
-        <Show when={props.onBack}>
-          {(back) => (
-            <Button type="button" onClick={() => back()()}>
-              {R.back}
-            </Button>
-          )}
-        </Show>
-        <strong>{R.addRemoteTitle}</strong>
-        <span class="grow" />
-        <Button onClick={props.onClose}>{S.close}</Button>
-      </div>
+      <Show when={!props.embedded}>
+        <div class="auto-head">
+          <strong>{R.addRemoteTitle}</strong>
+          <span class="grow" />
+          <Button onClick={props.onClose}>{S.close}</Button>
+        </div>
+      </Show>
 
       <Field label={R.host}>
         <Select
@@ -166,8 +178,44 @@ export function AddRemoteForm(props: { onClose: () => void; onBack?: () => void 
         />
       </Field>
 
+      <Show when={found().length > 0 && (suggestions("wsl").length > 0 || suggestions("ssh").length > 0)}>
+        <div class="flex flex-col gap-1.5">
+          <For each={["wsl", "ssh"] as const}>
+            {(kind) => (
+              <Show when={suggestions(kind).length > 0}>
+                <div
+                  role="group"
+                  aria-label={kind === "wsl" ? AP.suggestWsl : AP.suggestSsh}
+                  class="flex flex-wrap items-center gap-1.5"
+                >
+                  <span class="text-xs text-muted-foreground">{kind === "wsl" ? AP.suggestWsl : AP.suggestSsh}</span>
+                  <For each={suggestions(kind)}>
+                    {(f) => (
+                      <Button
+                        type="button"
+                        size="sm"
+                        title={AP.suggestUse(f.spec)}
+                        aria-label={AP.suggestUse(f.spec)}
+                        onClick={() => {
+                          setAdding(true);
+                          setPrefill({ name: f.name, spec: f.spec, n: Date.now() });
+                        }}
+                      >
+                        {f.name}
+                      </Button>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            )}
+          </For>
+          <span class="auto-note">{AP.suggestNote}</span>
+        </div>
+      </Show>
+
       <Show when={adding()}>
         <AddHostForm
+          prefill={prefill()}
           onAdded={(id) => {
             setHost(id);
             setAdding(false);
