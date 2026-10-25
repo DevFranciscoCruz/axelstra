@@ -156,6 +156,50 @@ try {
   await until("the daemon", () => cli("ls").status === 0);
   await page.size(1280, 800);
 
+  // 0. the Select dropdowns (dev gallery at #ui): agent logos in colour, rows aligned, light and dark, wide and small
+  if (process.env.VISUAL_SELECT) {
+    const key = async (k, code) => {
+      for (const type of ["keyDown", "keyUp"])
+        await page.send("Input.dispatchKeyEvent", {
+          type,
+          key: k,
+          code: k,
+          windowsVirtualKeyCode: code,
+        });
+    };
+    await page.evaluate("location.hash = '#ui'; location.reload()");
+    await sleep(1500);
+    await until("the gallery", () => page.evaluate("document.querySelectorAll('.select-btn').length > 0"));
+    for (const [w, h] of [
+      [1280, 800],
+      [800, 600],
+    ]) {
+      await page.size(w, h);
+      for (const theme of ["dark", "light"]) {
+        await page.evaluate(`document.documentElement.dataset.theme = '${theme}'`);
+        for (const [i, name] of ["plain", "agents"].entries()) {
+          await page.evaluate(
+            `document.querySelectorAll('.select-btn')[${i}].scrollIntoView({ block: 'center' }); document.querySelectorAll('.select-btn')[${i}].click()`,
+          );
+          await sleep(500);
+          const probe = await page.evaluate(
+            "(() => { const l = document.querySelector('[role=listbox]'); if (!l) return 'no listbox'; const c = l.parentElement.getBoundingClientRect(); const it = l.querySelector('[role=option]').getBoundingClientRect(); const cs = getComputedStyle(l); const ic = [...l.querySelectorAll('[data-agent]')].map((e) => e.dataset.agent + '=' + getComputedStyle(e).color).join(' '); return 'ul padL=' + cs.paddingLeft + ' item.left-content.left=' + Math.round(it.left - c.left) + ' ' + ic; })()",
+          );
+          console.log(`select ${name} ${theme} ${w}: ${probe}`);
+          await page.shot(`select-${name}-${theme}-${w}`);
+          await key("Escape", 27);
+          await sleep(300);
+        }
+      }
+    }
+    if (process.env.VISUAL_SELECT === "only") {
+      page.close();
+      throw Object.assign(new Error("select only"), { benign: true });
+    }
+    await page.evaluate("location.hash = ''; location.reload()");
+    await page.size(1280, 800);
+  }
+
   // 1. Welcome: no project yet
   for (const l of LOCALES) {
     await setLocale(page, l);
@@ -260,8 +304,8 @@ try {
   }
   page.close();
 } catch (e) {
-  failed = e;
-  console.error(`FAIL visual: ${e.stack ?? e}`);
+  if (!e.benign) failed = e;
+  if (!e.benign) console.error(`FAIL visual: ${e.stack ?? e}`);
 } finally {
   if (app) kill(app.pid);
   spawnSync(

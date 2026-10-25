@@ -1,9 +1,63 @@
 import { For, JSX, Show, createSignal, onCleanup } from "solid-js";
-import { Badge, Button, Checkbox, CheckboxField, CheckboxInput, Dialog, Field, Input, RadioGroup, Select, Textarea } from "./index";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  CheckboxField,
+  CheckboxInput,
+  Dialog,
+  Field,
+  Input,
+  RadioGroup,
+  Select,
+  Textarea,
+} from "./index";
 
-const BUTTON_VARIANTS = ["default", "outline", "secondary", "ghost", "destructive", "icon", "row", "chip", "link", "success"] as const;
-const BUTTON_SIZES = ["default", "sm", "icon", "tool", "glyph", "bare", "xs", "chip", "pill", "split", "splitEnd"] as const;
-const BADGE_VARIANTS = ["default", "agent", "high", "id", "warn", "bad", "quiet", "overlap", "pr", "prOk", "prErr", "prPend"] as const;
+const BUTTON_VARIANTS = [
+  "default",
+  "outline",
+  "secondary",
+  "ghost",
+  "destructive",
+  "icon",
+  "row",
+  "chip",
+  "link",
+  "success",
+] as const;
+const BUTTON_SIZES = [
+  "default",
+  "sm",
+  "icon",
+  "tool",
+  "glyph",
+  "bare",
+  "xs",
+  "chip",
+  "pill",
+  "split",
+  "splitEnd",
+] as const;
+const BADGE_VARIANTS = [
+  "default",
+  "agent",
+  "high",
+  "id",
+  "warn",
+  "bad",
+  "quiet",
+  "overlap",
+  "pr",
+  "prOk",
+  "prErr",
+  "prPend",
+] as const;
+const AGENTS = [
+  { value: "claude", label: "Claude Code", icon: "claude", desc: "Anthropic" },
+  { value: "codex", label: "Codex", icon: "codex", desc: "OpenAI" },
+  { value: "gemini", label: "Gemini", icon: "gemini", desc: "Google" },
+];
+
 const OPTIONS = [
   { value: "a", label: "Primeira" },
   { value: "b", label: "Segunda" },
@@ -38,6 +92,7 @@ export function Gallery() {
   });
   const [radio, setRadio] = createSignal("a");
   const [pick, setPick] = createSignal("a");
+  const [agent, setAgent] = createSignal("claude");
   const [field, setField] = createSignal(true);
   const [open, setOpen] = createSignal(false);
 
@@ -52,22 +107,52 @@ export function Gallery() {
       </header>
 
       <Section title="Button: variant">
-        <For each={BUTTON_VARIANTS}>{(v) => <Cell name={v}><Button variant={v}>Botão</Button></Cell>}</For>
+        <For each={BUTTON_VARIANTS}>
+          {(v) => (
+            <Cell name={v}>
+              <Button variant={v}>Botão</Button>
+            </Cell>
+          )}
+        </For>
       </Section>
       <Section title="Button: size">
-        <For each={BUTTON_SIZES}>{(z) => <Cell name={z}><Button size={z}>Aa</Button></Cell>}</For>
+        <For each={BUTTON_SIZES}>
+          {(z) => (
+            <Cell name={z}>
+              <Button size={z}>Aa</Button>
+            </Cell>
+          )}
+        </For>
       </Section>
       <Section title="Button: disabled">
-        <Cell name="disabled"><Button disabled>Botão</Button></Cell>
-        <Cell name="default disabled"><Button variant="default" disabled>Botão</Button></Cell>
+        <Cell name="disabled">
+          <Button disabled>Botão</Button>
+        </Cell>
+        <Cell name="default disabled">
+          <Button variant="default" disabled>
+            Botão
+          </Button>
+        </Cell>
       </Section>
       <Section title="Badge">
-        <For each={BADGE_VARIANTS}>{(v) => <Cell name={v}><Badge variant={v}>{v}</Badge></Cell>}</For>
+        <For each={BADGE_VARIANTS}>
+          {(v) => (
+            <Cell name={v}>
+              <Badge variant={v}>{v}</Badge>
+            </Cell>
+          )}
+        </For>
       </Section>
       <Section title="Input, Textarea, Field">
-        <Cell name="Input"><Input placeholder="texto" /></Cell>
-        <Cell name="Input disabled"><Input value="desativado" disabled /></Cell>
-        <Cell name="Textarea"><Textarea rows={2} placeholder="várias linhas" /></Cell>
+        <Cell name="Input">
+          <Input placeholder="texto" />
+        </Cell>
+        <Cell name="Input disabled">
+          <Input value="desativado" disabled />
+        </Cell>
+        <Cell name="Textarea">
+          <Textarea rows={2} placeholder="várias linhas" />
+        </Cell>
         <Cell name="Field">
           <Field label="Nome" hint="uma nota">
             <Input />
@@ -75,9 +160,15 @@ export function Gallery() {
         </Cell>
       </Section>
       <Section title="Checkbox, CheckboxInput, CheckboxField">
-        <Cell name="Checkbox"><Checkbox label="Opção" /></Cell>
-        <Cell name="CheckboxInput"><CheckboxInput /></Cell>
-        <Cell name="CheckboxInput disabled"><CheckboxInput disabled /></Cell>
+        <Cell name="Checkbox">
+          <Checkbox label="Opção" />
+        </Cell>
+        <Cell name="CheckboxInput">
+          <CheckboxInput />
+        </Cell>
+        <Cell name="CheckboxInput disabled">
+          <CheckboxInput disabled />
+        </Cell>
         <Cell name="CheckboxField">
           <CheckboxField checked={field()} onChange={setField}>
             Opção
@@ -86,11 +177,21 @@ export function Gallery() {
       </Section>
       <Section title="RadioGroup">
         <Cell name="RadioGroup">
-          <RadioGroup label="Escolha" value={radio()} options={OPTIONS.map((o) => ({ ...o, hint: "dica" }))} onChange={setRadio} />
+          <RadioGroup
+            label="Escolha"
+            value={radio()}
+            options={OPTIONS.map((o) => ({ ...o, hint: "dica" }))}
+            onChange={setRadio}
+          />
         </Cell>
       </Section>
       <Section title="Select">
-        <Cell name="Select"><Select value={pick()} options={OPTIONS} onChange={setPick} label="Escolha" class="w-40" /></Cell>
+        <Cell name="Select">
+          <Select value={pick()} options={OPTIONS} onChange={setPick} label="Escolha" class="w-40" />
+        </Cell>
+        <Cell name="Select (agents)">
+          <Select value={agent()} options={AGENTS} onChange={setAgent} label="Agente" class="w-48" />
+        </Cell>
       </Section>
       <Section title="Dialog">
         <Cell name="Dialog">
