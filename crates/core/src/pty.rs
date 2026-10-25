@@ -268,6 +268,15 @@ impl Drop for ExitHandle {
 
 impl Session {
     pub fn spawn(s: &Spawn) -> Result<Session> {
+        // portable-pty starts in the home folder when `cwd` is not a directory: an agent there would trust and edit HOME
+        if let Some(c) = s.cwd.as_ref().filter(|c| !std::path::Path::new(c).is_dir()) {
+            return Err(crate::coded!(
+                "session.cwd_missing",
+                "folder {path} does not exist: {program} was not started",
+                path = c.display(),
+                program = s.program
+            ));
+        }
         let pair = native_pty_system().openpty(PtySize { rows: s.rows, cols: s.cols, pixel_width: 0, pixel_height: 0 })?;
         let mut cmd = CommandBuilder::new(&s.program);
         cmd.args(&s.args);
