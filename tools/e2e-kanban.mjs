@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { freePort } from "./lib/freeport.mjs";
 
 if (process.platform !== "win32") {
   console.log("e2e-kanban: WebView2 driver is Windows only; skipping");
@@ -32,7 +33,7 @@ for (const f of [exe, cliBin]) {
 const dir = mkdtempSync(join(tmpdir(), "axelstra-e2e-kanban-"));
 const home = join(dir, "home");
 mkdirSync(home, { recursive: true });
-const port = 9300 + (process.pid % 500);
+const port = await freePort();
 const user = `axekb${process.pid}`;
 const env = {
   ...process.env,
@@ -45,6 +46,8 @@ const env = {
   AXELSTRA_TEST_PIPE: user,
   AXELSTRA_TEST_HIDDEN: process.env.AXELSTRA_TEST_HIDDEN ?? "1",
   WEBVIEW2_USER_DATA_FOLDER: join(dir, "webview"),
+  // the host (debug builds) hands the port to WebView2 itself; the env var alone is ignored by runtime 155
+  AXELSTRA_TEST_DEVTOOLS_PORT: String(port),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
 };
 const cli = (...a) => spawnSync(cliBin, a, { env, encoding: "utf8", timeout: 20000 });

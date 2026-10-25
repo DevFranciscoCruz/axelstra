@@ -45,7 +45,7 @@ node tools/e2e.mjs [path\to\axelstra-app.exe]
 `--features tauri/custom-protocol` makes the debug host load `../dist` through `tauri.localhost` with the
 production `csp` instead of the dev server and `devCsp`, so the check covers what users get. No release build is needed.
 
-How it drives the app: the script sets `AXELSTRA_TEST_DEVTOOLS_PORT=N` and the **debug** host (`create_main_window` in `app/src-tauri/src/main.rs`; the window is created in code, `create: false` in `tauri.conf.json`) passes `--remote-debugging-port=N` (plus `AXELSTRA_TEST_BROWSER_ARGS`) to WebView2 as `additional_browser_args`. Reason: wry always sets its own default browser arguments through the API, and on runtime 155 (the CI runner) that made `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` be ignored (the browser started without the port). The env var is still set as a fallback. Release builds never read the variables, so production has no debugging port. The failure report prints the effective env and the `Policies\Microsoft\Edge` registry keys. `N` is a port the OS just let the script bind (not one derived from the pid, which can fall in a Windows excluded range on the runners, where the browser cannot listen). The script launches the app with a throwaway `LOCALAPPDATA` (data dir), a unique
+How it drives the app: the script sets `AXELSTRA_TEST_DEVTOOLS_PORT=N` and the **debug** host (`create_main_window` in `app/src-tauri/src/main.rs`; the window is created in code, `create: false` in `tauri.conf.json`) passes `--remote-debugging-port=N` (plus `AXELSTRA_TEST_BROWSER_ARGS`) to WebView2 as `additional_browser_args`. Reason: wry always sets its own default browser arguments through the API, and on runtime 155 (the CI runner) that made `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` be ignored (the browser started without the port). The env var is still set as a fallback. Release builds never read the variables, so production has no debugging port. The failure report prints the effective env and the `Policies\Microsoft\Edge` registry keys. `N` is a port the OS just let the script bind (not one derived from the pid, which can fall in a Windows excluded range on the runners, where the browser cannot listen). `tools/e2e-html-link.mjs`, `tools/e2e-kanban.mjs` and `tools/visual.mjs` get theirs from `freePort()` in `tools/lib/freeport.mjs` and pass `AXELSTRA_TEST_DEVTOOLS_PORT` the same way. The script launches the app with a throwaway `LOCALAPPDATA` (data dir), a unique
 `USERNAME` (pipe name) and a throwaway WebView2 profile, attaches to the page over a WebSocket (Node's built-in
 client, no dependencies) and evaluates DOM queries. Do not override `USERPROFILE`: the app exits at startup with it.
 Set `E2E_VERBOSE=1` to see the app's stderr.
@@ -81,9 +81,18 @@ How it stays hermetic:
   `tools/smoke.mjs` has no RPC client (the CLI has no raw call), so it does not cover `project.init`/`project.clone`.
 - Never run it against ScorpioBots or any real project: every path it creates is under the temp dir of the run.
 
+### Scenario removeproject (the sidebar X)
+
+Runs after `addproject`. A temp repo `rmrepo` gets two worktrees under `<temp>/.axelstra-wt/` (the daemon only previews and removes
+worktrees there) on `ax/*` branches, one dirty and one with an unintegrated commit. The project is added with `axelstra add-project`
+and must appear in the sidebar by the daemon's `projects.changed` event alone (no refresh by the test). Checks: the dialog defaults to
+_Só tirar da lista_ and warns about both worktrees; Cancel keeps the project; _Remover tudo_ with unsaved work stays disabled until the
+name is typed; "list" drops the project and deletes no folder; "all" removes both worktree folders and the project, keeps the main
+repository and shows the counts.
+
 Cleanup stops only processes whose executable is the build under test, never the developer's own daemon.
 
-Last local run (Windows 11, WebView2 155, debug host + custom-protocol): all scenarios passed.
+Last local run (Windows 11, WebView2 155, debug host + custom-protocol): all scenarios passed (36 checks).
 
 ## Driver options
 
