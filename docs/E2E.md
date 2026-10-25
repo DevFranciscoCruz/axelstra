@@ -143,3 +143,11 @@ CDP (`Input.dispatchMouseEvent`, `modifiers: 2` for Ctrl) then assert that Ctrl+
 a plain click, `notes.txt` and the path outside the cwd (refused by `files.resolve_html`) log nothing. The terminal buffer is not
 reachable from the page, so the script finds the row by trying each row of the screen. Not run in CI (it needs the host's
 `open_html_file` command and the daemon's `files.resolve_html`).
+
+## Kanban drag and drop
+
+`tools/e2e-kanban.mjs` (same build and isolation as `e2e.mjs`, hidden window, temp data dir) writes four cards as `.kanban/*.md` in a
+throwaway git repo, opens the Kanban tab and drives it with real mouse and key events over CDP: a pointer drag to another
+column, a reorder inside a column (kept in the cards' `priority`, so it survives a reload), Esc and a drop outside the columns
+both cancel, and Space/ArrowRight/Space moves a card by keyboard with the live region filled and focus kept. It reads the card
+files back to check what was persisted.

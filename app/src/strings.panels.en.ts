@@ -404,7 +404,13 @@ export const enP: Widen<typeof ptP> = {
     openWt: "Open worktree",
     retry: "Try merging again",
     openPr: "Open PR",
-    moveTo: "Move to…",
+    grabHint: "Space picks the card up, arrows move it, Space drops it, Esc cancels. Enter edits.",
+    grabbed: (t: string, col: string, pos: number, total: number) =>
+      `${t} picked up. Column ${col}, position ${pos} of ${total}. Arrows move, Space drops, Esc cancels.`,
+    movedTo: (col: string, pos: number, total: number) => `Column ${col}, position ${pos} of ${total}.`,
+    dropped: (t: string, col: string, pos: number, total: number) =>
+      `${t} dropped in column ${col}, position ${pos} of ${total}.`,
+    dragCancelled: (t: string) => `Move of ${t} cancelled.`,
     titlePlaceholder: "Title",
     bodyPlaceholder: "Write freely: the context, what you want, criteria… The agent reads this.",
     status: "Status",
