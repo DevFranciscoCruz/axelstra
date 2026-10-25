@@ -39,7 +39,7 @@ socket, spawns and kills a session. It proves the engine boots on Ubuntu and Win
 cargo build -p axelstra
 (cd app && npm ci && npm run build)
 cargo build -p axelstra-app --features tauri/custom-protocol   # production CSP + bundled frontend, still a debug profile
-node tools/e2e.mjs [path	oxelstra-app.exe]
+node tools/e2e.mjs [path\to\axelstra-app.exe]
 ```
 
 `--features tauri/custom-protocol` makes the debug host load `../dist` through `tauri.localhost` with the

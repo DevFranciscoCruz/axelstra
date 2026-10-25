@@ -22,6 +22,9 @@ purpose and fix the new lints in the same change.
   `--check` (they agree), `--tag vX.Y.Z` (release workflow), `--self-test` (CI).
 - `bump-version.mjs X.Y.Z`: sets all three fields with the same rules, then refreshes `Cargo.lock` offline
   (`cargo update --workspace --offline`). `--no-lock` skips the lock. Releases still go by tag; see AGENTS.md.
+- `check-tauri-config.mjs`: fails when the CSP or the capabilities drift from what `SECURITY.md` says (no `style-src-attr 'unsafe-inline'`).
+- `check-format.mjs`: prettier on the files this branch added or changed (or that are already formatted); `prettier --write` them.
+- `check-i18n-static.mjs`: finds dictionary texts copied into module-level constants (part of `check.mjs`).
 - `write-latest-json.mjs`: builds the updater manifest (`latest.json`) in the release workflow.
 - `prepare-sidecar.sh` / `prepare-sidecar.ps1`: build the daemon binary and place it as the Tauri sidecar.
 - `build-installer.ps1`: **Windows only.** One command for the NSIS installer in steps (sidecar, frontend, bundle),
@@ -37,6 +40,8 @@ purpose and fix the new lints in the same change.
 - `smoke.mjs`: CLI-level smoke test. Starts `axelstra daemon` in a throwaway data dir (and, on Windows, a throwaway
   pipe name), checks `ls`, spawns and lists a session, kills it. `cargo build -p axelstra && node tools/smoke.mjs`.
   Runs in CI on Ubuntu and Windows. Never touches your real daemon.
+- `e2e.mjs [path\to\axelstra-app.exe]`: drives the real Windows app over the DevTools protocol (boot, a session, restore, CSP) in a throwaway data dir; see `docs/E2E.md`. Sets `AXELSTRA_TEST_HIDDEN=1` so no window shows.
+- `winrect.mjs`: Win32 helpers for `e2e.mjs` and `visual.mjs` (window geometry, a real resize). Windows only.
 - `visual.mjs [outDir]`: screenshots of the real app over CDP (Welcome, Settings, sidebar with lead rows and a stalled agent,
   three languages, 1280x800 and 800x600) in a throwaway data dir, with a `.cmd` stand-in agent. `VISUAL_FAST=1` skips the
   wait for the stall watchdog. Windows only; build the app and frontend first (see the header of the file).
