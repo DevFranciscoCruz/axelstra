@@ -14,6 +14,7 @@ export const pt = {
   "session.input_full": "A fila de entrada da sessão está cheia: o programa não está a ler o que lhe enviam.",
   "session.input_closed": "A entrada da sessão está fechada.",
   "session.spawn_failed": "Não foi possível iniciar {program}.\n({detail})",
+  "session.cwd_missing": "A pasta {path} não existe: {program} não foi iniciado.",
   "msg.unknown_kind": "Tipo de mensagem desconhecido: {kind}.",
 
   // task files
@@ -88,6 +89,7 @@ export const en: Widen<typeof pt> = {
   "session.input_full": "The session's input queue is full: the program is not reading what it is sent.",
   "session.input_closed": "The session's input is closed.",
   "session.spawn_failed": "Could not start {program}.\n({detail})",
+  "session.cwd_missing": "The folder {path} does not exist: {program} was not started.",
   "msg.unknown_kind": "Unknown message kind: {kind}.",
 
   "notes.too_many_files": "There are too many task files named {base}.",
@@ -157,6 +159,7 @@ export const ptBR: Widen<typeof pt> = {
   "session.input_full": "A fila de entrada da sessão está cheia: o programa não está lendo o que é enviado a ele.",
   "session.input_closed": "A entrada da sessão está fechada.",
   "session.spawn_failed": "Não foi possível iniciar {program}.\n({detail})",
+  "session.cwd_missing": "A pasta {path} não existe: {program} não foi iniciado.",
   "msg.unknown_kind": "Tipo de mensagem desconhecido: {kind}.",
 
   "notes.too_many_files": "Há arquivos de tarefa demais com o nome {base}.",

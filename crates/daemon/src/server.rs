@@ -168,7 +168,31 @@ impl Registry {
         ids.sort();
         // a session that reported with `axelstra done` is finished: restoring it would only start an agent with nothing to do
         v.extend(ids.iter().filter(|i| self.bus.finished(**i).is_none() && rec_alive(&specs[*i])).map(|i| specs[i].clone()));
+        // the bus forgets a `done` with the daemon: the mark in the spec keeps a finished task from coming back
+        v.retain(|r| r["meta"]["done"] != true);
         let _ = write_json(&self.saved, &v);
+    }
+
+    /// Marks (or unmarks, when new work reaches it) the saved spec of `id` as finished, so a restart does not bring a
+    /// finished task back, and saves.
+    fn set_done(&self, id: u32, done: bool) {
+        let changed = {
+            let mut specs = self.specs.lock_recover();
+            match specs.get_mut(&id).filter(|s| s["meta"].is_object()) {
+                Some(s) if (s["meta"]["done"] == true) != done => {
+                    if done {
+                        s["meta"]["done"] = json!(true);
+                    } else {
+                        s["meta"].as_object_mut().map(|o| o.remove("done"));
+                    }
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.persist();
+        }
     }
 
     /// `sid/` and `scrollback/` files no saved or live session refers to (old enough not to be one being written).

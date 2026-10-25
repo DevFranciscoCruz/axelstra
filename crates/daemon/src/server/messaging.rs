@@ -19,6 +19,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let target = reg.get(to).ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = to))?;
             let text = p["text"].as_str().unwrap_or_default();
             let m = reg.bus.send(from, to, kind, text, p["reply_to"].as_u64(), p["thread"].as_str().map(String::from));
+            // a finished agent is not restored; new work for it (a message or reply) makes it restorable again
+            if let (true, Some(f)) = (kind == "done", from) {
+                reg.set_done(f, true);
+            } else if kind == "message" || kind == "reply" {
+                reg.set_done(to, false);
+            }
             // the summary of a finished agent goes into the Relatorio section of its task file
             if let (true, Some(f)) = (kind == "done", from) {
                 if let Some(note) = note_path(reg, f) {
