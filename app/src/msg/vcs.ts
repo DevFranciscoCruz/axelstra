@@ -59,6 +59,8 @@ export const pt = {
   "worktree.remove_main": "Não se pode remover o worktree principal.",
   "worktree.no_lead": "Não há nenhum lead ativo neste worktree: inicia primeiro o main dele.",
   "worktree.park": "Não foi possível pôr {path} de lado.\n({detail})",
+  "worktree.folder_busy":
+    "A pasta {path} ainda está em uso por um processo, por isso o worktree ficou como estava: {detail}",
   "timeline.integrated": "Integrado em {base}",
   "wtenv.pattern_outside": "padrão fora do projeto",
   "wtenv.path_not_allowed": "caminho não permitido",
@@ -127,6 +129,8 @@ export const en: Widen<typeof pt> = {
   "worktree.remove_main": "The main worktree cannot be removed.",
   "worktree.no_lead": "No lead is running in this worktree: start its main agent first.",
   "worktree.park": "Could not move {path} out of the way.\n({detail})",
+  "worktree.folder_busy":
+    "The folder {path} is still in use by a process, so the worktree was left as it was: {detail}",
   "timeline.integrated": "Integrated into {base}",
   "wtenv.pattern_outside": "pattern outside the project",
   "wtenv.path_not_allowed": "path not allowed",
@@ -196,6 +200,8 @@ export const ptBR: Widen<typeof pt> = {
   "worktree.remove_main": "Não é possível remover o worktree principal.",
   "worktree.no_lead": "Não há nenhum lead ativo neste worktree: inicie primeiro o main dele.",
   "worktree.park": "Não foi possível tirar {path} do caminho.\n({detail})",
+  "worktree.folder_busy":
+    "A pasta {path} ainda está em uso por um processo, então o worktree ficou como estava: {detail}",
   "timeline.integrated": "Integrado em {base}",
   "wtenv.pattern_outside": "padrão fora do projeto",
   "wtenv.path_not_allowed": "caminho não permitido",

@@ -27,6 +27,10 @@ pub struct Project {
     /// push the default branch after an automatic or manual integration; never on unless the user turned it on
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub push_after_integrate: bool,
+    /// worktrees the user made by hand (the "Novo worktree" modal), by `norm_path`: the janitor never removes an empty
+    /// one, and removes an integrated one only when nobody has worked in it for a while
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub manual: std::collections::BTreeSet<String>,
 }
 
 /// The form of a worktree path used as a key: the shared comparison key (forward slashes, no trailing slash, no
@@ -377,6 +381,33 @@ pub fn worktree_remove(p: &Project, path: &str) -> Result<()> {
         git::branch_delete(repo, &b)?;
     }
     Ok(())
+}
+
+/// All-or-nothing `worktree_remove` (see `git::worktree_remove_strict`): the branch goes only after the folder did, and
+/// when the folder cannot be moved nothing at all has changed.
+pub fn worktree_remove_strict(p: &Project, path: &str) -> Result<()> {
+    let repo = Path::new(&p.path);
+    let wt = git::worktree_list(repo)?
+        .into_iter()
+        .find(|w| axelstra_core::paths::same(&w.path, path))
+        .ok_or_else(|| coded!("worktree.not_of_project", "not a worktree of this project"))?;
+    if wt.is_main {
+        return Err(coded!("worktree.main_remove", "cannot remove the main worktree"));
+    }
+    git::worktree_remove_strict(repo, Path::new(&wt.path))?;
+    if let Some(b) = wt.branch {
+        git::branch_delete(repo, &b)?;
+    }
+    Ok(())
+}
+
+/// Records that the user made the worktree `path` by hand.
+pub fn set_manual(store: &Path, id: &str, path: &str) -> Result<()> {
+    let _g = STORE_LOCK.lock_recover();
+    let mut v = load_for_update(store)?;
+    let p = v.iter_mut().find(|p| p.id == id).ok_or_else(|| coded!("project.unknown", "unknown project {id}", id = id))?;
+    p.manual.insert(norm_path(path));
+    save(store, &v)
 }
 
 /// The non-main worktree `path` of project `p`, as git lists it.

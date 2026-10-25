@@ -7,7 +7,7 @@ import {
   ShellChoice,
   Terse,
   backupExport,
-  worktreeSweep,
+  worktreeSweepFull,
   SweepItem,
   pickAndRestoreBackup,
   copyDiagnostics,
@@ -154,13 +154,20 @@ export function Settings() {
     }
   };
   const [swept, setSwept] = createSignal<SweepItem[] | null>(null);
+  const [closedNote, setClosedNote] = createSignal("");
   const cleanLine = (i: SweepItem) =>
     [i.warning ? T.cleanWarning : i.removed ? T.cleanRemoved : "", i.branch || i.path, i.warning ?? i.why ?? ""]
       .filter(Boolean)
       .join(" · ");
   const cleanNow = async () => {
     try {
-      setSwept(await worktreeSweep());
+      const r = await worktreeSweepFull();
+      setSwept(r.swept);
+      setClosedNote(
+        r.closed_sessions || r.closed_procs
+          ? T.cleanClosed(r.closed_sessions ?? 0, r.closed_procs ?? 0, r.freed_bytes ?? 0)
+          : "",
+      );
       await refreshProjects();
     } catch (e) {
       setError(errorText(e));
@@ -316,7 +323,10 @@ export function Settings() {
                 <Show when={swept()}>
                   {(list) => (
                     <ul class="clean-list">
-                      <Show when={!list().length}>
+                      <Show when={closedNote()}>
+                        <li>{closedNote()}</li>
+                      </Show>
+                      <Show when={!list().length && !closedNote()}>
                         <li>{T.cleanNothing}</li>
                       </Show>
                       <For each={list()}>{(i) => <li classList={{ warn: !!i.warning }}>{cleanLine(i)}</li>}</For>

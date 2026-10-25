@@ -18,8 +18,9 @@ export const handleJanitorEvents = (events: JanitorEvent[]): number => {
       pushNotification({ kind: "attention", worktree: e.path, text });
       continue;
     }
-    const text =
-      e.kind === "integrated"
+    const text = e.code
+      ? coded(e.code, e.params, e.text ?? e.code)
+      : e.kind === "integrated"
         ? L.notify.integrated(short(e.branch), e.into)
         : e.kind === "empty"
           ? L.notify.emptyRemoved(short(e.branch))
