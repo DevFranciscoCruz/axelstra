@@ -12,3 +12,16 @@
 .hint-keys kbd {
   padding: 0 4px;
 }
+/* inside the 18px status bar item the kbd (borders + line-height) must fit the hover box */
+.sb-item .hint-keys {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+.sb-item kbd {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 14px;
+  line-height: 1;
+}

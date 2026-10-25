@@ -208,6 +208,25 @@ try {
     await page.shot(`welcome-${l}`);
   }
 
+  // 1a. the status bar "shortcuts" button: its kbd must sit inside the hover box
+  if (process.env.VISUAL_SB) {
+    for (const l of LOCALES) {
+      await setLocale(page, l);
+      await until("the shortcuts button", () => page.evaluate("!!document.querySelector('.statusbar button .hint-keys')"));
+      const r = await page.evaluate(
+        "(()=>{const b=document.querySelector('.statusbar button .hint-keys').closest('button').getBoundingClientRect();const k=document.querySelector('.statusbar button kbd').getBoundingClientRect();return JSON.stringify({b:[b.top,b.bottom,b.left,b.right],k:[k.top,k.bottom,k.left,k.right]})})()",
+      );
+      const { b, k } = JSON.parse(r);
+      console.log(`sb-${l}: button ${b} kbd ${k}`);
+      if (k[0] < b[0] || k[1] > b[1] || k[2] < b[2] || k[3] > b[3]) throw new Error(`statusbar kbd outside hover box (${l})`);
+      await page.shot(`statusbar-${l}`);
+    }
+    if (process.env.VISUAL_SB === "only") {
+      page.close();
+      throw Object.assign(new Error("statusbar only"), { benign: true });
+    }
+  }
+
   // 1b. the Add project dialog (choice step, then the remote form) in a small window, every language
   if (process.env.VISUAL_ADD) {
     await page.size(800, 600);
