@@ -70,6 +70,7 @@ export const ptL = {
     voice: { label: "Ditado por voz" },
     orchestra: { label: "Orquestração: agentes e workers", hint: "ferramenta" },
     dispatcher: { label: "Despachante", hint: "pedidos enviados a cada worktree" },
+    addProject: { label: "Adicionar projeto", hint: "pasta local ou remota" },
     addRemote: { label: "Adicionar projeto remoto", hint: "anfitrião SSH ou WSL" },
     automations: { label: "Automatizações", hint: "agendamento" },
     computer: { label: "Controlo do ecrã pelos agentes", hint: "permissão" },

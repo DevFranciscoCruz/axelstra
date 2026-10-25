@@ -59,8 +59,14 @@ export const enR: Widen<typeof ptR> = {
   } as Record<SpecProblem, string>,
 
   // add remote project
-  addRemote: "Add remote project…",
   addRemoteTitle: "Add remote project",
+  addProjectTitle: "Add project",
+  chooseSource: "Where is the project?",
+  sourceLocal: "Local folder",
+  sourceLocalHint: "Pick a folder on this computer.",
+  sourceRemote: "Remote project",
+  sourceRemoteHint: "A folder on a WSL or SSH host.",
+  back: "Back",
   host: "Host",
   hostNone: "Choose a host",
   newHost: "Add new host…",

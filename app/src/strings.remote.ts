@@ -62,8 +62,14 @@ export const ptR = {
   } as Record<SpecProblem, string>,
 
   // add remote project
-  addRemote: "Adicionar projeto remoto…",
   addRemoteTitle: "Adicionar projeto remoto",
+  addProjectTitle: "Adicionar projeto",
+  chooseSource: "Onde está o projeto?",
+  sourceLocal: "Pasta local",
+  sourceLocalHint: "Escolhe uma pasta neste computador.",
+  sourceRemote: "Projeto remoto",
+  sourceRemoteHint: "Uma pasta num anfitrião WSL ou SSH.",
+  back: "Voltar",
   host: "Anfitrião",
   hostNone: "Escolhe um anfitrião",
   newHost: "Adicionar novo anfitrião…",

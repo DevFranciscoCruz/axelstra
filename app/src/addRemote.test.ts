@@ -38,7 +38,7 @@ vi.mock("./api", async (orig) => ({
 }));
 
 import { AddRemoteProject } from "./AddRemoteProject";
-import { loadHosts, setShowAddRemote } from "./store";
+import { loadHosts } from "./store";
 
 const settle = async () => {
   for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 0));
@@ -53,13 +53,12 @@ beforeEach(async () => {
   h.browseFail = null;
   h.addFail = null;
   await loadHosts();
-  setShowAddRemote(true);
 });
 afterEach(cleanup);
 
 describe("adicionar projeto remoto", () => {
   it("starts at the home folder, Enter on a row opens it, confirm adds the shown path", async () => {
-    render(() => createComponent(AddRemoteProject, {}));
+    render(() => createComponent(AddRemoteProject, { onClose: () => undefined }));
     await settle();
     expect(h.browsed).toEqual([undefined]);
     expect(pathInput().value).toBe("/home/me");
@@ -75,7 +74,7 @@ describe("adicionar projeto remoto", () => {
   });
 
   it("refuses an empty or relative path without calling the host", async () => {
-    render(() => createComponent(AddRemoteProject, {}));
+    render(() => createComponent(AddRemoteProject, { onClose: () => undefined }));
     await settle();
     fireEvent.input(pathInput(), { target: { value: "proj" } });
     fireEvent.keyDown(pathInput(), { key: "Enter" });
@@ -87,7 +86,7 @@ describe("adicionar projeto remoto", () => {
 
   it("explains an authentication failure and offers to reconnect", async () => {
     h.browseFail = "Permission denied (publickey)";
-    render(() => createComponent(AddRemoteProject, {}));
+    render(() => createComponent(AddRemoteProject, { onClose: () => undefined }));
     await settle();
     const alert = document.querySelector("[role=alert]")!;
     expect(alert.textContent).toContain("nunca pede palavra-passe");
@@ -96,7 +95,7 @@ describe("adicionar projeto remoto", () => {
 
   it("explains a daemon that is not running there", async () => {
     h.browseFail = "daemon not reachable on this machine; start it there";
-    render(() => createComponent(AddRemoteProject, {}));
+    render(() => createComponent(AddRemoteProject, { onClose: () => undefined }));
     await settle();
     expect(document.body.textContent).toContain("axelstra daemon");
   });

@@ -8,8 +8,11 @@ export type Overlay =
   | { kind: "orchestra" }
   | { kind: "dispatcher" }
   | { kind: "automations" }
-  | { kind: "addRemote" }
+  | { kind: "addProject"; tab: AddProjectTab }
   | { kind: "projectSettings"; project: string };
+
+/** where the Add project dialog opens: the choice of source, or straight at the remote (WSL/SSH) form */
+export type AddProjectTab = "choose" | "remote";
 
 type Kind = Overlay["kind"];
 
@@ -17,7 +20,7 @@ export const [overlay, setOverlay] = createSignal<Overlay | null>(null);
 
 const isOpen = (k: Kind) => overlay()?.kind === k;
 /** closing a dialog only does anything while it is the one showing */
-const set = (k: Exclude<Kind, "projectSettings">) => (on: boolean) =>
+const set = (k: Exclude<Kind, "projectSettings" | "addProject">) => (on: boolean) =>
   setOverlay((cur) => (on ? ({ kind: k } as Overlay) : cur?.kind === k ? null : cur));
 
 export const showSettings = () => isOpen("settings");
@@ -32,8 +35,16 @@ export const showDispatcher = () => isOpen("dispatcher");
 export const setShowDispatcher = set("dispatcher");
 export const showAutomations = () => isOpen("automations");
 export const setShowAutomations = set("automations");
-export const showAddRemote = () => isOpen("addRemote");
-export const setShowAddRemote = set("addRemote");
+export const showAddProject = () => isOpen("addProject");
+export const addProjectTab = (): AddProjectTab => {
+  const o = overlay();
+  return o?.kind === "addProject" ? o.tab : "choose";
+};
+export const setShowAddProject = (on: boolean, tab: AddProjectTab = "choose") =>
+  setOverlay((cur) => (on ? { kind: "addProject", tab } : cur?.kind === "addProject" ? null : cur));
+/** switch the open Add project dialog between its steps */
+export const setAddProjectTab = (tab: AddProjectTab) =>
+  setOverlay((cur) => (cur?.kind === "addProject" ? { kind: "addProject", tab } : cur));
 
 /** project whose settings dialog (worktree env files, setup command) is open */
 export const showProjectSettings = (): string | null => {

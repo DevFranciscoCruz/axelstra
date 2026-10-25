@@ -60,8 +60,14 @@ export const ptBRR: Widen<typeof ptR> = {
   } as Record<SpecProblem, string>,
 
   // add remote project
-  addRemote: "Adicionar projeto remoto…",
   addRemoteTitle: "Adicionar projeto remoto",
+  addProjectTitle: "Adicionar projeto",
+  chooseSource: "Onde está o projeto?",
+  sourceLocal: "Pasta local",
+  sourceLocalHint: "Escolha uma pasta neste computador.",
+  sourceRemote: "Projeto remoto",
+  sourceRemoteHint: "Uma pasta em um host WSL ou SSH.",
+  back: "Voltar",
   host: "Host",
   hostNone: "Escolha um host",
   newHost: "Adicionar novo host…",

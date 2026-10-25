@@ -208,6 +208,31 @@ try {
     await page.shot(`welcome-${l}`);
   }
 
+  // 1b. the Add project dialog (choice step, then the remote form) in a small window, every language
+  if (process.env.VISUAL_ADD) {
+    await page.size(800, 600);
+    const esc = async () => {
+      for (const type of ["keyDown", "keyUp"])
+        await page.send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      await sleep(400);
+    };
+    for (const l of LOCALES) {
+      await setLocale(page, l);
+      await until("the add button", () => page.evaluate(clickText("/^[+] (Adicionar projeto|Add project)$/")));
+      await until("the dialog", () => page.evaluate("!!document.querySelector('[role=dialog]')"));
+      await page.shot(`addproject-${l}`);
+      await page.evaluate(clickText("/^(Projeto remoto|Remote project)/"));
+      await sleep(900);
+      await page.shot(`addproject-remote-${l}`);
+      await esc();
+    }
+    await page.size(1280, 800);
+    if (process.env.VISUAL_ADD === "only") {
+      page.close();
+      throw Object.assign(new Error("add project only"), { benign: true });
+    }
+  }
+
   // 2. a project with a lead and a worker per worktree; one is quiet long enough to be stalled
   const repo = join(dir, "demo");
   mkdirSync(repo);

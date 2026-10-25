@@ -13,7 +13,7 @@ import {
   setRemoveRequest,
   setRightTab,
   setShowAgentSearch,
-  setShowAddRemote,
+  setShowAddProject,
   setShowAutomations,
   setShowDispatcher,
   setShowOrchestra,
@@ -67,7 +67,8 @@ export function buildPaletteActions(d: PaletteDeps) {
     orchestra: { run: () => setShowOrchestra(true) },
     dispatcher: { run: () => setShowDispatcher(true) },
     automations: { run: () => setShowAutomations(true) },
-    addRemote: { run: () => setShowAddRemote(true) },
+    addProject: { run: () => setShowAddProject(true) },
+    addRemote: { run: () => setShowAddProject(true, "remote") },
     computer: {
       run: () => void d.toggleComputer(),
       label: d.computerOn() ? S.palette.computerOff : S.palette.computerOn,

@@ -68,6 +68,7 @@ export const enL: Widen<typeof ptL> = {
     voice: { label: "Voice dictation" },
     orchestra: { label: "Orchestration: agents and workers", hint: "tool" },
     dispatcher: { label: "Dispatcher", hint: "requests sent to each worktree" },
+    addProject: { label: "Add project", hint: "local or remote folder" },
     addRemote: { label: "Add remote project", hint: "SSH or WSL host" },
     automations: { label: "Automations", hint: "scheduling" },
     computer: { label: "Screen control by agents", hint: "permission" },
