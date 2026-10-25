@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync }
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { layoutProblems, resizeClient, windowInfo } from "./winrect.mjs";
 
 if (process.platform !== "win32") {
   console.log("e2e: WebView2 driver is Windows only; skipping");
@@ -74,9 +75,13 @@ const fgBefore = foreground();
 
 let app;
 const problems = [];
-const launch = () => {
+const launch = (scale) => {
+  // scale: WebView2 --force-device-scale-factor, to run the geometry check at 100/125/150 % without changing the user's display
   app = spawn(exe, [], {
-    env,
+    env: {
+      ...env,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}${scale ? ` --force-device-scale-factor=${scale}` : ""}`,
+    },
     stdio: process.env.E2E_VERBOSE ? "inherit" : "ignore",
   });
   app.on("exit", (c) => (app.gone = c ?? "signal"));
@@ -297,6 +302,50 @@ ${dataDirReport()}`);
   const bg = await page.evaluate("getComputedStyle(document.documentElement).backgroundColor");
   if (/^rgb\(255, 255, 255\)|^rgba\(0, 0, 0, 0\)/.test(bg)) throw new Error(`html background is ${bg}`);
   console.log("ok  #root fills the window, html background is the theme");
+
+  // geometry: the viewport is the window's client area and nothing is displaced, at 100/125/150 % and after real resizes
+  const geometry = async (label) => {
+    const info = windowInfo(app.pid);
+    const v = JSON.parse(
+      await page.evaluate(
+        "(() => { const r = document.getElementById('root').getBoundingClientRect(); const b = document.documentElement.getBoundingClientRect(); return JSON.stringify({ iw: innerWidth, ih: innerHeight, dpr: devicePixelRatio, root: [r.left, r.top, r.width, r.height], html: [b.left, b.top], vv: [visualViewport.offsetLeft, visualViewport.offsetTop], sx: scrollX, sy: scrollY }); })()",
+      ),
+    );
+    const bad = layoutProblems(info);
+    if (Math.abs(v.iw * v.dpr - info.clientW) > 1.5 || Math.abs(v.ih * v.dpr - info.clientH) > 1.5)
+      bad.push(`viewport ${v.iw}x${v.ih} @${v.dpr} is not the client area ${info.clientW}x${info.clientH}`);
+    if ([...v.root.slice(0, 2), ...v.html, ...v.vv, v.sx, v.sy].some((n) => Math.abs(n) > 0.5))
+      bad.push(
+        `layout offset: root ${v.root.slice(0, 2)}, html ${v.html}, visualViewport ${v.vv}, scroll ${v.sx},${v.sy}`,
+      );
+    if (Math.abs(v.root[2] - v.iw) > 1 || Math.abs(v.root[3] - v.ih) > 1)
+      bad.push(`#root ${v.root[2]}x${v.root[3]} does not fill ${v.iw}x${v.ih}`);
+    if (bad.length) throw new Error(`geometry (${label}): ${bad.join("; ")}`);
+    console.log(
+      `ok  geometry ${label}: viewport ${v.iw}x${v.ih} @${v.dpr} = client ${info.clientW}x${info.clientH}, no offset`,
+    );
+  };
+  await geometry("100%");
+  for (const [w, h] of [
+    [1000, 700],
+    [900, 600],
+  ]) {
+    resizeClient(app.pid, w, h);
+    await sleep(700);
+    await geometry(`100% resized to ${w}x${h}`);
+  }
+  for (const scale of ["1.25", "1.5"]) {
+    page.close();
+    kill(app.pid, true);
+    await sleep(1500);
+    launch(scale);
+    page = await connect();
+    await until("the UI at scale " + scale, () =>
+      page.evaluate("document.getElementById('root')?.children.length > 0"),
+    );
+    await sleep(1000);
+    await geometry(`${Number(scale) * 100}%`);
+  }
 
   await sleep(1000);
   if (problems.length) throw new Error(`browser problems:\n  ${[...new Set(problems)].join("\n  ")}`);

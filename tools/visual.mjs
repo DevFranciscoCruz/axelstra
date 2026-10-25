@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { layoutProblems, resizeClient, windowInfo } from "./winrect.mjs";
 
 if (process.platform !== "win32") {
   console.log("visual: WebView2 only; skipping");
@@ -106,12 +107,13 @@ async function connect() {
     writeFileSync(join(out, `${name}.png`), Buffer.from(r.data, "base64"));
     console.log(`shot ${name}`);
   };
+  // a real resize of the host window: CDP Browser.setWindowBounds moves WebView2's inner window instead (see tools/winrect.mjs)
   const size = async (width, height) => {
-    const w = await send("Browser.getWindowForTarget");
-    await send("Browser.setWindowBounds", {
-      windowId: w.windowId,
-      bounds: { windowState: "normal", width, height },
-    });
+    const k = windowInfo(app.pid).dpi / 96;
+    resizeClient(app.pid, Math.round(width * k), Math.round(height * k));
+    await sleep(700); // the webview follows the host window asynchronously
+    const bad = layoutProblems(windowInfo(app.pid));
+    if (bad.length) throw new Error(`window layout is off after resizing: ${bad.join("; ")}`);
     await sleep(500);
   };
   return { send, evaluate, shot, size, close: () => ws.close() };

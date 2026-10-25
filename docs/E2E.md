@@ -94,5 +94,17 @@ daemon, no window.
 
 In hidden mode the host shows the window with `SW_SHOWNOACTIVATE` (never activated, never focused; an off-screen or minimised window is occluded and WebView2 would not render) and `e2e.mjs`
 compares `GetForegroundWindow()` before and after: if the test changed it, the run fails with "stole the focus". The
-harness only ever touches its own app process (`taskkill /T` on its pid), never the user's windows. Resize and DPI checks
-use `Browser.setWindowBounds` on the transparent test window.
+harness only ever touches its own app process (`taskkill /T` on its pid), never the user's windows. Resizes go through the host window (`resizeClient` in `tools/winrect.mjs`, `SetWindowPos` with `SWP_NOACTIVATE`), never
+through CDP `Browser.setWindowBounds`: in WebView2 that does not resize the host HWND, it moves the inner `Chrome_WidgetWin_1`
+child by the browser-window position on every call (measured rel 8,31 -> 120,166 -> 232,301), so the page paints displaced
+(an empty strip at the top and left, the right and bottom cut off). The host window and the WRY_WEBVIEW child stay correct, so
+this was a test-driver bug, not a production one.
+
+## Geometry check
+
+`e2e.mjs` scenario **geometry** compares, at 100 %, after two real resizes and at 125 % and 150 %: `innerWidth/innerHeight x
+devicePixelRatio` against the Win32 client area of the app window, `#root`/`html`/`visualViewport` at 0,0 filling the
+viewport, no scroll offset, and the webview's child windows (`layoutProblems` in `tools/winrect.mjs`) at the same offset and
+size (1 px rounding allowed) as the `WRY_WEBVIEW` child. 125 % and 150 % relaunch the app with WebView2
+`--force-device-scale-factor` (the `launch(scale)` argument), which changes the page's device pixel ratio without touching
+the user's display; the system DPI of the host window is not changed, so a real per-monitor DPI move is not covered.
