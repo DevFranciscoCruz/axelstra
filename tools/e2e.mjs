@@ -95,12 +95,14 @@ const fgBefore = foreground();
 
 let app;
 const problems = [];
+// With E2E_VERBOSE the browser writes its own debug log (<profile>/chrome_debug.log) so a missing DevTools port can be explained.
+const browserLog = process.env.E2E_VERBOSE ? " --enable-logging --v=0" : "";
 const launch = (scale) => {
   // scale: WebView2 --force-device-scale-factor, to run the geometry check at 100/125/150 % without changing the user's display
   app = spawn(exe, [], {
     env: {
       ...env,
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}${scale ? ` --force-device-scale-factor=${scale}` : ""}`,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}${scale ? ` --force-device-scale-factor=${scale}` : ""}${browserLog}`,
     },
     stdio: process.env.E2E_VERBOSE ? "inherit" : "ignore",
   });
@@ -230,7 +232,11 @@ function dataDirReport() {
       const f = join(d, e.name);
       if (e.isDirectory()) {
         if (depth < 2) walk(f, depth + 1);
-      } else if (/\.(json|log|bad)(\.\d+)?$/.test(e.name)) {
+      } else if (
+        /\.(json|log|bad)(\.\d+)?$/.test(e.name) ||
+        /^axelstra\.log\./.test(e.name) ||
+        e.name === "crash.log"
+      ) {
         out.push(`--- ${f}
 ${readFileSync(f, "utf8").slice(-1500)}`);
       }
@@ -240,6 +246,26 @@ ${readFileSync(f, "utf8").slice(-1500)}`);
     walk(join(home, "axelstra"), 0);
   } catch (e) {
     out.push(String(e));
+  }
+  // The host's own log (logs/) and the browser processes tell whether WebView2 was ever started, or died.
+  const procs = spawnSync("tasklist", ["/FO", "CSV", "/NH"], { encoding: "utf8", timeout: 20000 }).stdout ?? "";
+  out.push(`--- processes
+${procs
+  .split(/\r?\n/)
+  .filter((l) => /axelstra|msedge/i.test(l))
+  .join("\n")}`);
+  try {
+    const dbg = join(dir, "webview", "chrome_debug.log");
+    if (existsSync(dbg))
+      out.push(`--- ${dbg}
+${readFileSync(dbg, "utf8").slice(-3000)}`);
+  } catch {
+    /* unreadable while the browser holds it */
+  }
+  try {
+    out.push(`--- webview profile: ${readdirSync(join(dir, "webview")).join(" ")}`);
+  } catch (e) {
+    out.push(`--- webview profile: ${e}`);
   }
   return out.join("\n");
 }

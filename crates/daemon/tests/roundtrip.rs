@@ -91,7 +91,9 @@ fn session_survives_disconnect_and_replays_to_new_client() {
     let u = b.call("session.usage", json!({"id": id})).unwrap();
     assert!(u["peak_mem_bytes"].as_u64().unwrap() > 0);
 
-    b.call("session.kill", json!({"id": id})).unwrap();
+    // `call` drops the events that arrive before its reply, and a killed process can exit (the event) before the daemon
+    // has answered the kill: send it and read the frames, so the exit is seen whichever comes first
+    b.send("session.kill", json!({"id": id})).unwrap();
     let end = Instant::now() + Duration::from_secs(5);
     let mut exited = false;
     while Instant::now() < end {
