@@ -102,7 +102,20 @@ jobs:
         working-directory: app
       - run: cargo build -p axelstra
       - run: cargo build -p axelstra-app --features tauri/custom-protocol
+      # The runner image does not promise the WebView2 runtime; without it the app starts but never opens a page.
+      - name: WebView2 runtime
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $pv = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).pv
+          if (-not $pv) {
+            Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile "$env:RUNNER_TEMP\MicrosoftEdgeWebview2Setup.exe"
+            Start-Process "$env:RUNNER_TEMP\MicrosoftEdgeWebview2Setup.exe" -ArgumentList '/silent', '/install' -Wait
+            $pv = (Get-ItemProperty -Path $key -ErrorAction Stop).pv
+          }
+          "WebView2 runtime $pv"
       - run: node tools/e2e.mjs
+        env: { E2E_VERBOSE: "1" }
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 15

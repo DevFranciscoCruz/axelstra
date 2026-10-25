@@ -107,13 +107,26 @@ const launch = (scale) => {
   app.on("exit", (c) => (app.gone = c ?? "signal"));
 };
 
+/** Version of the installed WebView2 runtime ("none" when the machine has none: the app then opens no page at all). */
+function webview2Runtime() {
+  const clients = "Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+  for (const hive of ["HKLM\SOFTWARE\WOW6432Node", "HKLM\SOFTWARE", "HKCU\SOFTWARE"]) {
+    const r = spawnSync("reg", ["query", `${hive}\${clients}`, "/v", "pv"], { encoding: "utf8" });
+    const m = r.status === 0 && /pv\s+REG_SZ\s+(\S+)/.exec(r.stdout);
+    if (m) return m[1];
+  }
+  return "none";
+}
+
 /** Attaches to the first page target, collecting CSP violations and uncaught exceptions. */
 async function connect() {
   let target;
+  let seen = "nothing listening on the port";
   for (let i = 0; i < 80 && !target; i++) {
     if (app.gone !== undefined) throw new Error(`app exited early (${app.gone})`);
     try {
       const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+      seen = JSON.stringify(list.map((t) => ({ type: t.type, url: t.url })));
       // the page target exists at about:blank before the app navigates; reloading that would leave the window blank
       target = list.find((t) => t.type === "page" && t.webSocketDebuggerUrl && t.url !== "about:blank");
     } catch {
@@ -121,7 +134,11 @@ async function connect() {
     }
     if (!target) await sleep(500);
   }
-  if (!target) throw new Error(`no WebView2 page target within 40s (port ${port})`);
+  if (!target)
+    throw new Error(
+      `no WebView2 page target within 40s (port ${port}); targets: ${seen}; webview2 runtime: ${webview2Runtime()}
+${dataDirReport()}`,
+    );
   const ws = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((ok, no) => {
     ws.onopen = ok;

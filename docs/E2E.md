@@ -98,6 +98,10 @@ Last local run (Windows 11, WebView2 155, debug host + custom-protocol): all sce
 
 `ci.yml` job `e2e` (windows-latest, `continue-on-error: true`): builds the three pieces above and runs the script. It is
 advisory: a red job does not fail CI or releases. Promote it to blocking once it has stayed green for two weeks.
+The job first checks the WebView2 runtime in the registry and installs the Evergreen bootstrapper when it is missing (the
+runner image does not promise it; without the runtime the app starts but opens no page, which showed as `no WebView2 page
+target within 40s`). It runs with `E2E_VERBOSE=1`, and that failure now lists the CDP targets seen, the runtime version and
+the data dir report.
 
 ## Not done yet
 
