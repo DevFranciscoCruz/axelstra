@@ -430,25 +430,71 @@ fn abs_norm(p: &Path) -> String {
     norm(a.to_string_lossy().trim_start_matches(r"\\?\"))
 }
 
+/// Canonical comparison key: the nearest existing ancestor goes through `fs::canonicalize` (resolves 8.3 short names,
+/// `..`, links, true case) and the missing tail is appended as written. Same separator/case rules as `norm`.
+/// Two different directories never share a key, so this only widens "same place spelled differently".
+fn canon_norm(p: &Path) -> String {
+    let a = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let mut cur = a.as_path();
+    let base = loop {
+        if let Ok(c) = std::fs::canonicalize(cur) {
+            break c;
+        }
+        match (cur.parent(), cur.file_name()) {
+            (Some(par), Some(name)) => {
+                tail.push(name.to_os_string());
+                cur = par;
+            }
+            _ => break a.clone(),
+        }
+    };
+    let mut full = base;
+    for t in tail.iter().rev() {
+        full.push(t);
+    }
+    let s = full.to_string_lossy();
+    let s = match s.strip_prefix(r"\\?\UNC\") {
+        Some(rest) => format!(r"\\{rest}"),
+        None => s.trim_start_matches(r"\\?\").to_string(),
+    };
+    norm(&s)
+}
+
+/// Both spellings of a registered path equal the wanted one: as written, or canonical.
+fn same_place(registered: &str, want: &str, want_canon: &str) -> bool {
+    norm(registered) == want || canon_norm(Path::new(registered)) == want_canon
+}
+
 /// Project whose id, name or path equals `r`.
 pub(crate) fn find_project_by_ref<'a>(projects: &'a Value, r: &str) -> Option<&'a Value> {
     let want = abs_norm(Path::new(r));
-    projects
-        .as_array()?
-        .iter()
+    let canon = canon_norm(Path::new(r));
+    let arr = projects.as_array()?;
+    arr.iter()
         .find(|p| p["id"].as_str() == Some(r) || p["name"].as_str() == Some(r) || norm(p["path"].as_str().unwrap_or_default()) == want)
+        .or_else(|| arr.iter().find(|p| same_place(p["path"].as_str().unwrap_or_default(), &want, &canon)))
 }
 
 /// (project, worktree path as the daemon knows it) for a worktree directory.
 pub(crate) fn find_worktree<'a>(projects: &'a Value, path: &Path) -> Result<(&'a Value, String)> {
     let want = abs_norm(path);
-    for p in projects.as_array().map(|a| a.as_slice()).unwrap_or_default() {
-        for w in p["worktrees"].as_array().map(|a| a.as_slice()).unwrap_or_default() {
-            let wp = w["path"].as_str().unwrap_or_default();
-            if norm(wp) == want {
-                return Ok((p, wp.to_string()));
-            }
-        }
+    let all = || {
+        projects.as_array().map(|a| a.as_slice()).unwrap_or_default().iter().flat_map(|p| {
+            p["worktrees"]
+                .as_array()
+                .map(|a| a.as_slice())
+                .unwrap_or_default()
+                .iter()
+                .map(move |w| (p, w["path"].as_str().unwrap_or_default()))
+        })
+    };
+    if let Some((p, wp)) = all().find(|(_, wp)| norm(wp) == want) {
+        return Ok((p, wp.to_string()));
+    }
+    let canon = canon_norm(path);
+    if let Some((p, wp)) = all().find(|(_, wp)| !wp.is_empty() && same_place(wp, &want, &canon)) {
+        return Ok((p, wp.to_string()));
     }
     bail!("{} is not a worktree of a registered project (see `axelstra projects`)", path.display())
 }
@@ -638,6 +684,7 @@ pub fn strip_ansi(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn worker_prompt_says_how_to_report_and_never_to_wait_silently() {
@@ -646,6 +693,123 @@ mod tests {
         assert!(p.contains("axelstra done"));
         assert!(p.contains("Never wait silently for the human"));
         assert!(p.contains("axelstra ask $AXELSTRA_PARENT") && p.contains("axelstra escalate"));
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("axl-ctl-{tag}-{}-{}", std::process::id(), new_uuid()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn registry(wt: &Path) -> Value {
+        json!([{"id": "p1", "name": "proj", "path": wt.parent().unwrap().to_string_lossy(), "worktrees": [{"path": wt.to_string_lossy()}]}])
+    }
+
+    #[test]
+    fn worktree_matches_dotdot_and_missing_tail_spellings() {
+        let root = scratch("dots");
+        let wt = root.join("wt");
+        std::fs::create_dir_all(wt.join("sub")).unwrap();
+        let projects = registry(&wt);
+        assert!(find_worktree(&projects, &wt).is_ok());
+        assert!(find_worktree(&projects, &root.join("other").join("..").join("wt")).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sibling_with_same_prefix_and_outside_paths_do_not_match() {
+        let root = scratch("neg");
+        let wt = root.join("wt");
+        let sib = root.join("wt2");
+        let inner = wt.join("inner");
+        for d in [&wt, &sib, &inner] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let projects = registry(&wt);
+        assert!(find_worktree(&projects, &sib).is_err());
+        assert!(find_worktree(&projects, &inner).is_err(), "subdirectory is not the worktree");
+        assert!(find_worktree(&projects, &root.join("wt-missing")).is_err());
+        assert!(find_worktree(&projects, &root).is_err());
+        assert!(find_worktree(&projects, &wt.join("..").join("wt2")).is_err());
+        assert!(find_worktree(&json!([]), &wt).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(windows)]
+    fn short_name(p: &Path) -> Option<PathBuf> {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetShortPathNameW(long: *const u16, short: *mut u16, n: u32) -> u32;
+        }
+        let w: Vec<u16> = p.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut buf = vec![0u16; 1024];
+        let n = unsafe { GetShortPathNameW(w.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) } as usize;
+        if n == 0 || n >= buf.len() {
+            return None;
+        }
+        Some(PathBuf::from(std::ffi::OsString::from_wide(&buf[..n])))
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn worktree_matches_8dot3_short_name() {
+        let root = scratch("short");
+        let wt = root.join("a worktree with a long name");
+        std::fs::create_dir_all(&wt).unwrap();
+        let Some(short) = short_name(&wt).filter(|s| norm(&s.to_string_lossy()) != norm(&wt.to_string_lossy())) else {
+            eprintln!("8.3 names are disabled on this volume: skipped");
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        };
+        let projects = registry(&wt);
+        assert_eq!(find_worktree(&projects, &short).unwrap().1, wt.to_string_lossy());
+        let sib = root.join("a worktree with a long name 2");
+        std::fs::create_dir_all(&sib).unwrap();
+        if let Some(s2) = short_name(&sib) {
+            assert!(find_worktree(&projects, &s2).is_err());
+        }
+        // registered by short name, asked by long name
+        let projects = registry(&short);
+        assert!(find_worktree(&projects, &wt).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn junction_out_of_a_worktree_does_not_match_it() {
+        let root = scratch("junc");
+        let wt = root.join("wt");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let link = wt.join("link");
+        let ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&outside)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if ok {
+            let projects = registry(&wt);
+            assert!(find_worktree(&projects, &link).is_err());
+            assert!(find_worktree(&projects, &outside).is_err());
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn project_ref_by_path_tolerates_dotdot_not_siblings() {
+        let root = scratch("proj");
+        let proj = root.join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::create_dir_all(root.join("proj2")).unwrap();
+        let projects = json!([{"id": "p1", "name": "n", "path": proj.to_string_lossy(), "worktrees": []}]);
+        let via = root.join("x").join("..").join("proj");
+        assert!(find_project_by_ref(&projects, &via.to_string_lossy()).is_some());
+        assert!(find_project_by_ref(&projects, &root.join("proj2").to_string_lossy()).is_none());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
