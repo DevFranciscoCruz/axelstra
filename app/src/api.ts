@@ -452,6 +452,10 @@ export const removeSession = (id: number) => (cancelNudge(id), call("session.rem
 export const resizeSession = (id: number, cols: number, rows: number) =>
   call("session.resize", { id, cols, rows });
 const rawWrite = (id: number, data: string) => invoke("session_write", { id, data }).catch((e) => Promise.reject(toAppError("session_write", e)));
+/** Opens an .html/.htm path printed in a session's terminal in the system browser. The host resolves it through the daemon
+ *  (`files.resolve_html`) and opens the result itself: the webview never passes a url to the opener. */
+export const openHtmlFile = (session: number, path: string) =>
+  invoke<void>("open_html_file", { session, path }).catch((e) => Promise.reject(toAppError("files.resolve_html", e)));
 /** Text typed or pasted by the user (or a feature acting for them): a pending nudge into this session is dropped, it would interleave. */
 export const writeSession = (id: number, data: string) => (cancelNudge(id), rawWrite(id, data));
 

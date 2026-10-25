@@ -108,3 +108,14 @@ viewport, no scroll offset, and the webview's child windows (`layoutProblems` in
 size (1 px rounding allowed) as the `WRY_WEBVIEW` child. 125 % and 150 % relaunch the app with WebView2
 `--force-device-scale-factor` (the `launch(scale)` argument), which changes the page's device pixel ratio without touching
 the user's display; the system DPI of the host window is not changed, so a real per-monitor DPI move is not covered.
+
+## Opening an .html path from the terminal
+
+`tools/e2e-html-link.mjs` (same build and isolation as `e2e.mjs`, hidden window, temp data dir) checks that Ctrl+click (Cmd on
+macOS) on an `.html`/`.htm` path printed in a terminal opens it in the browser. The host is started with
+`AXELSTRA_TEST_OPENER_LOG=<temp file>`: instead of calling the system opener it appends the resolved `file://` url to that file,
+so no browser opens. A session prints `page.html` (inside its cwd), `notes.txt` and `..\outside\x.html`; real mouse events over
+CDP (`Input.dispatchMouseEvent`, `modifiers: 2` for Ctrl) then assert that Ctrl+click on `page.html` logs exactly its url, and that
+a plain click, `notes.txt` and the path outside the cwd (refused by `files.resolve_html`) log nothing. The terminal buffer is not
+reachable from the page, so the script finds the row by trying each row of the screen. Not run in CI (it needs the host's
+`open_html_file` command and the daemon's `files.resolve_html`).
