@@ -30,6 +30,7 @@ vi.mock("../api", () => ({
   worktreeSweep: vi.fn(async () => []),
 }));
 vi.mock("../store", () => ({
+  dismissExited: vi.fn(),
   norm: (p?: string | null) => (p ?? "").toLowerCase(),
   refreshProjects: vi.fn(async () => undefined),
   refreshSessions: vi.fn(async () => undefined),

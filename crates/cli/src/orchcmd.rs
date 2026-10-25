@@ -370,7 +370,18 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resu
             }
             // outcome: Some(ok, why)
             let outcome: Option<(bool, String)> = match s {
-                None => Some((true, "session closed".into())),
+                // ended on its own and left the list: the daemon still answers how it ended
+                None => match c.call("session.status", json!({"id": id})) {
+                    Ok(st) if st["gone"] == json!(true) && st["finished"] == json!(true) => Some((true, "reported done".into())),
+                    Ok(st) if st["gone"] == json!(true) => {
+                        let code = st["code"].as_i64();
+                        Some((
+                            code == Some(0) || (t.agent.is_some() && code.is_none()),
+                            format!("exit {}", code.map_or("?".to_string(), |c| c.to_string())),
+                        ))
+                    }
+                    _ => Some((true, "session closed".into())),
+                },
                 Some(s) if s["finished"] == json!(true) => Some((true, "reported done".into())),
                 Some(s) if s["running"] != json!(true) => {
                     let code = c.call("session.status", json!({"id": id}))?["code"].as_i64();

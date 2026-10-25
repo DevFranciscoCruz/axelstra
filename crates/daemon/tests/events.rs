@@ -75,7 +75,10 @@ fn exit_is_pushed_and_ends_what_the_session_left_running() {
     loop {
         let left = Duration::from_secs(15).saturating_sub(t0.elapsed());
         let ev = rx.recv_timeout(left).expect("no session.changed after the exit");
-        assert_eq!(ev["event"], "session.changed");
+        // `session.exited` and `dispatch.changed` come with the exit too
+        if ev["event"] != "session.changed" {
+            continue;
+        }
         if !running(&mut c, id) {
             break;
         }

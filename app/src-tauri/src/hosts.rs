@@ -1058,6 +1058,9 @@ mod tests {
         let mut ev = json!({"event": "session.exit", "id": 9, "code": 0});
         tag_result("session.exit", "lab", 1, &mut ev);
         assert_eq!(ev["id"], gid(1, 9));
+        let mut ev = json!({"event": "session.exited", "id": 9, "code": 3});
+        tag_result("session.exited", "lab", 1, &mut ev);
+        assert_eq!((&ev["id"], &ev["code"]), (&json!(gid(1, 9)), &json!(3)));
         let mut ev = json!({"event": "fs.changed", "worktree": "/home/me/p"});
         tag_result("fs.changed", "lab", 1, &mut ev);
         assert_eq!(ev["worktree"], "@lab:/home/me/p");

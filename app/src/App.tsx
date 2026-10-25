@@ -92,6 +92,7 @@ import {
   showNotice,
   openIfStill,
   navStamp,
+  dismissExited,
   selectedWorktree,
   selectWorktree,
   sessionsOf,
@@ -248,6 +249,7 @@ export function App() {
       rememberClosed(s);
       if (s.running) await killSession(s.id);
       await removeSession(s.id);
+      dismissExited(s.id);
     } catch (e) {
       setError(String(e));
     }

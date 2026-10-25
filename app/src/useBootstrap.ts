@@ -7,6 +7,7 @@ import {
   janitorEvents,
   listPorts,
   onDaemonEvent,
+  onSessionExited,
   restoreSessions,
   stopWatch,
   storeNotices,
@@ -21,6 +22,7 @@ import { wtName } from "./Usage";
 import { S } from "./strings";
 import { onTauriEvent } from "./tauriEvents";
 import {
+  handleSessionExited,
   norm,
   openSession,
   ports,
@@ -158,6 +160,7 @@ export function useBootstrap() {
     void takeTriggers();
     void takeBudget();
     const offEvents = [
+      onSessionExited(handleSessionExited),
       onDaemonEvent("janitor.events", () => void takeJanitor()),
       onDaemonEvent("triggers.events", () => void takeTriggers()),
       onDaemonEvent("budget.events", () => void takeBudget()),

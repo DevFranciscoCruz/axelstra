@@ -102,6 +102,20 @@ struct Registry {
     started: Instant,
     /// what the cleanup closed so far: sessions, processes, bytes of RAM (the app reads the difference of a manual run)
     closed: Closed,
+    /// the last sessions that ended on their own and left the registry (`retire`): a leaf lock. `session.status` still
+    /// answers for them, so `axelstra wait`, flows and the orchestrator get their exit code after the row is gone
+    exited: Mutex<std::collections::VecDeque<Exited>>,
+}
+
+/// How many ended sessions `Registry::exited` remembers.
+const EXITED_KEPT: usize = 256;
+
+/// What is remembered of a session that ended and left the registry.
+struct Exited {
+    id: u32,
+    code: Option<i32>,
+    /// it had reported with `axelstra done`
+    finished: bool,
 }
 
 /// Totals of what the janitor and the done-closer shut down.
@@ -149,7 +163,12 @@ impl Pulse {
 impl Registry {
     /// Sends `{"event": name}` to every watching connection. One that stopped reading misses it rather than block us.
     fn broadcast(&self, name: &str) {
-        let frame = encode(EVENT, json!({"event": name}).to_string().as_bytes());
+        self.broadcast_event(json!({"event": name}));
+    }
+
+    /// Same, for an event that carries data (`session.exited`).
+    fn broadcast_event(&self, ev: Value) {
+        let frame = encode(EVENT, ev.to_string().as_bytes());
         self.watchers.lock_recover().retain(|(stop, tx)| {
             !stop.load(Ordering::SeqCst) && !matches!(tx.try_send(frame.clone()), Err(mpsc::error::TrySendError::Closed(_)))
         });
@@ -304,6 +323,7 @@ impl Registry {
             activity: Default::default(),
             started: Instant::now(),
             closed: Default::default(),
+            exited: Default::default(),
         }
     }
 
@@ -454,9 +474,10 @@ impl Registry {
         self.closed.bytes.fetch_add(bytes, Ordering::SeqCst);
     }
 
-    /// Takes a finished session out of the registry (its tab, its restore record, its bus state).
-    fn forget_session(&self, id: u32) {
-        self.sessions.lock_recover().remove(&id);
+    /// Takes a finished session out of the registry (its tab, its restore record, its bus state). False when it was
+    /// not there (something else removed it first).
+    fn forget_session(&self, id: u32) -> bool {
+        let was = self.sessions.lock_recover().remove(&id).is_some();
         self.labels.lock_recover().remove(&id);
         self.metas.lock_recover().remove(&id);
         let gone = self.specs.lock_recover().remove(&id);
@@ -464,6 +485,43 @@ impl Registry {
             self.drop_sid_of(&spec);
         }
         self.bus.forget(id);
+        was
+    }
+
+    /// A session whose program ended on its own leaves the registry, so `session.list`, `axelstra ls` and
+    /// `sessions.json` show only what runs. Tells the watchers `session.exited {id, code}` (the app keeps a failed
+    /// terminal's tab until the user closes it, and shows the code) and `dispatch.changed`, and wakes the session
+    /// monitor and the janitor. Its exit code stays answerable through `session.status` (`exited`). Only the one that
+    /// really removed it announces, so a kill racing the exit does not announce twice. Whatever it reported with
+    /// `axelstra done` is already in its parent's inbox and its task file (written when `done` was called).
+    fn retire(&self, id: u32, code: Option<i32>) -> bool {
+        let finished = self.bus.finished(id).is_some();
+        // a closed tab keeps no history: the periodic save would otherwise leave its file behind
+        let key = self.metas.lock_recover().get(&id).and_then(|m| m["key"].as_str().map(String::from));
+        if !self.forget_session(id) {
+            return false;
+        }
+        if let Some(f) = key.and_then(|k| history_file(self, &k)) {
+            let _ = std::fs::remove_file(f);
+        }
+        {
+            let mut ring = self.exited.lock_recover();
+            ring.push_back(Exited { id, code, finished });
+            while ring.len() > EXITED_KEPT {
+                ring.pop_front();
+            }
+        }
+        self.persist();
+        self.broadcast_event(json!({"event": "session.exited", "id": id, "code": code}));
+        self.broadcast("dispatch.changed");
+        self.pulse.bump();
+        self.janitor.bump();
+        true
+    }
+
+    /// `(code, finished)` of a session that ended and left the registry, if it is still remembered.
+    fn exited_of(&self, id: u32) -> Option<(Option<i32>, bool)> {
+        self.exited.lock_recover().iter().rev().find(|e| e.id == id).map(|e| (e.code, e.finished))
     }
 
     fn worktree_busy(&self, path: &str) -> bool {
@@ -574,13 +632,20 @@ fn watch_exit(reg: &Arc<Registry>, id: u32, s: Arc<Session>) {
         }
         reg.hints.clear(id);
         reg.awaits.clear(id);
-        // a session that ended (killed, `exit`, finished) is not brought back by a restart: its spec leaves sessions.json
-        // now. A daemon shutdown keeps them on purpose (`closing`): those are restored on the next start.
+        // a session that ended (killed, `exit`, finished) is not brought back by a restart, and leaves the registry
+        // (`retire`: list, `ls`, sessions.json, `session.exited`). A daemon shutdown keeps them on purpose (`closing`):
+        // those are restored on the next start.
         if !reg.closing.load(Ordering::SeqCst) {
-            let gone = reg.specs.lock_recover().remove(&id);
-            if let Some(spec) = gone {
-                reg.drop_sid_of(&spec);
-                reg.persist();
+            if reg.bus.is_reaped(id) {
+                // an ephemeral worker or lead: its reaper reports to the parent first and retires it right after
+                let gone = reg.specs.lock_recover().remove(&id);
+                if let Some(spec) = gone {
+                    reg.drop_sid_of(&spec);
+                    reg.persist();
+                }
+            } else {
+                // killed or removed meanwhile: gone from the registry already, nothing to announce
+                reg.retire(id, s.try_wait());
             }
         }
         reg.pulse.bump();
@@ -950,10 +1015,8 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
             crate::msgbus::deliver(parent.1.clone(), data);
         }
         s.kill();
-        reg.forget_session(id);
-        reg.persist();
-        reg.pulse.bump();
-        reg.janitor.bump();
+        // the report went to the parent above; now the session leaves the registry (and the watchers hear it)
+        reg.retire(id, code);
     });
 }
 

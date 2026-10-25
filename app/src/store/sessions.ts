@@ -1,13 +1,14 @@
 import { createMemo, createRoot, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { coded } from "../msg";
-import { DispatchMeta, SessionInfo, callBg, flowTasks, listSessions, onDaemonEvent } from "../api";
+import { DispatchMeta, SessionExit, SessionInfo, callBg, flowTasks, listSessions, onDaemonEvent } from "../api";
 import { errorText } from "../appError";
 import { pushNotification } from "../notifications";
 import { norm } from "../paths";
 import { readString, writeString } from "../persist";
 import { clearError, setError } from "./notify";
 import { pruneTabState } from "./tabs";
+import { toast } from "../toasts";
 import { guarded, keepSame, setSplitSession, showView } from "./ui";
 import { setChanges } from "./git";
 import { L } from "../strings.logic";
@@ -162,11 +163,34 @@ const sessionSig = (s: SessionInfo) => ({
   idle_ms: s.idle_ms === undefined ? undefined : [s.idle_ms < WORKING_MS, Math.floor(s.idle_ms / 60000)],
 });
 
+/** Terminals that ended with an error. The daemon drops an ended session from `session.list` at once (`session.exited`),
+ *  but the tab stays until the user closes it, so the error output can be read. Local to the app: never in `ls` or sessions.json. */
+const kept = new Map<number, SessionInfo>();
+/** the user closed the tab of an ended terminal (or the session is gone for good) */
+export const dismissExited = (id: number) => {
+  if (kept.delete(id)) setSessions((cur) => cur.filter((s) => s.id !== id));
+};
+
+/** The daemon says a session's program ended by itself and it already left the list. Same notifications as when the poll
+ *  used to see it stop; a non-zero code is shown, and a failed terminal keeps its tab. */
+export const handleSessionExited = ({ id, code }: SessionExit) => {
+  const prev = sessions().find((s) => s.id === id);
+  if (!prev || kept.has(id)) return;
+  const gone: SessionInfo = { ...prev, running: false, waiting: false, wait: null, stalled: false, stall: null };
+  trackAgents(sessions().map((s) => (s.id === id ? gone : s)));
+  if (code != null && code !== 0) {
+    toast({ text: L.notify.exitCode(prev.label ?? L.session(id), code), kind: "error", key: `exit:${id}` });
+    if (prev.meta?.kind !== "agent") kept.set(id, gone);
+  }
+  void refreshSessions();
+};
+
 const POLL_SESSIONS = "poll:sessions";
 const pollSessions = async () => {
   void refreshFlows();
   try {
-    const list = await listSessions();
+    const list = [...(await listSessions())];
+    for (const [id, s] of kept) if (!list.some((x) => x.id === id)) list.push(s);
     trackAgents(list);
     pruneTabState(list);
     // a worktree on screen is being looked at: a flag left from earlier (or set while the window was hidden) is stale

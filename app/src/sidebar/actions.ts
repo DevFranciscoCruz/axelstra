@@ -9,6 +9,7 @@ import { needsTypedName, removeRisks } from "../removeRisk";
 import { P } from "../strings.panels";
 import { S } from "../strings";
 import {
+  dismissExited,
   norm,
   refreshProjects,
   refreshSessions,
@@ -48,6 +49,7 @@ export function createSidebarActions() {
     for (const s of sessionsOf(path)) {
       if (s.running) await killSession(s.id);
       await removeSession(s.id);
+      dismissExited(s.id);
     }
   };
 

@@ -6,7 +6,7 @@ import { SessionInfo, SessionRes, killSession, removeSession, sessionResources, 
 import { ask } from "./Confirm";
 import { Modal } from "./Modal";
 import { Badge, Button, Input } from "./ui";
-import { openSession, refreshSessions, sessionState, sessions, setShowOrchestra } from "./store";
+import { dismissExited, openSession, refreshSessions, sessionState, sessions, setShowOrchestra } from "./store";
 import { fmtFixed } from "./i18n";
 
 const baseName = (p?: string) => (p ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
@@ -66,6 +66,7 @@ export function Orchestra() {
     if (!(await ask(P.orchestra.stopAsk(s.label ?? P.orchestra.session(s.id)), { title: P.orchestra.stopTitle, kind: "warning", okLabel: P.orchestra.stop, cancelLabel: P.orchestra.cancel }))) return;
     if (s.running) await killSession(s.id).catch(() => 0);
     await removeSession(s.id).catch(() => 0);
+    dismissExited(s.id);
     await refreshSessions();
   };
   const applyMax = async () => {

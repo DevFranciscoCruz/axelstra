@@ -204,7 +204,11 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
                 let v = c.call("session.list", json!({}))?;
                 match v.as_array().and_then(|a| a.iter().find(|s| s["id"].as_u64() == Some(id as u64))) {
                     None => {
-                        println!("gone");
+                        // a session that ended on its own left the list, but the daemon still knows how it ended
+                        match c.call("session.status", json!({"id": id})) {
+                            Ok(st) if st["gone"] == json!(true) => println!("exited {}", st["code"]),
+                            _ => println!("gone"),
+                        }
                         return Ok(());
                     }
                     Some(s) if s["running"] != json!(true) => {

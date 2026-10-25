@@ -162,6 +162,7 @@ export const enL: Widen<typeof ptL> = {
       body: (who: string, wt: string) =>
         `${who} stopped in worktree "${wt}" without finishing. Open it to see what happened.`,
     },
+    exitCode: (who: string, code: number) => `${who} exited with code ${code}.`,
     ship: {
       merged: (pr: string, wt: string) => `Merged: ${pr} (${wt})`,
       ciFail: (pr: string, wt: string) => `CI failing: ${pr} (${wt})`,

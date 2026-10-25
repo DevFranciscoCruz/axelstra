@@ -266,6 +266,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({}))
         }
         "session.status" => {
+            // one that ended on its own already left the registry: its code is still answered (`gone`)
+            if let Some((code, finished)) = sid().ok().filter(|id| reg.get(*id).is_none()).and_then(|id| reg.exited_of(id)) {
+                return Ok(json!({"running": false, "code": code, "gone": true, "finished": finished}));
+            }
             let code = session()?.try_wait();
             Ok(json!({"running": code.is_none(), "code": code}))
         }

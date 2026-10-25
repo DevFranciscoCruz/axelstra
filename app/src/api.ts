@@ -355,7 +355,7 @@ let handlers: WatchHandlers | null = null;
 let lastWorktree: string | null = null;
 let wanted = false;
 let watchReady: Promise<void> | null = null;
-let channel: Channel<{ event?: string; worktree?: string }> | null = null;
+let channel: Channel<{ event?: string; worktree?: string; id?: number; code?: number | null }> | null = null;
 let unlisteners: Promise<() => void>[] = [];
 
 /** Events the daemon pushes on the watch stream besides the file, session and project ones: the app takes what changed
@@ -369,6 +369,14 @@ export const onDaemonEvent = (name: DaemonEvent, fn: () => void): (() => void) =
   set.add(fn);
   return () => void set.delete(fn);
 };
+/** A session whose program ended on its own: the daemon already dropped it from `session.list` (`session.exited`). */
+export type SessionExit = { id: number; code: number | null };
+const exitSubs = new Set<(e: SessionExit) => void>();
+/** Runs `fn` for each session that ends by itself; returns the unsubscribe. */
+export const onSessionExited = (fn: (e: SessionExit) => void): (() => void) => {
+  exitSubs.add(fn);
+  return () => void exitSubs.delete(fn);
+};
 const fire = (name: string) => eventSubs.get(name)?.forEach((f) => f());
 
 /** Drops the current Channel: its late messages go nowhere. (Tauri has no close for a Channel; the host replaces its end on the next watch_start.) */
@@ -379,7 +387,7 @@ const dropChannel = () => {
 };
 const startWatch = () => {
   dropChannel();
-  const ch = new Channel<{ event?: string; worktree?: string }>();
+  const ch = new Channel<{ event?: string; worktree?: string; id?: number; code?: number | null }>();
   channel = ch;
   // the handlers are read when a message arrives, so the newest ones from watchWorktree win
   ch.onmessage = (m) => {
@@ -387,6 +395,7 @@ const startWatch = () => {
     if (m?.event === "fs.changed" && m.worktree) handlers.onChanged(m.worktree);
     else if (m?.event === "session.changed") handlers.onSessions?.();
     else if (m?.event === "projects.changed") handlers.onProjects?.();
+    else if (m?.event === "session.exited" && typeof m.id === "number") exitSubs.forEach((f) => f({ id: m.id!, code: m.code ?? null }));
     else if (m?.event) fire(m.event);
   };
   return tauriInvoke<void>("watch_start", { onEvent: ch });

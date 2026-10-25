@@ -81,6 +81,22 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
 - A lead started by `axelstra dispatch new/send` is ephemeral: when it calls `axelstra done` its session closes (a
   reaper in mode `exit` with `lead: true`, so it does not count against the worker limit) and the report goes to main
   and to the task file. Main only reads the report.
+- **A session that ends on its own leaves the registry** (`Registry::retire`, called by `watch_exit`, and by the reaper
+  of an ephemeral worker or lead after it reported to its parent). By event, no polling: it drops the row from
+  `session.list`/`axelstra ls`, its spec from `sessions.json` (and its `sid/` and scrollback files), its bus state, then
+  broadcasts `session.exited {id, code}` and `dispatch.changed` on the watch stream and bumps the session monitor and
+  the janitor (`watch_exit` keeps doing the worktree activity note and the janitor kick). Only the caller that really
+  removed the session announces, so a `session.kill`/`session.remove`/done-closer racing the exit says nothing (those
+  already forget it themselves); a daemon shutdown (`closing`) retires nothing, the sessions stay saved for the restart.
+  A `done` report is not lost: it is written to the parent's inbox and the task file when `done` is called, long
+  before the exit; an ephemeral session is retired only after its reaper sent the report. `session.status` still
+  answers for the last 256 retired sessions (`Registry::exited`, a leaf lock): `{running: false, code, gone: true,
+  finished}`, so `axelstra wait`, flows (`orchcmd`) and the orchestrator runner get the exit code (a vanished id that is
+  not remembered is `gone`/`session closed` as before). No PROTO bump: the app only reads an additive event; an old
+  daemon keeps the old behaviour (the row stays with `running: false`). The app (`handleSessionExited` in
+  `store/sessions.ts`, registered by `useBootstrap`) runs the usual done/stopped notifications on the last list it had,
+  shows a non-zero code as an error toast (`L.notify.exitCode`) and keeps the tab of a failed terminal (not agents) as a
+  local row until the user closes it (`dismissExited`): that row is never in `ls` or `sessions.json`.
 - The lead is a dispatcher, not an implementer: its prompt (`FOOTER` in `crates/cli/src/dispatch.rs`) tells it to plan
   the request into subtasks, start workers in its own worktree (`axelstra agent . --report-to $AXELSTRA_SESSION`, they
   show as `Tarefa N` under `main`), not edit code or run heavy builds itself (only integrate commits and run the final

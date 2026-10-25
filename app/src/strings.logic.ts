@@ -170,6 +170,7 @@ export const ptL = {
       body: (who: string, wt: string) =>
         `${who} ficou parado na worktree "${wt}" sem terminar. Abre para ver o que aconteceu.`,
     },
+    exitCode: (who: string, code: number) => `${who} terminou com o código de saída ${code}.`,
     ship: {
       merged: (pr: string, wt: string) => `Merge feito: ${pr} (${wt})`,
       ciFail: (pr: string, wt: string) => `CI a falhar: ${pr} (${wt})`,

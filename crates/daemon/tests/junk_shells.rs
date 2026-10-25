@@ -1,10 +1,11 @@
 //! Bare shells (no cwd, no meta) are never saved or restored; a closed session leaves `sessions.json` and `ls` at once;
 //! a start prunes the legacy junk after copying the file to `backups/`.
 mod common;
-use axelstra_daemon::client::Client;
+use axelstra_daemon::client::{Client, Frame};
 use axelstra_daemon::server;
 use serde_json::{json, Value};
 use std::path::Path;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 fn start(root: &Path, tag: &str) -> Client {
@@ -94,6 +95,60 @@ fn a_session_that_exits_by_itself_leaves_sessions_json() {
     let (prog, args): (&str, Value) = if cfg!(windows) { ("cmd", json!(["/c", "exit"])) } else { ("sh", json!(["-c", "exit 0"])) };
     c.call("session.spawn", json!({"program": prog, "args": args, "cwd": wt.to_string_lossy(), "meta": {"kind": "terminal"}})).unwrap();
     assert!(until(|| saved(&root).is_empty()), "an exited session must leave sessions.json");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_session_that_exits_by_itself_leaves_the_list_announced_with_its_code() {
+    let root = temp("announce");
+    let wt = root.join("wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    let pipe = format!("{}-announce-{}", common::base_pipe(), std::process::id());
+    let token = "c".repeat(32);
+    let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
+    std::thread::spawn(move || {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(server::serve_with_store(p, t, s))
+            .unwrap();
+    });
+    common::wait_ready(&pipe, &token);
+    let mut c = Client::connect(&pipe, &token).unwrap();
+    // a listening connection: `watch.unsubscribe` with no worktree still turns on the session events
+    let mut w = Client::connect(&pipe, &token).unwrap();
+    w.call("watch.unsubscribe", json!({})).unwrap();
+    let (tx, rx) = mpsc::channel::<Value>();
+    std::thread::spawn(move || {
+        while let Ok(f) = w.read() {
+            if let Frame::Event(e) = f {
+                let _ = tx.send(e);
+            }
+        }
+    });
+    let (prog, args): (&str, Value) = if cfg!(windows) { ("cmd", json!(["/c", "exit 3"])) } else { ("sh", json!(["-c", "exit 3"])) };
+    let id = c
+        .call("session.spawn", json!({"program": prog, "args": args, "cwd": wt.to_string_lossy(), "meta": {"kind": "terminal"}}))
+        .unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    let end = Instant::now() + Duration::from_secs(10);
+    let ev = loop {
+        let left = end.saturating_duration_since(Instant::now());
+        let e = rx.recv_timeout(left).expect("no session.exited after the exit");
+        if e["event"] == "session.exited" {
+            break e;
+        }
+    };
+    assert_eq!((ev["id"].as_u64(), ev["code"].as_i64()), (Some(id), Some(3)));
+    let ids: Vec<u64> = c.call("session.list", json!({})).unwrap().as_array().unwrap().iter().filter_map(|s| s["id"].as_u64()).collect();
+    assert!(!ids.contains(&id), "an exited session must leave the list");
+    assert!(saved(&root).is_empty());
+    // the code stays answerable for `axelstra wait` and flows
+    let st = c.call("session.status", json!({"id": id})).unwrap();
+    assert_eq!((st["running"].as_bool(), st["code"].as_i64(), st["gone"].as_bool()), (Some(false), Some(3), Some(true)));
     let _ = std::fs::remove_dir_all(&root);
 }
 

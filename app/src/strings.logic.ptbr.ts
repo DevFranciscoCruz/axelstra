@@ -169,6 +169,7 @@ export const ptBRL: Widen<typeof ptL> = {
       body: (who: string, wt: string) =>
         `${who} ficou parado no worktree "${wt}" sem terminar. Abra para ver o que aconteceu.`,
     },
+    exitCode: (who: string, code: number) => `${who} terminou com o código de saída ${code}.`,
     ship: {
       merged: (pr: string, wt: string) => `Merge feito: ${pr} (${wt})`,
       ciFail: (pr: string, wt: string) => `CI falhando: ${pr} (${wt})`,
