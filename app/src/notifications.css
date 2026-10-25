@@ -14,7 +14,7 @@
 .notif-kind.waiting, .notif-kind.budget { color: var(--warn); }
 .notif-text { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .notif-meta { font-size: var(--fs-sm); color: var(--muted); }
-.statusbar .notif-pop { top: auto; bottom: calc(100% + 6px); }
+.statusbar .notif-pop { top: auto; bottom: calc(100% + 6px); left: auto; right: 0; }
 .notif-head .link { background: transparent; border: 1px solid var(--line-ctl); color: var(--text); border-radius: var(--r-md); padding: 3px 10px; font-size: var(--fs-md); cursor: pointer; }
 .notif-head .link:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .notif-head .link:disabled { opacity: .45; cursor: default; }
