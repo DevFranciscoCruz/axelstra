@@ -100,6 +100,14 @@ describe("restoreSessions", () => {
     ]);
   });
 
+  it("drops bare shells (no cwd, no meta) without starting or counting them", async () => {
+    pending = [{ program: "cmd", args: ["/q"] }, { program: "powershell" }, { program: "pwsh.exe", label: "shell", cwd: "C:/w" }];
+    const r = await restoreSessions();
+    expect(r).toEqual({ restored: 1, skipped: 0, failed: [] });
+    expect(calls.filter((c) => c.method === "session.spawn")).toHaveLength(1);
+    expect(calls.filter((c) => c.method === "session.pending_remove")).toHaveLength(3);
+  });
+
   it("skips blank agents, reports failures, and still removes the failed entry", async () => {
     failSpawnFor = "bad";
     pending = [

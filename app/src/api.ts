@@ -265,6 +265,10 @@ const restartNote = (interrupted: boolean, lost: string[]) => {
 export type RestoreResult = { restored: number; skipped: number; failed: string[] };
 type PendingRec = { program: string; args?: string[]; cwd?: string; label?: string; meta?: SessionMeta; env?: Record<string, string> };
 
+/** A saved shell with no cwd and no worktree/project/key/kind in its meta: nobody opened it on purpose. */
+export const isBareShell = (r: PendingRec): boolean =>
+  !r.cwd && !(r.meta && (r.meta.worktree || r.meta.project || r.meta.key || r.meta.kind));
+
 /** True when the daemon already runs the session this pending entry describes: same agent key, or (no key) same program, cwd and label. */
 const alreadyRunning = async (r: PendingRec): Promise<boolean> => {
   const live = await call<SessionInfo[]>("session.list").catch(() => null);
@@ -290,6 +294,11 @@ const restoreOnce = async (): Promise<RestoreResult> => {
   };
   for (const r of pending) {
     const m = r.meta;
+    // a bare shell (no folder, no meta; an older daemon may still hand them out) is not worth a tab: dropped, not counted
+    if (isBareShell(r)) {
+      await call("session.pending_remove", { rec: r }).catch((e) => console.debug("session.pending_remove", e));
+      continue;
+    }
     try {
       // idempotent: a second restore (another window, a daemon swap mid-run, a lost pending_remove) finds the entry
       // already alive in the daemon and only drops it from the list, instead of starting a twin

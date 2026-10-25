@@ -194,7 +194,13 @@ impl Registry {
         v.extend(ids.iter().filter(|i| self.bus.finished(**i).is_none() && rec_alive(&specs[*i])).map(|i| specs[i].clone()));
         // the bus forgets a `done` with the daemon: the mark in the spec keeps a finished task from coming back
         v.retain(|r| r["meta"]["done"] != true);
-        let _ = write_json(&self.saved, &v);
+        // a bare shell (no folder, no meta) is not kept; one conversation (same key) is saved once
+        v.retain(|r| !rec_junk(r));
+        let mut keys = std::collections::HashSet::new();
+        v.retain(|r| r["meta"]["key"].as_str().is_none_or(|k| keys.insert(k.to_string())));
+        if !real_dir_under_test(&self.saved) {
+            let _ = write_json(&self.saved, &v);
+        }
     }
 
     /// Marks (or unmarks, when new work reaches it) the saved spec of `id` as finished, so a restart does not bring a
@@ -568,6 +574,15 @@ fn watch_exit(reg: &Arc<Registry>, id: u32, s: Arc<Session>) {
         }
         reg.hints.clear(id);
         reg.awaits.clear(id);
+        // a session that ended (killed, `exit`, finished) is not brought back by a restart: its spec leaves sessions.json
+        // now. A daemon shutdown keeps them on purpose (`closing`): those are restored on the next start.
+        if !reg.closing.load(Ordering::SeqCst) {
+            let gone = reg.specs.lock_recover().remove(&id);
+            if let Some(spec) = gone {
+                reg.drop_sid_of(&spec);
+                reg.persist();
+            }
+        }
         reg.pulse.bump();
         reg.janitor.bump();
     });
@@ -643,7 +658,15 @@ fn rec_alive(rec: &Value) -> bool {
 /// One-off clean-up at start: sessions saved for worktrees that no longer exist are dropped, so a restart does not
 /// try to bring back dozens of dead agents. The file as it was is copied to `backups/` first.
 fn prune_dead_pending(saved: &std::path::Path, pending: &mut Vec<Value>) {
-    if pending.iter().all(rec_alive) {
+    if real_dir_under_test(saved) {
+        return;
+    }
+    // dead worktrees, shells that carry nothing worth bringing back, and a second entry of one conversation (same key)
+    let keep = |r: &Value, keys: &mut std::collections::HashSet<String>| {
+        rec_alive(r) && !rec_junk(r) && r["meta"]["key"].as_str().is_none_or(|k| keys.insert(k.to_string()))
+    };
+    let mut keys = std::collections::HashSet::new();
+    if pending.iter().all(|r| keep(r, &mut keys)) {
         return;
     }
     if let (Some(dir), Ok(ts)) = (saved.parent(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)) {
@@ -652,8 +675,23 @@ fn prune_dead_pending(saved: &std::path::Path, pending: &mut Vec<Value>) {
             let _ = std::fs::copy(saved, backups.join(format!("sessions-before-prune-{}.json", ts.as_secs())));
         }
     }
-    pending.retain(rec_alive);
+    let mut keys = std::collections::HashSet::new();
+    pending.retain(|r| keep(r, &mut keys));
     let _ = write_json(saved, &*pending);
+}
+
+/// A saved shell with no folder and nothing in its meta (no project, worktree, kind or key): nobody opened it on purpose
+/// in a worktree, so restoring it only piles up bare `cmd`/`powershell` windows on every start. Terminals the user opens
+/// and agents always carry a cwd or a meta.
+fn rec_junk(rec: &Value) -> bool {
+    let has = |v: &Value| v.as_str().is_some_and(|s| !s.is_empty());
+    let meta = &rec["meta"];
+    !has(&rec["cwd"]) && !["worktree", "project", "key", "kind"].iter().any(|k| has(&meta[*k]))
+}
+
+/// Under test, the real data dir's files are never written (the same rule `serve_with_store` applies to the daemon).
+fn real_dir_under_test(saved: &std::path::Path) -> bool {
+    saved.parent().is_some_and(|d| crate::proto::refuse_real_when_testing("", d).is_err())
 }
 
 fn within(path: &str, root: &str) -> bool {

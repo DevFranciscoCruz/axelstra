@@ -328,7 +328,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let mut v: Vec<Value> = reg.pending.lock_recover().clone();
             let before = v.len();
             // a task that reported `done` before the restart is not brought back either
-            v.retain(|r| rec_alive(r) && r["meta"]["done"] != true);
+            // a bare shell (no folder, no meta) is junk an older run saved: never handed out
+            v.retain(|r| rec_alive(r) && !rec_junk(r) && r["meta"]["done"] != true);
             if v.len() != before {
                 *reg.pending.lock_recover() = v.clone();
                 reg.persist();
@@ -377,7 +378,13 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({}))
         }
         "session.kill" => {
-            session()?.kill();
+            let s = session()?;
+            let id = sid()?;
+            s.kill();
+            // a killed session leaves the list and sessions.json right away (the exit watcher only ends its stream)
+            reg.forget_session(id);
+            reg.persist();
+            reg.pulse.bump();
             Ok(json!({}))
         }
         // the last lines as the terminal shows them (replayed through an emulator), for `axelstra read` and flow reports
