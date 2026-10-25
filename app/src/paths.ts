@@ -1,5 +1,10 @@
 /** Paths come back with either slash style; compare them in one normal form. The one `norm` for the whole app. */
-export const norm = (p?: string | null) => (p ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+export const norm = (p?: string | null) =>
+  (p ?? "")
+    .replace(/^\\\\\?\\/, "") // the Windows verbatim prefix, which the daemon drops too
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "")
+    .toLowerCase();
 
 /** last segment of a path with either slash style; trailing slashes ignored ("C:\a\b\\" -> "b") */
 export const basename = (p: string | null | undefined): string =>

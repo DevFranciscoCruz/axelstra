@@ -1,4 +1,5 @@
 import type { SessionInfo } from "./api";
+import { norm } from "./paths";
 
 /** The lead of a worktree is its first agent ("main"): it owns the worktree's theme and the tasks started there report to it. */
 export const isLead = (s: Pick<SessionInfo, "meta">) => s.meta?.lead === true;
@@ -12,6 +13,11 @@ export const leadFirst = <T extends Pick<SessionInfo, "meta">>(agents: T[]): T[]
 /** A worktree (never the project's main checkout) with no running lead offers to start one. */
 export const lacksLead = (agents: Pick<SessionInfo, "meta" | "running">[], isMain: boolean) =>
   !isMain && !agents.some((a) => a.running && isLead(a));
+
+/** The running lead of the worktree at `path` in a full session list (any state: idle, working, waiting), or undefined.
+ *  Paths compare in their normal form, so slash style, case and a trailing slash do not hide a lead. */
+export const leadOf = (all: SessionInfo[], path: string) =>
+  all.find((s) => s.running && s.meta?.kind === "agent" && isLead(s) && norm(s.meta?.worktree) === norm(path));
 
 /** What the state dot of a worktree row reads from its agents. With a running lead the lead speaks for the worktree
  *  (working / idle), and a task only adds "waiting" because someone has to answer it; without a lead every agent counts. */

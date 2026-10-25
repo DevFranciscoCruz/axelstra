@@ -106,6 +106,14 @@ export const createWriteBatcher = (
   };
 };
 
+/** The daemon has no such session (the host passes its English text on, or the message code): it ended and left the registry. */
+export const isNoSuchSession = (e: unknown): boolean => {
+  if (e && typeof e === "object" && (e as { code?: unknown }).code === "session.not_found") return true;
+  const text =
+    typeof e === "string" ? e : e instanceof Error ? e.message : ((e as { message?: unknown } | null)?.message ?? "");
+  return typeof text === "string" && /no such session/i.test(text);
+};
+
 /**
  * Runs `attempt` and, when it fails, once more after `wait` ms. The returned promise covers both tries, so whoever
  * awaits it knows the final outcome: `true` attached, `false` gave up (`onFail` got the last error).
@@ -113,18 +121,29 @@ export const createWriteBatcher = (
 export const attachWithRetry = async <T>(
   attempt: () => Promise<T>,
   wait: number,
-  opts: { sleep?: (ms: number) => Promise<void>; gone?: () => boolean; onFail?: (e: unknown) => void } = {},
+  opts: {
+    sleep?: (ms: number) => Promise<void>;
+    gone?: () => boolean;
+    onFail?: (e: unknown) => void;
+    /** the failure says the session no longer exists: no retry and no `onFail`, `onEnded` runs instead */
+    onEnded?: () => void;
+  } = {},
 ): Promise<{ ok: true; value: T } | { ok: false }> => {
   const sleep = opts.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
   try {
     return { ok: true, value: await attempt() };
-  } catch {
+  } catch (first) {
+    if (opts.onEnded && isNoSuchSession(first)) {
+      opts.onEnded();
+      return { ok: false };
+    }
     await sleep(wait);
     if (opts.gone?.()) return { ok: false };
     try {
       return { ok: true, value: await attempt() };
     } catch (e) {
-      opts.onFail?.(e);
+      if (opts.onEnded && isNoSuchSession(e)) opts.onEnded();
+      else opts.onFail?.(e);
       return { ok: false };
     }
   }

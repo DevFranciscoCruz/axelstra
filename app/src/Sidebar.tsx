@@ -1,7 +1,8 @@
 import { createPoller } from "./poller";
 import { askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
-import { getSettings, detectPackageManagers, createWorktree, launchDefaultAgent, setProjectSetup, dispatchOverlapFiles, worktreeRename } from "./api";
+import { getSettings, detectPackageManagers, createWorktree, launchDefaultAgent, listSessions, setProjectSetup, dispatchOverlapFiles, worktreeRename } from "./api";
+import { leadOf } from "./leadRole";
 import { groupRunning, isFinished, layout, wtKey } from "./wtGroups";
 import { ProjectHead, SetupEditor } from "./sidebar/ProjectHead";
 import { CreateWorktree } from "./sidebar/CreateWorktree";
@@ -151,6 +152,13 @@ export function Sidebar() {
     startingLead.add(norm(path));
     const stamp = navStamp();
     try {
+      // the sidebar may be showing an old list: ask the daemon, and never start a second lead beside a running one
+      const live = leadOf(await listSessions(), path);
+      if (live) {
+        await refreshSessions();
+        openIfStill(stamp, path, live.id);
+        return;
+      }
       const agent = projectPrefsOf(projectId).agent;
       const key = agent && AGENTS[agent] ? agent : canonAgent(savedAgent() === "none" ? "claude" : savedAgent());
       const id = await launchDefaultAgent(projectId, path, key, AGENTS[key], undefined, undefined, projectTerse(projectId));

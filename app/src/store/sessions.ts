@@ -7,14 +7,17 @@ import { pushNotification } from "../notifications";
 import { norm } from "../paths";
 import { readString, writeString } from "../persist";
 import { clearError, setError } from "./notify";
-import { pruneTabState } from "./tabs";
+import { pruneTabState, sortedTabs } from "./tabs";
 import { toast } from "../toasts";
-import { guarded, keepSame, setSplitSession, showView } from "./ui";
+import { guarded, keepSame, setSplitSession, showView, splitSession } from "./ui";
 import { setChanges } from "./git";
 import { L } from "../strings.logic";
 import { decideWait } from "../waitNotice";
 
 export const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
+
+/** false until the first `session.list` answered: an empty list before that says nothing about leads */
+export const [sessionsLoaded, setSessionsLoaded] = createSignal(false);
 
 export const [activeSession, setActiveSession] = createSignal<number | null>(null);
 
@@ -166,13 +169,76 @@ const sessionSig = (s: SessionInfo) => ({
 /** Terminals that ended with an error. The daemon drops an ended session from `session.list` at once (`session.exited`),
  *  but the tab stays until the user closes it, so the error output can be read. Local to the app: never in `ls` or sessions.json. */
 const kept = new Map<number, SessionInfo>();
+/** exit code of each kept terminal, for its screen (the daemon no longer knows the session) */
+const exitCodes = new Map<number, number>();
+export const exitCodeOf = (id: number): number | undefined => exitCodes.get(id);
+
+/** Sessions the daemon said ended, and when. A `session.list` that was already in flight must not bring their rows back;
+ *  the entry expires because ids can come back after a daemon restart. */
+const exited = new Map<number, number>();
+const EXITED_TTL_MS = 10000;
+const recentlyExited = (id: number) => {
+  const at = exited.get(id);
+  if (at === undefined) return false;
+  if (Date.now() - at < EXITED_TTL_MS) return true;
+  exited.delete(id);
+  return false;
+};
+
+/** Where focus goes when the active tab goes away: the next tab of its worktree, else the one before; null when none is left. */
+export const neighbourOf = (tabs: { id: number }[], gone: number, stays: (id: number) => boolean): number | null => {
+  const at = tabs.findIndex((t) => t.id === gone);
+  if (at < 0) return null;
+  const after = tabs.slice(at + 1).find((t) => stays(t.id));
+  const before = tabs
+    .slice(0, at)
+    .reverse()
+    .find((t) => stays(t.id));
+  return (after ?? before)?.id ?? null;
+};
+
+/** The tab the user is on is leaving the list: focus moves to a neighbour. A tab that is not the active one never moves focus. */
+const refocusAfterDrop = (prev: SessionInfo[], next: SessionInfo[]) => {
+  const a = activeSession();
+  if (a !== null && !next.some((s) => s.id === a)) {
+    const was = prev.find((s) => s.id === a);
+    if (was) {
+      const k = norm(was.meta?.worktree);
+      const here = sortedTabs(prev.filter((s) => norm(s.meta?.worktree) === k));
+      setActiveSession(neighbourOf(here, a, (id) => next.some((s) => s.id === id)));
+    }
+  }
+  const sp = splitSession();
+  if (sp !== null && !next.some((s) => s.id === sp)) setSplitSession(null);
+};
+
+/** takes the rows of these sessions off the list now (their tabs close), moving focus only if the active one is among them */
+const dropSessions = (ids: number[]) => {
+  const prev = sessions();
+  const next = prev.filter((s) => !ids.includes(s.id));
+  if (next.length === prev.length) return;
+  refocusAfterDrop(prev, next);
+  setSessions(next);
+};
+
 /** the user closed the tab of an ended terminal (or the session is gone for good) */
 export const dismissExited = (id: number) => {
-  if (kept.delete(id)) setSessions((cur) => cur.filter((s) => s.id !== id));
+  exitCodes.delete(id);
+  if (kept.delete(id)) dropSessions([id]);
+};
+
+/** The daemon does not know this session any more (a terminal got "no such session"): its tab goes, unless it is a failed
+ *  terminal the app keeps on purpose. */
+export const sessionGone = (id: number) => {
+  if (kept.has(id)) return;
+  exited.set(id, Date.now());
+  dropSessions([id]);
+  void refreshSessions();
 };
 
 /** The daemon says a session's program ended by itself and it already left the list. Same notifications as when the poll
- *  used to see it stop; a non-zero code is shown, and a failed terminal keeps its tab. */
+ *  used to see it stop; a non-zero code is shown. The tab of an agent or of a terminal that ended well closes at once;
+ *  only a failed terminal keeps it (and its code) until the user closes it. */
 export const handleSessionExited = ({ id, code }: SessionExit) => {
   const prev = sessions().find((s) => s.id === id);
   if (!prev || kept.has(id)) return;
@@ -180,7 +246,14 @@ export const handleSessionExited = ({ id, code }: SessionExit) => {
   trackAgents(sessions().map((s) => (s.id === id ? gone : s)));
   if (code != null && code !== 0) {
     toast({ text: L.notify.exitCode(prev.label ?? L.session(id), code), kind: "error", key: `exit:${id}` });
-    if (prev.meta?.kind !== "agent") kept.set(id, gone);
+    if (prev.meta?.kind !== "agent") {
+      kept.set(id, gone);
+      exitCodes.set(id, code);
+    }
+  }
+  if (!kept.has(id)) {
+    exited.set(id, Date.now());
+    dropSessions([id]);
   }
   void refreshSessions();
 };
@@ -189,8 +262,14 @@ const POLL_SESSIONS = "poll:sessions";
 const pollSessions = async () => {
   void refreshFlows();
   try {
-    const list = [...(await listSessions())];
-    for (const [id, s] of kept) if (!list.some((x) => x.id === id)) list.push(s);
+    const list = (await listSessions()).filter((s) => !recentlyExited(s.id));
+    // the daemon lists an id again (a restart handed it to a new session): the kept row is not that session
+    for (const id of [...kept.keys()])
+      if (list.some((x) => x.id === id)) {
+        kept.delete(id);
+        exitCodes.delete(id);
+      }
+    list.push(...kept.values());
     trackAgents(list);
     pruneTabState(list);
     // a worktree on screen is being looked at: a flag left from earlier (or set while the window was hidden) is stale
@@ -201,7 +280,10 @@ const pollSessions = async () => {
         n.delete(norm(cur));
         return n;
       });
+    // an id that is no longer listed has no tab, no focus and no split pane (also right after a restore or a daemon restart)
+    refocusAfterDrop(sessions(), list);
     setSessions((prev) => keepSame(prev, list, (s) => s.id, sessionSig));
+    setSessionsLoaded(true);
     clearError(POLL_SESSIONS);
   } catch (e) {
     setError(errorText(e), POLL_SESSIONS);

@@ -241,6 +241,7 @@ export const enS: Widen<typeof ptS> = {
 
   // terminal
   attachFailed: "could not attach to this session: ",
+  sessionEnded: (code: number) => `the session exited with code ${code}`,
   findPlaceholder: "Search in terminal",
   findPrev: "Previous",
   findNext: "Next",

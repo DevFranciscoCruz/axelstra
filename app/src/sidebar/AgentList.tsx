@@ -18,6 +18,7 @@ import {
   openSession,
   renameTab,
   selectedWorktree,
+  sessionsLoaded,
   sessionsOf,
   tabLabel,
 } from "../store";
@@ -51,7 +52,7 @@ export function AgentList(props: {
   // the lead first, its tasks after it
   const agents = () => leadFirst(sessionsOf(props.path).filter((x) => x.meta?.kind === "agent"));
   const hasLead = () => agents().some((a) => a.running && isLead(a));
-  const missingLead = () => !!props.onStartLead && lacksLead(agents(), !!props.isMain);
+  const missingLead = () => !!props.onStartLead && sessionsLoaded() && lacksLead(agents(), !!props.isMain);
   const finishRename = (id: number, name: string | null) => {
     if (name !== null) renameTab(id, name);
     setRenaming(null);

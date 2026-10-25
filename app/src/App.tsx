@@ -93,6 +93,8 @@ import {
   openIfStill,
   navStamp,
   dismissExited,
+  exitCodeOf,
+  sessionGone,
   selectedWorktree,
   selectWorktree,
   sessionsOf,
@@ -473,7 +475,13 @@ export function App() {
                 <For each={keptLive()}>
                   {(id) => (
                     <div class="term-slot" classList={{ off: id !== activeSession() }}>
-                      <TerminalView id={id} active={() => id === activeSession()} onExit={() => void refreshSessions()} />
+                      <TerminalView
+                        id={id}
+                        active={() => id === activeSession()}
+                        onExit={() => void refreshSessions()}
+                        onGone={() => sessionGone(id)}
+                        exitCode={() => exitCodeOf(id)}
+                      />
                     </div>
                   )}
                 </For>

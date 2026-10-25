@@ -69,6 +69,108 @@ describe("session.exited", () => {
     expect(toasts.toasts().filter((t) => t.kind === "error")).toHaveLength(1);
   });
 
+  const agent = (id: number, over: Partial<SessionInfo> = {}) =>
+    sess({ id, label: `Tarefa ${id}`, meta: { kind: "agent", worktree: WT }, ...over });
+
+  it("an agent tab closes at once on session.exited, and a late stale list does not bring it back", async () => {
+    const { store } = await load();
+    now.list = [agent(1), agent(2)];
+    await store.refreshSessions();
+    const stale = [agent(1), agent(2)];
+    store.handleSessionExited({ id: 2, code: 0 });
+    expect(store.sessionsOf(WT).map((s) => s.id)).toEqual([1]);
+    now.list = stale; // a poll that was already in flight
+    await store.refreshSessions();
+    expect(store.sessionsOf(WT).map((s) => s.id)).toEqual([1]);
+    expect(store.exitCodeOf(2)).toBeUndefined();
+  });
+
+  it("focus moves to a neighbour only when the active tab closes", async () => {
+    const { store } = await load();
+    now.list = [agent(1), agent(2), agent(3)];
+    await store.refreshSessions();
+    store.setActiveSession(1);
+    store.handleSessionExited({ id: 3, code: 0 }); // not the active one
+    expect(store.activeSession()).toBe(1);
+    store.setActiveSession(2);
+    store.handleSessionExited({ id: 2, code: 0 }); // the active one: its neighbour
+    expect(store.activeSession()).toBe(1);
+    store.handleSessionExited({ id: 1, code: 0 });
+    expect(store.activeSession()).toBeNull();
+  });
+
+  it("an agent that vanished from session.list (no event) closes too and the active tab moves on", async () => {
+    const { store } = await load();
+    now.list = [agent(1), agent(2), agent(3)];
+    await store.refreshSessions();
+    store.setActiveSession(2);
+    store.setSplitSession(3);
+    now.list = [agent(1)];
+    await store.refreshSessions();
+    expect(store.sessionsOf(WT).map((s) => s.id)).toEqual([1]);
+    expect(store.activeSession()).toBe(1);
+    expect(store.splitSession()).toBeNull();
+    // another tab vanishing does not steal focus
+    now.list = [agent(1), agent(4)];
+    await store.refreshSessions();
+    store.setActiveSession(1);
+    now.list = [agent(1)];
+    await store.refreshSessions();
+    expect(store.activeSession()).toBe(1);
+  });
+
+  it("a failed terminal keeps its tab and code; an id the daemon lists again replaces it; sessionGone spares it", async () => {
+    const { store } = await load();
+    now.list = [sess({ id: 5 })];
+    await store.refreshSessions();
+    now.list = [];
+    store.handleSessionExited({ id: 5, code: 2 });
+    expect(store.exitCodeOf(5)).toBe(2);
+    store.sessionGone(5);
+    await store.refreshSessions();
+    expect(store.sessionsOf(WT).map((s) => [s.id, s.running])).toEqual([[5, false]]);
+    // after a daemon restart a new session gets the id
+    now.list = [agent(5)];
+    await store.refreshSessions();
+    expect(store.sessionsOf(WT).map((s) => [s.id, s.running])).toEqual([[5, true]]);
+    expect(store.exitCodeOf(5)).toBeUndefined();
+  });
+
+  it("sessionGone (no such session) closes an agent tab", async () => {
+    const { store } = await load();
+    now.list = [agent(7)];
+    await store.refreshSessions();
+    now.list = [];
+    store.sessionGone(7);
+    expect(store.sessionsOf(WT)).toEqual([]);
+  });
+
+  it("the lead button condition: an idle lead with a working task is a lead, whatever the path spelling", async () => {
+    const { store } = await load();
+    const lead = (path: string) =>
+      sess({ id: 1, label: "main", idle_ms: 600000, meta: { kind: "agent", worktree: path, lead: true } });
+    const task = sess({ id: 2, label: "Tarefa 1", idle_ms: 0, meta: { kind: "agent", worktree: WT } });
+    const { lacksLead } = await import("./leadRole");
+    for (const p of [WT, "C:\\work\\proj-a", "c:/WORK/proj-a/", "\\\\?\\C:\\work\\proj-a"]) {
+      now.list = [lead(p), task];
+      await store.refreshSessions();
+      expect(
+        lacksLead(
+          store.sessionsOf(WT).filter((s) => s.meta?.kind === "agent"),
+          false,
+        ),
+      ).toBe(false);
+    }
+    now.list = [task];
+    await store.refreshSessions();
+    expect(
+      lacksLead(
+        store.sessionsOf(WT).filter((s) => s.meta?.kind === "agent"),
+        false,
+      ),
+    ).toBe(true);
+  });
+
   it("an id the app never showed is ignored", async () => {
     const { store, toasts } = await load();
     now.list = [];

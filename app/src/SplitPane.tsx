@@ -2,7 +2,7 @@ import { Show, createSignal, onCleanup } from "solid-js";
 import { startDrag } from "./dragResize";
 import { Icon } from "./Icon";
 import { splitTo } from "./layout";
-import { refreshSessions, setSplitSession, splitSession } from "./store";
+import { exitCodeOf, refreshSessions, sessionGone, setSplitSession, splitSession } from "./store";
 import { S } from "./strings";
 import { TerminalView } from "./TerminalView";
 import { Button } from "./ui";
@@ -48,7 +48,15 @@ export function SplitPane() {
           <Icon name="x" />
         </Button>
         <Show when={splitSession()} keyed>
-          {(id) => <TerminalView id={id} focus={false} onExit={() => void refreshSessions()} />}
+          {(id) => (
+            <TerminalView
+              id={id}
+              focus={false}
+              onExit={() => void refreshSessions()}
+              onGone={() => sessionGone(id)}
+              exitCode={() => exitCodeOf(id)}
+            />
+          )}
         </Show>
       </div>
     </>

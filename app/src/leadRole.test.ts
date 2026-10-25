@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isLead, lacksLead, leadFirst, worktreeSignals } from "./leadRole";
+import { isLead, lacksLead, leadFirst, leadOf, worktreeSignals } from "./leadRole";
 import { agentRowInfo } from "./agentRow";
 
 const a = (id: number, over: { lead?: boolean; running?: boolean; state?: string; kind?: string } = {}) => ({
@@ -29,6 +29,27 @@ describe("lead of a worktree in the sidebar", () => {
     expect(lacksLead([a(1, { lead: true, running: false })], false)).toBe(true);
     expect(lacksLead([a(1, { lead: true })], false)).toBe(false);
     expect(lacksLead([], true)).toBe(false);
+  });
+  it("finds the running lead of a worktree whatever its state and path spelling", () => {
+    const at = (id: number, wt: string, over: Parameters<typeof a>[1] = {}) => {
+      const s = a(id, over);
+      return { ...s, meta: { ...s.meta, worktree: wt } } as unknown as import("./api").SessionInfo;
+    };
+    const wt = "C:\\Users\\me\\.axelstra-wt\\proj-ci-green-2";
+    // idle lead plus a working task: the lead is there
+    const list = [at(1, wt, { lead: true, state: "idle" }), at(2, wt, { state: "working" })];
+    expect(leadOf(list, wt)?.id).toBe(1);
+    // forward slashes, other case, trailing slash and the verbatim prefix all name the same folder
+    for (const p of [
+      "C:/Users/me/.axelstra-wt/proj-ci-green-2",
+      "c:\\users\\ME\\.axelstra-wt\\proj-ci-green-2\\",
+      "\\\\?\\C:\\Users\\me\\.axelstra-wt\\proj-ci-green-2",
+    ])
+      expect(leadOf(list, p)?.id).toBe(1);
+    expect(leadOf([at(1, wt + "-other", { lead: true })], wt)).toBeUndefined();
+    // an ended lead, a task, or a lead of another worktree does not count
+    expect(leadOf([at(1, wt, { lead: true, running: false }), at(2, wt)], wt)).toBeUndefined();
+    expect(leadOf([at(1, wt, { lead: true, kind: "shell" })], wt)).toBeUndefined();
   });
   it("lets the lead speak for the worktree dot; a waiting task still shows", () => {
     // tasks working, lead idle: the worktree is not "working"

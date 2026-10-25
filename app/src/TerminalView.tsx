@@ -18,7 +18,16 @@ import "./termui.css";
  * One xterm bound to one daemon session. Only the visible terminal is mounted:
  * the daemon keeps the history, so re-attaching replays what was missed.
  */
-export function TerminalView(props: { id: number; focus?: boolean; active?: () => boolean; onExit?: (code: number | null) => void }) {
+export function TerminalView(props: {
+  id: number;
+  focus?: boolean;
+  active?: () => boolean;
+  onExit?: (code: number | null) => void;
+  /** the session no longer exists on the daemon (nothing to show: its tab should go) */
+  onGone?: () => void;
+  /** exit code of an ended terminal the app still shows (failed terminals keep their tab) */
+  exitCode?: () => number | undefined;
+}) {
   let host!: HTMLDivElement;
   const find = useFind();
 
@@ -66,6 +75,12 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
     const detach = () => void invoke("session_detach", { id: props.id, token: token ?? undefined }).catch(() => 0);
     void attachWithRetry(() => invoke<unknown>("session_attach", { id: props.id, onData: channel }), 600, {
       gone: () => gone,
+      // the session ended and left the daemon: a failed terminal says its exit code, anything else just closes
+      onEnded: () => {
+        const code = props.exitCode?.();
+        if (code != null && code !== 0) term.write(`\r\n\x1b[2m[axelstra] ${S.sessionEnded(code)}\x1b[0m\r\n`);
+        else props.onGone?.();
+      },
       onFail: (e) => term.write(`\r\n\x1b[31m[axelstra] ${S.attachFailed}${errorText(e)}\x1b[0m\r\n`),
     }).then((r) => {
       // only a terminal that really attached tells the PTY its size

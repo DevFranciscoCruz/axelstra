@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { attachWithRetry, createSizeSync, createWriteBatcher } from "./termsize";
+import { attachWithRetry, createSizeSync, createWriteBatcher, isNoSuchSession } from "./termsize";
 
 describe("createSizeSync", () => {
   beforeEach(() => vi.useFakeTimers());
@@ -151,5 +151,36 @@ describe("attachWithRetry", () => {
     const attempt = vi.fn().mockRejectedValue(new Error("x"));
     expect(await attachWithRetry(attempt, 600, { sleep, gone: () => true })).toEqual({ ok: false });
     expect(attempt).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("attachWithRetry: a session that no longer exists", () => {
+  it("is not retried and is not an error: onEnded runs", async () => {
+    const sleep = vi.fn(async () => {});
+    const onFail = vi.fn();
+    const onEnded = vi.fn();
+    const attempt = vi.fn(() => Promise.reject("session.subscribe: no such session 7"));
+    expect(await attachWithRetry(attempt, 600, { sleep, onFail, onEnded })).toEqual({ ok: false });
+    expect(attempt).toHaveBeenCalledTimes(1);
+    expect(onEnded).toHaveBeenCalledTimes(1);
+    expect(onFail).not.toHaveBeenCalled();
+  });
+  it("also when it only shows on the second try; other failures still go to onFail", async () => {
+    const sleep = vi.fn(async () => {});
+    const onFail = vi.fn();
+    const onEnded = vi.fn();
+    const calls = [new Error("down"), { code: "session.not_found", message: "x" }];
+    await attachWithRetry(() => Promise.reject(calls.shift()), 600, { sleep, onFail, onEnded });
+    expect(onEnded).toHaveBeenCalledTimes(1);
+    expect(onFail).not.toHaveBeenCalled();
+    await attachWithRetry(() => Promise.reject(new Error("down")), 600, { sleep, onFail, onEnded });
+    expect(onFail).toHaveBeenCalledTimes(1);
+  });
+  it("isNoSuchSession reads strings, errors and coded objects", () => {
+    expect(isNoSuchSession("session.subscribe: no such session 7")).toBe(true);
+    expect(isNoSuchSession(new Error("No such session 3"))).toBe(true);
+    expect(isNoSuchSession({ code: "session.not_found" })).toBe(true);
+    expect(isNoSuchSession(new Error("pipe closed"))).toBe(false);
+    expect(isNoSuchSession(undefined)).toBe(false);
   });
 });

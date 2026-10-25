@@ -237,6 +237,7 @@ export const ptBRS: Widen<typeof ptS> = {
   detached: "(desanexado)",
 
   attachFailed: "não foi possível conectar a esta sessão: ",
+  sessionEnded: (code: number) => `a sessão terminou com o código de saída ${code}`,
   findPlaceholder: "Pesquisar no terminal",
   findPrev: "Anterior",
   findNext: "Próximo",

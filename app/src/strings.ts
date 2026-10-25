@@ -234,6 +234,7 @@ export const ptS = {
 
   // terminal
   attachFailed: "não foi possível ligar a esta sessão: ",
+  sessionEnded: (code: number) => `a sessão terminou com o código de saída ${code}`,
   findPlaceholder: "Procurar no terminal",
   findPrev: "Anterior",
   findNext: "Seguinte",
