@@ -90,20 +90,54 @@ const kill = (pid, tree = false) =>
     stdio: "ignore",
   });
 
-/** The foreground window of the desktop (0 when unknown); a test must never change it. */
-const foreground = () => {
-  const r = spawnSync(
-    "powershell",
-    [
-      "-NoProfile",
-      "-Command",
-      "Add-Type 'using System;using System.Runtime.InteropServices;public class FG{[DllImport(\"user32.dll\")]public static extern IntPtr GetForegroundWindow();}'; [FG]::GetForegroundWindow().ToInt64()",
-    ],
-    { encoding: "utf8", timeout: 20000 },
+/**
+ * Foreground watcher: one long-lived PowerShell that prints a line each time the foreground window changes (and once at
+ * the start): `FG <hwnd> <pid> <exe path>|<command line>`. The runner and other processes may change the foreground
+ * (no interactive desktop, a job window, WebView2 helpers), so a plain before/after comparison is noise; what must never
+ * happen is the app's own window (the app, the daemon, or a WebView2 process started with our debugging port) becoming
+ * the foreground window at any sample.
+ */
+const FG_SCRIPT = `
+Add-Type 'using System;using System.Runtime.InteropServices;public class FG{[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);}'
+$last = -1
+while ($true) {
+  $h = [FG]::GetForegroundWindow().ToInt64()
+  if ($h -ne $last) {
+    $last = $h
+    $p = [uint32]0
+    [void][FG]::GetWindowThreadProcessId([IntPtr]$h, [ref]$p)
+    $c = if ($p -ne 0) { Get-CimInstance Win32_Process -Filter "ProcessId=$p" -ErrorAction SilentlyContinue } else { $null }
+    $line = "FG $h $p $($c.ExecutablePath)|$($c.CommandLine)"
+    [Console]::Out.WriteLine($line.Replace("\`r", ' ').Replace("\`n", ' '))
+    [Console]::Out.Flush()
+  }
+  Start-Sleep -Milliseconds 100
+}
+`;
+const fgSamples = [];
+const fgWatcher = spawn(
+  "powershell",
+  ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(FG_SCRIPT, "utf16le").toString("base64")],
+  { stdio: ["ignore", "pipe", "ignore"] },
+);
+let fgBuf = "";
+fgWatcher.stdout.on("data", (d) => {
+  fgBuf += d;
+  const lines = fgBuf.split(/\r?\n/);
+  fgBuf = lines.pop();
+  for (const l of lines) if (l.startsWith("FG ")) fgSamples.push(l.trim());
+});
+/** True when a sample's foreground window belongs to the app under test. */
+const fgIsApp = (line) => {
+  const rest = line.split(" ").slice(3).join(" ");
+  const [path, cmd = ""] = rest.split("|");
+  const low = path.toLowerCase();
+  return (
+    low === exe.toLowerCase() ||
+    low === cliBin.toLowerCase() ||
+    (/msedgewebview2/i.test(low) && cmd.includes(`--remote-debugging-port=${port}`))
   );
-  return r.stdout.trim();
 };
-const fgBefore = foreground();
 
 let app;
 const problems = [];
@@ -647,11 +681,12 @@ ${dataDirReport()}`);
   console.log("ok  removeproject: no console error, CSP violation or uncaught exception");
   problems.length = 0;
 
-  // the user's foreground window must not have changed because of the test
-  const fgAfter = foreground();
-  if (fgBefore && fgAfter !== fgBefore)
-    throw new Error(`the test changed the foreground window (${fgBefore} -> ${fgAfter}): it stole the focus`);
-  console.log("ok  the foreground window did not change");
+  // the app must never have been the foreground window (whoever else changed it, e.g. the runner, is not our doing)
+  const stolen = fgSamples.filter(fgIsApp);
+  if (stolen.length)
+    throw new Error(`an app window became the foreground window (it stole the focus): ${stolen.join(" ; ")}`);
+  if (fgSamples.length === 0) throw new Error("the foreground watcher produced no sample: the check would be blind");
+  console.log(`ok  no app window was ever the foreground window (${fgSamples.length} foreground samples)`);
   // no white band: #root fills the viewport and the corners paint the theme, not the default white
   const fill = await page.evaluate(
     "(() => { const r = document.getElementById('root').getBoundingClientRect(); return [r.left, r.top, r.width - innerWidth, r.height - innerHeight].map(Math.round); })()",
@@ -720,6 +755,7 @@ ${dataDirReport()}`);
   console.error(`FAIL e2e: ${e.stack ?? e}`);
   if (problems.length) console.error(`browser problems so far:\n  ${[...new Set(problems)].join("\n  ")}`);
 } finally {
+  fgWatcher.kill();
   if (app) kill(app.pid, true);
   // the daemon is detached from the app: stop the ones started from this build tree only (never the developer's own)
   spawnSync(
