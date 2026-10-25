@@ -77,6 +77,16 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   inside another live `ax/*` branch (or its PR was merged), it has no changes, and no session works in it. A session
   that reported with `done` and is quiet for 10 s is not busy. Removals are queued as events (`janitor.events`) that
   the app shows as a toast and a notification-center entry.
+  Safe by default: automatic removal needs (1) an `auto` mark (`Project.auto`, set by `worktree.create` with `auto: true`,
+  which `axelstra dispatch new` sends) or a branch really integrated with its own commits (`merged_reason`: no own
+  commits, i.e. tip == default tip, never counts as merged), and (2) no session in the worktree for 10 min
+  (`MANUAL_QUIET_SECS`; an `auto` worktree whose agent reported `done` is exempt). A worktree with no `auto` mark
+  (old, hand-made, other projects, `worktree.from_pr`) counts as manual: it leaves only through real integration, and an
+  empty one never leaves by itself (only the user's button). The "empty worktree" rule applies to `auto` only.
+  `projects::migrate_marks` runs once at daemon start, before the janitor: worktrees that exist then with neither mark
+  become `manual`; later ones are marked at creation. A removal that stays pending (folder held) is retried by event:
+  a session exit (`watch_exit`) and `sweep_soon` kick the janitor. Holders we cannot observe get a bounded exponential
+  backoff (`janitor::retry_delay`: 1, 2, 4... up to 30 min), never a fixed timer.
 
 Every method the frontend calls must also be in `ALLOWED_METHODS` in `app/src-tauri/src/main.rs`; a unit test reads
 `app/src` (`call`, `callBg`, `callOr` with a string literal) and fails when the list and the sources drift apart.
