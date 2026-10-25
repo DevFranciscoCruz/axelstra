@@ -373,6 +373,9 @@ mod tests {
     fn sweep_removes_only_merged_idle_agent_worktrees() {
         let root = std::env::temp_dir().join(format!("axl-sweep-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        // git lists canonical paths (no 8.3 names on Windows, no /var -> /private/var on macOS)
+        let root = git::canon(&root).unwrap();
         let repo = root.join("proj");
         std::fs::create_dir_all(&repo).unwrap();
         let g = |dir: &Path, args: &[&str]| assert!(git::run(dir, args).unwrap().ok, "git {args:?}");
@@ -605,14 +608,19 @@ mod tests {
         let mut child = holder(&wt.path);
         let r = projects::worktree_remove_strict(&p, &wt.path);
         if cfg!(windows) {
-            let e = r.unwrap_err();
-            assert_eq!(axelstra_core::msg::find(&e).map(|c| c.code.as_str()), Some("worktree.folder_busy"));
+            let e = r.as_ref().unwrap_err();
+            assert_eq!(axelstra_core::msg::find(e).map(|c| c.code.as_str()), Some("worktree.folder_busy"));
             assert!(Path::new(&wt.path).join(".git").exists());
             assert!(branch_exists(&p, "ax/strict"));
         }
         let _ = child.kill();
         let _ = child.wait();
-        projects::worktree_remove_strict(&p, &wt.path).unwrap();
+        if cfg!(windows) {
+            projects::worktree_remove_strict(&p, &wt.path).unwrap();
+        } else {
+            // an open handle does not hold a folder here: the first call already removed it
+            r.unwrap();
+        }
         assert!(!Path::new(&wt.path).exists());
         assert!(!branch_exists(&p, "ax/strict"));
         git::purge_trash(wt_parent(&wt));

@@ -109,9 +109,9 @@ const launch = (scale) => {
 
 /** Version of the installed WebView2 runtime ("none" when the machine has none: the app then opens no page at all). */
 function webview2Runtime() {
-  const clients = "Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
-  for (const hive of ["HKLM\SOFTWARE\WOW6432Node", "HKLM\SOFTWARE", "HKCU\SOFTWARE"]) {
-    const r = spawnSync("reg", ["query", `${hive}\${clients}`, "/v", "pv"], { encoding: "utf8" });
+  const clients = "Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+  for (const hive of ["HKLM\\SOFTWARE\\WOW6432Node", "HKLM\\SOFTWARE", "HKCU\\SOFTWARE"]) {
+    const r = spawnSync("reg", ["query", `${hive}\\${clients}`, "/v", "pv"], { encoding: "utf8" });
     const m = r.status === 0 && /pv\s+REG_SZ\s+(\S+)/.exec(r.stdout);
     if (m) return m[1];
   }

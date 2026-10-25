@@ -81,6 +81,9 @@ mod tests {
         }
         let root = std::env::temp_dir().join(format!("axl-rebase-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        // git lists canonical paths (no 8.3 names on Windows, no /var -> /private/var on macOS)
+        let root = git::canon(&root).unwrap();
         let repo = root.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
         g(&repo, &["init", "-q", "-b", "main"]);
