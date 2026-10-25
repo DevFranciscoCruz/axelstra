@@ -15,6 +15,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 let env = crate::janitor::Env { busy: &busy, close: &close, touched: &touched };
                 let mut v = crate::janitor::sweep_with(&reg.store, &env, dry);
                 v.extend(reg.clean_leftovers(dry));
+                // the user asks for a clean-up: worktrees of a removed project that were held get another try
+                if !dry && crate::removal::has_pending(&reg.store) {
+                    crate::removal::retry(&reg.store, &close);
+                }
                 v
             });
             let after = reg.closed.read();
@@ -125,10 +129,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let has_package_json = path.as_ref().map(|p| p.join("package.json").is_file()).unwrap_or(false);
             Ok(json!({"installed": installed, "suggested": suggested, "package_json": has_package_json}))
         }
-        "project.remove" => {
-            crate::projects::remove(&reg.store, p["id"].as_str().unwrap_or_default())?;
-            Ok(json!({}))
-        }
+        "project.remove" | "project.remove_preview" => super::removal::call(c),
         "worktree.create" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let name = p["name"].as_str().ok_or_else(|| missing("name"))?;

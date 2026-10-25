@@ -30,6 +30,7 @@ pub mod proto;
 pub mod publish;
 pub mod rebase;
 pub mod remote;
+pub mod removal;
 pub mod runner;
 pub mod server;
 pub mod skill;

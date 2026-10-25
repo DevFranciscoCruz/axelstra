@@ -65,7 +65,7 @@ worker prompt) and the axelstration skill tell agents to use it instead of stopp
 `PROTO` in `crates/daemon/src/proto.rs` is the app <-> daemon contract version. A daemon outlives
 app updates, and the app only restarts a daemon older than `PROTO`. Bump it (and add the new method
 to the doc comment above it) whenever the app starts calling a daemon method an old daemon lacks.
-Do not bump it for changes an old daemon already tolerates. Current: 23 (project.discover, project.add_discovered, project.clone, project.clone_status, project.clone_cancel,
+Do not bump it for changes an old daemon already tolerates. Current: 25 (project.remove_preview and `mode` in project.remove; 24 belongs to another topic), before that 23 (project.discover, project.add_discovered, project.clone, project.clone_status, project.clone_cancel,
 project.init, gh.repos, wsl_distros/ssh_hosts in host.info, notices.take, audit.list, backup.export,
 backup.restore, orch.trust_info, env.tools, janitor.events, workspace.export, workspace.import_preview,
 workspace.import, host.info, host.browse, stalled in session.list, stall_minutes, and the watch-stream events janitor.events, triggers.events, budget.events, dispatch.changed).
@@ -100,6 +100,26 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   become `manual`; later ones are marked at creation. A removal that stays pending (folder held) is retried by event:
   a session exit (`watch_exit`) and `sweep_soon` kick the janitor. Holders we cannot observe get a bounded exponential
   backoff (`janitor::retry_delay`: 1, 2, 4... up to 30 min), never a fixed timer.
+
+## Removing a project
+
+`project.remove {id, mode?}` (app only: `project.remove` and `project.remove_preview` are in `agent_forbidden`). Mode `list`
+(default, what old callers get) only drops the project from `projects.json`. Mode `all` is the full cleanup
+(`server/removal.rs` for what needs the registry, `crates/daemon/src/removal.rs` for the rest), in this order: close every
+session of the project (meta `project`, or cwd/worktree in the checkout or a worktree: agents, leads, workers, terminals, plus
+the saved ones waiting for a restore) with `tear_down`, so the process trees die and nothing holds a folder; remove the
+worktrees (`removal::removable_worktrees`: listed by git, not the main checkout, under `.axelstra-wt`, the only door to
+deleting a folder) with `git::worktree_remove_strict` (rename-away, long paths via `remove_tree`, `worktree prune`) and delete
+their `ax/*` branches (dirty or unmerged ones too: the app warned the user); drop the records (task files `notes/<id>/`,
+`dispatch.json` entries, `triggers.json` entry, automations, the project's keys in settings `ui`, bus state per session,
+flows, janitor events, integration marks); and only then the project from the list. The project's own checkout is never
+touched. A folder still held by a process we do not own stays whole and is queued in `removals.json`; the janitor retries
+the queue on its usual wakes (session exit, `sweep_soon`, daemon start, `worktree.sweep`) and with the bounded backoff
+(`janitor::retry_delay`), never on a fixed timer, even when the automatic cleanup is off. `project.remove_preview {id}` is
+read only: `{sessions, terminals, worktrees: [{path, branch, dirty, unmerged}]}`. The answer of `all` is
+`{removed, sessions_closed, worktrees_removed, worktrees_pending, branches_deleted}`. Not touched on purpose: the
+named locks in `locks/` (shared by all projects), the flow progress files (not tied to a project), `.kanban/` and
+`.axelstra/` inside the repo, and the notifications and project preferences the webview keeps in its own storage.
 
 Every method the frontend calls must also be in `ALLOWED_METHODS` in `app/src-tauri/src/main.rs`; a unit test reads
 `app/src` (`call`, `callBg`, `callOr` with a string literal) and fails when the list and the sources drift apart.

@@ -113,6 +113,11 @@ fn restart(dir: &Path, project: &str) {
     }
 }
 
+/// The project is gone: its numbering starts from scratch if it is ever added again.
+pub fn forget_project(project: &str) {
+    COUNTERS.lock_recover().get_or_insert_with(HashMap::new).remove(project);
+}
+
 fn stamp() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
 }

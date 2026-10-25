@@ -9,9 +9,22 @@ import * as app from "./app";
 import * as integrate from "./integrate";
 import * as janitor from "./janitor";
 import * as sources from "./sources";
+import * as projectRemoval from "./projectRemoval";
 
 /** one file per group of code prefixes, so parallel changes never touch the same file */
-export const parts = { files, kanban, vcs, containers, hosts, agents, app, integrate, janitor, sources };
+export const parts = {
+  files,
+  kanban,
+  vcs,
+  containers,
+  hosts,
+  agents,
+  app,
+  integrate,
+  janitor,
+  sources,
+  projectRemoval,
+};
 
 const merge = (k: "pt" | "en" | "ptBR"): Record<string, string> =>
   Object.assign({}, ...Object.values(parts).map((p) => p[k]));

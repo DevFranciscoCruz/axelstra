@@ -17,6 +17,7 @@ mod messaging;
 mod misc;
 mod orchestration;
 mod origin;
+mod removal;
 mod session;
 mod sources;
 mod triggers;
@@ -585,6 +586,8 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         "host.info" | "host.browse" => true,
         "settings.set" => p.get("budgets").is_some() || p.get("hosts").is_some(),
         "project.add"
+        | "project.remove"
+        | "project.remove_preview"
         | "project.setup"
         | "hooks.install"
         | "automation.save"
@@ -1046,6 +1049,20 @@ fn spawn_data_watch(reg: Arc<Registry>) {
 /// Removes the worktrees whose work is merged (see `janitor`) when something may have made one removable: at start,
 /// when a session ends (its worktree is no longer busy), after a merge, a `done`, a finished flow or orchestration.
 /// Kicks that come close together make one sweep, at most one a minute. `janitor.off` turns it off.
+/// Wakes the janitor again after the backoff delay of attempt `attempts` (one waiting timer at a time).
+fn queue_janitor_retry(reg: &Arc<Registry>, attempts: u32) {
+    if RETRY_QUEUED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let r = reg.clone();
+    let delay = crate::janitor::retry_delay(attempts);
+    std::thread::spawn(move || {
+        std::thread::sleep(delay);
+        RETRY_QUEUED.store(false, Ordering::SeqCst);
+        r.janitor.bump();
+    });
+}
+
 fn spawn_janitor(reg: Arc<Registry>) {
     const GAP: Duration = Duration::from_secs(60);
     std::thread::spawn(move || {
@@ -1060,7 +1077,26 @@ fn spawn_janitor(reg: Arc<Registry>) {
                 seen = reg.janitor.now();
             }
             last = Some(Instant::now());
-            if reg.closing.load(Ordering::SeqCst) || reg.saved.with_file_name("janitor.off").exists() {
+            if reg.closing.load(Ordering::SeqCst) {
+                continue;
+            }
+            // worktrees of a removed project whose folder was held: the user asked for them to go, so this runs even
+            // with the automatic cleanup off
+            let (retried, held) = if crate::removal::has_pending(&reg.store) {
+                crate::removal::retry(&reg.store, &|path| reg.close_worktree(path))
+            } else {
+                (0, 0)
+            };
+            if retried > 0 {
+                reg.projects_changed();
+            }
+            if reg.saved.with_file_name("janitor.off").exists() {
+                if held > 0 {
+                    attempts += 1;
+                    queue_janitor_retry(&reg, attempts);
+                } else {
+                    attempts = 0;
+                }
                 continue;
             }
             // a session waiting to be restored still needs its worktree
@@ -1084,17 +1120,9 @@ fn spawn_janitor(reg: Arc<Registry>) {
             }
             // a folder nothing we watch holds was left whole: look again with a growing, bounded delay (see
             // `janitor::retry_delay`); a session that exits kicks the janitor at once, so no fixed timer runs
-            if swept.iter().any(|s| s["pending"] == true) {
+            if held > 0 || swept.iter().any(|s| s["pending"] == true) {
                 attempts += 1;
-                if !RETRY_QUEUED.swap(true, Ordering::SeqCst) {
-                    let r = reg.clone();
-                    let delay = crate::janitor::retry_delay(attempts);
-                    std::thread::spawn(move || {
-                        std::thread::sleep(delay);
-                        RETRY_QUEUED.store(false, Ordering::SeqCst);
-                        r.janitor.bump();
-                    });
-                }
+                queue_janitor_retry(&reg, attempts);
             } else {
                 attempts = 0;
             }

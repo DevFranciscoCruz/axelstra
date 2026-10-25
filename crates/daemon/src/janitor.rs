@@ -110,6 +110,11 @@ pub fn has_events() -> bool {
     !EVENTS.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
 }
 
+/// Drops the queued events of a project that was removed (nothing is left to show them for).
+pub fn drop_events_of(project: &str) {
+    EVENTS.lock().unwrap_or_else(|e| e.into_inner()).retain(|e| e["project"].as_str() != Some(project));
+}
+
 fn push_event(e: Value) {
     let mut q = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
     q.push(e);

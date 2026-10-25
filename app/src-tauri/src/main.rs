@@ -280,6 +280,7 @@ const ALLOWED_METHODS: &[&str] = &[
     "project.list",
     "project.logo",
     "project.remove",
+    "project.remove_preview",
     "project.setup",
     "session.kill",
     "session.list",
