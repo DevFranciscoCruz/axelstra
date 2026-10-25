@@ -1,7 +1,6 @@
 # Agent support notes (M8 / M8b: Gemini CLI)
 
-Source text for the README "Agent support" section (main rewrites the README at the end). The code table is
-`crates/core/src/agents.rs`.
+Detail behind the "Agents" section of the README. The code table is `crates/core/src/agents.rs`.
 
 **Verified against gemini-cli 0.65.0** (`npm install --prefix <temp> @google/gemini-cli`, run on Windows 11 with a
 throwaway `HOME`/`USERPROFILE`, `GEMINI_API_KEY` set to a dummy and `GOOGLE_GEMINI_BASE_URL` pointing at a local stub
