@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "../Confirm";
+import { askRemoveProject } from "../RemoveProject";
+import { doneNotice } from "../removeProjectLogic";
 import { killSession, removeProject, removeSession, removeWorktree, worktreeRebase, worktreeSweep } from "../api";
 import { rebaseBlocker, rebaseOutcome } from "../rebase";
 import { toast } from "../toasts";
@@ -10,6 +12,7 @@ import {
   norm,
   refreshProjects,
   refreshSessions,
+  findWorktree,
   selectWorktree,
   selectedWorktree,
   sessionsOf,
@@ -76,21 +79,24 @@ export function createSidebarActions() {
     reload();
   };
 
+  /** asks how to remove the project (list only, or everything), then does it and says what happened */
   const dropProject = async (id: string, name: string) => {
-    if (
-      !(await ask(T.dropAsk(name), { title: T.dropTitle, kind: "warning", okLabel: T.dropOk, cancelLabel: T.cancel }))
-    )
-      return;
+    const mode = await askRemoveProject(id, name);
+    if (!mode) return;
+    // the daemon is about to close this project's sessions and worktrees: leave a worktree of it before it goes
+    const leaving = findWorktree(selectedWorktree())?.project.id === id;
+    let result: Awaited<ReturnType<typeof removeProject>> | undefined;
     let gone = true;
     await run(async () => {
       try {
-        await removeProject(id);
+        result = await removeProject(id, mode);
       } catch (e) {
         gone = false;
         throw e;
       }
+      if (leaving) selectWorktree(null);
     });
-    if (gone) showNotice(S.projectRemoved(name));
+    if (gone) showNotice(doneNotice(name, mode, result));
   };
 
   // worktrees being removed: a second click (or menu entry) while it runs is ignored

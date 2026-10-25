@@ -470,7 +470,13 @@ export const integrateWorktree = (project: string, path: string) => call<Integra
 export const setProjectSetup = (id: string, setup: string) => call("project.setup", { id, setup });
 export const detectPackageManagers = (id: string) => call<{ installed: string[]; suggested: string | null; package_json?: boolean }>("pm.detect", { id });
 export type DispatchMeta = Record<string, { title?: string; archived?: boolean; requests?: string[]; updated?: number }>;
-export const removeProject = (id: string) => call("project.remove", { id });
+/** how a project leaves Axelstra: "list" only drops it from the list, "all" also closes its sessions and deletes its worktrees and branches */
+export type RemoveMode = "list" | "all";
+/** what removing a project would touch (read-only); `dirty`: uncommitted changes, `unmerged`: commits not in the default branch */
+export type RemovePreview = { sessions: number; terminals: number; worktrees: { path: string; branch: string | null; dirty: boolean; unmerged: boolean }[] };
+export type RemoveResult = { removed: boolean; sessions_closed: number; worktrees_removed: number; worktrees_pending: number; branches_deleted: number };
+export const removeProjectPreview = (id: string) => call<RemovePreview>("project.remove_preview", { id });
+export const removeProject = (id: string, mode: RemoveMode = "list") => call<RemoveResult>("project.remove", { id, mode });
 export type EnvSkip = { path: string; reason: string };
 /** worktree.create also says what .worktreeinclude copied into the new worktree and what it left out */
 export type WorktreeCreated = Worktree & { env_copied?: string[]; env_skipped?: EnvSkip[] };

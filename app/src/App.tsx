@@ -36,6 +36,7 @@ import { VersionSkew } from "./VersionSkew";
 import { PanelIcon } from "./PanelIcon";
 import { CloseConfirm } from "./CloseConfirm";
 import { ConfirmHost } from "./Confirm";
+import { RemoveProjectHost } from "./RemoveProject";
 import { AgentSearch } from "./AgentSearch";
 import { Orchestra } from "./Orchestra";
 import { UsageChip } from "./Usage";
@@ -370,6 +371,7 @@ export function App() {
       </Show>
       <CloseConfirm />
       <ConfirmHost />
+      <RemoveProjectHost />
       <Show when={showSidebar()}>
         <Section name={S.app.sectionProjects}>
           <Sidebar />

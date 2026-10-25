@@ -41,8 +41,8 @@ export const ptBRP: Widen<typeof ptP> = {
     showWorktrees: "Mostrar os worktrees",
     hideWorktrees: "Ocultar os worktrees",
     setupTip: (s?: string | null) => (s ? `Setup: ${s}` : "Comando de setup para novos worktrees"),
-    dropTip: "Remover da lista (não exclui arquivos)",
-    dropLabel: "Remover projeto da lista",
+    dropTip: "Remover projeto… (você escolhe se worktrees e sessões também saem)",
+    dropLabel: "Remover projeto",
     setupPlaceholder: "setup, ex.: bun install (vazio = nenhum)",
     setupLabel: (n: string) => `Comando de setup do projeto ${n}`,
     pmSuggested: "Sugerido pelo lockfile do projeto",
@@ -114,9 +114,6 @@ export const ptBRP: Widen<typeof ptP> = {
     remove: "Remover",
     cancel: "Cancelar",
     sweepDone: (n: number) => count(n, "worktree removido", "worktrees removidos"),
-    dropAsk: (n: string) => `Remover "${n}" da lista?\n\nOs arquivos e worktrees não são excluídos.`,
-    dropTitle: "Remover projeto",
-    dropOk: "Remover",
     removeAsk: (name: string, lost: string, typed: boolean) =>
       `Remover o worktree "${name}"?${lost}\n\nA pasta e o branch são excluídos e os terminais dele são fechados.${typed ? "\n\nPara confirmar, digite o nome do worktree." : ""}`,
     removeLost: (risks: string[]) =>
@@ -874,6 +871,36 @@ O branch precisa estar enviado ao remoto.`,
     kindFired: "lançada",
     kindLimited: "adiada",
     kindFailed: "falhou",
+  },
+  removeProject: {
+    title: "Remover projeto",
+    ask: (name: string) => `O que fazer com "${name}"?`,
+    modes: "Modo de remoção",
+    modeList: "Só tirar da lista",
+    modeAll: "Remover tudo (exclui worktrees e sessões)",
+    loading: "Verificando o que há no projeto…",
+    previewFailed: (why: string) =>
+      `Não foi possível verificar o que seria excluído (${why}). Só é possível tirar da lista.`,
+    listEffects: [
+      "O projeto sai da barra lateral.",
+      "Nada é excluído do disco: a pasta, os worktrees e os branches ficam como estão.",
+    ],
+    allNothing: "Não há worktrees, sessões nem terminais para excluir.",
+    allSessions: (sessions: number, terminals: number) =>
+      `Fecha ${count(sessions, "sessão de agente", "sessões de agentes")} e ${count(terminals, "terminal", "terminais")}.`,
+    allWorktrees: (n: number) => `Exclui ${count(n, "worktree (pasta e branch)", "worktrees (pasta e branch)")}.`,
+    allKept: "A pasta principal do projeto e o repositório não são tocados.",
+    riskTitle: "Atenção: «Remover tudo» perde este trabalho, que não está salvo em nenhum outro lugar:",
+    riskDirty: "alterações não salvas",
+    riskUnmerged: "commits não integrados",
+    riskItem: (name: string, what: string[]) => `${name}: ${what.join(" e ")}`,
+    typeToConfirm: (name: string) =>
+      `Para remover tudo apesar do trabalho não salvo, digite o nome do projeto: ${name}`,
+    okList: "Tirar da lista",
+    okAll: "Remover tudo",
+    cancel: "Cancelar",
+    doneAll: (name: string, sessions: number, worktrees: number, branches: number, pending: number) =>
+      `Projeto removido: ${name}. ${count(sessions, "sessão fechada", "sessões fechadas")}, ${count(worktrees, "worktree removido", "worktrees removidos")}, ${count(branches, "branch excluído", "branches excluídos")}${pending > 0 ? `; ${count(pending, "worktree ainda não removido (pasta em uso)", "worktrees ainda não removidos (pasta em uso)")}` : ""}.`,
   },
   hooks: {
     title: "Agentes: estado em tempo real",

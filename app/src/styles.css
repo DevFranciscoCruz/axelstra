@@ -513,6 +513,7 @@ button.icon:hover {
 .prow input { flex: 1; min-width: 0; }
 .pnote { font-size: var(--fs-sm); color: var(--ok2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .pnote.bad { color: var(--danger); white-space: normal; max-height: 80px; overflow: auto; }
+.rm-risk { color: var(--danger); border: 1px solid rgba(var(--danger-rgb), .45); border-radius: var(--r-md); padding: 6px 10px; font-size: var(--fs-sm); }
 .kanban { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .kbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line-2); }
 .ktitle { font-weight: 600; }

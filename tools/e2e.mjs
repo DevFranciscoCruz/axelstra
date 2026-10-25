@@ -10,7 +10,8 @@
 //
 // Scenarios: boot (window renders, no CSP violation, no uncaught error), session (a session spawned through the CLI
 // shows up in the UI with a live terminal), addproject (the Add project dialog: origins by arrow keys, a new project, a
-// clone that fails offline, GitHub without a login, discovered, Esc), restore (the app is closed and relaunched: the
+// clone that fails offline, GitHub without a login, discovered, Esc), removeproject (the sidebar X: list vs everything,
+// warnings, typed name, counts), restore (the app is closed and relaunched: the
 // daemon kept the session).
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -435,6 +436,116 @@ ${dataDirReport()}`);
   await sleep(500);
   if (problems.length) throw new Error(`add project problems: ${[...new Set(problems)].join(" | ")}`);
   console.log("ok  addproject: no console error, CSP violation or uncaught exception");
+  problems.length = 0;
+
+  // removeproject: the sidebar X asks how to remove the project. Temp repo with two worktrees (one dirty, one with an
+  // unintegrated commit), never a real project. "list" keeps every folder; "all" needs the typed name and deletes them.
+  problems.length = 0;
+  const rmRepo = join(dir, "rmrepo");
+  const rmWts = join(dir, "rmrepo-wt");
+  mkdirSync(rmRepo);
+  mkdirSync(rmWts);
+  const rg = (cwd, ...a) => {
+    const r = spawnSync("git", a, { cwd, env, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${a.join(" ")} failed: ${r.stderr}`);
+  };
+  rg(rmRepo, "init", "-b", "main");
+  writeFileSync(join(rmRepo, "README.md"), "rm\n");
+  rg(rmRepo, "add", "README.md");
+  rg(rmRepo, "commit", "-m", "init");
+  const wtDirty = join(rmWts, "dirty");
+  const wtUnmerged = join(rmWts, "unmerged");
+  rg(rmRepo, "worktree", "add", "-b", "e2e-dirty", wtDirty);
+  writeFileSync(join(wtDirty, "README.md"), "changed and not committed\n");
+  rg(rmRepo, "worktree", "add", "-b", "e2e-unmerged", wtUnmerged);
+  writeFileSync(join(wtUnmerged, "work.txt"), "work\n");
+  rg(wtUnmerged, "add", "work.txt");
+  rg(wtUnmerged, "commit", "-m", "unintegrated work");
+  const addRm = async () => {
+    const r = cli("add-project", rmRepo);
+    if (r.status !== 0) throw new Error(`add-project failed: ${r.stderr || r.stdout}`);
+    await until("rmrepo in the sidebar", () =>
+      page.evaluate("[...document.querySelectorAll('.pname')].some((e) => e.textContent.trim() === 'rmrepo')"),
+    );
+  };
+  const openRemove = async () => {
+    await until("the remove button of rmrepo", () =>
+      page.evaluate(
+        "(() => { const n = [...document.querySelectorAll('.pname')].find((e) => e.textContent.trim() === 'rmrepo'); const b = n?.parentElement?.querySelector('button[aria-label=\"Remover projeto\"]'); if (!b) return false; b.click(); return true; })()",
+      ),
+    );
+    await until("the remove dialog", () =>
+      page.evaluate("!!document.querySelector('[role=dialog] .rm-risk, [role=dialog] input[type=radio]')"),
+    );
+  };
+  const radioOf = (v) =>
+    dlg(`const r = d.querySelector('input[type=radio][value="${v}"]'); if (!r) return false; r.click(); return true;`);
+  const checkedMode = () => dlg("return d.querySelector('input[type=radio]:checked')?.value ?? '';");
+  const okState = () =>
+    dlg("const b = d.querySelector('.m-actions .primary'); return b ? (b.disabled ? 'disabled' : 'enabled') : 'none';");
+  const pressOk = () =>
+    dlg(
+      "const b = d.querySelector('.m-actions .primary'); if (!b || b.disabled) return false; b.click(); return true;",
+    );
+  const projectListed = () => /rmrepo/.test(cli("projects").stdout);
+
+  await addRm();
+  await openRemove();
+  if ((await checkedMode()) !== "list")
+    throw new Error(`the remove dialog did not default to list: ${await checkedMode()}`);
+  await until("the preview to load", async () => /e2e-dirty/.test(await dlg("return d.innerText;")), 15000);
+  const text = await dlg("return d.innerText;");
+  if (!/e2e-unmerged/.test(text)) throw new Error(`the unintegrated branch is not warned about: ${text}`);
+  const red = await dlg("const e = d.querySelector('.rm-risk'); return e ? getComputedStyle(e).color : '';");
+  if (!red) throw new Error("the risk box is missing");
+  console.log("ok  removeproject: defaults to list and warns about the dirty worktree and the unintegrated branch");
+
+  // cancel removes nothing
+  await dlg("[...d.querySelectorAll('.m-actions button')][0].click();");
+  await until("the dialog to close", closed, 5000);
+  if (!projectListed()) throw new Error("cancel removed the project");
+  console.log("ok  removeproject: cancel keeps the project");
+
+  // "all" with unsaved work stays disabled until the project name is typed
+  await openRemove();
+  await radioOf("all");
+  await until("all selected", async () => (await checkedMode()) === "all", 3000);
+  await until("the typed-name guard", async () => (await okState()) === "disabled", 3000);
+  await typeInto("input[placeholder=rmrepo]", "rmrepo");
+  await until("the OK button to enable", async () => (await okState()) === "enabled", 3000);
+  console.log("ok  removeproject: 'all' with unsaved work needs the typed name");
+
+  // back to "list": confirm; the project leaves the list, every folder stays
+  await radioOf("list");
+  await until("list selected", async () => (await checkedMode()) === "list", 3000);
+  await pressOk();
+  await until("the dialog to close", closed, 5000);
+  await until("the project to leave the list", () => !projectListed(), 15000);
+  if (!existsSync(wtDirty) || !existsSync(wtUnmerged) || !existsSync(rmRepo))
+    throw new Error("'list' deleted a folder");
+  console.log("ok  removeproject: 'list' drops the project and deletes nothing");
+
+  // "all": worktree folders and the project go; the main repository stays
+  await addRm();
+  await openRemove();
+  await radioOf("all");
+  await until("all selected", async () => (await checkedMode()) === "all", 3000);
+  await typeInto("input[placeholder=rmrepo]", "rmrepo");
+  await until("the OK button to enable", async () => (await okState()) === "enabled", 3000);
+  await pressOk();
+  await until("the dialog to close", closed, 5000);
+  await until("the project to leave the list", () => !projectListed(), 30000);
+  await until("the worktree folders to go", () => !existsSync(wtDirty) && !existsSync(wtUnmerged), 30000);
+  if (!existsSync(join(rmRepo, "README.md"))) throw new Error("'all' touched the main repository");
+  await until(
+    "the notice with the counts",
+    () => page.evaluate("/Projeto removido: rmrepo/.test(document.body.innerText)"),
+    10000,
+  );
+  console.log("ok  removeproject: 'all' removes worktrees and project, keeps the main repository, shows the counts");
+  await sleep(500);
+  if (problems.length) throw new Error(`remove project problems: ${[...new Set(problems)].join(" | ")}`);
+  console.log("ok  removeproject: no console error, CSP violation or uncaught exception");
   problems.length = 0;
 
   // the user's foreground window must not have changed because of the test

@@ -41,8 +41,8 @@ export const enP: Widen<typeof ptP> = {
     showWorktrees: "Show worktrees",
     hideWorktrees: "Hide worktrees",
     setupTip: (s?: string | null) => (s ? `Setup: ${s}` : "Setup command for new worktrees"),
-    dropTip: "Remove from the list (does not delete files)",
-    dropLabel: "Remove project from the list",
+    dropTip: "Remove project… (you choose whether worktrees and sessions go too)",
+    dropLabel: "Remove project",
     setupPlaceholder: "setup, e.g. bun install (empty = none)",
     setupLabel: (n: string) => `Setup command for project ${n}`,
     pmSuggested: "Suggested by the project's lockfile",
@@ -114,9 +114,6 @@ export const enP: Widen<typeof ptP> = {
     remove: "Remove",
     cancel: "Cancel",
     sweepDone: (n: number) => count(n, "worktree removed", "worktrees removed"),
-    dropAsk: (n: string) => `Remove "${n}" from the list?\n\nFiles and worktrees are not deleted.`,
-    dropTitle: "Remove project",
-    dropOk: "Remove",
     removeAsk: (name: string, lost: string, typed: boolean) =>
       `Remove worktree "${name}"?${lost}\n\nThe folder and branch are deleted and its terminals are closed.${typed ? "\n\nTo confirm, type the worktree name." : ""}`,
     removeLost: (risks: string[]) =>
@@ -868,6 +865,36 @@ The branch has to be pushed to the remote.`,
     kindFired: "launched",
     kindLimited: "postponed",
     kindFailed: "failed",
+  },
+  removeProject: {
+    title: "Remove project",
+    ask: (name: string) => `What to do with "${name}"?`,
+    modes: "Removal mode",
+    modeList: "Only remove from the list",
+    modeAll: "Remove everything (deletes worktrees and sessions)",
+    loading: "Checking what the project holds…",
+    previewFailed: (why: string) =>
+      `Could not check what would be deleted (${why}). Only removing it from the list is possible.`,
+    listEffects: [
+      "The project leaves the sidebar.",
+      "Nothing is deleted from disk: the folder, worktrees and branches stay as they are.",
+    ],
+    allNothing: "There are no worktrees, sessions or terminals to delete.",
+    allSessions: (sessions: number, terminals: number) =>
+      `Closes ${count(sessions, "agent session", "agent sessions")} and ${count(terminals, "terminal", "terminals")}.`,
+    allWorktrees: (n: number) =>
+      `Deletes ${count(n, "worktree (folder and branch)", "worktrees (folder and branch)")}.`,
+    allKept: "The project's main folder and repository are not touched.",
+    riskTitle: 'Warning: "Remove everything" loses this work, which is not saved anywhere else:',
+    riskDirty: "uncommitted changes",
+    riskUnmerged: "unintegrated commits",
+    riskItem: (name: string, what: string[]) => `${name}: ${what.join(" and ")}`,
+    typeToConfirm: (name: string) => `To remove everything despite unsaved work, type the project name: ${name}`,
+    okList: "Remove from list",
+    okAll: "Remove everything",
+    cancel: "Cancel",
+    doneAll: (name: string, sessions: number, worktrees: number, branches: number, pending: number) =>
+      `Project removed: ${name}. ${count(sessions, "session closed", "sessions closed")}, ${count(worktrees, "worktree removed", "worktrees removed")}, ${count(branches, "branch deleted", "branches deleted")}${pending > 0 ? `; ${count(pending, "worktree still to remove (folder in use)", "worktrees still to remove (folder in use)")}` : ""}.`,
   },
   hooks: {
     title: "Agents: live status",
