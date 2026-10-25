@@ -1253,6 +1253,35 @@ fn update_apply(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>) -> R
     app.restart();
 }
 
+/// Browser switches for the test drivers (`tools/e2e.mjs`), debug builds only: `AXELSTRA_TEST_DEVTOOLS_PORT=N` opens the
+/// DevTools port, `AXELSTRA_TEST_BROWSER_ARGS` adds more switches. wry always hands WebView2 its own default switches through
+/// the API, and on current runtimes (155) that makes `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` be ignored, so the host passes them
+/// itself. Release builds never read the variables: no debugging port can be opened in production.
+#[cfg(all(debug_assertions, windows))]
+fn test_browser_args() -> Option<String> {
+    let port = std::env::var("AXELSTRA_TEST_DEVTOOLS_PORT").ok()?;
+    let port: u16 = port.trim().parse().ok().filter(|p| *p != 0)?;
+    let mut args = format!("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port}");
+    if let Ok(extra) = std::env::var("AXELSTRA_TEST_BROWSER_ARGS") {
+        args.push(' ');
+        args.push_str(extra.trim());
+    }
+    Some(args)
+}
+
+/// The main window comes from tauri.conf.json (`create: false`) so the host can add the test switches above.
+fn create_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let Some(cfg) = app.config().app.windows.first().cloned() else { return Ok(()) };
+    #[allow(unused_mut)]
+    let mut builder = tauri::WebviewWindowBuilder::from_config(app, &cfg)?;
+    #[cfg(all(debug_assertions, windows))]
+    if let Some(args) = test_browser_args() {
+        builder = builder.additional_browser_args(&args);
+    }
+    builder.build()?;
+    Ok(())
+}
+
 /// The window is created hidden (`visible: false` in tauri.conf.json) and shown here. Under `AXELSTRA_TEST_HIDDEN=1`
 /// (visual/e2e drivers) it is shown fully transparent, click-through, out of the taskbar and never activated: WebView2 still renders, so
 /// the DevTools screenshots work, but nothing appears on the user's screen or steals the focus.
@@ -1292,6 +1321,7 @@ fn main() {
         .manage(voice::Voice::default())
         .setup(|app| {
             let _ = APP.set(app.handle().clone());
+            create_main_window(app.handle())?;
             show_main_window(app.handle());
             hosts::load();
             std::thread::spawn(clean_pastes);

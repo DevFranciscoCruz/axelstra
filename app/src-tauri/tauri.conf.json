@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "Axelstra",
+        "create": false,
         "visible": false,
         "backgroundColor": "#1e1f23",
         "width": 1280,

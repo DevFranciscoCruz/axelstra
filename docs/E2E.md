@@ -45,8 +45,7 @@ node tools/e2e.mjs [path\to\axelstra-app.exe]
 `--features tauri/custom-protocol` makes the debug host load `../dist` through `tauri.localhost` with the
 production `csp` instead of the dev server and `devCsp`, so the check covers what users get. No release build is needed.
 
-How it drives the app: WebView2 opens a Chrome DevTools Protocol port when `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
-holds `--remote-debugging-port=N`. `N` is a port the OS just let the script bind (not one derived from the pid, which can fall in a Windows excluded range on the runners, where the browser cannot listen). The script launches the app with a throwaway `LOCALAPPDATA` (data dir), a unique
+How it drives the app: the script sets `AXELSTRA_TEST_DEVTOOLS_PORT=N` and the **debug** host (`create_main_window` in `app/src-tauri/src/main.rs`; the window is created in code, `create: false` in `tauri.conf.json`) passes `--remote-debugging-port=N` (plus `AXELSTRA_TEST_BROWSER_ARGS`) to WebView2 as `additional_browser_args`. Reason: wry always sets its own default browser arguments through the API, and on runtime 155 (the CI runner) that made `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` be ignored (the browser started without the port). The env var is still set as a fallback. Release builds never read the variables, so production has no debugging port. The failure report prints the effective env and the `Policies\Microsoft\Edge` registry keys. `N` is a port the OS just let the script bind (not one derived from the pid, which can fall in a Windows excluded range on the runners, where the browser cannot listen). The script launches the app with a throwaway `LOCALAPPDATA` (data dir), a unique
 `USERNAME` (pipe name) and a throwaway WebView2 profile, attaches to the page over a WebSocket (Node's built-in
 client, no dependencies) and evaluates DOM queries. Do not override `USERPROFILE`: the app exits at startup with it.
 Set `E2E_VERBOSE=1` to see the app's stderr.

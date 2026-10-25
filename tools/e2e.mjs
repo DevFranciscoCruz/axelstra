@@ -61,6 +61,8 @@ const env = {
   AXELSTRA_TEST_PIPE: user, // the pipe is named by SID now, USERNAME no longer isolates it
   AXELSTRA_TEST_HIDDEN: process.env.AXELSTRA_TEST_HIDDEN ?? "1", // the host shows its window transparent, click-through, unfocusable
   WEBVIEW2_USER_DATA_FOLDER: join(dir, "webview"),
+  // the host (debug builds) hands these to WebView2 itself; the env var alone is ignored by runtime 155 because wry sets its own args
+  AXELSTRA_TEST_DEVTOOLS_PORT: String(port),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
 };
 // A git identity for the daemon's `project.init` (it reads `git config user.name`), never the developer's own gitconfig.
@@ -112,6 +114,7 @@ const launch = (scale) => {
   app = spawn(exe, [], {
     env: {
       ...env,
+      AXELSTRA_TEST_BROWSER_ARGS: `${scale ? `--force-device-scale-factor=${scale}` : ""}${browserLog}`.trim(),
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}${scale ? ` --force-device-scale-factor=${scale}` : ""}${browserLog}`,
     },
     stdio: process.env.E2E_VERBOSE ? "inherit" : "ignore",
@@ -270,6 +273,16 @@ ${procs
       encoding: "utf8",
       timeout: 30000,
     }).stdout?.trim() ?? "";
+  out.push(`--- effective env of the app
+${Object.entries(env)
+  .filter(([k]) => /^(AXELSTRA_TEST|WEBVIEW2)/.test(k))
+  .map(([k, v]) => `${k}=${v}`)
+  .join("\n")}`);
+  const policyKeys = ["Edge", "Edge\WebView2", "Edge\WebView2\AdditionalBrowserArguments"].flatMap((k) =>
+    ["HKLM", "HKCU"].map((h) => `${h}:\SOFTWARE\Policies\Microsoft\${k}`),
+  );
+  out.push(`--- WebView2/Edge policy keys
+${ps(`foreach ($k in ${policyKeys.map((k) => `'${k}'`).join(",")}) { if (Test-Path $k) { "[$k]"; (Get-ItemProperty $k).PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' } | ForEach-Object { "  $($_.Name)=$($_.Value)" } } else { "[$k] absent" } }`)}`);
   out.push(`--- browser command lines
 ${ps("Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | Where-Object { $_.CommandLine -notmatch '--type=' } | ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }")}`);
   out.push(`--- listening sockets of the app and browser (wanted port ${port})
