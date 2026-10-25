@@ -8,7 +8,7 @@
 // The "agent" is a .cmd stand-in that only sleeps, so no real agent CLI or network is involved.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { realTmpdir } from "./lib/tmp.mjs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { layoutProblems, resizeClient, windowInfo } from "./winrect.mjs";
@@ -19,7 +19,7 @@ if (process.platform !== "win32") {
   process.exit(0);
 }
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const out = resolve(process.argv[2] ?? join(tmpdir(), "axelstra-visual"));
+const out = resolve(process.argv[2] ?? join(realTmpdir(), "axelstra-visual"));
 const exe = resolve(process.argv[3] ?? join(root, "target", "debug", "axelstra-app.exe"));
 const cliBin = join(dirname(exe), "axelstra.exe");
 for (const f of [exe, cliBin]) {
@@ -30,7 +30,7 @@ for (const f of [exe, cliBin]) {
 }
 mkdirSync(out, { recursive: true });
 
-const dir = mkdtempSync(join(tmpdir(), "axelstra-vis-"));
+const dir = mkdtempSync(join(realTmpdir(), "axelstra-vis-"));
 const home = join(dir, "home");
 const bin = join(dir, "bin");
 mkdirSync(home, { recursive: true });

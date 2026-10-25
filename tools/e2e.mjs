@@ -16,7 +16,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { realTmpdir } from "./lib/tmp.mjs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { layoutProblems, resizeClient, windowInfo } from "./winrect.mjs";
@@ -35,7 +35,7 @@ for (const f of [exe, cliBin]) {
   }
 }
 
-const dir = mkdtempSync(join(tmpdir(), "axelstra-e2e-"));
+const dir = mkdtempSync(join(realTmpdir(), "axelstra-e2e-"));
 const home = join(dir, "home");
 mkdirSync(home, { recursive: true });
 // A port the OS just let us bind: a pid-derived one can sit in a Windows excluded range (Hyper-V/WinNAT reservations on the
@@ -107,6 +107,10 @@ const fgBefore = foreground();
 
 let app;
 const problems = [];
+// Console noise that is environment, not a bug: Tauri falling back from its IPC custom protocol to postMessage, and the
+// updater endpoint answering 404 (no release published for this build) on a runner.
+const BENIGN_CONSOLE =
+  /IPC custom protocol failed|Failed to fetch|Couldn't find callback id|updater|latest\.json|Failed to load resource: the server responded with a status of 404/i;
 // With E2E_VERBOSE the browser writes its own debug log (<profile>/chrome_debug.log) so a missing DevTools port can be explained.
 const browserLog = process.env.E2E_VERBOSE ? " --enable-logging --v=0" : "";
 const launch = (scale) => {
@@ -171,7 +175,8 @@ ${dataDirReport()}`,
       msg.error ? no(new Error(msg.error.message)) : ok(msg.result);
     } else if (msg.method === "Log.entryAdded") {
       const e = msg.params.entry;
-      if (e.level === "error") problems.push(`console error: ${e.text} ${e.url ?? ""}`);
+      if (e.level === "error" && !BENIGN_CONSOLE.test(`${e.text} ${e.url ?? ""}`))
+        problems.push(`console error: ${e.text} ${e.url ?? ""}`);
     } else if (msg.method === "Runtime.exceptionThrown") {
       problems.push(
         `uncaught: ${msg.params.exceptionDetails.exception?.description ?? msg.params.exceptionDetails.text}`,

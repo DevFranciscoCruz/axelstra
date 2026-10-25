@@ -165,3 +165,12 @@ throwaway git repo, opens the Kanban tab and drives it with real mouse and key e
 column, a reorder inside a column (kept in the cards' `priority`, so it survives a reload), Esc and a drop outside the columns
 both cancel, and Space/ArrowRight/Space moves a card by keyboard with the live region filled and focus kept. It reads the card
 files back to check what was persisted.
+
+## Temp dir: always the canonical path
+
+The drivers take their temp dir from `realTmpdir()` (`tools/lib/tmp.mjs`, `fs.realpathSync.native(os.tmpdir())`), never from
+`os.tmpdir()`. On the Windows runners `os.tmpdir()` is the 8.3 short name (`C:\Users\RUNNER~1\...`) while git and the daemon
+register the long one (`C:\Users\runneradmin\...`), so a repo path built from the short form failed with "is not a worktree
+of a registered project". `e2e.mjs` also ignores console noise that is environment, not a bug (`BENIGN_CONSOLE`: Tauri's
+"IPC custom protocol failed ... Failed to fetch" fallback to postMessage, a missing callback id after a reload, the updater
+endpoint answering 404).

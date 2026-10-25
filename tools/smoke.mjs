@@ -9,7 +9,7 @@
 // session that prints a marker -> `ls --json` lists it -> `kill` -> daemon stopped.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { realTmpdir } from "./lib/tmp.mjs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,7 +21,7 @@ if (!existsSync(bin)) {
   process.exit(2);
 }
 
-const dir = mkdtempSync(join(tmpdir(), "axelstra-smoke-"));
+const dir = mkdtempSync(join(realTmpdir(), "axelstra-smoke-"));
 const home = join(dir, "home");
 mkdirSync(home, { recursive: true });
 const env = {

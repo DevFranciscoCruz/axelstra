@@ -12,7 +12,7 @@
 //   ..\outside\x.html    escapes the cwd            -> the daemon refuses it, nothing logged
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { realTmpdir } from "./lib/tmp.mjs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { freePort } from "./lib/freeport.mjs";
@@ -31,7 +31,7 @@ for (const f of [exe, cliBin]) {
   }
 }
 
-const dir = mkdtempSync(join(tmpdir(), "axelstra-e2e-html-"));
+const dir = mkdtempSync(join(realTmpdir(), "axelstra-e2e-html-"));
 const home = join(dir, "home");
 mkdirSync(home, { recursive: true });
 const port = await freePort();
