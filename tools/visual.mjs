@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { layoutProblems, resizeClient, windowInfo } from "./winrect.mjs";
+import { freePort } from "./lib/freeport.mjs";
 
 if (process.platform !== "win32") {
   console.log("visual: WebView2 only; skipping");
@@ -37,7 +38,7 @@ mkdirSync(bin, { recursive: true });
 writeFileSync(join(bin, "fakeagent.cmd"), "@echo off\r\nping -n 900 127.0.0.1 >nul\r\n");
 mkdirSync(join(home, "axelstra"), { recursive: true });
 writeFileSync(join(home, "axelstra", "settings.json"), JSON.stringify({ stall_minutes: 1 }));
-const port = 9300 + (process.pid % 500);
+const port = await freePort();
 const user = `axvis${process.pid}`;
 const env = {
   ...process.env,
@@ -51,6 +52,8 @@ const env = {
   PATH: `${bin};${process.env.PATH}`,
   AXELSTRA_TEST_HIDDEN: process.env.AXELSTRA_TEST_HIDDEN ?? "1", // the host shows its window transparent, click-through, unfocusable
   WEBVIEW2_USER_DATA_FOLDER: join(dir, "webview"),
+  // the host (debug builds) hands the port to WebView2 itself; the env var alone is ignored by runtime 155
+  AXELSTRA_TEST_DEVTOOLS_PORT: String(port),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
 };
 const cli = (...a) => spawnSync(cliBin, a, { env, encoding: "utf8", timeout: 30000 });

@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { freePort } from "./lib/freeport.mjs";
 
 if (process.platform !== "win32") {
   console.log("e2e-html-link: WebView2 driver is Windows only; skipping");
@@ -33,7 +34,7 @@ for (const f of [exe, cliBin]) {
 const dir = mkdtempSync(join(tmpdir(), "axelstra-e2e-html-"));
 const home = join(dir, "home");
 mkdirSync(home, { recursive: true });
-const port = 9800 + (process.pid % 500);
+const port = await freePort();
 const user = `axehtml${process.pid}`;
 const openerLog = join(dir, "opener.log");
 const env = {
@@ -48,6 +49,8 @@ const env = {
   AXELSTRA_TEST_HIDDEN: process.env.AXELSTRA_TEST_HIDDEN ?? "1",
   AXELSTRA_TEST_OPENER_LOG: openerLog,
   WEBVIEW2_USER_DATA_FOLDER: join(dir, "webview"),
+  // the host (debug builds) hands the port to WebView2 itself; the env var alone is ignored by runtime 155
+  AXELSTRA_TEST_DEVTOOLS_PORT: String(port),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
 };
 const cli = (...a) => spawnSync(cliBin, a, { env, encoding: "utf8", timeout: 20000 });
@@ -121,16 +124,49 @@ async function until(label, fn, ms = 30000) {
 
 const CTRL = 2; // CDP Input modifiers bitmask: Alt 1, Ctrl 2, Meta 4, Shift 8
 
+/**
+ * Cell size of the terminal in CSS px. The WebGL renderer drops xterm's `.xterm-char-measure-element` once it has measured,
+ * so a probe of the same shape is made with the terminal's default font (DEFAULT_PREFS in app/src/termprefs.ts) and removed.
+ */
+const MEASURE = `(() => {
+  const host = document.querySelector('.xterm-helpers') ?? document.querySelector('.xterm');
+  let m = document.querySelector('.xterm-char-measure-element');
+  const own = !m;
+  if (own) {
+    m = document.createElement('span');
+    m.className = 'xterm-char-measure-element';
+    m.textContent = 'W'.repeat(32);
+    m.style.fontFamily = '"Cascadia Mono", Consolas, monospace';
+    m.style.fontSize = '13px';
+    host.appendChild(m);
+  }
+  const r = m.getBoundingClientRect();
+  if (own) m.remove();
+  return { cw: r.width / 32, ch: r.height };
+})()`;
+
 /** moves over, then clicks (optionally with Ctrl) the cell at (col, row) of the terminal screen */
 async function clickCell(page, col, row, modifiers) {
   const g = await page.evaluate(`(() => {
     const s = document.querySelector('.xterm-screen').getBoundingClientRect();
-    const m = document.querySelector('.xterm-char-measure-element').getBoundingClientRect();
-    return { left: s.left, top: s.top, cw: m.width / 32, ch: m.height };
+    const m = ${MEASURE};
+    return { left: s.left, top: s.top, width: s.width, height: s.height, cw: m.cw, ch: m.ch };
   })()`);
   const x = g.left + g.cw * (col + 0.5);
   const y = g.top + g.ch * (row + 0.5);
   const base = { x, y, modifiers };
+  // The host's `held` flag follows the pointer events after xterm has already asked the link providers for that event, and
+  // xterm keeps the answers per line while the pointer stays on it. So Ctrl has to be down while the pointer arrives from
+  // another line (as for a user who holds Ctrl and moves): go over the empty last row first.
+  if (modifiers) {
+    await page.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: g.left + g.width - 2,
+      y: g.top + g.height - 2,
+      modifiers,
+    });
+    await sleep(150);
+  }
   await page.send("Input.dispatchMouseEvent", { ...base, type: "mouseMoved" });
   await sleep(250); // xterm asks the link providers on the move
   await page.send("Input.dispatchMouseEvent", {
@@ -149,18 +185,31 @@ async function clickCell(page, col, row, modifiers) {
 }
 
 /**
- * Clicks the middle of `needle` on every terminal row (the buffer is not reachable from here) until `done()` holds;
+ * A plain click (or Ctrl+click) on a non-html path opens it in the editor, which replaces the terminal view: go back to
+ * the terminal's tab (titled "e2e-html") before the next click.
+ */
+async function ensureTerminal(page) {
+  if (await page.evaluate("!!document.querySelector('.xterm-screen')")) return;
+  await page.evaluate(
+    "(() => { const el = [...document.querySelectorAll('span,div,button')].find((e) => e.children.length === 0 && e.textContent.trim() === 'e2e-html'); (el?.closest('[role=button],[role=tab],button,[tabindex]') ?? el)?.click(); })()",
+  );
+  for (let i = 0; i < 25 && !(await page.evaluate("!!document.querySelector('.xterm-screen')")); i++) await sleep(200);
+  await sleep(300);
+}
+
+/**
+ * Clicks the middle of `needle` on each terminal row that shows it (the buffer is not reachable from here) until `done()` holds;
  * returns whether it did.
  */
 async function clickText(page, needle, modifiers, done) {
   const text = cli("read", session).stdout.split(/\r?\n/);
-  const col = text.map((l) => l.indexOf(needle)).find((c) => c >= 0);
-  if (col === undefined) throw new Error(`"${needle}" is not in the terminal output:\n${text.join("\n")}`);
-  const rows = await page.evaluate(
-    "Math.floor(document.querySelector('.xterm-screen').getBoundingClientRect().height / document.querySelector('.xterm-char-measure-element').getBoundingClientRect().height)",
-  );
-  for (let r = 0; r < rows; r++) {
-    await clickCell(page, col + Math.floor(needle.length / 2), r, modifiers);
+  // `read` lists the screen from its first row, so a line's index is its row; click only where the text is (another row may
+  // hold a different path at that column)
+  const hits = text.map((l, r) => [r, l.indexOf(needle)]).filter(([, c]) => c >= 0);
+  if (!hits.length) throw new Error(`"${needle}" is not in the terminal output:\n${text.join("\n")}`);
+  for (const [r, c] of hits) {
+    await ensureTerminal(page);
+    await clickCell(page, c + Math.floor(needle.length / 2), r, modifiers);
     if (done()) return true;
   }
   return false;
