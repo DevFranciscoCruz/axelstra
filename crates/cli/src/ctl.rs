@@ -435,23 +435,24 @@ fn abs_norm(p: &Path) -> String {
 /// Two different directories never share a key, so this only widens "same place spelled differently".
 fn canon_norm(p: &Path) -> String {
     let a = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
-    let mut tail: Vec<std::ffi::OsString> = Vec::new();
-    let mut cur = a.as_path();
-    let base = loop {
-        if let Ok(c) = std::fs::canonicalize(cur) {
-            break c;
-        }
-        match (cur.parent(), cur.file_name()) {
-            (Some(par), Some(name)) => {
-                tail.push(name.to_os_string());
-                cur = par;
+    let comps: Vec<std::path::Component> = a.components().collect();
+    let (mut full, rest) = (1..=comps.len())
+        .rev()
+        .find_map(|n| {
+            let prefix: std::path::PathBuf = comps[..n].iter().collect();
+            std::fs::canonicalize(prefix).ok().map(|c| (c, &comps[n..]))
+        })
+        .unwrap_or_else(|| (a.clone(), &comps[comps.len()..]));
+    // The tail does not exist, so it holds no links: `..` there is resolved lexically (unix `canonicalize` fails on
+    // `missing/..`, Windows `absolute` already folds it).
+    for c in rest {
+        match c {
+            std::path::Component::ParentDir => {
+                full.pop();
             }
-            _ => break a.clone(),
+            std::path::Component::CurDir => {}
+            other => full.push(other),
         }
-    };
-    let mut full = base;
-    for t in tail.iter().rev() {
-        full.push(t);
     }
     let s = full.to_string_lossy();
     let s = match s.strip_prefix(r"\\?\UNC\") {
