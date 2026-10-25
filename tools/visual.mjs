@@ -48,7 +48,10 @@ writeFileSync(
   "@echo off\r\nping -n 900 127.0.0.1 >nul\r\n",
 );
 mkdirSync(join(home, "axelstra"), { recursive: true });
-writeFileSync(join(home, "axelstra", "settings.json"), JSON.stringify({ stall_minutes: 1 }));
+writeFileSync(
+  join(home, "axelstra", "settings.json"),
+  JSON.stringify({ stall_minutes: 1 }),
+);
 const port = await freePort();
 const user = `axvis${process.pid}`;
 const env = {
