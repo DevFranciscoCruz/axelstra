@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls: { method: string; params: Record<string, any> }[] = [];
 let pending: unknown[] = [];
+let live: unknown[] = [];
 let failSpawnFor: string | null = null;
 
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -15,6 +16,8 @@ vi.mock("@tauri-apps/api/core", () => ({
     switch (args.method) {
       case "session.pending":
         return pending;
+      case "session.list":
+        return live;
       case "settings.get":
         return { rules: `rules:${args.params.terse ?? "global"}` };
       case "app.dir":
@@ -73,6 +76,7 @@ describe("restoreSessions", () => {
   beforeEach(() => {
     calls.length = 0;
     failSpawnFor = null;
+    live = [];
   });
 
   it("restores in order, drops each entry right after it was dealt with, and reads settings once", async () => {
@@ -141,5 +145,21 @@ describe("restoreSessions", () => {
     expect(line("c")).toContain("rules:short");
     expect(line("d")).toContain("rules:global");
     expect(line("e")).toContain("rules:global");
+  });
+
+  it("never starts a twin of an agent the daemon already runs, but still drops its pending entry", async () => {
+    const ag = (label: string, key: string) => ({ program: "pwsh.exe", label, meta: { kind: "agent", agent: "claude", project: "p", worktree: "C:/w/a", key, resume: key } });
+    pending = [ag("a", "k1"), ag("b", "k2")];
+    live = [{ id: 1, running: true, label: "a", meta: { kind: "agent", key: "k1" } }];
+    const r = await restoreSessions();
+    expect(r).toEqual({ restored: 1, skipped: 1, failed: [] });
+    expect(calls.filter((c) => c.method === "session.spawn").map((c) => c.params.label)).toEqual(["b"]);
+    expect(calls.filter((c) => c.method === "session.pending_remove")).toHaveLength(2);
+  });
+
+  it("a dead session with the same key does not block the restore", async () => {
+    pending = [{ program: "pwsh.exe", label: "a", meta: { kind: "agent", agent: "claude", project: "p", worktree: "C:/w/a", key: "k1", resume: "k1" } }];
+    live = [{ id: 1, running: false, label: "a", meta: { kind: "agent", key: "k1" } }];
+    expect((await restoreSessions()).restored).toBe(1);
   });
 });
