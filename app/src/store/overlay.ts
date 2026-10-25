@@ -53,3 +53,11 @@ export const showProjectSettings = (): string | null => {
 };
 export const setShowProjectSettings = (id: string | null) =>
   setOverlay((cur) => (id ? { kind: "projectSettings", project: id } : cur?.kind === "projectSettings" ? null : cur));
+
+/** The part of Settings to scroll to when it opens (the status bar's version chip asks for "about"); consumed once. */
+export const [settingsFocus, setSettingsFocus] = createSignal<"about" | null>(null);
+/** Opens Settings at the About section. */
+export const openAbout = () => {
+  setSettingsFocus("about");
+  setShowSettings(true);
+};

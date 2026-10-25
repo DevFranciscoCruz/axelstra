@@ -11,6 +11,34 @@ export const enL: Widen<typeof ptL> = {
     ferramentas: "Tools",
     rato: "Mouse",
   },
+  about: {
+    title: "About",
+    note: "Installed version and the daemon that is running. Copy it when reporting a problem.",
+    app: "Application",
+    daemon: "Running daemon",
+    version: "Version",
+    commit: "Commit",
+    built: "Built on",
+    proto: "Protocol",
+    buildId: "Daemon build",
+    os: "System",
+    webview: "WebView2",
+    unknown: "unknown",
+    offline: "not connected",
+    inSync: "The app and the daemon are on the same version.",
+    older: (daemon: string, app: string) =>
+      `The running daemon (${daemon}) is older than the app (${app}). Restart it to use the new version; terminals and agents come back on their own.`,
+    newer: (daemon: string, app: string) =>
+      `The running daemon (${daemon}) is newer than the app (${app}). Update the app.`,
+    differs:
+      "The app and the daemon have the same version number but were built from different commits. Restart the daemon.",
+    noDaemon: "Not connected to the daemon: the versions cannot be compared.",
+    copy: "Copy info",
+    copied: "Info copied.",
+    chipTip: (version: string, commit: string, built: string) =>
+      `Axelstra ${version} · commit ${commit} · built on ${built}. Click for details.`,
+    chipLabel: "About Axelstra",
+  },
   settingsRows: {
     a11y: "Accessibility",
     a11yNote: "For screen readers. Off by default because it makes the terminals slower.",

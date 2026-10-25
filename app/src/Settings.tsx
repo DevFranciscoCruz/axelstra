@@ -19,6 +19,7 @@ import {
 import { restartDaemonFlow } from "./daemonActions";
 import { BudgetsSection } from "./BudgetsSection";
 import { setBudgetRows } from "./budgetStore";
+import { AboutSection } from "./About";
 import { HooksSection } from "./HooksSection";
 import { WorkspaceSection } from "./WorkspaceSection";
 import { HostsSection } from "./HostsSection";
@@ -204,6 +205,8 @@ export function Settings() {
         <Show when={s()} fallback={<div class="auto-note">{S.loading}</div>}>
           {(cfg) => (
             <>
+              <AboutSection />
+
               <Section title={S.replies} note={S.repliesNote}>
                 <Choices
                   label={S.replies}

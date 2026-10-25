@@ -121,6 +121,11 @@ export const daemonShutdown = () => call("daemon.shutdown");
 /** What the Rust `diagnostics` command reports. */
 export type Diagnostics = {
   app_version: string;
+  /** build metadata of the host; absent on a host from before it was reported */
+  app_commit?: string;
+  app_built?: string;
+  os?: string;
+  webview?: string | null;
   app_proto: number;
   daemon_connected: boolean;
   daemon_proto: number | null;
@@ -909,7 +914,7 @@ export const triggersEvents = () => callOr<{ events: TriggerEvent[] }>("triggers
 // ---- remote hosts (M7b): the registry lives in the Tauri host, not in the daemon ----
 export type HostState = "idle" | "connecting" | "ok" | "lost" | "auth";
 export type HostInfo = { id: string; name: string; spec: string; slot: number; state: HostState; error?: string; /** message code of `error` when it is a single coded message */ error_code?: string; error_params?: Record<string, unknown>; proto?: number; build?: string };
-export type HostInfoReport = { os: string; home: string; user: string; hostname: string; shell: string; sep: string; proto: number; build: string; /** absent on a daemon from before Add project sources */ wsl_distros?: string[]; ssh_hosts?: string[] };
+export type HostInfoReport = { os: string; home: string; user: string; hostname: string; shell: string; sep: string; proto: number; build: string; /** additive: absent on a daemon from before they were reported */ version?: string; commit?: string; built?: string; /** absent on a daemon from before Add project sources */ wsl_distros?: string[]; ssh_hosts?: string[] };
 export type BrowseEntry = { name: string; git: boolean };
 export type BrowseResult = { path: string; parent: string | null; home: string; entries: BrowseEntry[]; truncated?: boolean };
 export const hostsList = () => hostCmd<HostInfo[]>("hosts_list", "hosts_list");
@@ -943,3 +948,6 @@ export const ghRepos = (query?: string, limit = 100) => call<GhRepos>("gh.repos"
 export type InitParams = { parent: string; name: string; readme?: boolean; gitignore?: boolean; commit?: boolean };
 /** creates parent/name, `git init` and the optional first files, then registers the project */
 export const projectInit = (p: InitParams) => call<Project>("project.init", p);
+
+/** Copies plain text to the clipboard through the host. */
+export const clipboardWrite = (text: string) => tauriInvoke<void>("clipboard_write", { text });

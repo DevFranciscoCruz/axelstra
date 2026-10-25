@@ -11,6 +11,7 @@ import { StateDot } from "./StateDot";
 import { Icon } from "./Icon";
 import { countsFor, groupAgents, mergedList, type AgentEntry } from "./statusGroups";
 import { LimitsBar } from "./LimitsBar";
+import { VersionChip } from "./About";
 import { hoverIntent, keepInside } from "./hoverIntent";
 import { NotificationBell } from "./NotificationBell";
 import { pollWtUsage, wtUsageTip } from "./Usage";
@@ -328,6 +329,7 @@ export function StatusBar() {
       </Button>
       <NotificationBell onJump={(e) => { if (e.session != null && e.worktree) openSession(e.worktree, e.session); else if (e.worktree) selectWorktree(e.worktree); }} />
       <LimitsBar />
+      <VersionChip />
     </div>
   );
 }

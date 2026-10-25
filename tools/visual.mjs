@@ -305,6 +305,16 @@ try {
   for (const l of LOCALES) {
     await setLocale(page, l);
     await page.shot(`sidebar-${l}`);
+    // the version chip in the status bar opens Settings scrolled to About
+    await page.shot(`footer-${l}`);
+    await page.evaluate("document.querySelector('[data-testid=version-chip]')?.click()");
+    await until("the About section", () => page.evaluate("!!document.querySelector('[data-testid=about-warn], [data-testid=about-sync]')"));
+    await sleep(600);
+    await page.shot(`about-${l}`);
+    console.log(`about-${l}: ${await page.evaluate("document.querySelector('[data-testid=about]')?.innerText.split(String.fromCharCode(10)).join(' | ')")}`);
+    for (const type of ["keyDown", "keyUp"])
+      await page.send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await sleep(400);
     await page.evaluate(clickText("/^(Definições|Settings|Configurações)$/"));
     await sleep(900);
     await page.shot(`settings-${l}`);

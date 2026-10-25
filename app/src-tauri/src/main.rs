@@ -1062,6 +1062,10 @@ async fn diagnostics(state: tauri::State<'_, Arc<State>>) -> Result<Value, CallE
         let lag = proto::data_dir().join("lag.log");
         json!({
             "app_version": env!("CARGO_PKG_VERSION"),
+            "app_commit": env!("AXELSTRA_GIT_SHA"),
+            "app_built": env!("AXELSTRA_BUILD_DATE"),
+            "os": format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+            "webview": tauri::webview_version().ok(),
             "app_proto": proto::PROTO,
             "daemon_connected": daemon.is_some(),
             "daemon_proto": daemon.as_ref().map(|d| d.0),

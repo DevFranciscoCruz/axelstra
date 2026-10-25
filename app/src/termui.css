@@ -25,6 +25,8 @@
 .set-diag { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; font-size: var(--fs-md); }
 .set-diag dt { color: var(--muted); }
 .set-diag dd { margin: 0; word-break: break-all; user-select: text; }
+.set-diag .set-diag-head { color: var(--text); font-weight: 600; margin-top: 6px; }
+.about-warn { color: var(--warn); border-left: 2px solid currentColor; padding-left: 8px; }
 .set-error { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
 
 

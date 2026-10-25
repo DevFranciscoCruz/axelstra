@@ -13,6 +13,34 @@ export const ptL = {
     ferramentas: "Ferramentas",
     rato: "Rato",
   },
+  about: {
+    title: "Acerca",
+    note: "Versão instalada e o daemon que está a correr. Copia-a ao reportar um problema.",
+    app: "Aplicação",
+    daemon: "Daemon em execução",
+    version: "Versão",
+    commit: "Commit",
+    built: "Compilado em",
+    proto: "Protocolo",
+    buildId: "Build do daemon",
+    os: "Sistema",
+    webview: "Componente web (WebView2)",
+    unknown: "desconhecido",
+    offline: "sem ligação",
+    inSync: "A aplicação e o daemon estão na mesma versão.",
+    older: (daemon: string, app: string) =>
+      `O daemon em execução (${daemon}) é mais antigo do que a aplicação (${app}). Reinicia-o para usar a versão nova; os terminais e agentes voltam sozinhos.`,
+    newer: (daemon: string, app: string) =>
+      `O daemon em execução (${daemon}) é mais recente do que a aplicação (${app}). Atualiza a aplicação.`,
+    differs:
+      "A aplicação e o daemon têm o mesmo número de versão mas foram compilados de commits diferentes. Reinicia o daemon.",
+    noDaemon: "Sem ligação ao daemon: não é possível comparar as versões.",
+    copy: "Copiar informação",
+    copied: "Informação copiada.",
+    chipTip: (version: string, commit: string, built: string) =>
+      `Axelstra ${version} · commit ${commit} · compilado em ${built}. Clica para ver os detalhes.`,
+    chipLabel: "Acerca do Axelstra",
+  },
   settingsRows: {
     a11y: "Acessibilidade",
     a11yNote: "Para leitores de ecrã. Desligado por omissão porque deixa os terminais mais lentos.",
