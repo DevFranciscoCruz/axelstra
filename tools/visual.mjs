@@ -218,7 +218,7 @@ try {
     };
     for (const l of LOCALES) {
       await setLocale(page, l);
-      await until("the add button", () => page.evaluate(clickText("/^\+ (Adicionar projeto|Add project)$/")));
+      await until("the add button", () => page.evaluate(clickText("/^[+] (Adicionar projeto|Add project)$/")));
       await until("the dialog", () => page.evaluate("!!document.querySelector('[role=dialog]')"));
       await page.shot(`addproject-${l}`);
       await page.evaluate(clickText("/^(Projeto remoto|Remote project)/"));
