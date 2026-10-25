@@ -10,7 +10,11 @@ fn main() {
         println!("cargo:rerun-if-changed={dir}/HEAD");
     }
 
-    let commit = env("AXELSTRA_GIT_SHA").or_else(|| git(&["rev-parse", "--short=7", "HEAD"])).unwrap_or_else(|| "unknown".into());
+    // a full sha (CI passes `github.sha`) is cut to 7 chars
+    let commit = env("AXELSTRA_GIT_SHA")
+        .map(|s| s.chars().take(7).collect::<String>())
+        .or_else(|| git(&["rev-parse", "--short=7", "HEAD"]))
+        .unwrap_or_else(|| "unknown".into());
     let built = env("AXELSTRA_BUILD_DATE").unwrap_or_else(today);
     println!("cargo:rustc-env=AXELSTRA_BUILDINFO_COMMIT={commit}");
     println!("cargo:rustc-env=AXELSTRA_BUILDINFO_BUILT={built}");

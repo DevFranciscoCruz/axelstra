@@ -6,7 +6,7 @@ Helpers outside the Rust and TypeScript sources. Run everything from the repo ro
 
 | Command | What it does |
 | --- | --- |
-| `node scripts/check.mjs` | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `tsc --noEmit`, `vitest`; stops at the first failure |
+| `node scripts/check.mjs` | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `tsc --noEmit`, `vitest`, and `actionlint` on `.github/workflows` (skipped with a notice when it is not on PATH, `--skip-workflows`); stops at the first failure |
 | `node scripts/check.mjs --engine` | same, but the Rust steps cover only core, daemon and cli (no desktop toolkit needed) |
 | `node scripts/check.mjs --skip-rust` / `--skip-frontend` | run one half |
 | `--skip-fmt --skip-clippy --skip-test --skip-tsc --skip-vitest` | skip one step |

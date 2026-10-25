@@ -8,8 +8,9 @@ on:
   workflow_call:
 permissions: { contents: read }
 env:
-  # embedded in the binaries (axelstra_core::buildinfo); the date falls back to today in build.rs
-  AXELSTRA_GIT_SHA: ${{ substring(github.sha, 0, 7) }}
+  # embedded in the binaries (axelstra_core::buildinfo); the build.rs files cut it to 7 chars (Actions has no
+  # substring()) and the date falls back to today
+  AXELSTRA_GIT_SHA: ${{ github.sha }}
 jobs:
   # the three version fields (Cargo.toml workspace, package.json, tauri.conf.json) must agree, and the
   # stamp script that the release relies on must pass its own tests

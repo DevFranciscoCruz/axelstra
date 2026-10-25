@@ -23,7 +23,7 @@ Notes for coding agents and new contributors.
 - Frontend: `cd app && npm ci && npx tsc --noEmit && npm test`
 - Lint: `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings`
 - Release helpers: `node scripts/stamp-version.mjs --self-test` and `--check`.
-- Everything at once: `node scripts/check.mjs` (fmt, clippy, tests, tsc, vitest; `--engine` skips the desktop toolkit).
+- Everything at once: `node scripts/check.mjs` (fmt, clippy, tests, tsc, vitest, `actionlint` on the workflows when it is on PATH; `--engine` skips the desktop toolkit).
 - Check scripts: `scripts/check-tauri-config.mjs` (CSP and capabilities must stay as `SECURITY.md` says; no
   `style-src-attr 'unsafe-inline'`, so no static `style="..."`: use a class, or a CSS variable set from code),
   `scripts/check-format.mjs` (prettier on new or already formatted files; `prettier --write` them), `tools/check-deny-expiry.mjs`,
@@ -161,7 +161,7 @@ temp dir.
 
 ## Build metadata
 
-`axelstra_core::buildinfo::{VERSION, COMMIT, BUILT}` come from `AXELSTRA_GIT_SHA` (7 chars, else `git rev-parse --short=7 HEAD`,
+`axelstra_core::buildinfo::{VERSION, COMMIT, BUILT}` come from `AXELSTRA_GIT_SHA` (a full sha is cut to 7 chars; else `git rev-parse --short=7 HEAD`,
 else `unknown`) and `AXELSTRA_BUILD_DATE` (UTC `YYYY-MM-DD`, else today), set by `build-installer.ps1` and the workflows
 (`github.sha`; shallow checkouts need it). `hello`/`ping`/`host.info` carry `version`, `commit`, `built` (additive, no PROTO bump;
 missing = "unknown" in the app). Surfaces: `axelstra --version`/`-V`, `axelstra version --json`, footer, Settings > About
