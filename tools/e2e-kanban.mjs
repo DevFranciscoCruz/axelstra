@@ -201,14 +201,22 @@ try {
   await until("the project in the sidebar", () => page.evaluate("document.body.innerText.includes('repo')"));
   const click = (js) =>
     page.evaluate(`(() => { const el = ${js}; if (!el) return false; el.click(); return true; })()`);
-  await until("the project selected", () =>
-    click(
-      "[...document.querySelectorAll('span,div')].find((e) => e.children.length === 0 && e.textContent.trim() === 'repo')",
-    ),
-  );
-  await until("the Kanban tab", () =>
-    click("[...document.querySelectorAll('[role=tab],button')].find((e) => /^kanban$/i.test(e.textContent.trim()))"),
-  );
+  const openBoard = async () => {
+    await until("the project selected", () =>
+      click(
+        "[...document.querySelectorAll('span,div')].find((e) => e.children.length === 0 && e.textContent.trim() === 'repo')",
+      ),
+    );
+    await until("the main worktree", () =>
+      click(
+        "(() => { const el = [...document.querySelectorAll('span,div')].find((e) => e.children.length === 0 && e.textContent.trim() === 'main'); return el?.closest('[role=button],button,[tabindex]') ?? el; })()",
+      ),
+    );
+    await until("the Kanban tab", () =>
+      click("[...document.querySelectorAll('[role=tab],button')].find((e) => /^kanban$/i.test(e.textContent.trim()))"),
+    );
+  };
+  await openBoard();
   await until("the cards", () => page.evaluate("document.querySelectorAll('.kcard').length === 4"));
   expect("the board lists the cards", [await order(page, 2), await order(page, 5)], ["a,b", "c,d"]);
   expect(
@@ -230,6 +238,8 @@ try {
   if (!(prio("d") > prio("a"))) throw new Error(`d must outrank a (priority ${prio("d")} vs ${prio("a")})`);
   console.log("ok  the order is kept in the cards' priority");
   await page.send("Page.reload");
+  await until("the project in the sidebar again", () => page.evaluate("document.body.innerText.includes('repo')"));
+  await openBoard();
   await until("the cards again", () => page.evaluate("document.querySelectorAll('.kcard').length === 4"));
   expect("the order survives a reload", await order(page, 5), "d,a,c");
 
