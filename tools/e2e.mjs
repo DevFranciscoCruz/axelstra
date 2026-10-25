@@ -15,6 +15,7 @@
 // daemon kept the session).
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +38,16 @@ for (const f of [exe, cliBin]) {
 const dir = mkdtempSync(join(tmpdir(), "axelstra-e2e-"));
 const home = join(dir, "home");
 mkdirSync(home, { recursive: true });
-const port = 9300 + (process.pid % 500);
+// A port the OS just let us bind: a pid-derived one can sit in a Windows excluded range (Hyper-V/WinNAT reservations on the
+// runners), where the browser cannot listen and says so only in its own log.
+const port = await new Promise((ok, no) => {
+  const srv = createServer();
+  srv.once("error", no);
+  srv.listen(0, "127.0.0.1", () => {
+    const { port: p } = srv.address();
+    srv.close(() => ok(p));
+  });
+});
 const user = `axe2e${process.pid}`;
 // USERPROFILE stays real: overriding it makes WebView2 exit at startup. LOCALAPPDATA is what proto::data_dir() reads.
 const env = {
@@ -254,13 +264,29 @@ ${procs
   .split(/\r?\n/)
   .filter((l) => /axelstra|msedge/i.test(l))
   .join("\n")}`);
-  try {
-    const dbg = join(dir, "webview", "chrome_debug.log");
-    if (existsSync(dbg))
-      out.push(`--- ${dbg}
-${readFileSync(dbg, "utf8").slice(-3000)}`);
-  } catch {
-    /* unreadable while the browser holds it */
+  // What the browser was started with, and what listens: tells a dropped switch from a port the OS refused.
+  const ps = (cmd) =>
+    spawnSync("powershell", ["-NoProfile", "-Command", cmd], {
+      encoding: "utf8",
+      timeout: 30000,
+    }).stdout?.trim() ?? "";
+  out.push(`--- browser command lines
+${ps("Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | Where-Object { $_.CommandLine -notmatch '--type=' } | ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }")}`);
+  out.push(`--- listening sockets of the app and browser (wanted port ${port})
+${ps('$ids = (Get-Process -Name axelstra-app,msedgewebview2 -ErrorAction SilentlyContinue).Id; Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $ids -contains $_.OwningProcess } | ForEach-Object { "$($_.LocalAddress):$($_.LocalPort) pid $($_.OwningProcess)" }')}`);
+  out.push(`--- excluded tcp port ranges
+${ps("netsh int ipv4 show excludedportrange protocol=tcp")}`);
+  // The profile is <webview>/EBWebView; the browser writes its debug log and DevToolsActivePort inside it.
+  for (const name of ["chrome_debug.log", "DevToolsActivePort"]) {
+    for (const f of [join(dir, "webview", "EBWebView", name), join(dir, "webview", name)]) {
+      try {
+        if (existsSync(f))
+          out.push(`--- ${f}
+${readFileSync(f, "utf8").slice(-3000)}`);
+      } catch {
+        /* unreadable while the browser holds it */
+      }
+    }
   }
   try {
     out.push(`--- webview profile: ${readdirSync(join(dir, "webview")).join(" ")}`);

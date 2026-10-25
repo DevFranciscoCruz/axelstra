@@ -46,7 +46,7 @@ node tools/e2e.mjs [path\to\axelstra-app.exe]
 production `csp` instead of the dev server and `devCsp`, so the check covers what users get. No release build is needed.
 
 How it drives the app: WebView2 opens a Chrome DevTools Protocol port when `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
-holds `--remote-debugging-port=N`. The script launches the app with a throwaway `LOCALAPPDATA` (data dir), a unique
+holds `--remote-debugging-port=N`. `N` is a port the OS just let the script bind (not one derived from the pid, which can fall in a Windows excluded range on the runners, where the browser cannot listen). The script launches the app with a throwaway `LOCALAPPDATA` (data dir), a unique
 `USERNAME` (pipe name) and a throwaway WebView2 profile, attaches to the page over a WebSocket (Node's built-in
 client, no dependencies) and evaluates DOM queries. Do not override `USERPROFILE`: the app exits at startup with it.
 Set `E2E_VERBOSE=1` to see the app's stderr.
@@ -60,11 +60,11 @@ The CSP check is what verifies a `style-src` change (see SECURITY.md, "Content S
 
 ### Scenario addproject (the Add project dialog)
 
-Runs after `restore`, in the relaunched app. It opens *+ Adicionar projeto* and checks, in this order: the six origins are listed;
+Runs after `restore`, in the relaunched app. It opens _+ Adicionar projeto_ and checks, in this order: the six origins are listed;
 `Home`, `ArrowDown`, `End` and `ArrowUp` (real `Input.dispatchKeyEvent`) move and select the tab; **Novo projeto** refuses a name with a
 separator in the page, then creates `newparent/e2e-new` with a README and exactly one commit and the project shows in `axelstra projects`;
 the dialog reopens on the origin used last; **Clonar** refuses `file://` in the page, then clones `ssh://127.0.0.1:1/none.git` (refused at
-once, offline) and must show *A clonagem falhou* and leave no `none` folder; **GitHub** shows its hint (no `gh` login, no list); **Descobertos**
+once, offline) and must show _A clonagem falhou_ and leave no `none` folder; **GitHub** shows its hint (no `gh` login, no list); **Descobertos**
 shows a list or the empty note; `Esc` closes; no console error, CSP violation or uncaught exception meanwhile.
 
 How it stays hermetic:
@@ -88,11 +88,11 @@ Last local run (Windows 11, WebView2 155, debug host + custom-protocol): all sce
 
 ## Driver options
 
-| Option | Fits | Notes |
-| --- | --- | --- |
-| CDP straight to WebView2 (**used**, `tools/e2e.mjs`) | boot, session, restore on Windows | no driver binary, no msedgedriver version matching; Windows only |
-| `tauri-driver` + WebDriver (WebdriverIO) | the same scenarios on Linux (WebKitWebDriver); Windows with msedgedriver | official; **no macOS**. Not set up: it adds two binaries (`tauri-driver`, a version-matched msedgedriver) for what CDP already does on Windows. Worth adding when a Linux E2E is wanted |
-| Playwright against the Vite dev server with a mocked `invoke` | frontend flows only | fast and cross-OS, but does not exercise the Tauri host or the daemon |
+| Option                                                        | Fits                                                                     | Notes                                                                                                                                                                                   |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CDP straight to WebView2 (**used**, `tools/e2e.mjs`)          | boot, session, restore on Windows                                        | no driver binary, no msedgedriver version matching; Windows only                                                                                                                        |
+| `tauri-driver` + WebDriver (WebdriverIO)                      | the same scenarios on Linux (WebKitWebDriver); Windows with msedgedriver | official; **no macOS**. Not set up: it adds two binaries (`tauri-driver`, a version-matched msedgedriver) for what CDP already does on Windows. Worth adding when a Linux E2E is wanted |
+| Playwright against the Vite dev server with a mocked `invoke` | frontend flows only                                                      | fast and cross-OS, but does not exercise the Tauri host or the daemon                                                                                                                   |
 
 ## CI wiring
 
@@ -100,8 +100,10 @@ Last local run (Windows 11, WebView2 155, debug host + custom-protocol): all sce
 advisory: a red job does not fail CI or releases. Promote it to blocking once it has stayed green for two weeks.
 The job first checks the WebView2 runtime in the registry and installs the Evergreen bootstrapper when it is missing (the
 runner image does not promise it; without the runtime the app starts but opens no page, which showed as `no WebView2 page
-target within 40s`). It runs with `E2E_VERBOSE=1`, and that failure now lists the CDP targets seen, the runtime version and
-the data dir report.
+target within 40s`). It runs with `E2E_VERBOSE=1`, and that failure lists the CDP targets seen, the runtime version, the data
+dir report, the browser command lines (was the switch passed?), the listening sockets, the excluded port ranges, and the
+profile's `chrome_debug.log` and `DevToolsActivePort`. Only CI confirms that the free-port change fixes the runner: if the
+port is still not opened, that report names the cause.
 
 ## Not done yet
 
