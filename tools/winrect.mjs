@@ -54,8 +54,7 @@ const run = (body) => {
     timeout: 30000,
   });
   const out = r.stdout.trim();
-  if (r.status !== 0 || !out || out === "null")
-    throw new Error(`winrect: no app window (${r.stderr || out})`);
+  if (r.status !== 0 || !out || out === "null") throw new Error(`winrect: no app window (${r.stderr || out})`);
   return JSON.parse(out);
 };
 
@@ -63,8 +62,7 @@ const run = (body) => {
 export const windowInfo = (pid) => run(`[W]::Info(${pid})`);
 
 /** Resizes the host window so its client area is `cw` x `ch` physical pixels; returns the new `windowInfo`. */
-export const resizeClient = (pid, cw, ch) =>
-  run(`[W]::Resize(${pid}, ${cw}, ${ch})`);
+export const resizeClient = (pid, cw, ch) => run(`[W]::Resize(${pid}, ${cw}, ${ch})`);
 
 /**
  * The webview's own child windows must keep the offset of the WRY_WEBVIEW child (the controller bounds): a browser
@@ -75,15 +73,11 @@ export const layoutProblems = (info) => {
   const host = info.children.find((c) => c.cls === "WRY_WEBVIEW");
   if (!host) return ["no WRY_WEBVIEW child window"];
   if (host.w !== info.clientW || host.h !== info.clientH)
-    out.push(
-      `WRY_WEBVIEW is ${host.w}x${host.h}, client area is ${info.clientW}x${info.clientH}`,
-    );
+    out.push(`WRY_WEBVIEW is ${host.w}x${host.h}, client area is ${info.clientW}x${info.clientH}`);
   for (const c of info.children) {
     if (!/^Chrome_(WidgetWin_1|RenderWidgetHostHWND)$/.test(c.cls)) continue;
     if (c.x !== host.x || c.y !== host.y)
-      out.push(
-        `${c.cls} sits at ${c.x},${c.y}, the webview at ${host.x},${host.y}`,
-      );
+      out.push(`${c.cls} sits at ${c.x},${c.y}, the webview at ${host.x},${host.y}`);
     if (Math.abs(c.w - host.w) > 1 || Math.abs(c.h - host.h) > 1)
       out.push(`${c.cls} is ${c.w}x${c.h}, the webview ${host.w}x${host.h}`);
   }
