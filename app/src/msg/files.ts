@@ -19,6 +19,12 @@ export const pt = {
   "fs.tmp_failed": "Não foi possível criar um ficheiro temporário.",
   "fs.unknown_editor": "Editor desconhecido: {editor}.",
   "fs.editor_start_failed": "Não foi possível iniciar {program}.\n({detail})",
+  // files: HTML paths opened from a terminal
+  "files.html_not_found": "Ficheiro não encontrado: {path}",
+  "files.html_not_allowed":
+    "Não é permitido abrir {path}: só ficheiros .html e .htm da pasta da sessão, ou com caminho absoluto.",
+  "files.html_not_file": "{path} não é um ficheiro.",
+  "files.html_open_failed": "Não foi possível abrir {path}.\n({detail})",
   // watch
   "watch.create_failed": "Não foi possível criar o observador de ficheiros.\n({detail})",
   "watch.nothing": "Não há nada para observar em {path}.",
@@ -135,6 +141,11 @@ export const en: Widen<typeof pt> = {
   "fs.tmp_failed": "Could not create a temporary file.",
   "fs.unknown_editor": "Unknown editor: {editor}.",
   "fs.editor_start_failed": "Could not start {program}.\n({detail})",
+  "files.html_not_found": "File not found: {path}",
+  "files.html_not_allowed":
+    "Not allowed to open {path}: only .html and .htm files in the session folder, or given by absolute path.",
+  "files.html_not_file": "{path} is not a file.",
+  "files.html_open_failed": "Could not open {path}.\n({detail})",
   "watch.create_failed": "Could not create the file watcher.\n({detail})",
   "watch.nothing": "There is nothing to watch in {path}.",
   "watch.failed": "Could not watch the worktree.",
@@ -244,6 +255,11 @@ export const ptBR: Widen<typeof pt> = {
   "fs.tmp_failed": "Não foi possível criar um arquivo temporário.",
   "fs.unknown_editor": "Editor desconhecido: {editor}.",
   "fs.editor_start_failed": "Não foi possível iniciar {program}.\n({detail})",
+  "files.html_not_found": "Arquivo não encontrado: {path}",
+  "files.html_not_allowed":
+    "Não é permitido abrir {path}: só arquivos .html e .htm da pasta da sessão, ou com caminho absoluto.",
+  "files.html_not_file": "{path} não é um arquivo.",
+  "files.html_open_failed": "Não foi possível abrir {path}.\n({detail})",
   "watch.create_failed": "Não foi possível criar o observador de arquivos.\n({detail})",
   "watch.nothing": "Não há nada para observar em {path}.",
   "watch.failed": "Não foi possível observar o worktree.",

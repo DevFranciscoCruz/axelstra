@@ -12,6 +12,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
     };
     match req.method.as_str() {
         "session.spawn" => {
+            // idempotent: a restore that races another one (or a retry) must not start the same conversation twice
+            if let Some(id) = p["meta"]["key"].as_str().and_then(|k| reg.live_by_key(k)) {
+                return Ok(json!({"id": id, "existing": true}));
+            }
             let mut s = Spawn {
                 program: p["program"].as_str().ok_or_else(|| missing("program"))?.into(),
                 args: p["args"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
@@ -111,18 +115,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             if is_worker {
                 reg.bus.add_worker(id);
             }
-            if let Some(r) = p["reap"].as_object() {
-                // ephemeral worker: never restored after a restart, reports to `parent` and closes itself
-                reg.bus.mark_reaped(id);
-                let parent = r.get("parent").and_then(Value::as_u64).map(|x| x as u32);
-                let idle_mode = r.get("mode").and_then(Value::as_str) == Some("idle");
-                let idle_secs = r.get("idle_secs").and_then(Value::as_u64).unwrap_or(20).max(3);
-                let lines = r.get("lines").and_then(Value::as_u64).unwrap_or(40).clamp(1, 400) as usize;
-                spawn_reaper(reg.clone(), id, parent, idle_mode, idle_secs, lines);
-                return Ok(json!({"id": id}));
-            }
+            // a dispatched lead or a worker is ephemeral only in that it closes itself after `done`: while it runs and has not
+            // reported, a restart must bring it back (as a plain agent: the reaper is not restored), so `reap` stays out
             let mut spec = p.clone();
             spec["id"] = Value::Null;
+            spec.as_object_mut().map(|o| o.remove("reap"));
             // restoring brings back the name and the file; the goal text stays out of sessions.json
             spec.as_object_mut().map(|o| o.remove("goal"));
             if let Some(l) = &label {
@@ -135,8 +132,21 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             if lead && spec["meta"].is_object() {
                 spec["meta"]["lead"] = json!(true);
             }
-            reg.specs.lock_recover().insert(id, spec);
-            reg.persist();
+            // a reaped plain shell (a test runner, a one-off command) is not worth bringing back; a reaped agent is
+            if p["reap"].is_null() || spec["meta"]["kind"] == "agent" {
+                reg.specs.lock_recover().insert(id, spec);
+                reg.persist();
+            }
+            if let Some(r) = p["reap"].as_object() {
+                // ephemeral worker or lead: reports to `parent` and closes itself (its spec, if an agent, was saved above)
+                reg.bus.mark_reaped(id);
+                let parent = r.get("parent").and_then(Value::as_u64).map(|x| x as u32);
+                let idle_mode = r.get("mode").and_then(Value::as_str) == Some("idle");
+                let idle_secs = r.get("idle_secs").and_then(Value::as_u64).unwrap_or(20).max(3);
+                let lines = r.get("lines").and_then(Value::as_u64).unwrap_or(40).clamp(1, 400) as usize;
+                spawn_reaper(reg.clone(), id, parent, idle_mode, idle_secs, lines);
+                return Ok(json!({"id": id}));
+            }
             Ok(json!({"id": id}))
         }
         "session.list" => Ok(Value::Array(session_list(reg))),
@@ -314,7 +324,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "session.pending" => {
             let sid_dir = reg.saved.with_file_name("sid");
-            // entries whose worktree was deleted meanwhile are dropped; at most RESTORE_BATCH are handed out
+            // entries whose worktree was deleted meanwhile are dropped; every other one is handed out, none is dropped by a cap
             let mut v: Vec<Value> = reg.pending.lock_recover().clone();
             let before = v.len();
             // a task that reported `done` before the restart is not brought back either
@@ -323,7 +333,6 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 *reg.pending.lock_recover() = v.clone();
                 reg.persist();
             }
-            v.truncate(RESTORE_BATCH);
             for rec in v.iter_mut() {
                 // the agent may have started a new conversation (/clear) since: resume the latest one
                 let Some(key) = rec["meta"]["key"].as_str().map(String::from) else { continue };
@@ -343,6 +352,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     rec["meta"]["resume"] = Value::String(id);
                 }
             }
+            // an entry whose conversation already runs is not handed out again (it stays saved: the live spec replaces it)
+            v.retain(|r| r["meta"]["key"].as_str().and_then(|k| reg.live_by_key(k)).is_none());
             Ok(Value::Array(v))
         }
         "session.pending_remove" => {

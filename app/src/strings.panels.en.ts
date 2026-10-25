@@ -820,6 +820,7 @@ The branch has to be pushed to the remote.`,
     open: "Open",
     cancel: "Cancel",
     outside: (p: string) => `The path ${p} is outside this worktree and is not opened from the terminal.`,
+    htmlTip: "Ctrl+click to open in browser",
   },
   triggers: {
     title: "Fix CI automatically",

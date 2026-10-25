@@ -1162,6 +1162,43 @@ fn clipboard_read() -> Result<Value, CallError> {
     }
 }
 
+/// Hands a resolved `file://` url to the system opener. With `AXELSTRA_TEST_OPENER_LOG` set (tests, E2E) the url is
+/// appended to that file instead and no browser starts.
+fn open_resolved(url: &str, open: impl FnOnce(&str) -> Result<(), String>) -> Result<(), CallError> {
+    if let Some(log) = std::env::var_os("AXELSTRA_TEST_OPENER_LOG").filter(|l| !l.is_empty()) {
+        use std::io::Write;
+        return std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log)
+            .and_then(|mut f| writeln!(f, "{url}"))
+            .map_err(|e| CallError::from(e.to_string()));
+    }
+    open(url).map_err(|e| host_err!("files.html_open_failed", "could not open {path}: {detail}", path = url, detail = e))
+}
+
+/// Ctrl+click on an HTML path in a terminal: the daemon resolves and confines it (`files.resolve_html`), then the system
+/// opener gets the url *it* returned. The page never passes a url, so it cannot open an arbitrary address or program.
+/// `session` is a session of this machine's daemon (a remote host's files are not on this disk).
+#[tauri::command]
+async fn open_html_file(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, session: u32, path: String) -> Result<(), CallError> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let r = with_client(&st.control, true, |c| c.call("files.resolve_html", json!({"session": session, "path": path})))
+            .map_err(|e| CallError::from(&e))?;
+        let url = r["url"].as_str().unwrap_or_default().to_string();
+        if !url.starts_with("file://") {
+            return Err(host_err!("files.html_not_allowed", "not allowed to open {path}", path = path));
+        }
+        open_resolved(&url, |u| {
+            use tauri_plugin_opener::OpenerExt;
+            app.opener().open_url(u, None::<&str>).map_err(|e| e.to_string())
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn clipboard_write(text: String) -> Result<(), CallError> {
     arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).map_err(|e| CallError::from(e.to_string()))
@@ -1300,6 +1337,7 @@ fn main() {
             update_apply,
             clipboard_read,
             clipboard_write,
+            open_html_file,
             notify_session,
             app_quit,
             diagnostics,
@@ -1466,6 +1504,25 @@ mod tests {
         }
         assert!(check_call("project.list", &json!({})).is_ok());
         assert!(check_call("backup.export", &json!({})).is_ok());
+    }
+
+    #[test]
+    fn opener_log_replaces_the_browser_in_tests() {
+        let log = std::env::temp_dir().join(format!("ax-opener-{}.log", std::process::id()));
+        let _ = std::fs::remove_file(&log);
+        std::env::set_var("AXELSTRA_TEST_OPENER_LOG", &log);
+        let res = super::open_resolved("file:///a/b.html", |_| panic!("must not open a browser"));
+        assert!(res.is_ok());
+        assert!(super::open_resolved("file:///c%20d.html", |_| panic!("no")).is_ok());
+        std::env::remove_var("AXELSTRA_TEST_OPENER_LOG");
+        assert_eq!(
+            std::fs::read_to_string(&log).unwrap(),
+            "file:///a/b.html
+file:///c%20d.html
+"
+        );
+        let _ = std::fs::remove_file(&log);
+        assert!(super::open_resolved("file:///x.html", |_| Err("boom".into())).is_err());
     }
 
     #[test]

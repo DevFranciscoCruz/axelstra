@@ -824,6 +824,7 @@ O branch precisa estar enviado ao remoto.`,
     open: "Abrir",
     cancel: "Cancelar",
     outside: (p: string) => `O caminho ${p} está fora deste worktree e não é aberto a partir do terminal.`,
+    htmlTip: "Ctrl+clique para abrir no navegador",
   },
   triggers: {
     title: "Corrigir CI automaticamente",

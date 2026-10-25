@@ -24,7 +24,7 @@ export function TerminalView(props: { id: number; focus?: boolean; active?: () =
 
   onMount(() => {
     const isActive = () => props.active?.() ?? true;
-    const { term, fit, search } = createXterm(host, isActive());
+    const { term, fit, search } = createXterm(host, isActive(), props.id);
     find.bind(term, search);
     let gone = false;
 
