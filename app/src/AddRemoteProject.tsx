@@ -14,7 +14,6 @@ import {
   refreshSessions,
   selectWorktree,
   setError,
-  setShowAddRemote,
   showNotice,
 } from "./store";
 import { S } from "./strings";
@@ -24,8 +23,8 @@ import { Badge, Button, Field, Input, Select } from "./ui";
 const NEW = "__new__";
 type Failure = { text: string; detail: string };
 
-/** Dialog: pick a host (or add one), type or browse the folder on it, confirm. The Tauri host asks its own native confirmation and checks the folder exists. */
-export function AddRemoteProject() {
+/** Pick a host (or add one), type or browse the folder on it, confirm. The Tauri host asks its own native confirmation and checks the folder exists. `onBack` (when embedded in the Add project dialog) adds a Back button. */
+export function AddRemoteForm(props: { onClose: () => void; onBack?: () => void }) {
   const [host, setHost] = createSignal(hosts().find((h) => h.state === "ok")?.id ?? hosts()[0]?.id ?? "");
   const [adding, setAdding] = createSignal(hosts().length === 0);
   const [path, setPath] = createSignal("");
@@ -111,7 +110,7 @@ export function AddRemoteProject() {
         ?.worktrees.find((w) => w.is_main);
       if (main) selectWorktree(main.path);
       showNotice(R.projectAdded(added.name, info()?.name ?? host()));
-      setShowAddRemote(false);
+      props.onClose();
     } catch (e) {
       const msg = errorText(e);
       // the native confirmation was declined
@@ -138,11 +137,18 @@ export function AddRemoteProject() {
   };
 
   return (
-    <Modal label={R.addRemoteTitle} class="modal" onClose={() => setShowAddRemote(false)}>
+    <>
       <div class="auto-head">
+        <Show when={props.onBack}>
+          {(back) => (
+            <Button type="button" onClick={() => back()()}>
+              {R.back}
+            </Button>
+          )}
+        </Show>
         <strong>{R.addRemoteTitle}</strong>
         <span class="grow" />
-        <Button onClick={() => setShowAddRemote(false)}>{S.close}</Button>
+        <Button onClick={props.onClose}>{S.close}</Button>
       </div>
 
       <Field label={R.host}>
@@ -312,7 +318,7 @@ export function AddRemoteProject() {
         </Show>
 
         <div class="m-actions">
-          <Button type="button" onClick={() => setShowAddRemote(false)}>
+          <Button type="button" onClick={props.onClose}>
             {S.cancel}
           </Button>
           <Button type="button" variant="default" disabled={busy() || !path().trim()} onClick={() => void submit()}>
@@ -320,6 +326,15 @@ export function AddRemoteProject() {
           </Button>
         </div>
       </Show>
+    </>
+  );
+}
+
+/** The remote form on its own dialog (used by tests and anywhere the form is wanted without the choice step). */
+export function AddRemoteProject(props: { onClose: () => void }) {
+  return (
+    <Modal label={R.addRemoteTitle} class="modal" onClose={props.onClose}>
+      <AddRemoteForm onClose={props.onClose} />
     </Modal>
   );
 }

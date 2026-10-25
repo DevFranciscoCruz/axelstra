@@ -19,7 +19,7 @@ import { ContextMenu } from "./ContextMenu";
 import { Automations } from "./Automations";
 import { Dispatcher } from "./Dispatcher";
 import { Settings } from "./Settings";
-import { AddRemoteProject } from "./AddRemoteProject";
+import { AddProject } from "./AddProject";
 import { Shortcuts } from "./Shortcuts";
 import { S } from "./strings";
 import { startDrag } from "./dragResize";
@@ -45,7 +45,6 @@ import { StatusBar } from "./StatusBar";
 import { MicIcon, VoiceDraft, listening, toggleVoice, voiceSupported } from "./Voice";
 import { ErrorToast } from "./ErrorToast";
 import { TabBar } from "./TabBar";
-import { pickProject } from "./projectActions";
 import { ask } from "./Confirm";
 import { PullsPanel } from "./PullsPanel";
 import { TimelinePanel } from "./TimelinePanel";
@@ -58,7 +57,8 @@ import {
   fileLine,
   projectTerse,
   changesMode,
-  showAddRemote,
+  showAddProject,
+  setShowAddProject,
   showAutomations,
   showDispatcher,
   setSessionCloser,
@@ -362,8 +362,8 @@ export function App() {
       <Show when={showDispatcher()}>
         <Dispatcher />
       </Show>
-      <Show when={showAddRemote()}>
-        <AddRemoteProject />
+      <Show when={showAddProject()}>
+        <AddProject />
       </Show>
       <Show when={showAutomations()}>
         <Automations />
@@ -385,10 +385,10 @@ export function App() {
                   <PanelIcon side="left" on={false} />
                 </Button>
               </Show>
-              <Show when={projects()[0]} fallback={<Welcome onAddProject={() => void pickProject()} />}>
+              <Show when={projects()[0]} fallback={<Welcome onAddProject={() => setShowAddProject(true)} />}>
                 {(p) => (
                   <Welcome
-                    onAddProject={() => void pickProject()}
+                    onAddProject={() => setShowAddProject(true)}
                     projectName={p().name}
                     worktrees={p().worktrees}
                     onPick={selectWorktree}

@@ -56,6 +56,7 @@ const RAW: Raw[] = [
   { id: "voice", keys: "Ctrl+Shift+M", group: "ferramentas" },
   { id: "orchestra", group: "ferramentas" },
   { id: "dispatcher", group: "ferramentas" },
+  { id: "addProject", group: "worktree" },
   { id: "addRemote", group: "worktree" },
   { id: "automations", group: "ferramentas" },
   { id: "computer", group: "ferramentas" },
