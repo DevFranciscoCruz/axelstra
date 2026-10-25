@@ -126,7 +126,9 @@ const launch = (scale) => {
 function webview2Runtime() {
   const clients = "Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
   for (const hive of ["HKLM\\SOFTWARE\\WOW6432Node", "HKLM\\SOFTWARE", "HKCU\\SOFTWARE"]) {
-    const r = spawnSync("reg", ["query", `${hive}\\${clients}`, "/v", "pv"], { encoding: "utf8" });
+    const r = spawnSync("reg", ["query", `${hive}\\${clients}`, "/v", "pv"], {
+      encoding: "utf8",
+    });
     const m = r.status === 0 && /pv\s+REG_SZ\s+(\S+)/.exec(r.stdout);
     if (m) return m[1];
   }
@@ -261,7 +263,11 @@ ${readFileSync(f, "utf8").slice(-1500)}`);
     out.push(String(e));
   }
   // The host's own log (logs/) and the browser processes tell whether WebView2 was ever started, or died.
-  const procs = spawnSync("tasklist", ["/FO", "CSV", "/NH"], { encoding: "utf8", timeout: 20000 }).stdout ?? "";
+  const procs =
+    spawnSync("tasklist", ["/FO", "CSV", "/NH"], {
+      encoding: "utf8",
+      timeout: 20000,
+    }).stdout ?? "";
   out.push(`--- processes
 ${procs
   .split(/\r?\n/)
@@ -524,7 +530,9 @@ ${dataDirReport()}`);
   // unintegrated commit), never a real project. "list" keeps every folder; "all" needs the typed name and deletes them.
   problems.length = 0;
   const rmRepo = join(dir, "rmrepo");
-  const rmWts = join(dir, "rmrepo-wt");
+  // the daemon only previews and removes worktrees under `<repo parent>/.axelstra-wt` (the only door to deleting a folder),
+  // and only counts an `ax/*` branch as unintegrated work
+  const rmWts = join(dir, ".axelstra-wt");
   mkdirSync(rmRepo);
   mkdirSync(rmWts);
   const rg = (cwd, ...a) => {
@@ -535,11 +543,11 @@ ${dataDirReport()}`);
   writeFileSync(join(rmRepo, "README.md"), "rm\n");
   rg(rmRepo, "add", "README.md");
   rg(rmRepo, "commit", "-m", "init");
-  const wtDirty = join(rmWts, "dirty");
-  const wtUnmerged = join(rmWts, "unmerged");
-  rg(rmRepo, "worktree", "add", "-b", "e2e-dirty", wtDirty);
+  const wtDirty = join(rmWts, "rmrepo-dirty");
+  const wtUnmerged = join(rmWts, "rmrepo-unmerged");
+  rg(rmRepo, "worktree", "add", "-b", "ax/e2e-dirty", wtDirty);
   writeFileSync(join(wtDirty, "README.md"), "changed and not committed\n");
-  rg(rmRepo, "worktree", "add", "-b", "e2e-unmerged", wtUnmerged);
+  rg(rmRepo, "worktree", "add", "-b", "ax/e2e-unmerged", wtUnmerged);
   writeFileSync(join(wtUnmerged, "work.txt"), "work\n");
   rg(wtUnmerged, "add", "work.txt");
   rg(wtUnmerged, "commit", "-m", "unintegrated work");
@@ -559,9 +567,13 @@ ${dataDirReport()}`);
     await until("the remove dialog", () =>
       page.evaluate("!!document.querySelector('[role=dialog] .rm-risk, [role=dialog] input[type=radio]')"),
     );
+    // "Remover tudo" can only be chosen once the preview is in (the page ignores the click before)
+    await until("the preview to load", async () => /e2e-dirty/.test(await dlg("return d.innerText;")), 15000);
   };
   const radioOf = (v) =>
-    dlg(`const r = d.querySelector('input[type=radio][value="${v}"]'); if (!r) return false; r.click(); return true;`);
+    dlg(
+      `const r = d.querySelector('input[type=radio][value="${v}"]'); if (!r) return false; (r.labels?.[0] ?? r).click(); return true;`,
+    );
   const checkedMode = () => dlg("return d.querySelector('input[type=radio]:checked')?.value ?? '';");
   const okState = () =>
     dlg("const b = d.querySelector('.m-actions .primary'); return b ? (b.disabled ? 'disabled' : 'enabled') : 'none';");
@@ -569,7 +581,7 @@ ${dataDirReport()}`);
     dlg(
       "const b = d.querySelector('.m-actions .primary'); if (!b || b.disabled) return false; b.click(); return true;",
     );
-  const projectListed = () => /rmrepo/.test(cli("projects").stdout);
+  const projectListed = () => /"name": "rmrepo"/.test(cli("projects").stdout);
 
   await addRm();
   await openRemove();

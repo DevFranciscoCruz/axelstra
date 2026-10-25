@@ -154,3 +154,66 @@ fn worktree_created_by_another_client_is_announced() {
     }
     assert!(got, "worktree.create must emit projects.changed");
 }
+
+/// The app reads its event stream in one thread and sends `watch.subscribe` from another, on a duplicate of the same
+/// connection, while the stream is quiet. On Windows a blocking read on the pipe would hold that write back until an
+/// event came, so the subscription never reached the daemon and the app missed `projects.changed`.
+#[test]
+fn a_request_sent_on_a_quiet_event_stream_is_not_held_back_by_the_reader() {
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_secs(60));
+        eprintln!("watchdog: test stuck");
+        std::process::exit(1);
+    });
+
+    let root = std::env::temp_dir().join(format!("axelstra-quiet-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let repo = root.join("r");
+    std::fs::create_dir_all(&repo).unwrap();
+    sh(&repo, &["init", "-q", "-b", "main"]);
+    sh(&repo, &["config", "user.email", "t@t"]);
+    sh(&repo, &["config", "user.name", "t"]);
+    std::fs::write(repo.join("a.txt"), "x").unwrap();
+    sh(&repo, &["add", "-A"]);
+    sh(&repo, &["commit", "-qm", "init"]);
+
+    let pipe = format!("{}-quiet-{}", common::base_pipe(), std::process::id());
+    let token = "f".repeat(32);
+    let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
+    std::thread::spawn(move || {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(server::serve_with_store(p, t, s))
+            .unwrap();
+    });
+    common::wait_ready(&pipe, &token);
+
+    let mut app = Client::connect(&pipe, &token).unwrap();
+    let mut rd = app.try_clone().unwrap();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        while let Ok(f) = rd.read_shared() {
+            if let Frame::Event(e) = f {
+                let _ = tx.send(e);
+            }
+        }
+    });
+    // let the reader settle into waiting before the request goes out
+    std::thread::sleep(Duration::from_millis(300));
+    app.send("watch.unsubscribe", json!({})).unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+
+    let mut cli = Client::connect(&pipe, &token).unwrap();
+    cli.call("project.add", json!({"path": &repo})).unwrap();
+    let mut got = false;
+    while let Ok(e) = rx.recv_timeout(Duration::from_secs(5)) {
+        if e["event"] == "projects.changed" {
+            got = true;
+            break;
+        }
+    }
+    assert!(got, "the app must hear projects.changed on a stream it only wrote one request to");
+}

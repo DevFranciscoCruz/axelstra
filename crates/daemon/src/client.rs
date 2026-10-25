@@ -703,6 +703,34 @@ impl Client {
         Ok(())
     }
 
+    /// `read` for a connection another thread writes to at the same time (the app's event stream). On Windows a pending
+    /// `ReadFile` on the synchronous pipe handle keeps a write on its duplicate waiting until a frame arrives, so a
+    /// request sent on a quiet stream would not reach the daemon (and the watchdog would cancel the read 30 s later).
+    /// This waits for data with `PeekNamedPipe`, like `PeekRead`, and reads only once a frame has started.
+    pub fn read_shared(&mut self) -> Result<Frame> {
+        #[cfg(windows)]
+        if let Conn::File(f) = &self.rd {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+            let mut nap = Duration::from_millis(1);
+            loop {
+                let mut avail = 0u32;
+                let ok = unsafe {
+                    PeekNamedPipe(f.as_raw_handle() as _, std::ptr::null_mut(), 0, std::ptr::null_mut(), &mut avail, std::ptr::null_mut())
+                };
+                if ok == 0 {
+                    bail!("the daemon closed the connection");
+                }
+                if avail > 0 {
+                    break;
+                }
+                std::thread::sleep(nap);
+                nap = (nap * 2).min(Duration::from_millis(10));
+            }
+        }
+        self.read()
+    }
+
     pub fn read(&mut self) -> Result<Frame> {
         let mut len = [0u8; 4];
         self.rd.read_exact(&mut len)?;

@@ -27,6 +27,8 @@ struct State {
     attachments: Mutex<std::collections::HashMap<u32, std::collections::HashMap<u64, Arc<AtomicBool>>>>,
     /// write side of the change-event connection (see `watch_start`)
     watch: Mutex<Option<Client>>,
+    /// number of the newest `watch_start`; an older one that finishes later must not replace the newer connection
+    watch_gen: std::sync::atomic::AtomicU64,
     /// an update already downloaded and verified, waiting for a restart (or for the app to be closed)
     pending: Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>,
 }
@@ -883,23 +885,37 @@ async fn watch_start(
     on_event: Channel<InvokeResponseBody>,
 ) -> Result<(), CallError> {
     let st = state.inner().clone();
+    // numbered in the order the page asked: the connections below finish in any order, and the page only listens to the
+    // channel of its newest call (a stale connection installed last would receive events nobody reads)
+    let gen = st.watch_gen.fetch_add(1, Ordering::SeqCst) + 1;
     tauri::async_runtime::spawn_blocking(move || -> Result<(), CallError> {
         let c = connect().map_err(|e| CallError::from(&e))?;
         let mut rd = c.try_clone().map_err(|e| CallError::from(&e))?;
-        *st.watch.lock().unwrap() = Some(c);
+        {
+            let mut w = st.watch.lock().unwrap();
+            if st.watch_gen.load(Ordering::SeqCst) != gen {
+                return Ok(());
+            }
+            *w = Some(c);
+        }
         // remote hosts push their events into the same channel
         hosts::set_events(on_event.clone());
+        let st2 = st.clone();
         std::thread::spawn(move || {
-            while let Ok(f) = rd.read() {
+            // `read_shared`: the page writes to this connection (watch_set) while this thread waits for events
+            while let Ok(f) = rd.read_shared() {
                 if let Frame::Event(e) = f {
                     if on_event.send(InvokeResponseBody::Json(e.to_string())).is_err() {
                         break;
                     }
                 }
             }
-            // the connection dropped (daemon gone) or the channel closed: the UI starts the stream again
-            use tauri::Emitter;
-            let _ = app.emit("watch-ended", ());
+            // the connection dropped (daemon gone) or the channel closed: the UI starts the stream again; a replaced
+            // connection ending is expected and says nothing (it would make the page tear down the live one)
+            if st2.watch_gen.load(Ordering::SeqCst) == gen {
+                use tauri::Emitter;
+                let _ = app.emit("watch-ended", ());
+            }
         });
         Ok(())
     })

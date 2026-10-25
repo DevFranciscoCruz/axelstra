@@ -81,9 +81,18 @@ How it stays hermetic:
   `tools/smoke.mjs` has no RPC client (the CLI has no raw call), so it does not cover `project.init`/`project.clone`.
 - Never run it against ScorpioBots or any real project: every path it creates is under the temp dir of the run.
 
+### Scenario removeproject (the sidebar X)
+
+Runs after `addproject`. A temp repo `rmrepo` gets two worktrees under `<temp>/.axelstra-wt/` (the daemon only previews and removes
+worktrees there) on `ax/*` branches, one dirty and one with an unintegrated commit. The project is added with `axelstra add-project`
+and must appear in the sidebar by the daemon's `projects.changed` event alone (no refresh by the test). Checks: the dialog defaults to
+_Só tirar da lista_ and warns about both worktrees; Cancel keeps the project; _Remover tudo_ with unsaved work stays disabled until the
+name is typed; "list" drops the project and deletes no folder; "all" removes both worktree folders and the project, keeps the main
+repository and shows the counts.
+
 Cleanup stops only processes whose executable is the build under test, never the developer's own daemon.
 
-Last local run (Windows 11, WebView2 155, debug host + custom-protocol): all scenarios passed.
+Last local run (Windows 11, WebView2 155, debug host + custom-protocol): all scenarios passed (36 checks).
 
 ## Driver options
 
