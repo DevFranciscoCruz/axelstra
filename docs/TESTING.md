@@ -50,3 +50,14 @@ cannot see a test that only reads. The `serve` refusal is the real barrier; the 
 
 App-level drivers (`tools/e2e.mjs`, `tools/visual.mjs`) set `AXELSTRA_TEST_HIDDEN=1` so the app window is created transparent
 and unfocusable (see `docs/E2E.md`). Never launch the real app from a test without it.
+
+## Opening HTML from a terminal
+
+`files.resolve_html` (daemon) turns a path clicked in a terminal into a `file://` URL; the host command `open_html_file`
+({session, path}) calls it itself and hands the returned URL to the system opener, so the page never passes a URL.
+Rules (`crates/daemon/src/htmlpath.rs`): trailing `. , ; : ) ]` and `:line[:col]` are dropped; the real path (symlinks
+followed) must be a regular `.html`/`.htm` file. A relative path must stay inside the session's cwd, worktree or project
+root (so `..` and symlinks cannot leave, and `/a/proj-evil` is not inside `/a/proj`). An absolute path is allowed anywhere:
+the user clicked it explicitly and only html/htm pass, never an executable or script. Agents may not call it
+(`agent_forbidden`). In tests and E2E set `AXELSTRA_TEST_OPENER_LOG=<file>`: the host appends each URL to that file
+instead of starting a browser.

@@ -600,7 +600,9 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         | "project.integrate"
         | "workspace.export"
         | "workspace.import_preview"
-        | "workspace.import" => true,
+        | "workspace.import"
+        // opening a browser is the user's act: the app host calls it, never an agent
+        | "files.resolve_html" => true,
         _ => false,
     }
 }
@@ -1854,7 +1856,7 @@ fn dispatch_call(c: &mut Ctx) -> Result<Value> {
     match req.method.split('.').next().unwrap_or_default() {
         "session" => session::call(c),
         "worktree" | "project" | "pm" | "janitor" | "dispatch" | "ports" => worktrees::call(c),
-        "fs" | "watch" | "open" => files::call(c),
+        "fs" | "files" | "watch" | "open" => files::call(c),
         "git" | "gh" => vcs::call(c),
         "triggers" => triggers::call(c),
         "docker" => containers::call(c),
