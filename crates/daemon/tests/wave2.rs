@@ -41,8 +41,8 @@ fn one_daemon_serves_every_new_method_and_reports_proto_21() {
     });
     common::wait_ready(&pipe, &token);
     let mut c = Client::connect(&pipe, &token).unwrap();
-    assert_eq!(PROTO, 22, "wave 2 merged as 18; 19 added host.info, host.browse, hosts and agent-aware hooks.*; the stall watchdog (stalled, stall_minutes) makes 20; the watch-stream events that replace polling make 21; auto-integrate (worktree.integrate, project.integrate) makes 22");
-    assert_eq!(c.proto, 22);
+    assert_eq!(PROTO, 23, "wave 2 merged as 18; 19 added host.info, host.browse, hosts and agent-aware hooks.*; the stall watchdog (stalled, stall_minutes) makes 20; the watch-stream events that replace polling make 21; auto-integrate (worktree.integrate, project.integrate) makes 22; the Add Project sources (project.discover, clone, init, gh.repos) make 23");
+    assert_eq!(c.proto, 23);
     // bogus arguments: any answer is fine except "unknown method" (the daemon lacks it) or an agent refusal
     for m in NEW_METHODS {
         if let Err(e) = c.call(m, json!({"project": "x", "worktree": "x", "path": "x"})) {
