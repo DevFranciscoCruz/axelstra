@@ -149,6 +149,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 }
                 reg.note_activity(&wt.path);
             }
+            // made by Axelstra's own flow (`dispatch new`): the janitor may remove it once integrated or empty
+            if p["auto"].as_bool() == Some(true) && p["manual"].as_bool() != Some(true) {
+                if let Err(e) = crate::projects::set_auto(&reg.store, &pr.id, &wt.path) {
+                    eprintln!("auto mark of {}: {e:#}", wt.path);
+                }
+            }
             // the worktree plus what .worktreeinclude copied (env_copied) and left out (env_skipped)
             let mut v = serde_json::to_value(wt)?;
             v["env_copied"] = json!(env.copied);

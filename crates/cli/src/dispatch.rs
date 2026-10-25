@@ -280,7 +280,7 @@ pub fn run(cmd: DispCmd, mut c: Client) -> Result<()> {
             let pid = find_project_by_ref(&projects, &project)
                 .and_then(|p| p["id"].as_str().map(String::from))
                 .with_context(|| format!("no registered project matches {project:?}"))?;
-            let w = c.call("worktree.create", json!({"project": pid, "name": name}))?;
+            let w = c.call("worktree.create", json!({"project": pid, "name": name, "auto": true}))?;
             let path = w["path"].as_str().unwrap_or_default().to_string();
             let id = spawn_agent(&mut c, Path::new(&path), &agent, Some(&lead_prompt(&request)), Some(lead_reap()), false)?;
             remember(&mut meta, &path, title.as_deref(), &request);

@@ -31,6 +31,10 @@ pub struct Project {
     /// one, and removes an integrated one only when nobody has worked in it for a while
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub manual: std::collections::BTreeSet<String>,
+    /// worktrees Axelstra's own flows made (`dispatch new`), by `norm_path`: only these (or one whose branch is really
+    /// integrated) may be removed by the janitor. A worktree with neither mark counts as manual.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub auto: std::collections::BTreeSet<String>,
 }
 
 /// The form of a worktree path used as a key: the shared comparison key (forward slashes, no trailing slash, no
@@ -408,6 +412,40 @@ pub fn set_manual(store: &Path, id: &str, path: &str) -> Result<()> {
     let p = v.iter_mut().find(|p| p.id == id).ok_or_else(|| coded!("project.unknown", "unknown project {id}", id = id))?;
     p.manual.insert(norm_path(path));
     save(store, &v)
+}
+
+/// Records that Axelstra's own flow (`dispatch new`) made the worktree `path`: the janitor may remove it by itself.
+pub fn set_auto(store: &Path, id: &str, path: &str) -> Result<()> {
+    let _g = STORE_LOCK.lock_recover();
+    let mut v = load_for_update(store)?;
+    let p = v.iter_mut().find(|p| p.id == id).ok_or_else(|| coded!("project.unknown", "unknown project {id}", id = id))?;
+    let k = norm_path(path);
+    p.manual.remove(&k);
+    p.auto.insert(k);
+    save(store, &v)
+}
+
+/// Startup migration, run once before the janitor: every worktree that exists now and has neither mark becomes
+/// `manual`, so old or hand-made ones leave only through real integration. Worktrees created later are marked at
+/// creation (`auto`) or count as manual by having no `auto` mark; this never runs again, so it cannot touch them.
+pub fn migrate_marks(store: &Path) -> Result<()> {
+    let _g = STORE_LOCK.lock_recover();
+    let mut v = load_for_update(store)?;
+    let mut changed = false;
+    for p in v.iter_mut() {
+        let Ok(list) = git::worktree_list(Path::new(&p.path)) else { continue };
+        for w in list.into_iter().filter(|w| !w.is_main) {
+            let k = norm_path(&w.path);
+            if !p.manual.contains(&k) && !p.auto.contains(&k) {
+                p.manual.insert(k);
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        save(store, &v)?;
+    }
+    Ok(())
 }
 
 /// The non-main worktree `path` of project `p`, as git lists it.

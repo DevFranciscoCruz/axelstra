@@ -2,6 +2,9 @@
 //! the default branch already, it is inside another live `ax/*` branch (stacked integration), or GitHub says its pull
 //! request was merged (squash merges leave no ancestor). A worktree with a running session that has not reported,
 //! uncommitted changes or unmerged work is never touched, and neither is a branch whose commits no other ref holds.
+//! Safe by default: a worktree with no `auto` mark (hand-made, old, migrated) goes only through real integration of its
+//! own commits; an empty one is removed automatically only when it is `auto`. Nothing goes while a session was in it
+//! within `MANUAL_QUIET_SECS`.
 
 use crate::integrate;
 use crate::projects::{self, Project};
@@ -120,6 +123,13 @@ fn push_event(e: Value) {
 /// user just made by hand is left alone. A worktree whose session reported `done` goes at the next sweep.
 const EMPTY_MIN_AGE_SECS: u64 = 10 * 60;
 
+/// Retry delay for a removal that stayed pending (a process outside our sessions holds the folder, so no exit event
+/// reaches us): doubles from one minute up to 30 minutes. Sessions that exit kick the janitor by event (`watch_exit`),
+/// so this is only the fallback for holders we cannot observe; it is not a fixed poll.
+pub fn retry_delay(attempt: u32) -> Duration {
+    Duration::from_secs((60u64 << attempt.saturating_sub(1).min(5)).min(30 * 60))
+}
+
 fn attention_event(p: &Project, path: &str, branch: &str, why: &axelstra_core::msg::Coded) -> Value {
     json!({"kind": "attention", "project": p.id, "path": path, "branch": branch, "code": why.code, "params": why.params_json(),
            "text": why.text, "at": now_ms()})
@@ -154,9 +164,11 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>) -> Res
             }
             continue;
         }
-        let manual = p.manual.contains(&projects::norm_path(&w.path));
-        // a worktree the user made by hand is left alone while they have a session in it or used it a moment ago
-        if manual && (env.touched)(&w.path) {
+        // safe by default: only a worktree marked `auto` (made by `dispatch new`) is automatic; no mark means manual
+        let auto = p.auto.contains(&projects::norm_path(&w.path)) && !p.manual.contains(&projects::norm_path(&w.path));
+        // nothing is removed while a session is in it or was a moment ago; an auto worktree whose agent just said `done`
+        // is the one exception (the report is the signal that the work is finished)
+        if (env.touched)(&w.path) && !(auto && integrate::done_mark(&w.path, false).is_some()) {
             continue;
         }
         let dirty = git::has_changes(Path::new(&w.path)).unwrap_or(true);
@@ -222,8 +234,9 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>) -> Res
             .collect();
         let Some(why) = merged_reason_in(repo, &branch, &default, &others) else {
             // nothing of its own and nothing to lose: an empty worktree nobody works in goes away after a few minutes
-            // never one the user made by hand: it may just be waiting for its first commit
-            let old = !manual && (reported.is_some() || integrate::branch_age_secs(repo, &branch).is_some_and(|a| a >= EMPTY_MIN_AGE_SECS));
+            // only an `auto` one: a manual or unmarked one may just be waiting for its first commit, and leaves only by
+            // the user's button
+            let old = auto && (reported.is_some() || integrate::branch_age_secs(repo, &branch).is_some_and(|a| a >= EMPTY_MIN_AGE_SECS));
             if old && integrate::ahead_of(repo, &branch, &default) == 0 && !has_own_commits(repo, &branch) {
                 let (removed, closed) = if dry { (false, vec![]) } else { remove_closing(env, p, &w.path) };
                 if removed {
@@ -602,6 +615,87 @@ mod tests {
     }
 
     #[test]
+    fn an_unmarked_empty_worktree_is_never_removed_even_when_old_or_reported_done() {
+        let (root, store, p) = repo_with_store("unmarked");
+        let old = projects::worktree_create(&p, "legacy").unwrap();
+        let hand = projects::worktree_create(&p, "hand").unwrap();
+        projects::set_manual(&store, &p.id, &hand.path).unwrap();
+        // the reported-done signal and a quiet folder must not matter without the `auto` mark
+        integrate::mark_done(&old.path, true);
+        integrate::mark_done(&hand.path, true);
+        let out = sweep(&store, &|_| false, false);
+        assert!(out.iter().all(|o| o["removed"] != true), "{out:?}");
+        // migration marks it manual and changes nothing else
+        projects::migrate_marks(&store).unwrap();
+        let p2 = projects::find(&store, &p.id).unwrap();
+        assert!(p2.manual.contains(&projects::norm_path(&old.path)) && p2.auto.is_empty());
+        let out = sweep(&store, &|_| false, false);
+        assert!(out.iter().all(|o| o["removed"] != true), "{out:?}");
+        assert!(Path::new(&old.path).exists() && Path::new(&hand.path).exists());
+        let _ = git::remove_tree(&root);
+    }
+
+    #[test]
+    fn migration_runs_for_existing_worktrees_only_and_keeps_auto() {
+        let (root, store, p) = repo_with_store("migrate");
+        let auto = projects::worktree_create(&p, "robot").unwrap();
+        projects::set_auto(&store, &p.id, &auto.path).unwrap();
+        let old = projects::worktree_create(&p, "old").unwrap();
+        projects::migrate_marks(&store).unwrap();
+        // created after the migration: no mark yet, and the migration does not run again by itself
+        let late = projects::worktree_create(&p, "late").unwrap();
+        let p2 = projects::find(&store, &p.id).unwrap();
+        assert!(p2.auto.contains(&projects::norm_path(&auto.path)) && !p2.manual.contains(&projects::norm_path(&auto.path)));
+        assert!(p2.manual.contains(&projects::norm_path(&old.path)));
+        assert!(!p2.manual.contains(&projects::norm_path(&late.path)) && !p2.auto.contains(&projects::norm_path(&late.path)));
+        let _ = git::remove_tree(&root);
+    }
+
+    #[test]
+    fn an_empty_auto_worktree_goes_only_once_old_or_reported_and_a_fresh_one_stays() {
+        let (root, store, p) = repo_with_store("autoempty");
+        let fresh = projects::worktree_create(&p, "fresh").unwrap();
+        let done = projects::worktree_create(&p, "done").unwrap();
+        for w in [&fresh, &done] {
+            projects::set_auto(&store, &p.id, &w.path).unwrap();
+        }
+        integrate::mark_done(&done.path, true);
+        let out = sweep(&store, &|_| false, false);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(out[0]["branch"], "ax/done");
+        assert_eq!(out[0]["removed"], true);
+        assert!(Path::new(&fresh.path).exists(), "an auto worktree younger than 10 min with no report stays");
+        git::purge_trash(wt_parent(&done));
+        let _ = git::remove_tree(&root);
+    }
+
+    #[test]
+    fn an_auto_integrated_worktree_is_removed_but_not_while_touched() {
+        let (root, store, p, wt) = merged_worktree("autointeg", "robot");
+        projects::set_auto(&store, &p.id, &wt.path).unwrap();
+        let touched = std::cell::Cell::new(true);
+        let t = |_: &str| touched.get();
+        let env = Env { busy: &|_| false, close: &|_| vec![], touched: &t };
+        assert!(sweep_with(&store, &env, false).is_empty());
+        touched.set(false);
+        let out = sweep_with(&store, &env, false);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(out[0]["removed"], true);
+        assert!(!Path::new(&wt.path).exists());
+        git::purge_trash(wt_parent(&wt));
+        let _ = git::remove_tree(&root);
+    }
+
+    #[test]
+    fn a_branch_at_the_default_tip_without_commits_is_never_merged() {
+        let (root, _store, p) = repo_with_store("tiptip");
+        let w = projects::worktree_create(&p, "same").unwrap();
+        assert!(merged_reason(Path::new(&p.path), "ax/same", "main").is_none());
+        git::purge_trash(wt_parent(&w));
+        let _ = git::remove_tree(&root);
+    }
+
+    #[test]
     fn a_worktree_made_by_hand_stays_while_touched_and_is_never_swept_as_empty() {
         let (root, store, p, wt) = merged_worktree("manual", "mine");
         let empty = projects::worktree_create(&p, "blank").unwrap();
@@ -631,12 +725,43 @@ mod tests {
     fn an_empty_agent_worktree_that_reported_done_is_still_swept() {
         let (root, store, p) = repo_with_store("emptyagent");
         let empty = projects::worktree_create(&p, "agentempty").unwrap();
+        projects::set_auto(&store, &p.id, &empty.path).unwrap();
         integrate::mark_done(&empty.path, true);
         let out = sweep(&store, &|_| false, false);
         assert!(out.iter().any(|o| o["why"] == "empty" && o["removed"] == true), "{out:?}");
         git::purge_trash(wt_parent(&empty));
         let _ = git::remove_tree(&root);
     }
+    #[test]
+    fn pending_retry_backs_off_and_is_bounded() {
+        let d: Vec<u64> = (1..=9).map(|n| retry_delay(n).as_secs()).collect();
+        assert_eq!(d, [60, 120, 240, 480, 960, 1800, 1800, 1800, 1800]);
+        assert_eq!(retry_delay(0).as_secs(), 60);
+        assert_eq!(retry_delay(u32::MAX).as_secs(), 1800);
+    }
+
+    /// The retry is by event: once the holder is gone, the next sweep (what its exit kicks) removes the worktree.
+    #[test]
+    fn a_pending_removal_is_retried_by_the_next_sweep_once_the_holder_exits() {
+        let (root, store, p, wt) = merged_worktree("retry", "retry");
+        projects::set_auto(&store, &p.id, &wt.path).unwrap();
+        let mut child = holder(&wt.path);
+        let out = sweep(&store, &|_| false, false);
+        if cfg!(windows) {
+            assert_eq!(out[0]["pending"], true, "{out:?}");
+            assert!(Path::new(&wt.path).exists());
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        let out = sweep(&store, &|_| false, false);
+        if cfg!(windows) {
+            assert_eq!(out[0]["removed"], true, "{out:?}");
+        }
+        assert!(!Path::new(&wt.path).exists());
+        git::purge_trash(wt_parent(&wt));
+        let _ = git::remove_tree(&root);
+    }
+
     #[test]
     fn integrated_into_names_the_target() {
         assert_eq!(integrated_into("already in origin/main", "main"), "main");

@@ -727,6 +727,8 @@ const REPORTED_IDLE_MS: u64 = 10_000;
 const SHELL_IDLE_MS: u64 = 10 * 60_000;
 
 static SWEEP_QUEUED: AtomicBool = AtomicBool::new(false);
+/// A backoff retry of a pending removal is already waiting.
+static RETRY_QUEUED: AtomicBool = AtomicBool::new(false);
 
 /// Kicks the janitor a few seconds from now (once for a burst of events): after a `done` or a merge, so the finished
 /// worktree goes away without waiting for anything else. The delay lets the reaper close the session; it is one
@@ -1029,6 +1031,7 @@ fn spawn_janitor(reg: Arc<Registry>) {
     std::thread::spawn(move || {
         let mut seen = 0;
         let mut last: Option<Instant> = None;
+        let mut attempts = 0u32;
         loop {
             seen = reg.janitor.wait(seen, None);
             if let Some(left) = last.map(|l| GAP.saturating_sub(l.elapsed())).filter(|d| !d.is_zero()) {
@@ -1059,13 +1062,21 @@ fn spawn_janitor(reg: Arc<Registry>) {
                 reg.persist();
                 reg.projects_changed();
             }
-            // a folder something still held was left whole: look again soon (only while one is waiting)
+            // a folder nothing we watch holds was left whole: look again with a growing, bounded delay (see
+            // `janitor::retry_delay`); a session that exits kicks the janitor at once, so no fixed timer runs
             if swept.iter().any(|s| s["pending"] == true) {
-                let r = reg.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(Duration::from_secs(30));
-                    r.janitor.bump();
-                });
+                attempts += 1;
+                if !RETRY_QUEUED.swap(true, Ordering::SeqCst) {
+                    let r = reg.clone();
+                    let delay = crate::janitor::retry_delay(attempts);
+                    std::thread::spawn(move || {
+                        std::thread::sleep(delay);
+                        RETRY_QUEUED.store(false, Ordering::SeqCst);
+                        r.janitor.bump();
+                    });
+                }
+            } else {
+                attempts = 0;
             }
             reg.announce_events();
         }
@@ -1209,6 +1220,10 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     spawn_budget_loop(reg.clone());
     spawn_data_watch(reg.clone());
     spawn_session_monitor(reg.clone());
+    // worktrees that exist now and carry no mark become manual, before the janitor may look at them
+    if let Err(e) = crate::projects::migrate_marks(&reg.store) {
+        eprintln!("janitor: mark migration failed: {e:#}");
+    }
     // the daemon starting is one of the moments to look for merged worktrees
     reg.janitor.bump();
     spawn_janitor(reg.clone());
