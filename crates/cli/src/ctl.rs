@@ -254,6 +254,7 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
         | Cmd::Reply { .. }
         | Cmd::Done { .. }
         | Cmd::Escalate { .. }
+        | Cmd::Await { .. }
         | Cmd::Note { .. }
         | Cmd::TaskFile
         | Cmd::Limit { .. }

@@ -71,6 +71,8 @@ struct Registry {
     computer: AtomicBool,
     /// what agents' own hooks said they are doing (`session.hint`)
     hints: axelstra_core::waiting::Hints,
+    /// sessions that said they only wait for something external (`session.await`)
+    awaits: axelstra_core::waiting::Awaits,
     /// sessions the stall watchdog already told their parent about (until they work again)
     stall_notified: Mutex<std::collections::HashSet<u32>>,
     /// bumped when a request changed projects or worktrees; watchers hear it as `projects.changed`
@@ -280,6 +282,7 @@ impl Registry {
             clients: Default::default(),
             computer: AtomicBool::new(false),
             hints: Default::default(),
+            awaits: Default::default(),
             stall_notified: Default::default(),
             wt_gen: AtomicU64::new(0),
             audit,
@@ -334,6 +337,14 @@ impl Registry {
             return None;
         }
         self.hints.waiting(id, since_input_ms, idle_ms)
+    }
+
+    /// What the session said it only waits for (CI, a deploy), while that still holds. Never after `done`.
+    fn awaiting_of(&self, id: u32, since_input_ms: u64, idle_ms: u64) -> Option<axelstra_core::waiting::AwaitView> {
+        if self.bus.finished(id).is_some() {
+            return None;
+        }
+        self.awaits.active(id, since_input_ms, idle_ms)
     }
 
     /// Tells the session's parent (once per wait) that it waits for an answer, with the agent's own text.
@@ -541,6 +552,7 @@ fn watch_exit(reg: &Arc<Registry>, id: u32, s: Arc<Session>) {
             reg.note_activity(&w);
         }
         reg.hints.clear(id);
+        reg.awaits.clear(id);
         reg.pulse.bump();
         reg.janitor.bump();
     });
@@ -1092,8 +1104,8 @@ fn spawn_session_monitor(reg: Arc<Registry>) {
     use axelstra_core::pty::QUIET_MS;
     std::thread::spawn(move || {
         let mut seen = reg.pulse.now();
-        // (id, running, quiet, escalated, unread, finished)
-        let mut last: Vec<(u32, bool, bool, bool, usize, bool)> = vec![];
+        // (id, running, quiet, escalated, unread, finished, awaiting)
+        let mut last: Vec<(u32, bool, bool, bool, usize, bool, bool)> = vec![];
         loop {
             let mut next: Option<u64> = None;
             let now: Vec<_> = {
@@ -1107,7 +1119,15 @@ fn spawn_session_monitor(reg: Arc<Registry>) {
                         if running && idle < QUIET_MS {
                             next = Some(next.map_or(QUIET_MS - idle, |n| n.min(QUIET_MS - idle)));
                         }
-                        (id, running, idle >= QUIET_MS, reg.bus.is_escalated(id), reg.bus.unread(id), reg.bus.finished(id).is_some())
+                        (
+                            id,
+                            running,
+                            idle >= QUIET_MS,
+                            reg.bus.is_escalated(id),
+                            reg.bus.unread(id),
+                            reg.bus.finished(id).is_some(),
+                            reg.awaiting_of(id, s.view().since_input_ms(), idle).is_some(),
+                        )
                     })
                     .collect()
             };
@@ -1657,6 +1677,7 @@ fn stall_facts(
         running,
         reported: reg.bus.finished(id).is_some(),
         escalated: reg.bus.is_escalated(id),
+        awaiting: reg.awaiting_of(id, since_input_ms, idle_ms).is_some(),
         live_children: busy.contains(&id),
         idle_ms,
         since_input_ms,
@@ -1733,6 +1754,7 @@ fn session_list(reg: &Registry) -> Vec<Value> {
             // waiting is what the agent said (ask, escalate, a hook event), never read off its screen
             let wait = if running { reg.wait_of(id, view.since_input_ms(), idle) } else { None };
             let waiting = wait.is_some();
+            let awaiting = if running { reg.awaiting_of(id, view.since_input_ms(), idle) } else { None };
             let facts = stall_facts(reg, id, running, idle, view.since_input_ms(), meta.as_ref(), &busy);
             let stalled = crate::stall::is_stalled(&facts, stall_ms);
             let stall = stalled.then(|| {
@@ -1745,7 +1767,7 @@ fn session_list(reg: &Registry) -> Vec<Value> {
                 );
                 json!({"minutes": stall_min, "code": c.code, "params": c.params_json(), "text": c.to_string()})
             });
-            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "wait": wait.map(|w| json!({"kind": w.kind.as_str(), "text": w.text})), "stalled": stalled, "stall": stall, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
+            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "wait": wait.map(|w| json!({"kind": w.kind.as_str(), "text": w.text})), "awaiting": awaiting.map(|a| json!({"reason": a.reason, "since": a.since, "until": a.until})), "stalled": stalled, "stall": stall, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
         })
         .collect();
     v.sort_by_key(|x| x["id"].as_u64());

@@ -163,6 +163,30 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             reg.tell_parent_waiting(id);
             Ok(json!({}))
         }
+        // an agent says it only waits for something external (CI, a deploy): the stall watchdog stays quiet until it
+        // works again, the user types, `done`, `clear` or the limit (`for_min`, at most 2 h) passes
+        "session.await" => {
+            session()?;
+            let id = sid()?;
+            if c.agent.is_some_and(|me| me != id) {
+                return Err(axelstra_core::coded!(
+                    "rpc.agent_own_session",
+                    "{method} is only allowed for the agent's own session",
+                    method = req.method
+                ));
+            }
+            if p["clear"].as_bool() == Some(true) {
+                reg.awaits.clear(id);
+            } else {
+                let reason = axelstra_core::waiting::clean_text(p["reason"].as_str().unwrap_or_default());
+                if reason.is_empty() {
+                    return Err(axelstra_core::coded!("session.await_reason", "an await needs a reason, e.g. \"CI #3703\""));
+                }
+                reg.awaits.set(id, &reason, p["for_min"].as_u64());
+            }
+            reg.pulse.bump();
+            Ok(json!({}))
+        }
         "session.subscribe" => {
             let id = sid()?;
             let s = session()?;

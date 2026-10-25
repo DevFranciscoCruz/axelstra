@@ -111,6 +111,18 @@ enum Cmd {
         #[arg(long)]
         to: Option<u32>,
     },
+    /// Say this session only waits for something external (CI, a deploy): the stall watchdog stays quiet meanwhile.
+    /// It clears itself when you work again, `done`, or after --for-min (at most 120 min); `--clear` ends it now
+    Await {
+        /// what it waits for, e.g. "CI #3703"
+        #[arg(long, required_unless_present = "clear")]
+        reason: Option<String>,
+        /// give up waiting after N minutes (1..=120; default 120)
+        #[arg(long = "for-min")]
+        for_min: Option<u64>,
+        #[arg(long, conflicts_with_all = ["reason", "for_min"])]
+        clear: bool,
+    },
     /// Show a whole conversation: every message sent with --thread NAME, in order
     Thread {
         name: String,
@@ -444,6 +456,7 @@ fn main() -> Result<()> {
         | Cmd::Reply { .. }
         | Cmd::Done { .. }
         | Cmd::Escalate { .. }
+        | Cmd::Await { .. }
         | Cmd::Note { .. }
         | Cmd::TaskFile
         | Cmd::Limit { .. }

@@ -60,6 +60,9 @@ fn quiet_agent_is_stalled_and_its_parent_hears_once_but_no_false_alarms() {
     let main = spawn(&mut c, "main", json!({"kind": "agent", "main": true}), json!({}));
     let term = spawn(&mut c, "term", json!({"kind": "terminal"}), json!({}));
     let lonely = spawn(&mut c, "lonely", agent.clone(), json!({}));
+    let waiter = spawn(&mut c, "waiter", agent.clone(), json!({"parent": boss}));
+    assert!(c.call("session.await", json!({"id": waiter, "reason": "  "})).unwrap_err().to_string().contains("reason"));
+    c.call("session.await", json!({"id": waiter, "reason": "CI #3703", "for_min": 30})).unwrap();
     c.call("msg.send", json!({"from": reported, "to": boss, "text": "[ok] all done", "kind": "done", "quiet": true})).unwrap();
     c.call("msg.send", json!({"from": escalated, "to": boss, "text": "need help", "kind": "escalate", "quiet": true})).unwrap();
     let inbox_before = c.call("msg.inbox", json!({"session": boss})).unwrap().as_array().unwrap().len();
@@ -108,6 +111,22 @@ fn quiet_agent_is_stalled_and_its_parent_hears_once_but_no_false_alarms() {
         [(reported, "called done"), (escalated, "escalated"), (main, "main"), (term, "terminal"), (boss, "has running children")]
     {
         assert_eq!(row(&mut c, id)["stalled"], false, "{why}");
+    }
+
+    // awaiting something external: shown with its reason, never stalled, the parent is not told
+    let w = row(&mut c, waiter);
+    assert_eq!(w["stalled"], false, "awaiting");
+    assert_eq!(w["awaiting"]["reason"], "CI #3703");
+    assert_eq!(w["awaiting"]["until"].as_u64().unwrap() - w["awaiting"]["since"].as_u64().unwrap(), 30 * 60_000);
+    assert!(row(&mut c, quiet)["awaiting"].is_null());
+    assert!(c.call("msg.inbox", json!({"session": boss})).unwrap().as_array().unwrap().iter().all(|m| m["from"] != waiter));
+    // ending it hands the session back to the watchdog
+    c.call("session.await", json!({"id": waiter, "clear": true})).unwrap();
+    assert!(row(&mut c, waiter)["awaiting"].is_null());
+    let t0 = Instant::now();
+    while row(&mut c, waiter)["stalled"] != true {
+        assert!(t0.elapsed() < Duration::from_secs(10), "cleared await never stalled");
+        std::thread::sleep(Duration::from_millis(250));
     }
 
     // the threshold is a setting: 5 by default, 0 turns the watchdog off, nonsense is refused with a code

@@ -116,6 +116,16 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             c.call("msg.send", json!({"from": me()?, "to": to, "text": text, "kind": "escalate"}))?;
             println!("escalated to session {to}; waiting for an answer in your inbox (`axelstra inbox`)");
         }
+        Cmd::Await { reason, for_min, clear } => {
+            c.call("session.await", json!({"id": me()?, "reason": reason, "for_min": for_min, "clear": clear}))?;
+            if clear {
+                println!("no longer awaiting");
+            } else {
+                println!(
+                    "awaiting: the stall watchdog stays quiet until you work again, `done`, or the limit; `axelstra await --clear` ends it"
+                );
+            }
+        }
         Cmd::Thread { name, json } => {
             let list = c.call("msg.thread", json!({"name": name}))?;
             let list = list.as_array().cloned().unwrap_or_default();

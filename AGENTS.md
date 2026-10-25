@@ -48,6 +48,18 @@ Verified: Claude Code 2.1.310 Notification types (`permission_prompt`, `idle_pro
 `ToolPermission`. Codex 0.154 has `~/.codex/hooks.json` events (`PermissionRequest`, `PreToolUse`, `Stop`, `UserPromptSubmit`);
 `axelstra hook codex` understands them but nothing installs them (Codex asks the user to trust each hook).
 
+## Awaiting something external
+
+`axelstra await --reason "CI #3703" [--for-min N]` (`session.await`, `awaits` in `waiting.rs`/`Awaits`) marks the caller's own
+session as awaiting: it only waits for CI, a deploy or another process. `session.list` carries
+`awaiting: {reason, since, until}` (unix ms; `null` when not) and the app shows its own state, neither working, idle nor the
+red waiting. `stall_facts` sets `awaiting`, so `is_stalled` is false meanwhile. It holds until the user types, output comes
+more than `AWAIT_GRACE_MS` (30 s, the agent's closing words) after the call, `done`, the process exits, `axelstra await --clear`
+or the limit (`--for-min`, default and cap `AWAIT_CAP_MS` 2 h); then the watchdog warns the parent once as usual. Event-driven
+(`pulse` on set/clear, awaiting is part of the session monitor's state); no polling. An agent may only call it for itself
+(`rpc.agent_own_session`). No PROTO bump: the app only reads an additive field. `NEVER_WAIT_RULE` (typed into every lead and
+worker prompt) and the axelstration skill tell agents to use it instead of stopping silently.
+
 ## Bumping PROTO
 
 `PROTO` in `crates/daemon/src/proto.rs` is the app <-> daemon contract version. A daemon outlives

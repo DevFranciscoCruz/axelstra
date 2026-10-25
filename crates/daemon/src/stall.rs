@@ -50,6 +50,8 @@ pub struct Facts {
     pub reported: bool,
     /// it called `axelstra escalate` and nobody answered yet (the parent already knows)
     pub escalated: bool,
+    /// it said (`axelstra await`) that it only waits for something external, within its limit
+    pub awaiting: bool,
     /// a child session of it is still running (it legitimately waits for it)
     pub live_children: bool,
     /// ms since the last output
@@ -66,6 +68,7 @@ pub fn is_stalled(f: &Facts, threshold_ms: u64) -> bool {
         && f.running
         && !f.reported
         && !f.escalated
+        && !f.awaiting
         && !f.live_children
         && f.idle_ms.min(f.since_input_ms) >= threshold_ms
 }
@@ -111,6 +114,7 @@ mod tests {
         for f in [
             Facts { reported: true, ..quiet() },
             Facts { escalated: true, ..quiet() },
+            Facts { awaiting: true, ..quiet() },
             Facts { live_children: true, ..quiet() },
             Facts { running: false, ..quiet() },
             Facts { main: true, ..quiet() },

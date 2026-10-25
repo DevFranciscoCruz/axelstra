@@ -4,7 +4,7 @@
 
 /// Rule typed into every lead/worker prompt (English on purpose: agents are prompted in English). Writing "waiting for
 /// your decision" in the terminal tells nobody; the stall watchdog only flags the silence after the fact.
-pub const NEVER_WAIT_RULE: &str = "Never wait silently for the human: if you need a decision, a confirmation or a permission, or you are blocked, run `axelstra ask $AXELSTRA_PARENT \"<question>\"` (it blocks until answered) or `axelstra escalate \"<problem>\"`; if the choice is reversible, decide, say so in your report and carry on. Text such as \"waiting for your decision\" in the terminal reaches nobody, and after a few quiet minutes you are flagged as stalled.";
+pub const NEVER_WAIT_RULE: &str = "Never wait silently for the human: if you need a decision, a confirmation or a permission, or you are blocked, run `axelstra ask $AXELSTRA_PARENT \"<question>\"` (it blocks until answered) or `axelstra escalate \"<problem>\"`; if the choice is reversible, decide, say so in your report and carry on. Text such as \"waiting for your decision\" in the terminal reaches nobody, and after a few quiet minutes you are flagged as stalled. If you only wait for something external (a CI run, a deploy, a long process), run `axelstra await --reason \"CI #123\" [--for-min N]` before you stop instead of sitting silent: you are not flagged as stalled meanwhile, and it clears itself when you work again (`axelstra await --clear` ends it).";
 
 /// What an agent's own hook (Claude Code's Notification, Stop, UserPromptSubmit) said it is doing.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -134,6 +134,73 @@ impl Hints {
     }
 }
 
+/// Longest a session may stay "awaiting" something external; after that the stall watchdog speaks (once).
+pub const AWAIT_CAP_MS: u64 = 2 * 60 * 60 * 1000;
+/// Output within this long after `await` is the agent finishing its turn; later output means it works again.
+pub const AWAIT_GRACE_MS: u64 = 30_000;
+/// Longest reason kept (characters).
+pub const AWAIT_REASON_MAX: usize = 200;
+
+/// True while an `await` still holds: not expired (`limit_ms`), no typing and no real output since (see `AWAIT_GRACE_MS`).
+/// `age_ms` is the time since `await`, `since_input_ms` since the user last typed, `idle_ms` since the last output.
+pub fn await_active(age_ms: u64, limit_ms: u64, since_input_ms: u64, idle_ms: u64) -> bool {
+    age_ms < limit_ms.min(AWAIT_CAP_MS) && since_input_ms > age_ms && idle_ms + AWAIT_GRACE_MS >= age_ms
+}
+
+/// The limit in ms for `--for-min` (None = the cap).
+pub fn await_limit_ms(for_min: Option<u64>) -> u64 {
+    for_min.map_or(AWAIT_CAP_MS, |m| m.saturating_mul(60_000).clamp(60_000, AWAIT_CAP_MS))
+}
+
+/// What `session.list` shows for an awaiting session.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AwaitView {
+    pub reason: String,
+    /// unix ms when `await` was called
+    pub since: u64,
+    /// unix ms when it expires on its own
+    pub until: u64,
+}
+
+struct Await {
+    at: std::time::Instant,
+    since: u64,
+    reason: String,
+    limit_ms: u64,
+}
+
+/// Sessions that said they only wait for something external (CI, a deploy), by session id.
+#[derive(Default)]
+pub struct Awaits(std::sync::Mutex<std::collections::HashMap<u32, Await>>);
+
+impl Awaits {
+    pub fn set(&self, id: u32, reason: &str, for_min: Option<u64>) {
+        let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+        let reason: String = clean_text(reason).chars().take(AWAIT_REASON_MAX).collect();
+        let a = Await { at: std::time::Instant::now(), since, reason, limit_ms: await_limit_ms(for_min) };
+        if let Ok(mut m) = self.0.lock() {
+            m.insert(id, a);
+        }
+    }
+
+    /// True when there was one to clear.
+    pub fn clear(&self, id: u32) -> bool {
+        self.0.lock().ok().is_some_and(|mut m| m.remove(&id).is_some())
+    }
+
+    /// The await, if it still holds given how long the session has been quiet (see `await_active`).
+    pub fn active(&self, id: u32, since_input_ms: u64, idle_ms: u64) -> Option<AwaitView> {
+        let m = self.0.lock().ok()?;
+        let a = m.get(&id)?;
+        let age = a.at.elapsed().as_millis() as u64;
+        await_active(age, a.limit_ms, since_input_ms, idle_ms).then(|| AwaitView {
+            reason: a.reason.clone(),
+            since: a.since,
+            until: a.since + a.limit_ms.min(AWAIT_CAP_MS),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,5 +289,39 @@ mod tests {
         let h = Hints::default();
         assert!(h.waiting(7, u64::MAX, 60_000).is_none());
         assert!(h.take_untold(7).is_none());
+    }
+
+    #[test]
+    fn await_holds_until_input_output_or_expiry() {
+        let lim = await_limit_ms(None);
+        assert_eq!(lim, AWAIT_CAP_MS);
+        assert_eq!(await_limit_ms(Some(10)), 600_000);
+        assert_eq!(await_limit_ms(Some(0)), 60_000);
+        assert_eq!(await_limit_ms(Some(100_000)), AWAIT_CAP_MS);
+        // quiet since before the call
+        assert!(await_active(10_000, lim, u64::MAX, 10_000));
+        // the agent's closing words right after the call
+        assert!(await_active(10_000, lim, u64::MAX, 2_000));
+        // real output long after the call: it works again
+        assert!(!await_active(100_000, lim, u64::MAX, 5_000));
+        // the user typed after the call
+        assert!(!await_active(10_000, lim, 3_000, 10_000));
+        // expired by --for-min and by the cap
+        assert!(!await_active(700_000, 600_000, u64::MAX, 700_000));
+        assert!(!await_active(AWAIT_CAP_MS, lim, u64::MAX, AWAIT_CAP_MS));
+    }
+
+    #[test]
+    fn awaits_set_show_and_clear() {
+        let a = Awaits::default();
+        assert!(a.active(1, u64::MAX, 0).is_none());
+        a.set(1, "  CI #3703 \u{7}", Some(5));
+        let v = a.active(1, u64::MAX, 0).unwrap();
+        assert_eq!(v.reason, "CI #3703");
+        assert_eq!(v.until - v.since, 300_000);
+        assert!(a.active(2, u64::MAX, 0).is_none());
+        assert!(a.clear(1));
+        assert!(!a.clear(1));
+        assert!(a.active(1, u64::MAX, 0).is_none());
     }
 }
