@@ -54,9 +54,33 @@ Set `E2E_VERBOSE=1` to see the app's stderr.
 Scenarios it covers: **boot** (frontend renders, document title), **session** (a git repo is added with
 `axelstra add-project`, a terminal is started with `axelstra terminal`, the UI lists the project, mounts an xterm
 terminal with a sized WebGL canvas, and `axelstra read` shows the command ran), **restore** (the app process is
-killed, the daemon keeps the session, a relaunch shows the terminal again). Throughout, it fails on any CSP violation
+killed, the daemon keeps the session, a relaunch shows the terminal again), **addproject** (below). Throughout, it fails on any CSP violation
 (Audits `ContentSecurityPolicyIssue`), console error or uncaught exception once the page has settled.
 The CSP check is what verifies a `style-src` change (see SECURITY.md, "Content Security Policy").
+
+### Scenario addproject (the Add project dialog)
+
+Runs after `restore`, in the relaunched app. It opens *+ Adicionar projeto* and checks, in this order: the six origins are listed;
+`Home`, `ArrowDown`, `End` and `ArrowUp` (real `Input.dispatchKeyEvent`) move and select the tab; **Novo projeto** refuses a name with a
+separator in the page, then creates `newparent/e2e-new` with a README and exactly one commit and the project shows in `axelstra projects`;
+the dialog reopens on the origin used last; **Clonar** refuses `file://` in the page, then clones `ssh://127.0.0.1:1/none.git` (refused at
+once, offline) and must show *A clonagem falhou* and leave no `none` folder; **GitHub** shows its hint (no `gh` login, no list); **Descobertos**
+shows a list or the empty note; `Esc` closes; no console error, CSP violation or uncaught exception meanwhile.
+
+How it stays hermetic:
+
+- Folders are typed into the path fields through the native value setter plus an `input` event; the native folder picker (`pick_folder`) is never
+  clicked, so no OS dialog opens and nothing needs a test hook.
+- The git identity comes from a throwaway `GIT_CONFIG_GLOBAL` (and `GIT_AUTHOR_*`/`GIT_COMMITTER_*`): `project.init` reads `git config user.name`, so
+  the env vars alone are not enough. `GIT_TERMINAL_PROMPT=0` as well.
+- `GH_CONFIG_DIR` is an empty temp dir and `GH_TOKEN`/`GITHUB_TOKEN` are empty: `gh` has no login, the tab shows its hint and no request leaves the machine.
+- **Descobertos reads your real home.** The daemon resolves home from `USERPROFILE`, which the E2E cannot override (the app exits at startup with it), so the scan lists
+  real repositories read-only. The scenario only checks that a list or the empty note renders and never adds from it; the refusal of a path the scan did not offer
+  is covered by `crates/daemon/tests/sources.rs`; a successful add of a discovered repository has no automated test yet.
+- **A positive clone is not driven through the page**: it only offers `https://`, `ssh://` and `user@host:path`, and there is no offline server for those. A clone from a
+  local bare repo (`file://`, accepted by the daemon only under test) with progress, cancel and cleanup is covered by `crates/daemon/tests/sources.rs`.
+  `tools/smoke.mjs` has no RPC client (the CLI has no raw call), so it does not cover `project.init`/`project.clone`.
+- Never run it against ScorpioBots or any real project: every path it creates is under the temp dir of the run.
 
 Cleanup stops only processes whose executable is the build under test, never the developer's own daemon.
 

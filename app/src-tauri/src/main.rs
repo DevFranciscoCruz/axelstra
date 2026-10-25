@@ -208,6 +208,7 @@ const ALLOWED_METHODS: &[&str] = &[
     "fs.write",
     "gh.comments",
     "gh.list",
+    "gh.repos",
     "gh.send_comment",
     "git.changes",
     "git.commit",
@@ -235,7 +236,13 @@ const ALLOWED_METHODS: &[&str] = &[
     "git.checks",
     "git.timeline",
     "git.merge",
+    "project.add_discovered",
+    "project.clone",
+    "project.clone_cancel",
+    "project.clone_status",
+    "project.discover",
     "project.env_preview",
+    "project.init",
     "worktree.rename",
     "dispatch.overlaps",
     "dispatch.overlap_files",
@@ -479,6 +486,13 @@ fn pick_folder(app: &tauri::AppHandle, title: &str, start: Option<std::path::Pat
         None => Ok(None),
         Some(f) => f.into_path().map(|p| Some(p.to_string_lossy().into_owned())).map_err(|e| CallError::from(e.to_string())),
     }
+}
+
+/// Native folder pick; the path goes back to the page only as the parent or destination of `project.init` and
+/// `project.clone` (the daemon validates both). Returns null when cancelled.
+#[tauri::command]
+async fn folder_pick(app: tauri::AppHandle, title: String) -> Result<Option<String>, CallError> {
+    tauri::async_runtime::spawn_blocking(move || pick_folder(&app, &title, None)).await.map_err(|e| e.to_string())?
 }
 
 /// Native folder pick, then `project.add` with that path. Returns the daemon's project, or null when cancelled.
@@ -1297,6 +1311,7 @@ fn main() {
             daemon_call,
             daemon_call_bg,
             project_add_pick,
+            folder_pick,
             backup_restore_pick,
             workspace_export_pick,
             workspace_import_pick,

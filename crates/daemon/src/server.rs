@@ -18,6 +18,7 @@ mod misc;
 mod orchestration;
 mod origin;
 mod session;
+mod sources;
 mod triggers;
 mod vcs;
 mod worktrees;
@@ -598,6 +599,13 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         | "worktree.rebase"
         | "worktree.integrate"
         | "project.integrate"
+        | "project.discover"
+        | "project.add_discovered"
+        | "project.clone"
+        | "project.clone_status"
+        | "project.clone_cancel"
+        | "project.init"
+        | "gh.repos"
         | "workspace.export"
         | "workspace.import_preview"
         | "workspace.import"
@@ -1807,7 +1815,17 @@ struct Ctx<'a> {
 /// Whether `method` changes projects or worktrees, which makes the cached project list stale.
 fn changes_projects(method: &str) -> bool {
     (method.starts_with("worktree.") && !matches!(method, "worktree.status" | "worktree.overview"))
-        || (method.starts_with("project.") && !matches!(method, "project.list" | "project.logo" | "project.log"))
+        || (method.starts_with("project.")
+            && !matches!(
+                method,
+                "project.list"
+                    | "project.logo"
+                    | "project.log"
+                    | "project.discover"
+                    | "project.clone"
+                    | "project.clone_status"
+                    | "project.clone_cancel"
+            ))
 }
 
 /// Drops the cached project list and bumps the generation a `project.list` in flight checks before caching its answer.
@@ -1852,6 +1870,9 @@ fn dispatch_call(c: &mut Ctx) -> Result<Value> {
                 method = req.method
             ));
         }
+    }
+    if sources::handles(&req.method) {
+        return sources::call(c);
     }
     match req.method.split('.').next().unwrap_or_default() {
         "session" => session::call(c),

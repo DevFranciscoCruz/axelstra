@@ -1,4 +1,4 @@
-import { Show, createMemo, createSignal } from "solid-js";
+import { Show, createEffect, createMemo, createSignal } from "solid-js";
 import { errorText } from "./appError";
 import { specProblem } from "./hostLogic";
 import { addHost, setError, showNotice } from "./store";
@@ -7,11 +7,22 @@ import { R } from "./strings.remote";
 import { Button, Field, Input } from "./ui";
 
 /** Name + specification of a new remote host. The checks here are for the user's comfort; the Tauri host validates again. */
-export function AddHostForm(props: { onAdded?: (id: string) => void; onCancel?: () => void }) {
+export function AddHostForm(props: {
+  onAdded?: (id: string) => void;
+  onCancel?: () => void;
+  /** a suggestion the user clicked (a detected WSL distro or ssh host): fills the name and the specification */
+  prefill?: { name: string; spec: string; n: number } | null;
+}) {
   const [name, setName] = createSignal("");
   const [spec, setSpec] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [touched, setTouched] = createSignal(false);
+  createEffect(() => {
+    const p = props.prefill;
+    if (!p) return;
+    setName(p.name);
+    setSpec(p.spec);
+  });
   const specError = createMemo(() => {
     const p = specProblem(spec());
     return p ? R.spec_problem[p] : null;

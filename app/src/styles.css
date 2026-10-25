@@ -619,6 +619,7 @@ tr.cmt textarea { width: 100%; min-height: 60px; resize: vertical; background: v
 .port { margin-left: 6px; background: rgba(var(--ok2-rgb), .12); color: var(--ok); border: 1px solid rgba(var(--ok2-rgb), .35); border-radius: var(--r-xl); padding: 2px 8px; font: inherit; font-size: var(--fs-sm); cursor: pointer; align-self: center; }
 .port:hover { background: rgba(var(--ok2-rgb), .22); }
 .modal.auto { width: min(640px, 94vw); }
+.modal.add-project { width: min(860px, 94vw); }
 .auto-head { display: flex; align-items: center; gap: 8px; }
 .auto-note { font-size: var(--fs-md); color: var(--muted); line-height: 1.4; }
 .auto-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; max-height: 50vh; }

@@ -40,12 +40,12 @@ purpose and fix the new lints in the same change.
 - `smoke.mjs`: CLI-level smoke test. Starts `axelstra daemon` in a throwaway data dir (and, on Windows, a throwaway
   pipe name), checks `ls`, spawns and lists a session, kills it. `cargo build -p axelstra && node tools/smoke.mjs`.
   Runs in CI on Ubuntu and Windows. Never touches your real daemon.
-- `e2e.mjs [path\to\axelstra-app.exe]`: drives the real Windows app over the DevTools protocol (boot, a session, restore, CSP) in a throwaway data dir; see `docs/E2E.md`. Sets `AXELSTRA_TEST_HIDDEN=1` so no window shows.
+- `e2e.mjs [path\to\axelstra-app.exe]`: drives the real Windows app over the DevTools protocol (boot, a session, restore, the Add project dialog, CSP) in a throwaway data dir; see `docs/E2E.md`. Sets `AXELSTRA_TEST_HIDDEN=1` so no window shows.
 - `e2e-html-link.mjs [path\to\axelstra-app.exe]`: Ctrl+click on an `.html` path in a terminal logs its `file://` url to `AXELSTRA_TEST_OPENER_LOG` instead of opening a browser; same isolation and hidden window as `e2e.mjs`, see `docs/E2E.md`.
 - `winrect.mjs`: Win32 helpers for `e2e.mjs` and `visual.mjs` (window geometry, a real resize). Windows only.
 - `visual.mjs [outDir]`: screenshots of the real app over CDP (Welcome, Settings, sidebar with lead rows and a stalled agent,
   three languages, 1280x800 and 800x600) in a throwaway data dir, with a `.cmd` stand-in agent. `VISUAL_FAST=1` skips the
-  wait for the stall watchdog. `VISUAL_ADD=only` takes just the Add project dialog (choice and remote form, 800x600, three languages). Windows only; build the app and frontend first (see the header of the file).
+  wait for the stall watchdog. `VISUAL_ADD=only` takes just the Add project dialog (the Pasta local, Clonar and Novo projeto tabs, 800x600, three languages; files `addproject-<local|clone|new>-<locale>.png`). Windows only; build the app and frontend first (see the header of the file).
 - `check-deny-expiry.mjs`: CI check that every advisory ignore in `deny.toml` still has a future `expires YYYY-MM-DD`.
 - `make-icons.py`: regenerates the app icons from `assets/logo.png` (crop, black glow to alpha). Needs Python 3 and
   Pillow (`pip install pillow`). Only run it when the logo changes.

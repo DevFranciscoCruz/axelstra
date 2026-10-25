@@ -12,7 +12,7 @@ session lost its status line (ROADMAP B2/T4).
   `flows/`, `locks/`, `dispatch.json`, `lag.log`, `statusline.log`). On Windows the pipe name derives from it
   (`\.\pipe\axelstra-<SID>-d<hash of the dir>`), on Unix the socket lives inside it. Unset = the real, SID-based default.
   `AXELSTRA_TEST_PIPE` still appends a suffix on top.
-- `AXELSTRA_TESTING=1` (or `cfg(test)`): `server::serve` / `serve_with_store` refuse to run when the projects store is in
+- `AXELSTRA_TESTING=1` (or `cfg(test)`; also what lets `project.clone` accept `file://` so tests can clone a local bare repo): `server::serve` / `serve_with_store` refuse to run when the projects store is in
   the real data dir or the pipe is the real default pipe (`proto::refuse_real_when_testing`). Proven by
   `crates/daemon/tests/isolation.rs` and the `proto` unit test.
 
@@ -47,6 +47,10 @@ dir before the `test` step and fails if any changed after it; it is skipped when
 those four files are compared, because a real running daemon legitimately rewrites `sessions.json` (and backups),
 `lag.log`, `statusline.log` and `status/` on its own; a leak into those would not be caught by the script. It also
 cannot see a test that only reads. The `serve` refusal is the real barrier; the script is the net.
+
+Tests of Add project (`crates/daemon/tests/sources.rs`, the `addproject` scenario of `tools/e2e.mjs`) create every repository under a temp dir, give git an identity
+through a throwaway `GIT_CONFIG_GLOBAL` (never the developer's gitconfig), and keep `gh` logged out with an empty `GH_CONFIG_DIR`. `project.discover` scans
+`USERPROFILE`/`HOME`, i.e. the real home: both the daemon test and the app E2E (which cannot override `USERPROFILE`, see `docs/E2E.md`) only check the shape of the list and never add from it.
 
 App-level drivers (`tools/e2e.mjs`, `tools/visual.mjs`) set `AXELSTRA_TEST_HIDDEN=1` so the app window is created transparent
 and unfocusable (see `docs/E2E.md`). Never launch the real app from a test without it.

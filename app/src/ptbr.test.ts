@@ -17,6 +17,8 @@ import { W, ptW } from "./strings.welcome";
 import { ptBRW } from "./strings.welcome.ptbr";
 import { WS, ptWS } from "./strings.workspace";
 import { ptBRWS } from "./strings.workspace.ptbr";
+import { AP, ptAP } from "./strings.sources";
+import { ptBRAP } from "./strings.sources.ptbr";
 
 afterEach(() => setLocale("pt-PT"));
 
@@ -30,6 +32,7 @@ const dicts: Entry[] = [
   ["WS", WS, ptWS, ptBRWS],
   ["L", L, ptL, ptBRL],
   ["U", U, ptU, ptBRU],
+  ["AP", AP, ptAP, ptBRAP],
 ];
 
 const at = (o: unknown, path: string): unknown =>

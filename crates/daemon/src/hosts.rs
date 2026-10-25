@@ -5,6 +5,8 @@ use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// Most hosts the registry holds.
 pub const MAX_HOSTS: usize = 16;
@@ -81,12 +83,12 @@ pub fn validate(v: &Value) -> Result<Value> {
 /// Most directories `host.browse` lists.
 pub const MAX_ENTRIES: usize = 500;
 
-fn home() -> Option<PathBuf> {
+pub(crate) fn home() -> Option<PathBuf> {
     ["USERPROFILE", "HOME"].iter().filter_map(std::env::var_os).find(|h| !h.is_empty()).map(PathBuf::from)
 }
 
 /// A path as shown to the user: no `\\?\` prefix, and `\\?\UNC\` turned back into `\\`.
-fn display(p: &Path) -> String {
+pub(crate) fn display(p: &Path) -> String {
     let s = p.to_string_lossy();
     match s.strip_prefix(r"\\?\UNC\") {
         Some(r) => format!(r"\\{r}"),
@@ -115,7 +117,92 @@ pub fn info() -> Value {
     let shell = if cfg!(windows) { None } else { std::env::var("SHELL").ok().filter(|s| !s.is_empty()) };
     let user = std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default();
     json!({"os": os, "home": home().map(|h| display(&h)), "user": user, "hostname": hostname(), "shell": shell,
-        "sep": std::path::MAIN_SEPARATOR.to_string(), "proto": crate::proto::PROTO, "build": crate::proto::BUILD_ID})
+        "sep": std::path::MAIN_SEPARATOR.to_string(), "proto": crate::proto::PROTO, "build": crate::proto::BUILD_ID,
+        "wsl_distros": wsl_distros(), "ssh_hosts": ssh_hosts()})
+}
+
+/// How long the distro and ssh host lists are reused: `host.info` is asked for whenever the Add Project modal opens.
+const LISTS_TTL: Duration = Duration::from_secs(30);
+/// Most `Host` names `ssh_hosts` returns.
+const MAX_SSH_HOSTS: usize = 100;
+
+type Cached = Mutex<Option<(Instant, Vec<String>)>>;
+
+fn cached(slot: &'static Cached, make: impl FnOnce() -> Vec<String>) -> Vec<String> {
+    let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, v)) = g.as_ref().filter(|(at, _)| at.elapsed() < LISTS_TTL) {
+        return v.clone();
+    }
+    let v = make();
+    *g = Some((Instant::now(), v.clone()));
+    v
+}
+
+/// WSL distros installed here (`wsl -l -q`), without the helper distros of Docker Desktop. Empty off Windows or
+/// when `wsl` is missing.
+fn wsl_distros() -> Vec<String> {
+    static SLOT: Cached = Mutex::new(None);
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    cached(&SLOT, || {
+        let mut cmd = std::process::Command::new("wsl");
+        cmd.args(["-l", "-q"]);
+        axelstra_core::git::quiet(&mut cmd);
+        match axelstra_core::exec::run_capped(&mut cmd, Duration::from_secs(5), 64 << 10) {
+            Ok(o) if o.success() && !o.timed_out => parse_wsl_list(&o.stdout),
+            _ => Vec::new(),
+        }
+    })
+}
+
+/// `wsl -l -q` prints UTF-16LE (older builds: plain text); either way one distro per line.
+fn parse_wsl_list(raw: &[u8]) -> Vec<String> {
+    let text = if raw.len() >= 4 && raw.iter().skip(3).step_by(2).take(8).all(|b| *b == 0) {
+        let units: Vec<u16> = raw.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+        String::from_utf16_lossy(&units)
+    } else {
+        String::from_utf8_lossy(raw).into_owned()
+    };
+    text.lines()
+        .map(|l| l.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}' || c == '\0').to_string())
+        .filter(|l| !l.is_empty() && !l.to_ascii_lowercase().starts_with("docker-desktop"))
+        .collect()
+}
+
+/// `Host` names of `~/.ssh/config` that can be connected to by name: no patterns, no negations.
+fn ssh_hosts() -> Vec<String> {
+    static SLOT: Cached = Mutex::new(None);
+    cached(&SLOT, || {
+        let Some(text) = home().and_then(|h| std::fs::read_to_string(h.join(".ssh").join("config")).ok()) else { return Vec::new() };
+        parse_ssh_hosts(&text)
+    })
+}
+
+fn parse_ssh_hosts(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if !line.get(..4).is_some_and(|k| k.eq_ignore_ascii_case("host")) {
+            continue;
+        }
+        // `Host a b` or `Host=a b`; `HostName x` is another keyword
+        let rest = &line[4..];
+        if !(rest.starts_with(char::is_whitespace) || rest.starts_with('=')) {
+            continue;
+        }
+        let rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == '=');
+        for h in rest.split('#').next().unwrap_or_default().split_whitespace() {
+            let h = h.trim_matches('"');
+            if h.is_empty() || h.contains(['*', '?', '!']) || out.iter().any(|o| o == h) {
+                continue;
+            }
+            if out.len() < MAX_SSH_HOSTS {
+                out.push(h.to_string());
+            }
+        }
+    }
+    out
 }
 
 /// What `host.browse` answers: the directories under `path` (default: home), sorted without regard to case.
@@ -160,6 +247,19 @@ pub fn browse(path: Option<&str>) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssh_hosts_skip_patterns_and_other_keywords() {
+        let cfg = "Host box dev # note\n  HostName 1.2.3.4\nhost=ci\nHost *\nHost *.corp !bad ok box\nMatch host x\n";
+        assert_eq!(parse_ssh_hosts(cfg), ["box", "dev", "ci", "ok"]);
+    }
+
+    #[test]
+    fn wsl_list_reads_utf16_and_drops_docker_helpers() {
+        let utf16: Vec<u8> = "\u{feff}Ubuntu\r\ndocker-desktop\r\nDebian\r\n".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        assert_eq!(parse_wsl_list(&utf16), ["Ubuntu", "Debian"]);
+        assert_eq!(parse_wsl_list(b"Ubuntu\n"), ["Ubuntu"]);
+    }
 
     #[test]
     fn browse_rejects_relative_and_missing() {

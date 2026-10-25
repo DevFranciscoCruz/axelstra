@@ -9,9 +9,11 @@
 // The app runs against a throwaway data dir and WebView2 profile, so it never touches the developer's own daemon.
 //
 // Scenarios: boot (window renders, no CSP violation, no uncaught error), session (a session spawned through the CLI
-// shows up in the UI with a live terminal), restore (the app is closed and relaunched: the daemon kept the session).
+// shows up in the UI with a live terminal), addproject (the Add project dialog: origins by arrow keys, a new project, a
+// clone that fails offline, GitHub without a login, discovered, Esc), restore (the app is closed and relaunched: the
+// daemon kept the session).
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,6 +52,23 @@ const env = {
   WEBVIEW2_USER_DATA_FOLDER: join(dir, "webview"),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
 };
+// A git identity for the daemon's `project.init` (it reads `git config user.name`), never the developer's own gitconfig.
+writeFileSync(
+  join(home, "gitconfig"),
+  "[user]\n\tname = e2e\n\temail = e2e@example.invalid\n[init]\n\tdefaultBranch = main\n",
+);
+Object.assign(env, {
+  GIT_CONFIG_GLOBAL: join(home, "gitconfig"),
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_AUTHOR_NAME: "e2e",
+  GIT_AUTHOR_EMAIL: "e2e@example.invalid",
+  GIT_COMMITTER_NAME: "e2e",
+  GIT_COMMITTER_EMAIL: "e2e@example.invalid",
+  GIT_TERMINAL_PROMPT: "0",
+  GH_CONFIG_DIR: join(home, "gh"), // no gh login in the throwaway profile: the GitHub tab shows its hint, no network call
+  GH_TOKEN: "",
+  GITHUB_TOKEN: "",
+});
 const cli = (...a) => spawnSync(cliBin, a, { env, encoding: "utf8", timeout: 20000 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // without /T the daemon (a child of the app) survives, as it does when the user closes the window
@@ -289,6 +308,135 @@ ${dataDirReport()}`);
   await selectWorktree(page);
   await until("the terminal after relaunch", () => page.evaluate("!!document.querySelector('.xterm')"), 40000);
   console.log("ok  restore: relaunched app shows the session again");
+  // addproject: one dialog, six origins. Folders are typed into the fields (the native picker is never opened). The page
+  // offers only https://, ssh:// and user@host:path, so a positive clone from a local bare repo (file://) is covered by the
+  // daemon tests (crates/daemon/tests/sources.rs); here a failing ssh clone walks the whole job offline.
+  problems.length = 0;
+  const dlg = (js) => page.evaluate(`(() => { const d = document.querySelector('[role=dialog]'); ${js} })()`);
+  const key = async (k, vk) => {
+    for (const type of ["keyDown", "keyUp"])
+      await page.send("Input.dispatchKeyEvent", {
+        type,
+        key: k,
+        code: k,
+        windowsVirtualKeyCode: vk,
+      });
+  };
+  const tabLabel = "(t.querySelector('span')?.textContent ?? '').trim()";
+  const tabNames = () => dlg(`return [...d.querySelectorAll('[role=tab]')].map((t) => ${tabLabel});`);
+  const selectedTab = () =>
+    dlg(`const t = d.querySelector('[role=tab][aria-selected=true]'); return t ? ${tabLabel} : '';`);
+  const clickTab = (name) =>
+    dlg(
+      `const t = [...d.querySelectorAll('[role=tab]')].find((t) => ${tabLabel} === ${JSON.stringify(name)}); if (!t) return false; t.click(); return true;`,
+    );
+  /** Types the way Solid's onInput sees it: the native value setter plus an input event. */
+  const typeInto = (sel, value) =>
+    dlg(
+      `const i = d.querySelector(${JSON.stringify(sel)}); if (!i) return false; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(value)}); i.dispatchEvent(new Event('input', { bubbles: true })); return true;`,
+    );
+  const primary = () =>
+    dlg("const b = d.querySelector('[data-ap-primary]'); if (!b || b.disabled) return false; b.click(); return true;");
+  const alerts = () =>
+    dlg("return [...d.querySelectorAll('[role=alert]')].map((e) => e.textContent.trim()).filter(Boolean).join(' | ');");
+  const closed = () => page.evaluate("!document.querySelector('[role=dialog]')");
+  const openAdd = async () => {
+    await until("the add button", () =>
+      page.evaluate(
+        "(() => { const b = [...document.querySelectorAll('button')].find((e) => /^[+] (Adicionar projeto|Add project)$/.test(e.innerText.trim())); if (!b) return false; b.click(); return true; })()",
+      ),
+    );
+    await until("the dialog", () => page.evaluate("!!document.querySelector('[role=dialog]')"));
+  };
+
+  await openAdd();
+  const want = ["Pasta local", "Clonar repositório", "GitHub", "Novo projeto", "Remoto", "Descobertos"];
+  const names = await tabNames();
+  if (JSON.stringify(names) !== JSON.stringify(want)) throw new Error(`add project tabs are ${JSON.stringify(names)}`);
+  console.log("ok  addproject: the dialog lists the six origins");
+
+  // arrows move AND select, Home and End jump
+  await dlg("d.querySelector('[role=tab][aria-selected=true]').focus();");
+  await key("Home", 36);
+  await until("Home", async () => (await selectedTab()) === want[0], 3000);
+  for (const next of want.slice(1)) {
+    await key("ArrowDown", 40);
+    await until(`arrow down to ${next}`, async () => (await selectedTab()) === next, 3000);
+  }
+  await key("Home", 36);
+  await key("End", 35);
+  await until("End", async () => (await selectedTab()) === want[5], 3000);
+  await key("ArrowUp", 38);
+  await until("arrow up", async () => (await selectedTab()) === want[4], 3000);
+  console.log("ok  addproject: arrows, Home and End move and select the origin");
+
+  // Novo projeto: a bad name is refused in the page; a good one makes folder + README + first commit and adds it
+  const parent = join(dir, "newparent");
+  mkdirSync(parent);
+  await clickTab("Novo projeto");
+  await until("the new form", () => page.evaluate("!!document.querySelector('#ap-new-parent')"));
+  await typeInto("#ap-new-parent", parent);
+  await typeInto("input[placeholder=o-meu-projeto]", "a/b");
+  await primary();
+  await until("the name problem", async () => /uma só pasta/.test(await alerts()), 5000);
+  console.log("ok  addproject: new project: a name with a separator is refused before the daemon");
+  await typeInto("input[placeholder=o-meu-projeto]", "e2e-new");
+  await primary();
+  await until("the dialog to close", closed, 30000);
+  const made = join(parent, "e2e-new");
+  if (!existsSync(join(made, "README.md"))) throw new Error("project.init wrote no README.md");
+  const commits = spawnSync("git", ["rev-list", "--count", "HEAD"], {
+    cwd: made,
+    env,
+    encoding: "utf8",
+  });
+  if (commits.stdout.trim() !== "1") throw new Error(`expected one commit, got ${commits.stdout}${commits.stderr}`);
+  await until("the project to be registered", () => cli("projects").stdout.includes("e2e-new"));
+  console.log("ok  addproject: new project: folder, README, first commit and registration");
+
+  // the dialog opens on the origin used last
+  await openAdd();
+  if ((await selectedTab()) !== "Novo projeto")
+    throw new Error(`the dialog did not remember its last origin: ${await selectedTab()}`);
+  console.log("ok  addproject: the dialog reopens on the last origin used");
+
+  // Clonar: file:// is refused by the page; an unreachable ssh address fails offline and leaves no folder behind
+  await clickTab("Clonar repositório");
+  await until("the clone form", () => page.evaluate("!!document.querySelector('#ap-clone-parent')"));
+  await typeInto("#ap-clone-parent", parent);
+  await typeInto("input[placeholder^='https://github.com']", "file:///tmp/none.git");
+  await primary();
+  await until("the scheme problem", async () => /https:\/\//.test(await alerts()), 5000);
+  console.log("ok  addproject: clone: file:// is refused by the page");
+  await typeInto("input[placeholder^='https://github.com']", "ssh://127.0.0.1:1/none.git");
+  await primary();
+  await until("the clone to fail", async () => /A clonagem falhou/.test(await alerts()), 60000);
+  if (existsSync(join(parent, "none"))) throw new Error("a failed clone left its folder behind");
+  console.log("ok  addproject: clone: a failing clone reports the error and removes the partial folder");
+
+  // GitHub: no gh login in this profile, so the tab explains it instead of listing
+  await clickTab("GitHub");
+  await until("the gh hint", async () => /gh/.test(await alerts()), 30000);
+  if (await dlg("return !!d.querySelector('#ap-gh-list');"))
+    throw new Error("the GitHub tab listed repositories without a login");
+  console.log("ok  addproject: GitHub: no gh login shows its hint and no list");
+
+  // Descobertos scans the user's real home read-only (USERPROFILE cannot be overridden); either result is fine and
+  // nothing is added from it. Adding a discovered repository is covered by the daemon tests.
+  await clickTab("Descobertos");
+  await until("the discovered list or its empty note", () =>
+    dlg("return !!d.querySelector('#ap-ds-list') || /Não encontrei/.test(d.innerText);"),
+  );
+  console.log("ok  addproject: Descobertos: lists repositories or says there are none");
+
+  await key("Escape", 27);
+  await until("Esc to close the dialog", closed, 5000);
+  console.log("ok  addproject: Esc closes the dialog");
+  await sleep(500);
+  if (problems.length) throw new Error(`add project problems: ${[...new Set(problems)].join(" | ")}`);
+  console.log("ok  addproject: no console error, CSP violation or uncaught exception");
+  problems.length = 0;
+
   // the user's foreground window must not have changed because of the test
   const fgAfter = foreground();
   if (fgBefore && fgAfter !== fgBefore)
