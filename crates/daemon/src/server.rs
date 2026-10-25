@@ -487,6 +487,19 @@ impl Registry {
         working.iter().any(|id| metas.get(id).and_then(|m| m["worktree"].as_str()).map(|w| norm(w) == want).unwrap_or(false))
     }
 
+    /// The running session that carries conversation key `key` (`meta.key`), if any.
+    fn live_by_key(&self, key: &str) -> Option<u32> {
+        if key.is_empty() {
+            return None;
+        }
+        let sessions = self.sessions.lock_recover();
+        let metas = self.metas.lock_recover();
+        metas
+            .iter()
+            .find(|(id, m)| m["key"].as_str() == Some(key) && sessions.get(id).is_some_and(|s| s.try_wait().is_none()))
+            .map(|(id, _)| *id)
+    }
+
     fn get(&self, id: u32) -> Option<Arc<Session>> {
         self.sessions.lock_recover().get(&id).cloned()
     }
@@ -637,10 +650,6 @@ fn prune_dead_pending(saved: &std::path::Path, pending: &mut Vec<Value>) {
     pending.retain(rec_alive);
     let _ = write_json(saved, &*pending);
 }
-
-/// The most agents a single `session.pending` hands out; the rest wait for the next restore, so a restart never
-/// starts dozens of agents at once.
-const RESTORE_BATCH: usize = 8;
 
 fn within(path: &str, root: &str) -> bool {
     std::path::Path::new(path).starts_with(root)
