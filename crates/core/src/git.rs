@@ -241,6 +241,55 @@ pub fn worktree_remove(repo: &Path, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// All-or-nothing removal of a worktree for the janitor: the folder is renamed out of the way first (which Windows
+/// refuses while any process has it, or something inside it, open), and only then does git forget the worktree.
+/// When the rename keeps failing nothing was changed: git still lists the worktree and the folder is whole, so the
+/// caller can try again once whatever holds it is gone. The renamed folder is deleted in the background.
+pub fn worktree_remove_strict(repo: &Path, path: &Path) -> Result<()> {
+    forget_worktree_lists();
+    if !path.exists() {
+        must(repo, &["worktree", "prune"])?;
+        return Ok(());
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let trash =
+        path.with_file_name(format!(".axelstra-trash-{}-{stamp}", path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()));
+    let mut last = None;
+    // the handles of a process that was just killed take a moment to go
+    for ms in [0u64, 100, 300, 1000] {
+        sleep(Duration::from_millis(ms));
+        match std::fs::rename(path, &trash) {
+            Ok(()) => {
+                last = None;
+                break;
+            }
+            Err(e) => last = Some(e),
+        }
+    }
+    if let Some(e) = last {
+        return Err(coded!(
+            "worktree.folder_busy",
+            "the folder {path} is still in use by a process, so the worktree was left as it was: {detail}",
+            path = path.display(),
+            detail = e
+        ));
+    }
+    if let Err(e) = must(repo, &["worktree", "prune"]) {
+        // git did not forget it: put the folder back so git and disk agree
+        let _ = std::fs::rename(&trash, path);
+        return Err(e);
+    }
+    if let Some(dir) = trash.parent().map(Path::to_path_buf) {
+        std::thread::spawn(move || {
+            for wait in [0u64, 10, 10, 30, 60] {
+                sleep(Duration::from_secs(wait));
+                purge_trash(&dir);
+            }
+        });
+    }
+    Ok(())
+}
+
 /// Deletes the `.axelstra-trash-*` folders left in `dir` by removals that had to park a worktree.
 pub fn purge_trash(dir: &Path) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };

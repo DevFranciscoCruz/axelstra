@@ -1,4 +1,4 @@
-import { type Widen, count } from "./i18n";
+import { type Widen, count, fmtFixed } from "./i18n";
 import type { ptL } from "./strings.logic";
 
 /** Brazilian Portuguese texts built by the logic modules (commands and cheat sheet, status dots, friendly errors, notifications, ...), written out in full. */
@@ -31,6 +31,8 @@ export const ptBRL: Widen<typeof ptL> = {
     cleanNow: "Limpar agora",
     cleanNothing: "Nada para limpar.",
     cleanRemoved: "Removido",
+    cleanClosed: (sessions: number, procs: number, bytes: number) =>
+      `${count(sessions, "sessão fechada", "sessões fechadas")} · ${count(procs, "processo encerrado", "processos encerrados")} · ${fmtFixed(bytes / 1048576, 0)} MB de RAM liberados`,
     cleanWarning: "Aviso",
     diagCopied: "Diagnóstico copiado para a área de transferência.",
   },

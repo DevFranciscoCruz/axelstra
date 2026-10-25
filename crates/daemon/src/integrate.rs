@@ -89,6 +89,8 @@ pub enum Outcome {
         /// the worktree and branch are gone
         removed: bool,
         push_error: Option<Coded>,
+        /// labels of the sessions closed so the folder could go
+        closed: Vec<String>,
     },
 }
 
@@ -118,6 +120,12 @@ fn tracked_dirty(dir: &Path) -> bool {
 
 /// Integrates the work of worktree `wt` of project `p`. The caller has checked that no session works there.
 pub fn integrate(p: &Project, wt: &git::Worktree) -> Result<Outcome> {
+    integrate_with(p, wt, &Vec::new)
+}
+
+/// `integrate`; `close_sessions` runs just before the folder is removed (never when the merge fails) and closes whatever
+/// session still has it open, returning their labels.
+pub fn integrate_with(p: &Project, wt: &git::Worktree, close_sessions: &dyn Fn() -> Vec<String>) -> Result<Outcome> {
     let repo = Path::new(&p.path);
     let dir = Path::new(&wt.path);
     let branch = wt.branch.clone().filter(|b| b.starts_with("ax/")).ok_or_else(|| {
@@ -186,8 +194,9 @@ pub fn integrate(p: &Project, wt: &git::Worktree) -> Result<Outcome> {
         (None, None)
     };
     // its commits are in the default branch now; a failure here only leaves the worktree for the next sweep
-    let removed = projects::worktree_remove(p, &wt.path).is_ok();
-    Ok(Outcome::Integrated { into: default, how, pushed, removed, push_error })
+    let closed = close_sessions();
+    let removed = projects::worktree_remove_strict(p, &wt.path).is_ok();
+    Ok(Outcome::Integrated { into: default, how, pushed, removed, push_error, closed })
 }
 
 fn push(dir: &Path, default: &str) -> std::result::Result<(), Coded> {

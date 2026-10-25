@@ -472,7 +472,7 @@ export const removeProject = (id: string) => call("project.remove", { id });
 export type EnvSkip = { path: string; reason: string };
 /** worktree.create also says what .worktreeinclude copied into the new worktree and what it left out */
 export type WorktreeCreated = Worktree & { env_copied?: string[]; env_skipped?: EnvSkip[] };
-export const createWorktree = (project: string, name: string, parent?: string) => call<WorktreeCreated>("worktree.create", { project, name, parent });
+export const createWorktree = (project: string, name: string, parent?: string) => call<WorktreeCreated>("worktree.create", { project, name, parent, manual: true });
 /** groups a worktree under another one of the same project; null puts it back at the top level */
 export const worktreeSetParent = (project: string, path: string, parent: string | null) => call("worktree.set_parent", { project, path, parent });
 /** a task file (report) of an agent that worked in a worktree */
@@ -627,8 +627,11 @@ export const worktreeStatus = (paths: string[]) => callBg<{ status: WtStatus[] }
 /** counts per project for the status bar (cached by the daemon for about 10 s) */
 export const worktreeOverview = () => callBg<{ projects: import("./statusGroups").OverviewProject[] }>("worktree.overview").then((r) => r.projects);
 /** removes the worktrees whose work is merged (the janitor's sweep) */
-export type SweepItem = { path: string; branch: string; removed: boolean; kind?: string; why?: string; warning?: string };
-export const worktreeSweep = () => call<{ swept: SweepItem[] }>("worktree.sweep", {}).then((r) => r.swept);
+export type SweepItem = { path: string; branch: string; removed: boolean; kind?: string; why?: string; warning?: string; closed?: string[]; pending?: boolean };
+/** what a manual run closed besides removing worktrees (absent from an older daemon) */
+export type SweepResult = { swept: SweepItem[]; closed_sessions?: number; closed_procs?: number; freed_bytes?: number };
+export const worktreeSweepFull = () => call<SweepResult>("worktree.sweep", {});
+export const worktreeSweep = () => worktreeSweepFull().then((r) => r.swept);
 
 /** `project` is Gemini's project hash (its logs keep no folder); `geminiPathVariants` + sha-256 map it back to a worktree. */
 export type AgentHit = { agent: "claude" | "codex" | "gemini"; session: string; cwd: string; ts: number; snippet: string; project?: string };
@@ -810,6 +813,8 @@ export type JanitorEvent = {
   /** absent = "removed" (an older daemon) */
   kind?: "removed" | "integrated" | "empty" | "attention";
   how?: "ff" | "merge";
+  /** labels of the sessions closed so the folder could be removed */
+  closed?: string[];
   pushed?: boolean | null;
   code?: string;
   params?: Record<string, unknown>;

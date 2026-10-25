@@ -125,7 +125,21 @@ fn attention_event(p: &Project, path: &str, branch: &str, why: &axelstra_core::m
            "text": why.text, "at": now_ms()})
 }
 
-fn sweep_project(p: &Project, busy: &dyn Fn(&str) -> bool, dry: bool, out: &mut Vec<Value>) -> Result<()> {
+/// What the sweep needs to know about, and do to, the live sessions.
+pub struct Env<'a> {
+    /// a session works in this worktree (or a flow or a restore still needs it)
+    pub busy: &'a dyn Fn(&str) -> bool,
+    /// closes every session of this worktree, killing their process trees, and waits until they are gone; returns their labels
+    pub close: &'a dyn Fn(&str) -> Vec<String>,
+    /// a session of any kind is open in this worktree, or one was in the last `MANUAL_QUIET_SECS`
+    pub touched: &'a dyn Fn(&str) -> bool,
+}
+
+/// How long a worktree the user made by hand must have had no session before the sweep may remove it.
+pub const MANUAL_QUIET_SECS: u64 = 10 * 60;
+
+fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>) -> Result<()> {
+    let busy = env.busy;
     let repo = Path::new(&p.path);
     let default = git::default_branch(repo);
     let mut fetched = false;
@@ -140,13 +154,18 @@ fn sweep_project(p: &Project, busy: &dyn Fn(&str) -> bool, dry: bool, out: &mut 
             }
             continue;
         }
+        let manual = p.manual.contains(&projects::norm_path(&w.path));
+        // a worktree the user made by hand is left alone while they have a session in it or used it a moment ago
+        if manual && (env.touched)(&w.path) {
+            continue;
+        }
         let dirty = git::has_changes(Path::new(&w.path)).unwrap_or(true);
         // a lead (or `--report-to` worker) said `done` here: integrate its work, or flag why that is not possible
         let reported = if dry { integrate::done_mark(&w.path, false) } else { integrate::done_mark(&w.path, true) };
         if let (Some(ok), false) = (reported, dry) {
             if integrate::auto_on(p) {
                 let result = if ok {
-                    integrate::integrate(p, &w)
+                    integrate::integrate_with(p, &w, &|| (env.close)(&w.path))
                 } else {
                     Err(axelstra_core::coded!(
                         "integrate.not_ok",
@@ -155,20 +174,22 @@ fn sweep_project(p: &Project, busy: &dyn Fn(&str) -> bool, dry: bool, out: &mut 
                     ))
                 };
                 match result {
-                    Ok(integrate::Outcome::Integrated { into, how, pushed, removed, push_error }) => {
+                    Ok(integrate::Outcome::Integrated { into, how, pushed, removed, push_error, closed }) => {
                         integrate::clear_attention(&w.path);
                         if removed {
                             gone.push(branch.clone());
                         }
                         let why = format!("integrated into {into} ({how})");
-                        push_event(
-                            json!({"kind": "integrated", "project": p.id, "path": w.path, "branch": branch, "into": into, "how": how,
-                                          "pushed": pushed, "removed": removed, "why": why, "at": now_ms()}),
-                        );
+                        let mut ev = removed_event(p, &w.path, &branch, &into, &why, &closed);
+                        ev["kind"] = json!("integrated");
+                        ev["how"] = json!(how);
+                        ev["pushed"] = json!(pushed);
+                        ev["removed"] = json!(removed);
+                        push_event(ev);
                         if let Some(c) = push_error {
                             push_event(attention_event(p, &w.path, &branch, &c));
                         }
-                        out.push(json!({"project": p.id, "path": w.path, "branch": branch, "into": into, "why": why, "removed": removed, "dry_run": false}));
+                        out.push(json!({"project": p.id, "path": w.path, "branch": branch, "into": into, "why": why, "removed": removed, "closed": closed, "dry_run": false}));
                         continue;
                     }
                     Ok(integrate::Outcome::Nothing) => {}
@@ -201,26 +222,58 @@ fn sweep_project(p: &Project, busy: &dyn Fn(&str) -> bool, dry: bool, out: &mut 
             .collect();
         let Some(why) = merged_reason_in(repo, &branch, &default, &others) else {
             // nothing of its own and nothing to lose: an empty worktree nobody works in goes away after a few minutes
-            let old = reported.is_some() || integrate::branch_age_secs(repo, &branch).is_some_and(|a| a >= EMPTY_MIN_AGE_SECS);
+            // never one the user made by hand: it may just be waiting for its first commit
+            let old = !manual && (reported.is_some() || integrate::branch_age_secs(repo, &branch).is_some_and(|a| a >= EMPTY_MIN_AGE_SECS));
             if old && integrate::ahead_of(repo, &branch, &default) == 0 && !has_own_commits(repo, &branch) {
-                let removed = !dry && projects::worktree_remove(p, &w.path).is_ok();
+                let (removed, closed) = if dry { (false, vec![]) } else { remove_closing(env, p, &w.path) };
                 if removed {
                     gone.push(branch.clone());
-                    push_event(json!({"kind": "empty", "project": p.id, "path": w.path, "branch": branch, "at": now_ms()}));
+                    push_event(
+                        json!({"kind": "empty", "project": p.id, "path": w.path, "branch": branch, "closed": closed, "at": now_ms()}),
+                    );
                 }
-                out.push(json!({"project": p.id, "path": w.path, "branch": branch, "why": "empty", "removed": removed, "dry_run": dry}));
+                out.push(json!({"project": p.id, "path": w.path, "branch": branch, "why": "empty", "removed": removed, "pending": !dry && !removed, "dry_run": dry}));
             }
             continue;
         };
-        let removed = !dry && projects::worktree_remove(p, &w.path).is_ok();
+        let (removed, closed) = if dry { (false, vec![]) } else { remove_closing(env, p, &w.path) };
         let into = integrated_into(&why, &default);
         if removed {
             gone.push(branch.clone());
-            push_event(json!({"project": p.id, "path": w.path, "branch": branch, "into": into, "why": why, "at": now_ms()}));
+            push_event(removed_event(p, &w.path, &branch, &into, &why, &closed));
         }
-        out.push(json!({"project": p.id, "path": w.path, "branch": branch, "into": into, "why": why, "removed": removed, "dry_run": dry}));
+        out.push(json!({"project": p.id, "path": w.path, "branch": branch, "into": into, "why": why, "removed": removed, "closed": closed, "pending": !dry && !removed, "dry_run": dry}));
     }
     Ok(())
+}
+
+/// Closes the sessions still in the worktree (they hold its folder open on Windows), then removes it all-or-nothing:
+/// when the folder is still held nothing was removed, git and the branch are untouched and the next sweep (kicked when
+/// the holder exits, and again shortly after a failure) tries again. Returns whether it went, and the sessions closed.
+fn remove_closing(env: &Env, p: &Project, path: &str) -> (bool, Vec<String>) {
+    let closed = (env.close)(path);
+    // a session closed on the way may have left something behind: then the work is not finished after all
+    if !closed.is_empty() && git::has_changes(Path::new(path)).unwrap_or(true) {
+        return (false, closed);
+    }
+    (projects::worktree_remove_strict(p, path).is_ok(), closed)
+}
+
+/// The toast / notification of a removal; with closed sessions it names them (`janitor.removed_closed`).
+fn removed_event(p: &Project, path: &str, branch: &str, into: &str, why: &str, closed: &[String]) -> Value {
+    let mut e = json!({"project": p.id, "path": path, "branch": branch, "into": into, "why": why, "closed": closed, "at": now_ms()});
+    if !closed.is_empty() {
+        let (branch, sessions) = (branch.trim_start_matches("ax/"), closed.join(", "));
+        let c = axelstra_core::msg::Coded::new(
+            "janitor.removed_closed",
+            format!("worktree {branch} removed (merged into {into}); session {sessions} closed"),
+            &[("branch", branch.to_string()), ("into", into.to_string()), ("sessions", sessions)],
+        );
+        e["code"] = json!(c.code);
+        e["params"] = c.params_json();
+        e["text"] = json!(c.text);
+    }
+    e
 }
 
 fn now_ms() -> u64 {
@@ -229,10 +282,16 @@ fn now_ms() -> u64 {
 
 /// Sweeps every project; `busy(path)` says whether a live session works in that worktree.
 pub fn sweep(store: &Path, busy: &dyn Fn(&str) -> bool, dry: bool) -> Vec<Value> {
+    sweep_with(store, &Env { busy, close: &|_| vec![], touched: &|_| false }, dry)
+}
+
+/// `sweep` with a way to close sessions and to tell hand-made worktrees in use.
+pub fn sweep_with(store: &Path, env: &Env, dry: bool) -> Vec<Value> {
+    let busy = env.busy;
     let mut out = vec![];
     let all = projects::load(store);
     for p in &all {
-        let _ = sweep_project(p, busy, dry, &mut out);
+        let _ = sweep_project(p, env, dry, &mut out);
         crate::cleanup::stale_branches(p, dry, &mut out);
         crate::cleanup::prune_entries(p, dry, &mut out);
     }
@@ -454,6 +513,130 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A child process that has the worktree as its cwd (what a Claude session left alive does).
+    fn holder(dir: &str) -> std::process::Child {
+        let (prog, args): (&str, &[&str]) = if cfg!(windows) { ("ping", &["-n", "60", "127.0.0.1"]) } else { ("sleep", &["60"]) };
+        Command::new(prog)
+            .args(args)
+            .current_dir(dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap()
+    }
+
+    fn merged_worktree(tag: &str, name: &str) -> (std::path::PathBuf, std::path::PathBuf, Project, git::Worktree) {
+        let (root, store, p) = repo_with_store(tag);
+        let wt = projects::worktree_create(&p, name).unwrap();
+        commit_in(Path::new(&wt.path), "work");
+        assert!(git::run(Path::new(&p.path), &["merge", "-q", "--ff-only", &format!("ax/{name}")]).unwrap().ok);
+        (root, store, p, wt)
+    }
+
+    fn branch_exists(p: &Project, branch: &str) -> bool {
+        git::run(Path::new(&p.path), &["rev-parse", "--verify", branch]).unwrap().ok
+    }
+
+    #[test]
+    fn a_folder_held_by_a_process_is_left_whole_and_goes_once_the_session_is_closed() {
+        let (root, store, p, wt) = merged_worktree("held", "held");
+        let child = std::cell::RefCell::new(holder(&wt.path));
+        // nothing closes the session: on Windows the folder cannot move, so nothing at all may change
+        let out = sweep(&store, &|_| false, false);
+        if cfg!(windows) {
+            assert_eq!(out[0]["removed"], false, "{out:?}");
+            assert_eq!(out[0]["pending"], true, "{out:?}");
+            assert!(Path::new(&wt.path).exists());
+            assert!(branch_exists(&p, "ax/held"), "the branch must not go while the folder stays");
+            assert!(git::worktree_list(Path::new(&p.path)).unwrap().iter().any(|w| axelstra_core::paths::same(&w.path, &wt.path)));
+            // the sweep closes the session first, waits for it, and then the removal goes through
+            let killed = std::cell::Cell::new(false);
+            let close = |_: &str| {
+                let _ = child.borrow_mut().kill();
+                let _ = child.borrow_mut().wait();
+                killed.set(true);
+                vec!["Tarefa 3".to_string()]
+            };
+            let env = Env { busy: &|_| false, close: &close, touched: &|_| false };
+            let out = sweep_with(&store, &env, false);
+            assert!(killed.get());
+            assert_eq!(out[0]["removed"], true, "{out:?}");
+            assert_eq!(out[0]["closed"][0], "Tarefa 3");
+        } else {
+            let _ = child.borrow_mut().kill();
+            let _ = child.borrow_mut().wait();
+            assert_eq!(out[0]["removed"], true, "{out:?}");
+        }
+        assert!(!Path::new(&wt.path).exists());
+        assert!(!branch_exists(&p, "ax/held"));
+        let ev = take_events();
+        if cfg!(windows) {
+            assert!(ev.iter().any(|e| e["code"] == "janitor.removed_closed" && e["params"]["sessions"] == "Tarefa 3"), "{ev:?}");
+        }
+        git::purge_trash(wt_parent(&wt));
+        let _ = git::remove_tree(&root);
+    }
+
+    fn wt_parent(wt: &git::Worktree) -> &Path {
+        Path::new(&wt.path).parent().unwrap()
+    }
+
+    #[test]
+    fn strict_removal_changes_nothing_when_the_folder_is_held() {
+        let (root, _store, p, wt) = merged_worktree("strict", "strict");
+        let mut child = holder(&wt.path);
+        let r = projects::worktree_remove_strict(&p, &wt.path);
+        if cfg!(windows) {
+            let e = r.unwrap_err();
+            assert_eq!(axelstra_core::msg::find(&e).map(|c| c.code.as_str()), Some("worktree.folder_busy"));
+            assert!(Path::new(&wt.path).join(".git").exists());
+            assert!(branch_exists(&p, "ax/strict"));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        projects::worktree_remove_strict(&p, &wt.path).unwrap();
+        assert!(!Path::new(&wt.path).exists());
+        assert!(!branch_exists(&p, "ax/strict"));
+        git::purge_trash(wt_parent(&wt));
+        let _ = git::remove_tree(&root);
+    }
+
+    #[test]
+    fn a_worktree_made_by_hand_stays_while_touched_and_is_never_swept_as_empty() {
+        let (root, store, p, wt) = merged_worktree("manual", "mine");
+        let empty = projects::worktree_create(&p, "blank").unwrap();
+        for w in [&wt, &empty] {
+            projects::set_manual(&store, &p.id, &w.path).unwrap();
+        }
+        // an empty one reported `done`: for an agent's worktree that makes it removable at once, not for a hand-made one
+        integrate::mark_done(&empty.path, true);
+        let touched = std::cell::Cell::new(true);
+        let t = |_: &str| touched.get();
+        let env = Env { busy: &|_| false, close: &|_| vec![], touched: &t };
+        let out = sweep_with(&store, &env, false);
+        assert!(out.iter().all(|o| o["removed"] != true), "{out:?}");
+        assert!(Path::new(&wt.path).exists() && Path::new(&empty.path).exists());
+        // nobody used it for a while and its branch is really integrated: it goes; the empty one still does not
+        touched.set(false);
+        let out = sweep_with(&store, &env, false);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(out[0]["branch"], "ax/mine");
+        assert_eq!(out[0]["removed"], true);
+        assert!(Path::new(&empty.path).exists(), "an empty hand-made worktree is kept");
+        git::purge_trash(wt_parent(&wt));
+        let _ = git::remove_tree(&root);
+    }
+
+    #[test]
+    fn an_empty_agent_worktree_that_reported_done_is_still_swept() {
+        let (root, store, p) = repo_with_store("emptyagent");
+        let empty = projects::worktree_create(&p, "agentempty").unwrap();
+        integrate::mark_done(&empty.path, true);
+        let out = sweep(&store, &|_| false, false);
+        assert!(out.iter().any(|o| o["why"] == "empty" && o["removed"] == true), "{out:?}");
+        git::purge_trash(wt_parent(&empty));
+        let _ = git::remove_tree(&root);
+    }
     #[test]
     fn integrated_into_names_the_target() {
         assert_eq!(integrated_into("already in origin/main", "main"), "main");

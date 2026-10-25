@@ -1,4 +1,4 @@
-import { count, dict } from "./i18n";
+import { count, dict, fmtFixed } from "./i18n";
 import { enL } from "./strings.logic.en";
 import { ptBRL } from "./strings.logic.ptbr";
 
@@ -32,6 +32,8 @@ export const ptL = {
     cleanNow: "Limpar agora",
     cleanNothing: "Nada para limpar.",
     cleanRemoved: "Removido",
+    cleanClosed: (sessions: number, procs: number, bytes: number) =>
+      `${count(sessions, "sessão fechada", "sessões fechadas")} · ${count(procs, "processo terminado", "processos terminados")} · ${fmtFixed(bytes / 1048576, 0)} MB de RAM libertados`,
     cleanWarning: "Aviso",
     diagCopied: "Diagnóstico copiado para a área de transferência.",
   },

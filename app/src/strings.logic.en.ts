@@ -1,4 +1,4 @@
-import { type Widen, count } from "./i18n";
+import { type Widen, count, fmtFixed } from "./i18n";
 import type { ptL } from "./strings.logic";
 
 /** English texts built by the logic modules (commands and cheat sheet, status dots, friendly errors, notifications, ...). */
@@ -30,6 +30,8 @@ export const enL: Widen<typeof ptL> = {
     cleanNow: "Clean now",
     cleanNothing: "Nothing to clean.",
     cleanRemoved: "Removed",
+    cleanClosed: (sessions: number, procs: number, bytes: number) =>
+      `${count(sessions, "session closed", "sessions closed")} · ${count(procs, "process ended", "processes ended")} · ${fmtFixed(bytes / 1048576, 0)} MB of RAM freed`,
     cleanWarning: "Warning",
     diagCopied: "Diagnostics copied to the clipboard.",
   },

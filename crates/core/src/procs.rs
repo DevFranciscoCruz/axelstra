@@ -105,6 +105,33 @@ pub fn with_descendants_in(snap: &Snapshot, roots: &[u32]) -> HashSet<u32> {
     snap.descendants(roots)
 }
 
+/// Pids of `pids` that are still running.
+pub fn alive_of(pids: &HashSet<u32>) -> HashSet<u32> {
+    let snap = snapshot();
+    snap.procs.iter().map(|p| p.pid).filter(|p| pids.contains(p)).collect()
+}
+
+/// Kills each of `pids` (not their children). For leftovers of a session's tree that outlived the kill, taken a moment
+/// before it so a reused number is not a concern.
+pub fn kill_pids(pids: &HashSet<u32>) {
+    for &pid in pids {
+        #[cfg(windows)]
+        unsafe {
+            use windows_sys::Win32::Foundation::CloseHandle;
+            use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+            let h = OpenProcess(PROCESS_TERMINATE, 0, pid);
+            if !h.is_null() {
+                TerminateProcess(h, 1);
+                CloseHandle(h);
+            }
+        }
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
+    }
+}
+
 fn descend(table: &[(u32, u32)], roots: &[u32]) -> HashSet<u32> {
     let mut kids: HashMap<u32, Vec<u32>> = HashMap::new();
     for &(pid, ppid) in table {

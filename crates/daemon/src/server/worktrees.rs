@@ -7,17 +7,25 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "worktree.overview" => Ok(tokio::task::block_in_place(|| crate::overview::cached(&reg.store, &|path| reg.worktree_busy(path)))),
         "worktree.sweep" => {
             let dry = p["dry_run"].as_bool().unwrap_or(false);
+            let before = reg.closed.read();
             let done = tokio::task::block_in_place(|| {
-                let mut v = crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path), dry);
+                let busy = |path: &str| reg.worktree_busy(path) || reg.worktree_pending(path);
+                let close = |path: &str| reg.close_worktree(path);
+                let touched = |path: &str| reg.worktree_touched(path);
+                let env = crate::janitor::Env { busy: &busy, close: &close, touched: &touched };
+                let mut v = crate::janitor::sweep_with(&reg.store, &env, dry);
                 v.extend(reg.clean_leftovers(dry));
                 v
             });
+            let after = reg.closed.read();
             if !dry {
                 reg.persist();
                 reg.projects_changed();
             }
             reg.announce_events();
-            Ok(json!({"swept": done}))
+            Ok(
+                json!({"swept": done, "closed_sessions": after.0 - before.0, "closed_procs": after.1 - before.1, "freed_bytes": after.2 - before.2}),
+            )
         }
         // worktrees the automatic sweep removed since the last call (the app turns them into a toast)
         "janitor.events" => Ok(json!({"events": crate::janitor::take_events()})),
@@ -134,6 +142,13 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             if let Err(e) = crate::projects::set_parent(&reg.store, &pr.id, &wt.path, parent) {
                 eprintln!("parent of {}: {e:#}", wt.path);
             }
+            // made by hand in the app (an agent's CLI does not say so): the janitor treats it with more care
+            if p["manual"].as_bool() == Some(true) {
+                if let Err(e) = crate::projects::set_manual(&reg.store, &pr.id, &wt.path) {
+                    eprintln!("manual mark of {}: {e:#}", wt.path);
+                }
+                reg.note_activity(&wt.path);
+            }
             // the worktree plus what .worktreeinclude copied (env_copied) and left out (env_skipped)
             let mut v = serde_json::to_value(wt)?;
             v["env_copied"] = json!(env.copied);
@@ -226,7 +241,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 if reg.worktree_busy(&wt.path) {
                     return Err(axelstra_core::coded!("integrate.busy", "an agent is still working in {branch}", branch = branch));
                 }
-                let r = crate::integrate::integrate(&pr, &wt);
+                let r = crate::integrate::integrate_with(&pr, &wt, &|| reg.close_worktree(&wt.path));
                 match &r {
                     Err(e) => crate::integrate::set_attention(&wt.path, crate::integrate::as_coded(e, &branch)),
                     Ok(_) => crate::integrate::clear_attention(&wt.path),
@@ -240,8 +255,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 crate::integrate::Outcome::Nothing => {
                     json!({"integrated": false, "into": "", "how": "none", "removed": false, "pushed": null})
                 }
-                crate::integrate::Outcome::Integrated { into, how, pushed, removed, push_error } => {
-                    let mut v = json!({"integrated": true, "into": into, "how": how, "removed": removed, "pushed": pushed});
+                crate::integrate::Outcome::Integrated { into, how, pushed, removed, push_error, closed } => {
+                    let mut v =
+                        json!({"integrated": true, "into": into, "how": how, "removed": removed, "pushed": pushed, "closed": closed});
                     if let Some(c) = push_error {
                         v["push_code"] = json!(c.code);
                         v["push_params"] = c.params_json();

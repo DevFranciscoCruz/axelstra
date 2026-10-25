@@ -39,6 +39,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                         crate::integrate::mark_done(&wt, crate::notes::split_status(text).0 == "ok");
                     }
                 }
+                // an agent left running after its report is closed once it is quiet; ephemeral ones have their reaper
+                if let Some(f) =
+                    from.filter(|f| !reg.bus.is_reaped(*f) && reg.metas.lock_recover().get(f).is_some_and(|m| m["kind"] == "agent"))
+                {
+                    spawn_done_closer(reg.clone(), f);
+                }
                 sweep_soon(reg);
             }
             // agents get a one-line notice; a worker with a reaper reports through it instead

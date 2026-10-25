@@ -92,6 +92,26 @@ struct Registry {
     janitor: Pulse,
     /// `daemon.shutdown` is under way: the janitor must not start removing a worktree it could not finish
     closing: AtomicBool,
+    /// worktree (normalized) -> when a session last left it, for the janitor's "used a moment ago" rule
+    activity: Mutex<HashMap<String, Instant>>,
+    /// when this daemon started: what it does not remember about a worktree it cannot rule out
+    started: Instant,
+    /// what the cleanup closed so far: sessions, processes, bytes of RAM (the app reads the difference of a manual run)
+    closed: Closed,
+}
+
+/// Totals of what the janitor and the done-closer shut down.
+#[derive(Default)]
+struct Closed {
+    sessions: AtomicU64,
+    procs: AtomicU64,
+    bytes: AtomicU64,
+}
+
+impl Closed {
+    fn read(&self) -> (u64, u64, u64) {
+        (self.sessions.load(Ordering::SeqCst), self.procs.load(Ordering::SeqCst), self.bytes.load(Ordering::SeqCst))
+    }
 }
 
 /// Wakes a background waiter when something happened, so it never has to poll.
@@ -270,6 +290,9 @@ impl Registry {
             budget_wake: Default::default(),
             janitor: Default::default(),
             closing: AtomicBool::new(false),
+            activity: Default::default(),
+            started: Instant::now(),
+            closed: Default::default(),
         }
     }
 
@@ -328,6 +351,102 @@ impl Registry {
         }
     }
 
+    /// Sessions that are alive and have this worktree as worktree or cwd.
+    fn live_in(&self, path: &str) -> Vec<(u32, Arc<Session>)> {
+        let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
+        let want = norm(path);
+        // one lock at a time (the rest of the daemon takes sessions before metas)
+        let alive: Vec<(u32, Arc<Session>)> =
+            self.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, s)| (*id, s.clone())).collect();
+        let metas = self.metas.lock_recover();
+        let in_meta = |id: &u32| metas.get(id).and_then(|m| m["worktree"].as_str()).map(|w| norm(w) == want).unwrap_or(false);
+        let by_meta: Vec<u32> = alive.iter().map(|(id, _)| *id).filter(in_meta).collect();
+        drop(metas);
+        let specs = self.specs.lock_recover();
+        let by_cwd = |id: &u32| specs.get(id).and_then(|sp| sp["cwd"].as_str()).map(|c| within(&norm(c), &want)).unwrap_or(false);
+        alive.into_iter().filter(|(id, _)| by_meta.contains(id) || by_cwd(id)).collect()
+    }
+
+    /// A live session that has nothing left to do in its worktree: an agent that reported with `axelstra done` and went
+    /// quiet (it only waits to be closed), or a terminal nobody typed in or saw output from for a long while and that
+    /// runs nothing. Such a session does not keep its worktree from being cleaned; the janitor closes it first.
+    fn releasable(&self, id: u32, s: &Session) -> bool {
+        let quiet = |ms: u64| s.idle_ms() >= ms && s.since_input_ms() >= ms;
+        if self.bus.finished(id).is_some() {
+            return quiet(REPORTED_IDLE_MS);
+        }
+        let agent = self.metas.lock_recover().get(&id).is_some_and(|m| m["kind"] == "agent");
+        if agent || !quiet(SHELL_IDLE_MS) {
+            return false;
+        }
+        // a dev server or a build in the terminal is work, however quiet
+        let kids = s.pid().map(|pid| axelstra_core::procs::with_descendants(&[pid]).len()).unwrap_or(1);
+        kids <= 1
+    }
+
+    /// Notes that a session left this worktree just now.
+    fn note_activity(&self, path: &str) {
+        self.activity.lock_recover().insert(crate::projects::norm_path(path), Instant::now());
+    }
+
+    /// For a worktree the user made by hand: a session of any kind is open there, or one was a moment ago (or this
+    /// daemon is too new to know).
+    fn worktree_touched(&self, path: &str) -> bool {
+        const QUIET: Duration = Duration::from_secs(crate::janitor::MANUAL_QUIET_SECS);
+        if self.started.elapsed() < QUIET || !self.live_in(path).is_empty() {
+            return true;
+        }
+        self.activity.lock_recover().get(&crate::projects::norm_path(path)).is_some_and(|at| at.elapsed() < QUIET)
+    }
+
+    /// Closes every session of this worktree (agents, shells, whatever they started: the whole process tree dies) and
+    /// waits until they are gone, so the folder is no longer anyone's cwd. Returns their labels.
+    fn close_worktree(&self, path: &str) -> Vec<String> {
+        let doomed = self.live_in(path);
+        if doomed.is_empty() {
+            return vec![];
+        }
+        let sessions: Vec<Arc<Session>> = doomed.iter().map(|(_, s)| s.clone()).collect();
+        self.tear_down(&sessions);
+        let mut labels = vec![];
+        for (id, _) in &doomed {
+            labels.push(self.labels.lock_recover().get(id).cloned().unwrap_or_else(|| format!("sessão {id}")));
+            self.forget_session(*id);
+        }
+        self.note_activity(path);
+        self.persist();
+        self.pulse.bump();
+        labels
+    }
+
+    /// Kills the sessions' process trees and waits until they are gone, then kills whatever of the trees outlived the
+    /// kill (a process that broke out of its job), and counts sessions, processes and RAM released.
+    fn tear_down(&self, sessions: &[Arc<Session>]) {
+        let snap = axelstra_core::procs::snapshot();
+        let roots: Vec<u32> = sessions.iter().filter_map(|s| s.pid()).collect();
+        let tree = snap.descendants(&roots);
+        let bytes: u64 = sessions.iter().map(|s| s.memory_now_in(&snap)).sum();
+        kill_and_wait(sessions, Duration::from_secs(5));
+        let left = axelstra_core::procs::alive_of(&tree);
+        let stray: std::collections::HashSet<u32> = left.into_iter().filter(|p| !roots.contains(p)).collect();
+        axelstra_core::procs::kill_pids(&stray);
+        self.closed.sessions.fetch_add(sessions.len() as u64, Ordering::SeqCst);
+        self.closed.procs.fetch_add(tree.len() as u64, Ordering::SeqCst);
+        self.closed.bytes.fetch_add(bytes, Ordering::SeqCst);
+    }
+
+    /// Takes a finished session out of the registry (its tab, its restore record, its bus state).
+    fn forget_session(&self, id: u32) {
+        self.sessions.lock_recover().remove(&id);
+        self.labels.lock_recover().remove(&id);
+        self.metas.lock_recover().remove(&id);
+        let gone = self.specs.lock_recover().remove(&id);
+        if let Some(spec) = gone {
+            self.drop_sid_of(&spec);
+        }
+        self.bus.forget(id);
+    }
+
     fn worktree_busy(&self, path: &str) -> bool {
         let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
         let want = norm(path);
@@ -342,24 +461,7 @@ impl Registry {
                 })
                 .unwrap_or(false)
         });
-        if in_flow {
-            return true;
-        }
-        // one lock at a time (the rest of the daemon takes sessions before metas)
-        // a session that reported with `axelstra done` and went quiet is finished, not busy: it only waits to be closed
-        let alive: Vec<u32> = self
-            .sessions
-            .lock_recover()
-            .iter()
-            .filter(|(id, s)| s.try_wait().is_none() && !(self.bus.finished(**id).is_some() && s.idle_ms() >= REPORTED_IDLE_MS))
-            .map(|(id, _)| *id)
-            .collect();
-        let metas = self.metas.lock_recover();
-        let in_meta = |id: &u32| metas.get(id).and_then(|m| m["worktree"].as_str()).map(|w| norm(w) == want).unwrap_or(false);
-        let hit = alive.iter().any(in_meta);
-        drop(metas);
-        let specs = self.specs.lock_recover();
-        hit || alive.iter().any(|id| specs.get(id).and_then(|sp| sp["cwd"].as_str()).map(|c| within(&norm(c), &want)).unwrap_or(false))
+        in_flow || self.live_in(path).iter().any(|(id, s)| !self.releasable(*id, s))
     }
 
     /// True while a live session in this worktree is not idle (output in the last 5 s). A prompt waiting for
@@ -435,6 +537,9 @@ fn watch_exit(reg: &Arc<Registry>, id: u32, s: Arc<Session>) {
         std::thread::sleep(Duration::from_millis(150));
         s.end_stream();
         let Some(reg) = reg.upgrade() else { return };
+        if let Some(w) = reg.metas.lock_recover().get(&id).and_then(|m| m["worktree"].as_str().map(String::from)) {
+            reg.note_activity(&w);
+        }
         reg.hints.clear(id);
         reg.pulse.bump();
         reg.janitor.bump();
@@ -617,6 +722,10 @@ fn read_settings(saved: &std::path::Path) -> Value {
 /// How long a session that already called `axelstra done` must be quiet before it stops counting as busy.
 const REPORTED_IDLE_MS: u64 = 10_000;
 
+/// How long a terminal (not an agent) must have been quiet, with nothing running in it, before it no longer keeps its
+/// worktree from being cleaned up.
+const SHELL_IDLE_MS: u64 = 10 * 60_000;
+
 static SWEEP_QUEUED: AtomicBool = AtomicBool::new(false);
 
 /// Kicks the janitor a few seconds from now (once for a burst of events): after a `done` or a merge, so the finished
@@ -655,6 +764,45 @@ fn tell_main_not_integrated(reg: &Arc<Registry>, item: &Value) {
     );
     let m = reg.bus.send(None, id, "message", &text, None, None);
     reg.deliver_untrusted(id, s, &crate::msgbus::notice(&m, "axelstra"));
+}
+
+/// An agent that reported with `axelstra done` and then stays quiet for `REPORTED_IDLE_MS` is closed by itself (leads and
+/// plain workers too; ephemeral ones have `spawn_reaper`): its process tree ends and its tab and record go. One the user
+/// typed into after the report is theirs again and stays open. A session opened by hand that never said `done` is never
+/// closed here. Woken by the pulse, one timer for the quiet spell.
+fn spawn_done_closer(reg: Arc<Registry>, id: u32) {
+    std::thread::spawn(move || {
+        let armed = Instant::now();
+        let mut seen = reg.pulse.now();
+        loop {
+            let Some(s) = reg.get(id) else { return };
+            if s.try_wait().is_some() || reg.bus.finished(id).is_none() {
+                return;
+            }
+            if s.since_input_ms() < armed.elapsed().as_millis() as u64 {
+                return;
+            }
+            let idle = s.idle_ms();
+            if idle >= REPORTED_IDLE_MS {
+                break;
+            }
+            seen = reg.pulse.wait(seen, Some(Duration::from_millis(REPORTED_IDLE_MS - idle + 20)));
+        }
+        let Some(s) = reg.get(id) else { return };
+        // a question asked after the report is still a question
+        if reg.wait_of(id, s.since_input_ms(), s.idle_ms()).is_some() {
+            return;
+        }
+        let wt = reg.metas.lock_recover().get(&id).and_then(|m| m["worktree"].as_str().map(String::from));
+        reg.tear_down(&[s]);
+        reg.forget_session(id);
+        if let Some(w) = wt {
+            reg.note_activity(&w);
+        }
+        reg.persist();
+        reg.pulse.bump();
+        reg.janitor.bump();
+    });
 }
 
 fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: bool, idle_secs: u64, lines: usize) {
@@ -728,14 +876,7 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
             crate::msgbus::deliver(parent.1.clone(), data);
         }
         s.kill();
-        reg.sessions.lock_recover().remove(&id);
-        reg.labels.lock_recover().remove(&id);
-        reg.metas.lock_recover().remove(&id);
-        let gone = reg.specs.lock_recover().remove(&id);
-        if let Some(spec) = gone {
-            reg.drop_sid_of(&spec);
-        }
-        reg.bus.forget(id);
+        reg.forget_session(id);
         reg.persist();
         reg.pulse.bump();
         reg.janitor.bump();
@@ -900,7 +1041,11 @@ fn spawn_janitor(reg: Arc<Registry>) {
                 continue;
             }
             // a session waiting to be restored still needs its worktree
-            let swept = crate::janitor::sweep(&reg.store, &|path| reg.worktree_busy(path) || reg.worktree_pending(path), false);
+            let busy = |path: &str| reg.worktree_busy(path) || reg.worktree_pending(path);
+            let close = |path: &str| reg.close_worktree(path);
+            let touched = |path: &str| reg.worktree_touched(path);
+            let env = crate::janitor::Env { busy: &busy, close: &close, touched: &touched };
+            let swept = crate::janitor::sweep_with(&reg.store, &env, false);
             for s in swept.iter().chain(reg.clean_leftovers(false).iter()) {
                 eprintln!("janitor: {s}");
                 // finished work that could not be integrated is also reported to the project's main agent
@@ -913,6 +1058,14 @@ fn spawn_janitor(reg: Arc<Registry>) {
                 // the sessions saved for the removed worktrees go from sessions.json now
                 reg.persist();
                 reg.projects_changed();
+            }
+            // a folder something still held was left whole: look again soon (only while one is waiting)
+            if swept.iter().any(|s| s["pending"] == true) {
+                let r = reg.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(30));
+                    r.janitor.bump();
+                });
             }
             reg.announce_events();
         }
