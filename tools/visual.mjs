@@ -230,7 +230,7 @@ try {
     }
   }
 
-  // 1b. the Add project dialog (choice step, then the remote form) in a small window, every language
+  // 1b. the Add project dialog (six origins as tabs: local, clone, new) in a small window, every language
   if (process.env.VISUAL_ADD) {
     await page.size(800, 600);
     const esc = async () => {
@@ -247,10 +247,20 @@ try {
       await setLocale(page, l);
       await until("the add button", () => page.evaluate(clickText("/^[+] (Adicionar projeto|Add project)$/")));
       await until("the dialog", () => page.evaluate("!!document.querySelector('[role=dialog]')"));
-      await page.shot(`addproject-${l}`);
-      await page.evaluate(clickText("/^(Projeto remoto|Remote project)/"));
-      await sleep(900);
-      await page.shot(`addproject-remote-${l}`);
+      // the origins are tabs, in the same order in every language: 0 local, 1 clone, 2 GitHub, 3 new, 4 remote, 5 discovered
+      const tab = (i) =>
+        page.evaluate(
+          `(() => { const t = document.querySelectorAll('[role=dialog] [role=tab]')[${i}]; if (!t) return false; t.click(); return true; })()`,
+        );
+      await page.shot(`addproject-local-${l}`);
+      for (const [i, name] of [
+        [1, "clone"],
+        [3, "new"],
+      ]) {
+        await until(`the ${name} tab`, () => tab(i));
+        await sleep(900);
+        await page.shot(`addproject-${name}-${l}`);
+      }
       await esc();
     }
     await page.size(1280, 800);

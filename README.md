@@ -66,6 +66,25 @@ The interface comes in Portuguese (pt-PT), Brazilian Portuguese and English, pic
 - **Languages:** pt-PT, English and pt-BR, switched live.
 - **Layout:** `Ctrl+B` hides the project list, `Ctrl+Shift+B` the right panel.
 
+### Add project
+
+*+ Adicionar projeto* is one dialog with six origins, a tab list on the left (arrows move and select, Home/End jump, Enter runs the
+main button, Esc closes). It reopens on the origin you used last.
+
+| Origin | What it does | Needs |
+| --- | --- | --- |
+| Local folder | Adds a folder that already exists, chosen in the system dialog | nothing |
+| Clone | `git clone` of an `https://`, `ssh://` or `user@host:path` address into `folder/name`, optional branch and depth, with progress and Cancel (a clone keeps running if you close the dialog) | `git` and whatever credentials it already has (credential manager, ssh key) |
+| GitHub | Lists your repositories (filter, arrows, Enter or click clones) | the GitHub CLI: install `gh` and run `gh auth login` once |
+| New project | A new folder with `git init`, optionally a README, a `.gitignore` and the first commit | `git`; for the commit, `user.name` and `user.email` (without them the project is still created and the dialog says so) |
+| Remote | A folder on a WSL distro or an SSH host, which runs its own daemon; detected distros and `~/.ssh/config` hosts are offered | WSL, or an ssh key (see [`docs/remote-daemon.md`](docs/remote-daemon.md)) |
+| Discovered | Git repositories already on disk (`Projects`, `Projetos`, `Documents/GitHub`, `source/repos`, `dev`, `code`, `Desktop` under your home, two levels deep) that are not projects yet | nothing |
+
+Axelstra never asks for, stores or passes a token: clone and GitHub use your own git and `gh` login. The daemon validates what the
+page sends: clone accepts only `https://`, `ssh://` and `user@host:path` (no leading `-`, no `ext::`, no spaces; `file://` only under test),
+the destination must be absolute and empty or missing, a new project name is one folder name, and a discovered repository must be one
+the last scan returned.
+
 ### Worktree cleanup
 
 The janitor removes a worktree only when all of this holds:
@@ -190,7 +209,7 @@ Local builds are not signed for the updater, so they never produce update artifa
 | Desktop host tests | `cargo test -p axelstra-app` |
 | Frontend | `cd app && npm ci && npx tsc --noEmit && npm test` |
 | CLI and daemon smoke | `node tools/smoke.mjs` |
-| Real app E2E (Windows, over the DevTools protocol) | `node tools/e2e.mjs` |
+| Real app E2E (Windows, over the DevTools protocol; includes the Add project dialog) | `node tools/e2e.mjs` |
 | Screenshots of the real app, three languages | `node tools/visual.mjs` |
 
 Tests never touch your real data dir or pipe: they use `AXELSTRA_DATA_DIR` (see [`docs/TESTING.md`](docs/TESTING.md)). The app-level drivers set `AXELSTRA_TEST_HIDDEN=1`, which creates the window transparent and unfocusable, so no window appears while they run. Details: [`docs/TOOLS.md`](docs/TOOLS.md), [`docs/E2E.md`](docs/E2E.md). Contributing notes: [`CONTRIBUTING.md`](CONTRIBUTING.md).
@@ -209,6 +228,7 @@ Signing secrets are GitHub Environment secrets: the `release` Environment holds 
 - **Linux is experimental** and no one has run the desktop app there.
 - **The release workflow has not been proven on GitHub**: run a dry run before relying on a tag (the Apple and updater secrets must exist in the `release` Environment).
 - **Remote hosts:** Docker, screen control, automations and `open` are refused for remote projects, and ssh needs a key (no password or 2FA prompts). See [`docs/remote-daemon.md`](docs/remote-daemon.md).
+- **Add project dialog:** a folder dropped on the *Pasta local* zone only shows which folder to pick in the system dialog, because the webview gets no path it may hand to `project.add` (the dialog is the only way a path enters). Opening an existing worktree or branch and `worktree.from_pr` are not in the dialog: add the project first, then use the sidebar. There is no token entry (private repositories need `gh auth login` or a git credential helper set up outside Axelstra),. Git never prompts from the dialog (`GIT_TERMINAL_PROMPT=0`, ssh `BatchMode`), so a clone that needs a password you have not stored fails with git's message.
 - **B3, open:** the "Incluir CI" option in the timeline once showed "Maximum call stack size exceeded" in an installed build; it does not reproduce on current code. If it comes back, report the devtools stack trace and the project.
 
 [`ROADMAP.md`](ROADMAP.md) has the full history of what was done and what was verified.
