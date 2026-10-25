@@ -21,7 +21,10 @@ describe("agent logo colours under the CSP", () => {
     const light = css.slice(css.indexOf(':root[data-theme="light"]'));
     const lightBlock = light.slice(0, light.indexOf("}"));
     for (const a of AGENTS) {
-      expect(tw).toContain(`[data-agent="${a}"] { color: var(--brand-${a}); }`);
+      const rule = new RegExp(
+        String.raw`\[data-agent=["']${a}["']\]\s*\{\s*color:\s*var\(\s*--brand-${a}\s*\)\s*;?\s*\}`,
+      );
+      expect(tw.replace(/\r\n/g, "\n"), `rule ${a}`).toMatch(rule);
       const re = new RegExp(String.raw`--brand-${a}:\s*(#[0-9a-f]{6})`, "i");
       const d = re.exec(dark)?.[1];
       const l = re.exec(lightBlock)?.[1];
