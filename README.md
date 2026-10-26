@@ -58,7 +58,7 @@ The interface comes in Portuguese (pt-PT), Brazilian Portuguese and English, pic
 
 - **Terminals:** split view, command palette (`Ctrl+K`), dev-server ports as chips that open in the browser. URLs and file paths in the output are clickable (Ctrl+click: code opens in the editor, `.html` in the browser; any other file, program or folder asks first in a confirmation dialog, with *Cancelar* focused, and can be shown in its folder, opened or, for programs inside the project, run). Paths that the terminal broke across lines are put back together.
 - **Context menu:** right-click menus on sidebar rows, files, changes and Docker items.
-- **Voice:** `Ctrl+Shift+M` dictates a prompt into the active terminal. Speech is recognized locally (Whisper, downloaded once, about 160 MB).
+- **Voice:** `Ctrl+Shift+M` dictates a prompt into the active terminal. Speech is recognized locally (Whisper, downloaded once, about 160 MB). Not on Linux, see [Known limitations](#known-limitations).
 - **Search and usage:** `Ctrl+Shift+F` searches past Claude, Codex and Gemini conversations and resumes one. Tokens (input, output, cache) per worktree are read from the agent logs; no cost is estimated.
 - **Budgets and limits:** daily and weekly token limits per worktree; you are notified when one is near or over, and a runaway agent can be paused. `axelstra limit N` caps concurrent workers.
 - **Notifications:** a bell lists the last 100 events (agent finished or waiting, CI changed, merge done, errors), kept across restarts. On Windows, clicking the toast opens that session; elsewhere the worktree gets an attention dot instead.
@@ -236,7 +236,7 @@ Signing secrets are GitHub Environment secrets: the `release` Environment holds 
 - **macOS runtime is not verified.** CI runs the engine tests, compile checks and lints there, but nobody has run the desktop app. Known risks: no subreaper, so a fully detached agent process can be classified as a user process, and no parent-death signal for `axelstra lock`.
 - **Codex has no hook installer.** `axelstra hook codex` understands its events, but nothing installs them (Codex asks to trust each hook), so Codex sessions are only working or idle.
 - **Windows Authenticode is not configured.** The optional Azure Trusted Signing step in `release.yml` exists but has not run; SmartScreen warns about the installer until a certificate is set up.
-- **Linux is experimental** and no one has run the desktop app there.
+- **Linux is experimental** and no one has run the desktop app there. Voice dictation is off on Linux: the upstream sherpa-onnx static archive for linux-x64 ships no libraries, so the engine cannot be linked; the microphone button is hidden and `Ctrl+Shift+M` shows a notice.
 - **Installer warning when updating over a running app (Windows):** not verified end to end; the installer moves the daemon aside instead of stopping it, but the prompt shown when the app is still running has not been checked.
 - **The release workflow has not been proven on GitHub**: run a dry run before relying on a tag (the Apple and updater secrets must exist in the `release` Environment).
 - **Remote hosts:** Docker, screen control, automations and `open` are refused for remote projects, and ssh needs a key (no password or 2FA prompts). See [`docs/remote-daemon.md`](docs/remote-daemon.md).

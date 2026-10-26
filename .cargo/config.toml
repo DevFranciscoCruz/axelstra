@@ -2,6 +2,3 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "link-arg=advapi32.lib"]
 
-# sherpa-rs-sys refuses to build its static libraries on Linux without this (build.rs panics); the desktop host links them.
-[target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "relocation-model=dynamic-no-pic"]

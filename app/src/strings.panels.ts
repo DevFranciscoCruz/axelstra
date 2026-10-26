@@ -758,6 +758,7 @@ O branch tem de estar enviado para o remoto.`,
     needModel: "Ditado local precisa de um modelo (~160 MB, descarregado uma vez).",
     download: "Descarregar",
     close: "Fechar (Esc)",
+    unavailableLinux: "O ditado por voz ainda não está disponível no Linux.",
   },
   editor: {
     saved: "Guardado",

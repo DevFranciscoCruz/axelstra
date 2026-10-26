@@ -389,9 +389,6 @@ jobs:
         run: sh scripts/prepare-sidecar.sh
       - name: Build the .deb and the AppImage
         working-directory: app
-        # sherpa-rs-sys links its static libs and refuses to build on Linux without this
-        env:
-          RUSTFLAGS: -C relocation-model=dynamic-no-pic
         run: npx tauri build --config src-tauri/tauri.release.linux.conf.json --config '{"version":"${{ steps.v.outputs.version }}"}'
       - name: Stage artifacts
         run: |

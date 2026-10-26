@@ -164,6 +164,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
       - run: cargo check -p axelstra-app
+      # cargo check never links: this builds and links the host's test binary, so a native library that does not reach
+      # the link (the release once failed on undefined SherpaOnnx* symbols) fails here and not only in the release run.
+      - run: cargo test -p axelstra-app --no-run
   # cargo-deny: advisories (vulnerabilities fail; unmaintained and yanked stay warnings), licenses, bans, sources.
   # The advisory ignores live in deny.toml with an expiry date; tools/check-deny-expiry.mjs fails once one lapses.
   deny:
