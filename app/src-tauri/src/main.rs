@@ -1300,9 +1300,36 @@ fn create_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     if let Some(args) = test_browser_args() {
         builder = builder.additional_browser_args(&args);
     }
-    builder.build()?;
+    let hidden = std::env::var_os("AXELSTRA_TEST_HIDDEN").is_some_and(|v| v == "1");
+    if hidden {
+        // never take the focus, not even while the webview initialises
+        builder = builder.focused(false);
+    }
+    let w = builder.build()?;
+    if hidden {
+        make_inert(&w);
+    }
     Ok(())
 }
+
+/// Test-hidden window: fully transparent, click-through, tool window and never activatable. Applied right after
+/// creation (before the webview gets to focus its host), and again before showing. WebView2 counts it as visible (an
+/// off-screen or minimised window is occluded and never renders) while the user sees and touches nothing.
+#[cfg(windows)]
+fn make_inert(w: &tauri::WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging as wm;
+    let _ = w.set_skip_taskbar(true);
+    if let Ok(h) = w.hwnd() {
+        unsafe {
+            let ex = wm::GetWindowLongPtrW(h.0 as _, wm::GWL_EXSTYLE);
+            let add = (wm::WS_EX_LAYERED | wm::WS_EX_TRANSPARENT | wm::WS_EX_TOOLWINDOW | wm::WS_EX_NOACTIVATE) as isize;
+            wm::SetWindowLongPtrW(h.0 as _, wm::GWL_EXSTYLE, ex | add);
+            wm::SetLayeredWindowAttributes(h.0 as _, 0, 0, wm::LWA_ALPHA);
+        }
+    }
+}
+#[cfg(not(windows))]
+fn make_inert(_: &tauri::WebviewWindow) {}
 
 /// The window is created hidden (`visible: false` in tauri.conf.json) and shown here. Under `AXELSTRA_TEST_HIDDEN=1`
 /// (visual/e2e drivers) it is shown fully transparent, click-through, out of the taskbar and never activated: WebView2 still renders, so
@@ -1311,18 +1338,12 @@ fn show_main_window(app: &tauri::AppHandle) {
     use tauri::Manager;
     let Some(w) = app.get_webview_window("main") else { return };
     if std::env::var_os("AXELSTRA_TEST_HIDDEN").is_some_and(|v| v == "1") {
-        let _ = w.set_skip_taskbar(true);
+        make_inert(&w);
         #[cfg(windows)]
         if let Ok(h) = w.hwnd() {
             // shown without activating: the foreground window of the user stays where it is
             use windows_sys::Win32::UI::WindowsAndMessaging as wm;
             unsafe {
-                // fully transparent, click-through and tool-window: WebView2 counts it as visible (an off-screen
-                // or minimised window is occluded and never renders), the user sees and touches nothing
-                let ex = wm::GetWindowLongPtrW(h.0 as _, wm::GWL_EXSTYLE);
-                let add = (wm::WS_EX_LAYERED | wm::WS_EX_TRANSPARENT | wm::WS_EX_TOOLWINDOW | wm::WS_EX_NOACTIVATE) as isize;
-                wm::SetWindowLongPtrW(h.0 as _, wm::GWL_EXSTYLE, ex | add);
-                wm::SetLayeredWindowAttributes(h.0 as _, 0, 0, wm::LWA_ALPHA);
                 wm::ShowWindow(h.0 as _, wm::SW_SHOWNOACTIVATE);
             }
             return;

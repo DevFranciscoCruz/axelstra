@@ -98,7 +98,7 @@ const kill = (pid, tree = false) =>
  * the foreground window at any sample.
  */
 const FG_SCRIPT = `
-Add-Type 'using System;using System.Runtime.InteropServices;public class FG{[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);}'
+Add-Type 'using System;using System.Text;using System.Runtime.InteropServices;public class FG{[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);[DllImport("user32.dll",CharSet=CharSet.Unicode)]public static extern int GetClassName(IntPtr h,StringBuilder s,int n);[DllImport("user32.dll",CharSet=CharSet.Unicode)]public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);[DllImport("user32.dll",EntryPoint="GetWindowLongPtrW")]public static extern IntPtr GetLong(IntPtr h,int i);}'
 $last = -1
 while ($true) {
   $h = [FG]::GetForegroundWindow().ToInt64()
@@ -107,7 +107,13 @@ while ($true) {
     $p = [uint32]0
     [void][FG]::GetWindowThreadProcessId([IntPtr]$h, [ref]$p)
     $c = if ($p -ne 0) { Get-CimInstance Win32_Process -Filter "ProcessId=$p" -ErrorAction SilentlyContinue } else { $null }
-    $line = "FG $h $p $($c.ExecutablePath)|$($c.CommandLine)"
+    $cls = New-Object System.Text.StringBuilder 256
+    $ttl = New-Object System.Text.StringBuilder 256
+    [void][FG]::GetClassName([IntPtr]$h, $cls, 256)
+    [void][FG]::GetWindowText([IntPtr]$h, $ttl, 256)
+    $st = [FG]::GetLong([IntPtr]$h, -16).ToInt64()
+    $ex = [FG]::GetLong([IntPtr]$h, -20).ToInt64()
+    $line = "FG $h $p class=$cls title=[$ttl] style=0x$($st.ToString('x')) ex=0x$($ex.ToString('x')) $($c.ExecutablePath)|$($c.CommandLine)"
     [Console]::Out.WriteLine($line.Replace("\`r", ' ').Replace("\`n", ' '))
     [Console]::Out.Flush()
   }
@@ -129,7 +135,7 @@ fgWatcher.stdout.on("data", (d) => {
 });
 /** True when a sample's foreground window belongs to the app under test. */
 const fgIsApp = (line) => {
-  const rest = line.split(" ").slice(3).join(" ");
+  const rest = line.replace(/^FG \d+ \d+ class=.*? title=\[.*?\] style=0x\w+ ex=0x\w+ ?/, "");
   const [path, cmd = ""] = rest.split("|");
   const low = path.toLowerCase();
   return (
