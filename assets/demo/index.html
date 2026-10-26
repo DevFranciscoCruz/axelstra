@@ -7,7 +7,7 @@
 <!-- Fake data only. A scripted mock of the app (same colours and labels as app/src) that renders from one number,
      the time in ms, so a recorder can step it frame by frame: window.setT(ms). Opened directly it plays in a loop. -->
 <style>
-:root{--bg:#1e1f23;--panel:#24262c;--line:#33363f;--line-3:#43434f;--text:#d7dae0;--muted:#8b90a0;--accent:#a78bfa;--ok:#4ade80;--warn:#e5c07b;--bad:#f87171}
+:root{--bg:#1e1f23;--panel:#24262c;--line:#33363f;--line-2:#3a3a45;--line-3:#43434f;--text:#d7dae0;--muted:#9aa0b2;--accent:#a78bfa;--on-accent:#15121f;--ok:#4ade80;--warn:#e5c07b;--bad:#f87171;--await:#5eb8d6;--s3:#2a2a32;--s-in:#22222a;--s-code:#1b1b21}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{background:#14151a;display:grid;place-items:center;font:13px/1.4 "Inter Variable","Segoe UI Variable","Segoe UI",system-ui,sans-serif;color:var(--text)}
@@ -120,6 +120,26 @@ body{background:#14151a;display:grid;place-items:center;font:13px/1.4 "Inter Var
 .ship .acts{display:flex;gap:6px;padding:4px 10px}.ship .acts span{border:1px solid var(--line-3);border-radius:6px;padding:4px 10px;font-size:12px}.ship .acts span.p{background:var(--accent);color:#1a1530;border:0;font-weight:600}.ship .acts span.press{filter:brightness(1.3)}
 .ship .opt{padding:2px 10px;font-size:11px;color:var(--muted)}
 .rpt h3{margin:0 0 6px;font-size:14px}.rpt p{margin:4px 0;color:#b9bdc9}
+
+.dot.await{background:var(--await)}.dot.await.p{box-shadow:0 0 0 3px rgba(94,184,214,.25)}
+.chip.aw{color:var(--await);border:1px solid rgba(94,184,214,.45);background:transparent}
+.tip{position:absolute;left:262px;background:var(--s3);border:1px solid var(--line-3);border-radius:8px;padding:6px 10px;font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:6}
+.tip b{color:var(--await);font-weight:600}
+.pl{border-bottom:1px solid var(--accent);color:var(--accent)}.pl.hot{background:rgba(167,139,250,.18)}
+.key{display:inline-block;margin-left:8px;padding:0 6px;border:1px solid var(--line-3);border-radius:4px;font-size:11px;color:var(--text);background:var(--s3)}
+.mw{width:500px}.mact{display:flex;gap:8px;justify-content:flex-end}.pre{white-space:pre-line;font-size:12.5px}
+.mbtn.press{filter:brightness(1.3)}.addp.press{filter:brightness(1.25)}
+.ap{width:780px}.apb{display:grid;grid-template-columns:230px 1fr;gap:14px;min-height:300px}
+.srcs{display:flex;flex-direction:column;gap:4px}.src{display:flex;flex-direction:column;padding:6px 10px;border-radius:6px;border:1px solid transparent}.src b{font-size:12.5px}.src span{font-size:11px;color:var(--muted)}.src.on{background:#2f323b;border-color:var(--line-3)}
+.pane{display:flex;flex-direction:column;gap:8px;min-width:0}.lbl{font-size:11px;color:var(--muted)}
+.fld{background:var(--s-in);border:1px solid var(--line-3);border-radius:6px;padding:6px 8px;min-height:30px;font-size:12px}.fld.f{border-color:var(--accent)}
+.drop{border:1px dashed var(--line-3);border-radius:8px;padding:34px 10px;text-align:center;color:var(--muted)}
+.rp{display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px}.rp.on{background:#2f323b;border-color:var(--accent)}.rp .sp{flex:1}.rp small{color:var(--muted)}
+.chk{font-size:12px;color:var(--text)}.chk i{font-style:normal;color:var(--ok);margin-right:6px}
+.chips2{display:flex;gap:6px;flex-wrap:wrap}.chips2 span{border:1px solid var(--line-3);border-radius:9px;padding:1px 9px;font-size:11.5px}
+.kcard.lift{position:absolute;width:176px;margin:0;box-shadow:0 12px 28px rgba(0,0,0,.55);transform:rotate(2.5deg);z-index:7}.kcard.gh{visibility:hidden}
+.kcard.slot{border:1px dashed var(--accent);background:transparent;min-height:90px;visibility:visible}.kcol.over{border-color:var(--accent)}
+.cur{position:absolute;z-index:9;pointer-events:none}
 </style>
 </head>
 <body>
@@ -143,8 +163,11 @@ body{background:#14151a;display:grid;place-items:center;font:13px/1.4 "Inter Var
   <div class="back" id="pal" style="display:none"></div>
 </div>
 <script>
-const TOTAL = 55500;
 const TAIL = 38500;
+const TAIL2 = 55500; // scenes after the merge flow: add project, awaiting, kanban drag, path confirm
+const SCRIPT = 70500; // length of the script in its own ms
+const SPEED = 1.15; // the recorder plays the script this much faster so the whole loop stays near a minute
+const TOTAL = Math.round(SCRIPT / SPEED);
 const NEW = "promo-codes";
 const COMMIT_MSG = "feat(theme): add dark mode toggle to settings";
 const spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
@@ -247,7 +270,7 @@ function dispModal() {
 }
 
 // scenes added after the tour: sidebar groups and reports, status bar chips, Docker, bell, ship flow
-function tailRender(t) {
+function tailRender(t, aw) {
   const pulse = Math.floor(t / 500) % 2 === 0;
   const sc = t < 42500 ? 1 : t < 46500 ? 2 : t < 50500 ? 3 : t < 52500 ? 4 : 5;
   const rep = t >= 41200 && t < 42500;
@@ -259,7 +282,7 @@ function tailRender(t) {
       ${row("ax/checkout", "work", false)}
       <div class="nest">
         ${row("ax/checkout-ui", "work", !rep)}
-        <div class="box" style="margin-left:10px">${agt("Tarefa 1", "work p", "2m")}${agt("Tarefa 2", "wait", "aguarda")}</div>
+        <div class="box" style="margin-left:10px">${aw ? agt("Tarefa 1", "await p", "", '<span class="t"><span class="chip aw">CI #3703</span></span>') : agt("Tarefa 1", "work p", "2m")}${agt("Tarefa 2", "wait", "aguarda")}</div>
         ${row("ax/checkout-api", "done", rep)}
         <div class="box" style="margin-left:10px">${agt("Tarefa 3", "done", "", reportBtn)}</div>
       </div>
@@ -331,6 +354,157 @@ function tailRender(t) {
   $("kan").style.display = "none";
   $("modal").style.display = "none";
   $("pal").style.display = "none";
+}
+
+
+// ---- scenes after the merge flow ----
+const AP_TABS = [
+  ["Pasta local", "Uma pasta que já existe neste computador."],
+  ["Clonar repositório", "Um repositório git a partir de um endereço."],
+  ["GitHub", "Um dos teus repositórios no GitHub."],
+  ["Novo projeto", "Uma pasta nova com git iniciado."],
+  ["Remoto", "Uma pasta num anfitrião WSL ou SSH."],
+  ["Descobertos", "Repositórios que já tens no disco."],
+];
+const AP_AT = [500, 1300, 2100, 2900, 3700, 4500];
+const caretIf = (on) => (on ? '<span class="caret"></span>' : "");
+
+function addPane(i, r, pulse) {
+  const rr = r - AP_AT[i];
+  if (i === 0) return `<div class="drop">Larga aqui uma pasta</div><div class="mact"><span class="mbtn pr2">Escolher pasta…</span></div>`;
+  if (i === 1) {
+    const url = typed("https://github.com/acme/shop-web.git", rr, 150, 16);
+    return `<div class="lbl">Endereço do repositório</div><div class="fld f">${url}${caretIf(pulse && url.length < 36)}</div>
+      <div class="lbl">Nome da pasta</div><div class="fld">${rr > 800 ? "shop-web" : ""}</div>
+      <div class="lbl">${rr > 800 ? "Fica em C:\\Users\\ana\\Projetos\\shop-web" : "Ramo e profundidade são opcionais"}</div>
+      <div class="mact"><span class="mbtn pr2">Clonar</span></div>`;
+  }
+  if (i === 2) {
+    const rp = (n, on, priv) => `<div class="rp${on ? " on" : ""}"><b>${n}</b>${priv ? "<small>Privado</small>" : ""}<span class="sp"></span><small>Clonar</small></div>`;
+    return `<div class="lbl">Filtrar repositórios</div><div class="fld">Nome ou descrição</div>${rp("acme/shop-web", true, true)}${rp("acme/api-gateway", false, true)}${rp("acme/design-system", false, false)}<div class="lbl">3 repositórios · via gh</div>`;
+  }
+  if (i === 3) {
+    const nm = typed("loja-nova", rr, 150, 70);
+    const ck = (x) => `<div class="chk"><i>☑</i>${x}</div>`;
+    return `<div class="lbl">Nome do projeto</div><div class="fld f">${nm}${caretIf(pulse && nm.length < 9)}</div><div class="lbl">Pasta onde guardar</div><div class="fld">C:\\Users\\ana\\Projetos</div>
+      ${ck("Criar README.md")}${ck("Criar .gitignore")}${ck("Fazer o primeiro commit")}<div class="mact"><span class="mbtn pr2">Criar projeto</span></div>`;
+  }
+  if (i === 4) {
+    const chips = (xs) => `<div class="chips2">${xs.map((x) => `<span>${x}</span>`).join("")}</div>`;
+    return `<div class="lbl">Distros WSL detetadas</div>${chips(["Ubuntu-24.04", "Debian"])}<div class="lbl">Anfitriões do ~/.ssh/config</div>${chips(["build-box", "staging", "gpu-01"])}<div class="note">Clica para preencher a especificação do novo anfitrião.</div>`;
+  }
+  const d = (n, p, tag) => `<div class="rp"><b>${n}</b><small>${p}</small><span class="sp"></span><small>${tag}</small><span class="mbtn">Adicionar</span></div>`;
+  return `<div class="lbl">3 repositórios</div>${d("shop-web", "C:\\Users\\ana\\code", "recente")}${d("blog-site", "C:\\Users\\ana\\code", "encontrado")}${d("infra", "D:\\work", "encontrado")}<div class="note">Setas para escolher, Enter ou clique para adicionar.</div>`;
+}
+
+function addModal(r, pulse) {
+  const i = Math.max(0, AP_AT.filter((a) => r >= a).length - 1);
+  return `<div class="modal ap"><div class="mh"><b>Adicionar projeto</b><span class="sp"></span><span class="mbtn">Fechar</span></div>
+    <div class="apb"><div class="srcs"><div class="sec">De onde vem o projeto?</div>${AP_TABS.map(([l, h], k) => `<div class="src${k === i ? " on" : ""}"><b>${l}</b><span>${h}</span></div>`).join("")}</div>
+    <div class="pane">${addPane(i, r, pulse)}</div></div></div>`;
+}
+
+const AW_CMD = 'axelstra await --reason "CI #3703" --for-min 30';
+function awTerm(r, extra) {
+  let o = '<span class="m">ax/checkout-ui · Tarefa 1</span><br>● Pushed ax/checkout-ui, CI #3703 started<br>';
+  const cmd = typed(AW_CMD, r, 5100, 28);
+  o += `<span class="a">$</span> ${esc(cmd)}${cmd.length < AW_CMD.length ? caretIf(true) : ""}<br>`;
+  if (r >= 6700) o += '<span class="m">● À espera de algo externo: CI #3703 (expira em 30 min)</span><br>';
+  return o + (extra || "");
+}
+
+// Kanban card dragged from "Ideias" to "Para fazer"; positions are measured from the laid-out columns.
+function kanDrag(r) {
+  const cols = [["backlog", "Ideias", "#8a8aa0"], ["todo", "Para fazer", "#6aa3ff"], ["in-progress", "Em curso", "#e5c07b"], ["needs-review", "Rever", "#c792ea"], ["done", "Feito", "#4ade80"]];
+  const cards = [
+    { id: "csv-export", title: "Exportar relatórios em CSV", body: "Botão no ecrã de relatórios, só colunas visíveis.", status: "backlog", drag: true },
+    { id: "welcome-mail", title: "Email de boas-vindas", body: "", status: "backlog" },
+    { id: "rate-limit", title: "Rate limit na API", body: "Limitar a 100 pedidos por minuto por chave e devolver 429 com Retry-After.", status: "todo", pri: 1 },
+    { id: "invoices", title: "Página de faturas", body: "Lista paginada com download em PDF e filtro por estado.", status: "todo" },
+    { id: "dark-mode", title: "Dark mode toggle", body: "", status: "done" },
+  ];
+  const A = 800, B = 1900, C = 2000; // grab, arrive, drop (ms since the scene started)
+  const dragging = r >= A && r < C, dropped = r >= C;
+  const html = (c, color, cls) => `<div class="kcard${cls ? " " + cls : ""}" style="--st:${color}"><div class="kt">${c.title}</div>${c.body ? `<div class="kb">${c.body}</div>` : ""}<div class="chips"><span class="chip">claude</span>${c.pri ? '<span class="chip hi">prio 1</span>' : ""}<span class="chip">${c.id}</span></div></div>`;
+  const colOf = (c) => (c.drag && dropped ? "todo" : c.status);
+  const over = dragging && r >= 1300;
+  const body = cols.map(([id, label, color]) => {
+    const cs = cards.filter((c) => colOf(c) === id && !(c.drag && dragging)).sort((a, b) => !!(a.drag && dropped) - !!(b.drag && dropped));
+    const n = cs.length + (dragging && id === "backlog" ? 1 : 0);
+    let inner = cs.map((c) => html(c, color)).join("");
+    if (dragging && id === "backlog") inner = html(cards[0], color, "gh") + inner;
+    if (over && id === "todo") inner += '<div class="kcard slot"></div>';
+    return `<div class="kcol${over && id === "todo" ? " over" : ""}"><div class="kch">${label} <i>${n}</i></div>${inner}</div>`;
+  }).join("");
+  const note = dropped && r >= 2300 ? "csv-export passou para “Para fazer”" : "";
+  return {
+    html: `<div class="kbar"><b>Kanban</b><span style="flex:1"></span><span class="kbtn">Executar “Para fazer”</span></div>${note ? `<div class="krun">${note}</div>` : ""}<div class="kcols">${body}</div>`,
+    float: (kan) => {
+      const k = kan.getBoundingClientRect();
+      const src = kan.querySelector(".kcard.gh"), dst = kan.querySelector(".kcard.slot");
+      const cur = document.createElement("div");
+      cur.className = "cur";
+      cur.innerHTML = SVG('<path d="M3 2l9 5.2-3.9 1.1L10 13l-1.8.8-1.9-4.7L3 11.5z" fill="#fff" stroke="#111" stroke-width="1"/>', 22);
+      if (!src) {
+        const q = r < A ? kan.querySelector(".kcard").getBoundingClientRect() : null;
+        if (q) { cur.style.left = q.left - k.left + 80 + "px"; cur.style.top = q.top - k.top + 30 + "px"; kan.appendChild(cur); }
+        return;
+      }
+      const s = src.getBoundingClientRect(), d = dst ? dst.getBoundingClientRect() : s;
+      const u = Math.min(1, Math.max(0, (r - A - 150) / (B - A - 150)));
+      const e = u * u * (3 - 2 * u);
+      const x = s.left - k.left + (d.left - s.left) * e, y = s.top - k.top + (d.top - s.top) * e;
+      const f = src.cloneNode(true);
+      f.className = "kcard lift";
+      f.style.left = x + "px";
+      f.style.top = y + "px";
+      kan.appendChild(f);
+      cur.style.left = x + 90 + "px";
+      cur.style.top = y + 34 + "px";
+      kan.appendChild(cur);
+    },
+  };
+}
+
+function tail2Render(t, pulse) {
+  const r = t - TAIL2;
+  const scene = r < 5000 ? "add" : r < 8000 ? "await" : r < 11500 ? "kan" : "path";
+  tailRender(38600 + (t % 1400), r >= 6800);
+  const term = $("term");
+  const modal = $("modal");
+  const showModal = (h) => { modal.style.display = "grid"; modal.innerHTML = h; };
+  document.querySelector(".addp").classList.toggle("press", r >= 100 && r < 400);
+  if (scene === "add") {
+    if (r >= 300) showModal(addModal(r, pulse));
+  } else term.innerHTML = awTerm(r);
+  if (r >= 7000 && r < 8300) {
+    const h = document.createElement("div");
+    h.className = "tip";
+    h.innerHTML = "<b>À espera de algo externo:</b> CI #3703 (há 4 s) · expira 14:32";
+    const row = [...document.querySelectorAll(".ag")].find((e) => e.textContent.includes("Tarefa 1"));
+    h.style.top = (row ? row.getBoundingClientRect().top - $("win").getBoundingClientRect().top + 24 : 300) + "px";
+    $("win").appendChild(h);
+    window.__tip = h;
+  }
+  if (scene === "kan") {
+    const kd = kanDrag(r - 8000);
+    const kan = $("kan");
+    kan.style.display = "flex";
+    kan.innerHTML = kd.html;
+    kd.float(kan);
+  }
+  if (scene === "path") {
+    const q = r - 11500;
+    const hot = q >= 400;
+    const run = q >= 2600;
+    const extra = `● Created <span class="pl${hot ? " hot" : ""}">scripts/setup-env.ps1</span>${hot && q < 1000 ? '<span class="key">Ctrl+clique</span>' : ""}<br>` + (run ? '<span class="a">$</span> .\\scripts\\setup-env.ps1<br><span class="g">✓ ambiente pronto</span><br>' : "");
+    term.innerHTML = awTerm(r, extra);
+    if (q >= 1000 && !run) {
+      const full = "C:\\Users\\ana\\Projetos\\acme-web\\.axelstra-wt\\checkout-ui\\scripts\\setup-env.ps1";
+      showModal(`<div class="modal mw"><div class="mh"><b>Abrir caminho</b></div><div class="pre">${esc(full)}\n\nTipo: programa ou script\n\nExecutar corre este programa no teu computador, com as tuas permissões. Só o faças se confias nele.</div>
+        <div class="mact"><span class="mbtn">Cancelar</span><span class="mbtn">Mostrar na pasta</span><span class="mbtn pr2${q >= 2300 ? " press" : ""}">Executar</span></div></div>`);
+    }
+  }
 }
 
 let pulseNow = true;
@@ -451,14 +625,20 @@ function render(t) {
   } else pal.style.display = "none";
 }
 
-const draw = (t) => { render(t); if (t >= TAIL) tailRender(t); };
-window.setT = draw;
+// t is the script's own time; the tooltip of the last frame is dropped before a redraw
+const draw = (t) => {
+  if (window.__tip) { window.__tip.remove(); window.__tip = null; }
+  render(t);
+  if (t >= TAIL2) tail2Render(t, Math.floor(t / 500) % 2 === 0);
+  else if (t >= TAIL) tailRender(t);
+};
+window.setT = (ms) => draw(Math.min(SCRIPT - 1, ms * SPEED)); // the recorder's clock is video time
 window.TOTAL = TOTAL;
 if (!location.search.includes("manual")) {
   const t0 = performance.now();
-  const tick = () => { draw((performance.now() - t0) % TOTAL); requestAnimationFrame(tick); };
+  const tick = () => { window.setT((performance.now() - t0) % TOTAL); requestAnimationFrame(tick); };
   tick();
-} else draw(0);
+} else window.setT(0);
 </script>
 </body>
 </html>
