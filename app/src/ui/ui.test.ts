@@ -8,6 +8,7 @@ const noop = () => {};
 /** props that let each component render on its own; a new export fails the test until it is listed here */
 const props: Record<string, Record<string, unknown>> = {
   Button: { children: "x" },
+  CopyWord: { text: "x" },
   Badge: { children: "x" },
   Input: {},
   Textarea: {},
