@@ -54,6 +54,8 @@ export const pt = {
   "orch.finish_failed": "A conclusão da tarefa falhou.\n({detail})",
   "orch.spawn_failed": "Não foi possível iniciar o agente.\n({detail})",
   "orch.merge_conflict": "Conflito de merge.",
+  "orch.kept":
+    "{branch} ficou guardada: a execução não concluiu todos os cartões e a branch tem trabalho. Revê-a e integra-a.",
   "orch.acceptance_timeout": "A aceitação excedeu o limite de {secs} s.",
   "orch.acceptance_failed": "A aceitação falhou.",
   "orch.acceptance_error": "Não foi possível executar a aceitação.\n({detail})",
@@ -107,6 +109,8 @@ export const en: Widen<typeof pt> = {
   "orch.finish_failed": "Finishing the task failed.\n({detail})",
   "orch.spawn_failed": "Could not start the agent.\n({detail})",
   "orch.merge_conflict": "Merge conflict.",
+  "orch.kept":
+    "{branch} was kept: the run did not finish every card and the branch holds work. Review it, then integrate it.",
   "orch.acceptance_timeout": "Acceptance ran over its {secs} s limit.",
   "orch.acceptance_failed": "Acceptance failed.",
   "orch.acceptance_error": "Could not run the acceptance command.\n({detail})",
@@ -162,6 +166,8 @@ export const ptBR: Widen<typeof pt> = {
   "orch.finish_failed": "A conclusão da tarefa falhou.\n({detail})",
   "orch.spawn_failed": "Não foi possível iniciar o agente.\n({detail})",
   "orch.merge_conflict": "Conflito de merge.",
+  "orch.kept":
+    "{branch} foi mantida: a execução não concluiu todos os cartões e a branch tem trabalho. Revise-a e integre-a.",
   "orch.acceptance_timeout": "A aceitação passou do limite de {secs} s.",
   "orch.acceptance_failed": "A aceitação falhou.",
   "orch.acceptance_error": "Não foi possível executar a aceitação.\n({detail})",

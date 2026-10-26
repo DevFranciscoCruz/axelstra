@@ -66,7 +66,7 @@ pub fn preview(pr: &Project) -> Vec<Look> {
             let here = Path::new(&w.path).exists();
             let dirty = here && git::has_changes(Path::new(&w.path)).unwrap_or(true);
             let unmerged = w.branch.as_deref().is_some_and(|b| {
-                b.starts_with("ax/")
+                crate::janitor::integrable_branch(b)
                     && crate::integrate::ahead_of(repo, b, &default) > 0
                     && !crate::cleanup::squash_merged(repo, b, &default)
             });
@@ -95,7 +95,7 @@ pub fn remove_one(repo: &Path, path: &str, branch: Option<&str>) -> Gone {
         return Gone::Held;
     }
     let mut deleted = false;
-    if let Some(b) = branch.filter(|b| b.starts_with("ax/")) {
+    if let Some(b) = branch.filter(|b| crate::janitor::managed_branch(b)) {
         let existed = branch_exists(repo, b);
         let _ = git::branch_delete(repo, b);
         deleted = existed && !branch_exists(repo, b);

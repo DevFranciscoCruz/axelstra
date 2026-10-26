@@ -538,7 +538,21 @@ impl Registry {
                 })
                 .unwrap_or(false)
         });
-        in_flow || self.live_in(path).iter().any(|(id, s)| !self.releasable(*id, s))
+        in_flow || self.orch_active(path) || self.live_in(path).iter().any(|(id, s)| !self.releasable(*id, s))
+    }
+
+    /// True while an orchestrator run of this project is going and `path` is one of its worktrees (`<name>-integ`,
+    /// `<name>-<card>` in `.axelstra-wt`): the run owns them until it ends, whatever the janitor thinks of their branches.
+    fn orch_active(&self, path: &str) -> bool {
+        let p = std::path::Path::new(path);
+        let (Some(dir), Some(leaf)) = (p.parent().and_then(|d| d.file_name()), p.file_name().map(|l| l.to_string_lossy())) else {
+            return false;
+        };
+        dir == ".axelstra-wt"
+            && self.runs.lock_recover().values().any(|r| {
+                r["state"] == "running"
+                    && r["name"].as_str().is_some_and(|n| leaf.strip_prefix(n).is_some_and(|rest| rest.starts_with('-')))
+            })
     }
 
     /// True while a live session in this worktree is not idle (output in the last 5 s). A prompt waiting for

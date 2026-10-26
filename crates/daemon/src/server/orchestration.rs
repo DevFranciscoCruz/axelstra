@@ -55,8 +55,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let runner = tokio::task::block_in_place(|| crate::runner::DaemonRunner::connect(&reg.pipe, &reg.token)).map_err(release)?;
             let (reg2, pid, n2) = (reg.clone(), pr.id.clone(), name.clone());
             std::thread::spawn(move || {
+                let wt_root = repo.parent().unwrap_or(&repo).join(".axelstra-wt");
+                // the run's worktrees are Axelstra's own: the janitor may clean them up once they are integrated or empty
+                crate::orchend::mark_run(&reg2.store, &pid, &repo, &wt_root, &n2);
                 let opts = axelstra_core::orch::Options {
-                    wt_root: repo.parent().unwrap_or(&repo).join(".axelstra-wt"),
+                    wt_root,
                     repo,
                     name: n2.clone(),
                     max_concurrency: max,
@@ -70,6 +73,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     None if trust => axelstra_core::orch::run_trusted(&opts),
                     None => axelstra_core::orch::run(&opts),
                 };
+                // still "running" for the janitor while this cleans up, so it cannot race the run's own worktrees
+                if let Ok(pr) = crate::projects::find(&reg2.store, &pid) {
+                    let end = crate::orchend::end_of(&res);
+                    crate::orchend::finish(&pr, &n2, &end, &|path| reg2.close_worktree(path));
+                }
                 let v = match res {
                     Ok(r) => json!({"state": "done", "name": n2, "integ_branch": r.integ_branch,
                         "integ_wt": r.integ_wt, "merged": r.merged, "failed": r.failed,
@@ -81,6 +89,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 // the run removes worktrees with git directly: their sessions go, the app hears of it, the janitor looks
                 reap_orphans(&reg2);
                 reg2.projects_changed();
+                reg2.announce_events();
                 reg2.janitor.bump();
             });
             Ok(started)
@@ -98,6 +107,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 if let Some(v) = r["needs_review"].as_array_mut() {
                     v.retain(|e| e[0] != id.as_str());
                 }
+            }
+            // the last card waiting for review is merged: the run is finished after all, so it is cleaned up and integrated
+            let state = reg.runs.lock_recover().get(&pr.id).cloned().unwrap_or_default();
+            if crate::orchend::state_is_clean(&state) {
+                let end = crate::orchend::End { clean: true, holds: false };
+                tokio::task::block_in_place(|| crate::orchend::finish(&pr, &name, &end, &|path| reg.close_worktree(path)));
+                reap_orphans(reg);
+                reg.projects_changed();
+                reg.announce_events();
             }
             Ok(json!({}))
         }

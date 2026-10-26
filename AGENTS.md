@@ -116,6 +116,24 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   become `manual`; later ones are marked at creation. A removal that stays pending (folder held) is retried by event:
   a session exit (`watch_exit`) and `sweep_soon` kick the janitor. Holders we cannot observe get a bounded exponential
   backoff (`janitor::retry_delay`: 1, 2, 4... up to 30 min), never a fixed timer.
+- **Orchestrator runs (Kanban, `orch.start`).** A run's worktrees are Axelstra's own, so the janitor cleans them like an
+  agent's (`janitor::managed_branch`: `ax/*`, `orch/<run>` integration branch, `orch-task/<run>/<card>` task branches;
+  `integrable_branch` = `ax/*` and `orch/*`, the ones `integrate_with`, the overview's "por integrar" and `merged_reason`
+  treat as work going into the default branch; a task branch only leaves when empty or inside a live `orch/*`/`ax/*`
+  branch). `orch.start` marks `<run>-integ` and `<run>-<card>` `auto` before the run creates them (`orchend::mark_run`),
+  and `Registry::orch_active` (part of `worktree_busy`) keeps the janitor off them while that run is `running`.
+  For `orch/*` a merge in the reflog counts as an own commit (the integration branch only ever receives `merge --no-ff`).
+  When the run's thread ends it calls `orchend::finish` (before the run state leaves `running`; again after the last
+  `orch.retry` leaves nothing to review): a run with every card merged and unintegrated commits on `orch/<run>` is
+  integrated into the default branch (`integrate_with`: fast-forward or clean merge, respecting the project's
+  auto-integrate switch) and the worktree and branch go with it; on a conflict, a dirty checkout and the like it stays as
+  "por integrar" with `integrate::attention` and the Integrar button (any later `done`, `git.merge` or sweep cleans up
+  after a manual integration). An integration branch with nothing the default branch lacks (a failed run, a run that
+  changed nothing) is removed at once; one with work after a partial run (failed, blocked or unreviewed cards) is kept
+  with `orch.kept` and never integrated by itself; while a card waits for review nothing is touched (`orch.retry` needs
+  both worktrees). Dirty worktrees never go. Old `orch/*` worktrees (no mark) are `manual` by `migrate_marks`: they
+  leave only through real integration (`merged_reason`), never because they are empty. `worktree.sweep`, `stale_branches`
+  and `project.remove` cover `orch/*` and `orch-task/*` under the same rules.
 
 ## Removing a project
 

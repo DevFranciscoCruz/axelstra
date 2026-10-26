@@ -60,7 +60,7 @@ fn rows(p: &Project, busy: &dyn Fn(&str) -> bool) -> Vec<Row> {
     let mut out = vec![];
     let list = git::worktree_list(repo).unwrap_or_default();
     // the live `ax/*` branches a stacked branch can be integrated into (same rule as the janitor)
-    let live: Vec<String> = list.iter().filter_map(|w| w.branch.clone()).filter(|b| b.starts_with("ax/")).collect();
+    let live: Vec<String> = list.iter().filter_map(|w| w.branch.clone()).filter(|b| crate::janitor::integrable_branch(b)).collect();
     for w in list {
         if w.is_main {
             continue;
@@ -69,12 +69,12 @@ fn rows(p: &Project, busy: &dyn Fn(&str) -> bool) -> Vec<Row> {
         let branch = w.branch.clone().unwrap_or_default();
         let busy = busy(&w.path);
         // the same rule as the janitor: only Axelstra's own branches, and never one with changes or a session
-        let merged = if branch.starts_with("ax/") && st.dirty == 0 && !busy {
+        let merged = if crate::janitor::integrable_branch(&branch) && st.dirty == 0 && !busy {
             crate::janitor::merged_reason_in(repo, &branch, &default, &live)
         } else {
             None
         };
-        let pending = branch.starts_with("ax/") && !busy && merged.is_none();
+        let pending = crate::janitor::integrable_branch(&branch) && !busy && merged.is_none();
         let unintegrated = if pending { crate::integrate::ahead_of(repo, &branch, &default) } else { 0 };
         let attention = if pending { crate::integrate::attention(&w.path) } else { None };
         out.push(Row {

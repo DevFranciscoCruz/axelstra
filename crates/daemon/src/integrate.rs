@@ -128,7 +128,7 @@ pub fn integrate(p: &Project, wt: &git::Worktree) -> Result<Outcome> {
 pub fn integrate_with(p: &Project, wt: &git::Worktree, close_sessions: &dyn Fn() -> Vec<String>) -> Result<Outcome> {
     let repo = Path::new(&p.path);
     let dir = Path::new(&wt.path);
-    let branch = wt.branch.clone().filter(|b| b.starts_with("ax/")).ok_or_else(|| {
+    let branch = wt.branch.clone().filter(|b| crate::janitor::integrable_branch(b)).ok_or_else(|| {
         coded!(
             "integrate.not_agent_branch",
             "only ax/* branches are integrated, this one is {branch}",

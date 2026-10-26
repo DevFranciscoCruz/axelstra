@@ -21,6 +21,7 @@ pub mod kanban;
 pub mod lag;
 pub mod msgbus;
 pub mod notes;
+pub mod orchend;
 pub mod overlaps;
 pub mod overview;
 pub mod pathopen;

@@ -1,4 +1,5 @@
-//! Removes the worktrees Axelstra's agents created (branches `ax/...`) once their work is integrated: the branch is in
+//! Removes the worktrees Axelstra's agents created (branches `ax/...`, and an orchestrator run's `orch/...` and
+//! `orch-task/...`) once their work is integrated: the branch is in
 //! the default branch already, it is inside another live `ax/*` branch (stacked integration), or GitHub says its pull
 //! request was merged (squash merges leave no ancestor). A worktree with a running session that has not reported,
 //! uncommitted changes or unmerged work is never touched, and neither is a branch whose commits no other ref holds.
@@ -83,10 +84,24 @@ pub fn merged_reason_in(repo: &Path, branch: &str, default: &str, others: &[Stri
     pr["number"].as_u64().map(|n| format!("PR #{n} merged"))
 }
 
-/// True when the branch's reflog records a commit made on it (a fresh branch only has its creation).
+/// True for the branches Axelstra's own flows create and the janitor may clean up: agent worktrees (`ax/*`), an
+/// orchestrator run's integration branch (`orch/*`) and its task branches (`orch-task/*`).
+pub fn managed_branch(b: &str) -> bool {
+    b.starts_with("ax/") || integrable_branch(b) || b.starts_with("orch-task/")
+}
+
+/// The managed branches whose work is integrated into the default branch (`ax/*` and `orch/*`); a task branch of a run
+/// goes into its integration branch instead.
+pub fn integrable_branch(b: &str) -> bool {
+    b.starts_with("ax/") || b.starts_with("orch/")
+}
+
+/// True when the branch's reflog records a commit made on it (a fresh branch only has its creation). An integration
+/// branch of the orchestrator only ever receives merges (`merge --no-ff`), so for `orch/*` a merge counts too.
 pub fn has_own_commits(repo: &Path, branch: &str) -> bool {
+    let merges = branch.starts_with("orch/");
     git::run(repo, &["reflog", "show", "--format=%gs", branch])
-        .map(|o| o.ok && o.stdout.lines().any(|l| l.starts_with("commit")))
+        .map(|o| o.ok && o.stdout.lines().any(|l| l.starts_with("commit") || (merges && l.starts_with("merge"))))
         .unwrap_or(false)
 }
 
@@ -115,7 +130,7 @@ pub fn drop_events_of(project: &str) {
     EVENTS.lock().unwrap_or_else(|e| e.into_inner()).retain(|e| e["project"].as_str() != Some(project));
 }
 
-fn push_event(e: Value) {
+pub(crate) fn push_event(e: Value) {
     let mut q = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
     q.push(e);
     let n = q.len();
@@ -135,7 +150,7 @@ pub fn retry_delay(attempt: u32) -> Duration {
     Duration::from_secs((60u64 << attempt.saturating_sub(1).min(5)).min(30 * 60))
 }
 
-fn attention_event(p: &Project, path: &str, branch: &str, why: &axelstra_core::msg::Coded) -> Value {
+pub(crate) fn attention_event(p: &Project, path: &str, branch: &str, why: &axelstra_core::msg::Coded) -> Value {
     json!({"kind": "attention", "project": p.id, "path": path, "branch": branch, "code": why.code, "params": why.params_json(),
            "text": why.text, "at": now_ms()})
 }
@@ -161,7 +176,7 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>) -> Res
     // branches already removed by this pass cannot keep another one's commits alive
     let mut gone: Vec<String> = vec![];
     for w in git::worktree_list(repo)? {
-        let Some(branch) = w.branch.clone().filter(|b| b.starts_with("ax/")) else { continue };
+        let Some(branch) = w.branch.clone().filter(|b| managed_branch(b)) else { continue };
         if w.is_main || busy(&w.path) {
             // an agent works here again: whatever kept the last report from being integrated is moot
             if !w.is_main {
@@ -235,7 +250,7 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>) -> Res
         let others: Vec<String> = git::worktree_list(repo)?
             .into_iter()
             .filter_map(|o| o.branch)
-            .filter(|b| b.starts_with("ax/") && *b != branch && !gone.contains(b))
+            .filter(|b| integrable_branch(b) && *b != branch && !gone.contains(b))
             .collect();
         let Some(why) = merged_reason_in(repo, &branch, &default, &others) else {
             // nothing of its own and nothing to lose: an empty worktree nobody works in goes away after a few minutes
@@ -278,7 +293,7 @@ fn remove_closing(env: &Env, p: &Project, path: &str) -> (bool, Vec<String>) {
 }
 
 /// The toast / notification of a removal; with closed sessions it names them (`janitor.removed_closed`).
-fn removed_event(p: &Project, path: &str, branch: &str, into: &str, why: &str, closed: &[String]) -> Value {
+pub(crate) fn removed_event(p: &Project, path: &str, branch: &str, into: &str, why: &str, closed: &[String]) -> Value {
     let mut e = json!({"project": p.id, "path": path, "branch": branch, "into": into, "why": why, "closed": closed, "at": now_ms()});
     if !closed.is_empty() {
         let (branch, sessions) = (branch.trim_start_matches("ax/"), closed.join(", "));

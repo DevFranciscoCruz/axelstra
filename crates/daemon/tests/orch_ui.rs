@@ -79,6 +79,15 @@ fn ui_flow_cards_to_merged_branch() {
     let board = c.call("kanban.list", json!({"project": pid})).unwrap();
     let idea = board["cards"].as_array().unwrap().iter().find(|x| x["meta"]["id"] == "idea-only").unwrap();
     assert_eq!(idea["meta"]["status"], "backlog");
+    // every card merged: the run integrated its branch into main by itself and took its worktree and branch away
     let wt = done["integ_wt"].as_str().unwrap();
-    assert!(Path::new(wt).join("alpha.txt").exists());
+    assert!(repo.join("alpha.txt").exists() && repo.join("beta.txt").exists(), "the work landed in main");
+    assert!(!Path::new(wt).exists(), "the integration worktree is gone");
+    let branch = done["integ_branch"].as_str().unwrap();
+    let o = std::process::Command::new("git")
+        .current_dir(&repo)
+        .args(["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")])
+        .output()
+        .unwrap();
+    assert!(!o.status.success(), "the integration branch is gone");
 }

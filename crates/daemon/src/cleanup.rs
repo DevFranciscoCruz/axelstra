@@ -51,14 +51,18 @@ pub fn squash_merged(repo: &Path, branch: &str, upstream: &str) -> bool {
     }
 }
 
-/// Local `ax/*` branches that no worktree has checked out and whose work is in the default branch (or that never got a
+/// Local `ax/*`, `orch/*` and `orch-task/*` branches that no worktree has checked out and whose work is in the default branch (or that never got a
 /// commit of their own) are deleted. Returns what was done.
 pub fn stale_branches(p: &Project, dry: bool, out: &mut Vec<Value>) {
     let repo = Path::new(&p.path);
     let default = git::default_branch(repo);
     let Ok(wts) = git::worktree_list(repo) else { return };
     let used: Vec<String> = wts.into_iter().filter_map(|w| w.branch).collect();
-    let Ok(o) = git::run(repo, &["for-each-ref", "--format=%(refname:short)", "refs/heads/ax/"]) else { return };
+    let Ok(o) =
+        git::run(repo, &["for-each-ref", "--format=%(refname:short)", "refs/heads/ax/", "refs/heads/orch/", "refs/heads/orch-task/"])
+    else {
+        return;
+    };
     for b in o.stdout.lines().map(str::trim).filter(|b| !b.is_empty() && !used.iter().any(|u| u == b)) {
         let why = match crate::janitor::merged_reason_in(repo, b, &default, &[]) {
             Some(w) => w,
