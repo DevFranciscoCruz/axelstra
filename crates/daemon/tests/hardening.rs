@@ -106,6 +106,8 @@ fn agent_role_cannot_use_app_only_calls() {
         ("workspace.import", json!({"path": "x", "mode": "replace"})),
         // opening a browser is the user's act
         ("files.resolve_html", json!({"session": 1, "path": "a.html"})),
+        ("files.resolve_path", json!({"session": 1, "path": "a.exe"})),
+        ("files.path_action", json!({"session": 1, "path": "a.exe", "action": "run"})),
     ] {
         let e = agent.call(m, p).unwrap_err().to_string();
         assert!(e.contains("not allowed to agents"), "{m}: {e}");

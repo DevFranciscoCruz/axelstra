@@ -46,3 +46,21 @@ export const safeLinkUrl = (raw: string): string | null => {
     return null;
   }
 };
+
+/** the http(s) URLs of a (logical) line as `{start, end}` offsets, end exclusive; trailing punctuation and an unbalanced `)` are left out */
+export const findWebUrls = (line: string): { start: number; end: number }[] => {
+  const out: { start: number; end: number }[] = [];
+  for (const m of line.matchAll(/https?:\/\/[^\s"'`<>]+/gi)) {
+    let u = m[0];
+    for (;;) {
+      const t = u.replace(/[.,;:!?'"\]}]+$/, "");
+      const open = (t.match(/\(/g) ?? []).length;
+      const close = (t.match(/\)/g) ?? []).length;
+      const next = t.endsWith(")") && close > open ? t.slice(0, -1) : t;
+      if (next === u) break;
+      u = next;
+    }
+    if (/^https?:\/\/.+/i.test(u)) out.push({ start: m.index ?? 0, end: (m.index ?? 0) + u.length });
+  }
+  return out;
+};

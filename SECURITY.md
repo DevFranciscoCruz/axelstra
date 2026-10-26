@@ -55,3 +55,15 @@ The production policy lives in `app/src-tauri/tauri.conf.json` (`app.security.cs
 - **Workflows.** Third-party actions are pinned by full commit SHA (with the version in a comment), `actionlint` is
   clean, and `cargo deny check advisories licenses bans sources` runs in CI.
 
+
+## Paths clicked in a terminal
+
+Terminal output is untrusted text (an agent or a program prints it). Ctrl+click on a path never runs, opens or reveals
+anything by itself: code and text inside the worktree open in the editor, `.html` in the browser, everything else
+(programs, scripts, folders, binaries, paths outside the project) shows a dialog with the canonical path and its type.
+Focus starts on Cancel (Enter and Esc cancel) and the buttons only react to a real user click (`isTrusted`). The action
+is `files.path_action`: the daemon resolves the path again (exists, canonical, symlinks followed), only runs a regular
+program or script whose real path is inside the session's cwd, worktree or project, never passes through a shell
+(`ShellExecuteW` with the path as one argument, `open`/`xdg-open`, or the file itself on Unix), is closed to agents
+(`agent_forbidden`) and writes every run to the audit log. A path outside the project can only be shown in its folder;
+a remote (WSL/SSH) worktree only offers to copy the path. Anyone who clicks Run runs that program with their own permissions.

@@ -80,3 +80,15 @@ root (so `..` and symlinks cannot leave, and `/a/proj-evil` is not inside `/a/pr
 the user clicked it explicitly and only html/htm pass, never an executable or script. Agents may not call it
 (`agent_forbidden`). In tests and E2E set `AXELSTRA_TEST_OPENER_LOG=<file>`: the host appends each URL to that file
 instead of starting a browser.
+
+## Revealing, opening and running a clicked path
+
+Ctrl+click on a path that is not code or html (`app/src/terminal/pathOpen.ts`) asks the daemon (`files.resolve_path`) what it is and
+shows a dialog; the buttons call `files.path_action {session, path, action: reveal|open|run}`. Rules (`crates/daemon/src/pathopen.rs`):
+the path must exist and is canonical (symlinks followed); `run` needs a regular program or script (extension list or exec bit) and
+`open` a regular non-program file, both only when the real path is inside the session's cwd, worktree or project; `reveal`
+works anywhere, also for folders. The daemon re-resolves on every call and refuses what the description did not allow, nothing goes
+through a shell (`ShellExecuteW` with the path as one argument; `open`/`xdg-open`, or the file itself with its exec bit, on Unix), both
+methods are in `agent_forbidden`, and a run is written to `audit.log` (`files.run_path`). A remote (WSL/SSH) worktree's dialog only
+offers to copy the path. With `AXELSTRA_TEST_OPENER_LOG=<file>` the daemon appends `<action>\t<path>` to that file instead of doing
+anything (`crates/daemon/tests/path_open.rs`); tests must set it, never reveal or run anything real.
