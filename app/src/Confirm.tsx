@@ -1,4 +1,4 @@
-import { Show, createSignal, untrack } from "solid-js";
+import { For, Show, createSignal, untrack } from "solid-js";
 import { Modal } from "./Modal";
 import { P } from "./strings.panels";
 import { Button, Input, cn } from "./ui";
@@ -6,7 +6,7 @@ import { Button, Input, cn } from "./ui";
 type Opts = { title?: string; kind?: "danger" | "warning" | "info" | "error"; okLabel?: string; cancelLabel?: string;
   /** the OK button stays off until this exact text is typed (removing work that is not saved anywhere else) */
   typeToConfirm?: string };
-type Pending = { message: string; opts: Opts; resolve: (ok: boolean) => void; /** a third button: its label, and what answering it resolves */ third?: { label: string; resolve: () => void } };
+type Pending = { message: string; opts: Opts; resolve: (ok: boolean) => void; /** a third button: its label, and what answering it resolves */ third?: { label: string; resolve: () => void }; /** replaces the OK button: one button per choice, answered only by a real click (never a synthetic event) */ choices?: { label: string; resolve: () => void }[] };
 
 const [pending, setPending] = createSignal<Pending | null>(null);
 const [typed, setTyped] = createSignal("");
@@ -29,6 +29,22 @@ export const askSave = (message: string, title: string) =>
     setPending({ message, opts: { title, kind: "warning", okLabel: P.confirm.save, cancelLabel: P.confirm.cancel }, resolve: (ok) => resolve(ok ? "save" : "cancel"), third: { label: P.confirm.dontSave, resolve: () => resolve("discard") } });
   });
 
+/** a dialog with Cancel (focused, also Esc and the backdrop) and one button per choice; null when cancelled. Used for actions that touch the system (run, open): a script cannot press the choices, see `trustedClick`. */
+export const askChoice = (message: string, opts: { title: string; kind?: Opts["kind"]; cancelLabel: string; choices: { id: string; label: string }[] }) =>
+  new Promise<string | null>((resolve) => {
+    untrack(pending)?.resolve(false);
+    setTyped("");
+    setPending({
+      message,
+      opts: { title: opts.title, kind: opts.kind ?? "warning", cancelLabel: opts.cancelLabel },
+      resolve: () => resolve(null),
+      choices: opts.choices.map((c) => ({ label: c.label, resolve: () => resolve(c.id) })),
+    });
+  });
+
+/** only a click the user made counts: `isTrusted` is false for events a page script dispatches */
+export const trustedClick = (e: { isTrusted: boolean }) => e.isTrusted;
+
 /** discarding unsaved text (a draft, an edited form) */
 export const askDiscard = (what: string) => ask(P.confirm.discardAsk(what), { title: P.confirm.discardTitle, kind: "warning", okLabel: P.confirm.discard, cancelLabel: P.confirm.keepEditing });
 
@@ -37,6 +53,12 @@ export const focusesCancel = (kind: Opts["kind"]) => kind === "danger" || kind =
 
 /** only irreversible actions get the red confirm button */
 export const isDanger = (kind: Opts["kind"]) => kind === "danger" || kind === "error";
+
+const answerChoice = (i: number) => {
+  const p = pending();
+  setPending(null);
+  p?.choices?.[i]?.resolve();
+};
 
 const answerThird = () => {
   const p = pending();
@@ -75,10 +97,13 @@ export function ConfirmHost() {
           </Show>
           <div class="m-actions justify-end">
             <Button ref={(el: HTMLButtonElement) => focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} onClick={() => answer(false)}>{p.opts.cancelLabel ?? P.confirm.cancel}</Button>
+            <For each={p.choices}>{(c, i) => <Button class="primary" onClick={(e) => trustedClick(e) && answerChoice(i())}>{c.label}</Button>}</For>
             <Show when={p.third}>{(t) => <Button variant="destructive" onClick={answerThird}>{t().label}</Button>}</Show>
+            <Show when={!p.choices}>
             <Button variant={isDanger(p.opts.kind) && !p.third ? "destructive" : "default"} class={cn("primary", isDanger(p.opts.kind) && !p.third && "kind-warn")} ref={(el: HTMLButtonElement) => !focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())} disabled={!!p.opts.typeToConfirm && !typedMatches(p.opts.typeToConfirm, typed())} onClick={() => answer(true)}>
               {p.opts.okLabel ?? P.confirm.yes}
             </Button>
+            </Show>
           </div>
         </Modal>
       )}

@@ -16,7 +16,7 @@ pub struct Resolved {
 }
 
 /// Drops trailing punctuation a terminal line puts after a path, and a `:line[:col]` suffix, in any order.
-fn clean(raw: &str) -> &str {
+pub(crate) fn clean(raw: &str) -> &str {
     let mut s = raw.trim().trim_matches(['"', '\'', '`', '<', '>']);
     loop {
         let before = s;
@@ -39,7 +39,7 @@ fn is_html(p: &Path) -> bool {
 }
 
 /// `\\?\C:\x` -> `C:\x`, `\\?\UNC\srv\share` -> `\\srv\share`.
-fn strip_verbatim(p: &str) -> String {
+pub(crate) fn strip_verbatim(p: &str) -> String {
     if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
         format!(r"\\{rest}")
     } else {

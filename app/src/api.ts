@@ -590,6 +590,14 @@ export const fsDelete = (worktree: string, path: string) => call("fs.delete", { 
 export const fsRead = (worktree: string, path: string) => call<Opened>("fs.read", { worktree, path });
 export const fsStat = (worktree: string, path: string) =>
   call<{ hash: string | null }>("fs.stat", { worktree, path }).then((r) => r.hash);
+
+/** What the daemon says about a path clicked in a terminal (`files.resolve_path`): canonical path and what may be done with it. */
+export type PathInfo = { path: string; is_dir: boolean; exec: boolean; inside: boolean; can_open: boolean; can_run: boolean };
+export type PathAction = "reveal" | "open" | "run";
+/** Describes a path printed in a session's terminal (relative ones start at the session's folder). Throws `files.path_not_found` when it does not exist. */
+export const resolvePath = (session: number, path: string) => call<PathInfo>("files.resolve_path", { session, path });
+/** Reveals, opens or runs it. The daemon resolves the path again and refuses what `PathInfo` does not allow; a run is audited. */
+export const pathAction = (session: number, path: string, action: PathAction) => call<{ path: string }>("files.path_action", { session, path, action });
 export const fsWrite = (worktree: string, path: string, text: string, eol: string, bom: boolean, base_hash?: string) =>
   call<Saved>("fs.write", { worktree, path, text, eol, bom, base_hash });
 

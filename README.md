@@ -52,7 +52,7 @@ The interface comes in Portuguese (pt-PT), Brazilian Portuguese and English, pic
 
 **Terminal and app**
 
-- **Terminals:** split view, command palette (`Ctrl+K`), dev-server ports as chips that open in the browser. URLs and file paths in the output are clickable (a path opens in the editor).
+- **Terminals:** split view, command palette (`Ctrl+K`), dev-server ports as chips that open in the browser. URLs and file paths in the output are clickable (Ctrl+click: code opens in the editor, `.html` in the browser; any other file, program or folder asks first and can be shown in its folder, opened or, for programs inside the project, run).
 - **Context menu:** right-click menus on sidebar rows, files, changes and Docker items.
 - **Voice:** `Ctrl+Shift+M` dictates a prompt into the active terminal. Speech is recognized locally (Whisper, downloaded once, about 160 MB).
 - **Search and usage:** `Ctrl+Shift+F` searches past Claude, Codex and Gemini conversations and resumes one. Tokens (input, output, cache) per worktree are read from the agent logs; no cost is estimated.
@@ -179,7 +179,7 @@ Run `axelstra --help` for the rest. The command palette entry *Orquestração* s
 - **Roles in the daemon.** The daemon decides who is calling from the process on the other end of the connection, not from the token it presents. Agents run with a per-session token (`AXELSTRA_AGENT_TOKEN`) and the `agent` role: they can use the orchestration commands but cannot register projects, change hosts, enable screen control, export or restore backups, or start arbitrary programs. Messages between sessions carry the authenticated sender.
 - **`SECURITY_MIN`.** The app restarts a daemon older than the minimum it accepts for security reasons, whatever its protocol version.
 - **Untrusted code.** A worktree made from a pull request gets no `.worktreeinclude` files and no trust flag for agents (`--skip-trust` only goes to `ax/*` worktrees that are not PR code). Kanban cards that ask for a `bypass*` permission mode or carry acceptance commands need an explicit confirmation of the exact content; `docker compose` files are checked before they run.
-- **The app.** Strict CSP with no `unsafe-inline` for scripts or styles (so no static `style="..."` in the frontend), minimal Tauri capabilities, a method allow-list between the webview and the daemon, terminal links limited to `http(s)`. `scripts/check-tauri-config.mjs` guards this in CI.
+- **The app.** Strict CSP with no `unsafe-inline` for scripts or styles (so no static `style="..."` in the frontend), minimal Tauri capabilities, a method allow-list between the webview and the daemon, terminal links limited to `http(s)`; a path clicked in a terminal never runs anything by itself: a confirmation dialog (real click only, focus on Cancel) precedes `files.path_action`, which the daemon re-resolves, confines to the session's project, refuses to agents and audits when it runs a program. `scripts/check-tauri-config.mjs` guards this in CI.
 - **Your data.** State lives in the per-user data dir with atomic writes, rotating copies and a schema version; the token file is private to the user.
 
 [`SECURITY.md`](SECURITY.md) has the policy and how to report a vulnerability; [`docs/s3-app-secret.md`](docs/s3-app-secret.md) explains what is still open in the role model.

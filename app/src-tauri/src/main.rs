@@ -199,6 +199,8 @@ const ALLOWED_METHODS: &[&str] = &[
     "notices.take",
     "dispatch.meta",
     "flow.list",
+    "files.path_action",
+    "files.resolve_path",
     "fs.create",
     "fs.delete",
     "fs.grep",

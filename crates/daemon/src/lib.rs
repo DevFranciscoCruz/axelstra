@@ -23,6 +23,7 @@ pub mod msgbus;
 pub mod notes;
 pub mod overlaps;
 pub mod overview;
+pub mod pathopen;
 #[cfg(windows)]
 pub mod pipesec;
 pub mod ports;

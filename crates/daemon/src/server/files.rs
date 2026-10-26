@@ -101,6 +101,48 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let r = tokio::task::block_in_place(|| crate::htmlpath::resolve(&raw, cwd.as_deref(), &roots))?;
             Ok(json!({"path": r.path, "url": r.url}))
         }
+        // Ctrl+click on any other path: describe it, then act after the user confirmed in the app (rules: `pathopen`).
+        // Every call resolves again, so the dialog's answer is never trusted; running is written to the audit log.
+        "files.resolve_path" | "files.path_action" => {
+            let id = p["session"].as_u64().and_then(|x| u32::try_from(x).ok()).ok_or_else(|| missing("session"))?;
+            reg.get(id).ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = id))?;
+            let meta = reg.metas.lock_recover().get(&id).cloned().unwrap_or(Value::Null);
+            let cwd = reg.specs.lock_recover().get(&id).and_then(|s| s["cwd"].as_str().map(std::path::PathBuf::from));
+            let mut roots: Vec<std::path::PathBuf> = cwd.iter().cloned().collect();
+            roots.extend(meta["worktree"].as_str().filter(|w| !w.is_empty()).map(std::path::PathBuf::from));
+            if let Some(proj) = meta["project"].as_str().and_then(|id| crate::projects::find(&reg.store, id).ok()) {
+                roots.push(proj.path.into());
+            }
+            let raw = p["path"].as_str().unwrap_or_default().to_string();
+            let info = tokio::task::block_in_place(|| crate::pathopen::resolve(&raw, cwd.as_deref(), &roots))?;
+            if req.method == "files.resolve_path" {
+                return Ok(json!({
+                    "path": info.path, "is_dir": info.is_dir, "exec": info.exec, "inside": info.inside,
+                    "can_open": info.can_open, "can_run": info.can_run,
+                }));
+            }
+            let act = p["action"].as_str().unwrap_or_default();
+            let action = crate::pathopen::Action::parse(act).ok_or_else(|| missing("action"))?;
+            let res = if crate::pathopen::allowed(&info, action) {
+                tokio::task::block_in_place(|| crate::pathopen::perform(&info, action))
+            } else {
+                Err(axelstra_core::coded!(
+                    "files.path_not_allowed",
+                    "not allowed to {action} {path}",
+                    action = action.name(),
+                    path = &info.path
+                ))
+            };
+            if action == crate::pathopen::Action::Run {
+                reg.audit.record_system(
+                    "files.run_path",
+                    &json!({"session": id, "path": info.path}),
+                    &res.as_ref().map(|_| ()).map_err(|e| format!("{e:#}")),
+                );
+            }
+            res?;
+            Ok(json!({"path": info.path}))
+        }
         m => anyhow::bail!("unknown method {m}"),
     }
 }

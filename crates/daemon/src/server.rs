@@ -707,7 +707,10 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         | "workspace.import_preview"
         | "workspace.import"
         // opening a browser is the user's act: the app host calls it, never an agent
-        | "files.resolve_html" => true,
+        | "files.resolve_html"
+        // describing, revealing, opening or RUNNING a path: the user confirmed it in the app, an agent must never
+        | "files.resolve_path"
+        | "files.path_action" => true,
         _ => false,
     }
 }
