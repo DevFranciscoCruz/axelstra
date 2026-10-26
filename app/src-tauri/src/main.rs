@@ -40,6 +40,11 @@ mod hosts;
 mod logging;
 mod native;
 mod stats;
+#[cfg(not(target_os = "linux"))]
+mod voice;
+// Linux has no sherpa-onnx static libs upstream: same commands, they only say dictation is unavailable.
+#[cfg(target_os = "linux")]
+#[path = "voice_linux.rs"]
 mod voice;
 
 /// A coded error of this host (`app.*`, see `axelstra_core::msg`): English text for logs, code and params for the UI.

@@ -21,12 +21,16 @@ arboard = "3"
 png = "0.17"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
-sherpa-rs = { version = "0.6.8", default-features = false, features = ["download-binaries", "static"] }
 ureq = "2"
 sha2 = "0.10"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 tracing-appender = "0.2"
+
+# Not on Linux: the upstream sherpa-onnx linux-x64-static archive ships no lib/ (only bin/ and include/), so sherpa-rs-sys
+# links nothing and the release link fails with undefined SherpaOnnx* symbols. Dictation is off there (voice_linux.rs).
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+sherpa-rs = { version = "0.6.8", default-features = false, features = ["download-binaries", "static"] }
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.8"

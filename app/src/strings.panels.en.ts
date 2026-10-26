@@ -753,6 +753,7 @@ The branch has to be pushed to the remote.`,
     needModel: "Local dictation needs a model (~160 MB, downloaded once).",
     download: "Download",
     close: "Close (Esc)",
+    unavailableLinux: "Voice dictation is not available on Linux yet.",
   },
   editor: {
     saved: "Saved",

@@ -15,7 +15,9 @@ import { fmtFixed } from "./i18n";
 // (sherpa-onnx, model downloaded on first use). Hands-free: recording stops by itself after a pause in
 // the speech and the text goes straight to the terminal that was active when recording began. With
 // auto-send off (or no terminal), the text lands in an editable draft and waits for confirmation.
-export const voiceSupported = !!navigator.mediaDevices?.getUserMedia;
+// Linux builds have no speech engine (the host's voice_* commands only refuse): no button there, a notice on the shortcut.
+const voiceOnLinux = /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
+export const voiceSupported = !!navigator.mediaDevices?.getUserMedia && !voiceOnLinux;
 const [voiceState, setVoiceState] = createSignal<"idle" | "recording" | "transcribing">("idle");
 export const listening = () => voiceState() === "recording";
 export const [draft, setDraft] = createSignal<string | null>(null);
@@ -111,6 +113,10 @@ async function downloadModel() {
 export async function toggleVoice() {
   if (voiceState() === "recording") return void stopVoice();
   if (voiceState() === "transcribing") return;
+  if (voiceOnLinux) {
+    setVoiceError(P.voice.unavailableLinux);
+    return;
+  }
   setVoiceError("");
   if (draft() === null) setDraft("");
   if (!(await invoke<boolean>("voice_status"))) {
