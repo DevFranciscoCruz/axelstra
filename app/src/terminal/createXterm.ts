@@ -2,18 +2,19 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { SearchAddon } from "@xterm/addon-search";
-import { WebLinksAddon } from "@xterm/addon-web-links";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { fsStat, openHtmlFile } from "../api";
 import { errorText } from "../appError";
 import { K, isMac } from "../keyboard";
-import { findPathLinks, resolvePathLink, safeLinkUrl, type PathLink } from "../pathlinks";
+import { findPathLinks, findWebUrls, resolvePathLink, safeLinkUrl, type PathLink } from "../pathlinks";
 import { ask } from "../Confirm";
 import { S } from "../strings";
 import { P } from "../strings.panels";
 import { THEMES, cursorBlinks, termPrefs } from "../termprefs";
 import { openFileAt, selectedWorktree, showNotice } from "../store";
 import { findHtmlLinks } from "./htmlLinks";
+import { logicalLinks } from "./logicalLine";
+import { openPath } from "./pathOpen";
 
 /** a terminal that starts out of sight keeps less history until it is shown; the visible one keeps the full amount */
 export const SCROLLBACK = 5000;
@@ -84,7 +85,6 @@ export function createXterm(host: HTMLElement, visible: boolean, session?: numbe
   term.unicode.activeVersion = "11";
   const search = new SearchAddon();
   term.loadAddon(search);
-  term.loadAddon(new WebLinksAddon((_e, url) => void openTermUrl(url, false)));
   // .html/.htm paths open in the browser, only while the modifier is held (so plain clicks and selections are left alone).
   // xterm asks for links when the pointer moves, so a modifier change replays the last pointer position.
   let held = false;
@@ -108,15 +108,29 @@ export function createXterm(host: HTMLElement, visible: boolean, session?: numbe
   host.addEventListener("mouseleave", () => (lastMove = undefined));
   host.addEventListener("keydown", (e) => setHeld(linkModifier(e)));
   host.addEventListener("keyup", (e) => setHeld(linkModifier(e)));
+  // Every provider reads the LOGICAL line (rows joined by soft wrap, see logicalLine.ts) and returns ranges that may
+  // span rows, so a path or URL split by the wrap is one link, underlined and clickable on both rows.
+  // Known limit: with the modifier pressed and the mouse perfectly still, xterm may not re-ask for links until the
+  // pointer moves; the replay above covers the usual case, a stricter fix would need xterm internals.
+  // URLs (http/https only; openTermUrl re-checks)
+  term.registerLinkProvider({
+    provideLinks(y, cb) {
+      const out = logicalLinks(term.buffer.active, y, findWebUrls).map((l) => ({
+        text: l.text,
+        range: l.range,
+        activate: () => void openTermUrl(l.text, false),
+      }));
+      cb(out.length ? out : undefined);
+    },
+  });
   // registered before the path provider: with the modifier held an .html path is the browser's, not the editor's
   term.registerLinkProvider({
     provideLinks(y, cb) {
       if (session === undefined || !held) return cb(undefined);
-      const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
-      const out = findHtmlLinks(line).map((l) => ({
-        text: line.slice(l.start, l.end),
-        range: { start: { x: l.start + 1, y }, end: { x: l.end, y } },
-        activate: (e: MouseEvent) => linkModifier(e) && void openHtmlPath(session, l.path),
+      const out = logicalLinks(term.buffer.active, y, findHtmlLinks).map((l) => ({
+        text: l.text,
+        range: l.range,
+        activate: (e: MouseEvent) => linkModifier(e) && void openHtmlPath(session, l.match.path),
         hover: () => void (host.title = K(P.terminal.htmlTip)),
         leave: () => void (host.title = ""),
       }));
@@ -125,14 +139,15 @@ export function createXterm(host: HTMLElement, visible: boolean, session?: numbe
   });
   term.registerLinkProvider({
     provideLinks(y, cb) {
-      const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
-      const out = findPathLinks(line)
-        .filter((l) => !(held && session !== undefined && /\.html?$/i.test(l.path)))
-        .map((l) => ({
-          text: l.text,
-          range: { start: { x: l.start + 1, y }, end: { x: l.start + l.text.length, y } },
-          activate: () => void openPathLink(l),
-        }));
+      const find = (text: string) =>
+        findPathLinks(text)
+          .filter((l) => !(held && session !== undefined && /\.html?$/i.test(l.path)))
+          .map((l) => ({ ...l, end: l.start + l.text.length }));
+      const out = logicalLinks(term.buffer.active, y, find).map((l) => ({
+        text: l.text,
+        range: l.range,
+        activate: (e: MouseEvent) => e.isTrusted && linkModifier(e) && void openPath(l.match, session),
+      }));
       cb(out.length ? out : undefined);
     },
   });
