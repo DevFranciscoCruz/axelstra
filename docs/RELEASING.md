@@ -31,9 +31,19 @@ Move the existing repository secrets into the `release` Environment, then delete
 level. Until the Environment exists GitHub creates it empty on first use, and the release fails at the
 signing steps for lack of secrets.
 
-### macOS signing is mandatory
+### macOS is off until Apple signing exists
 
-A real release **fails** on the macOS jobs when any of `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+There is no Apple Developer account yet, so releases ship **Windows only** (plus the experimental Linux
+files). The macOS legs of the `release` matrix are not even created unless the repository variable
+`RELEASE_MACOS` is `true` (Settings, Secrets and variables, Actions, Variables), and `latest.json` lists only
+the platforms that were built. To enable macOS: set `RELEASE_MACOS=true` and add the six `APPLE_*` secrets to
+the `release` Environment. From then on the rule below applies, and a failure of the Apple silicon leg blocks
+the publish (the Intel leg is experimental and does not).
+
+Linux is experimental and never blocks a release: `publish` waits for it to finish and goes ahead whether it
+succeeded or failed.
+
+With macOS enabled, signing is mandatory. A real release **fails** on the macOS jobs when any of `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
 `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` is missing. There is no silent unsigned
 Mac. A dry run only warns and builds unsigned, so the pipeline can be tested before the Apple account exists.
 The setup of the Apple secrets is in the README ("Signing and notarizing the macOS app").

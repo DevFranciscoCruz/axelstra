@@ -5,12 +5,16 @@ Platforms, signing status, and what users see. Release mechanics are in [RELEASI
 | Platform | Artifact | Updater key in `latest.json` | Status |
 | --- | --- | --- | --- |
 | Windows x64 | NSIS `-setup.exe` | `windows-x86_64` | supported; Authenticode optional |
-| macOS Apple silicon | `.dmg`, `.app.tar.gz` | `darwin-aarch64` | supported; Developer ID + notarized (mandatory) |
-| macOS Intel | `.dmg`, `.app.tar.gz` | `darwin-x86_64` | experimental, see below |
+| macOS Apple silicon | `.dmg`, `.app.tar.gz` | `darwin-aarch64` | **not available** until Apple signing exists; Developer ID + notarized (mandatory) once enabled |
+| macOS Intel | `.dmg`, `.app.tar.gz` | `darwin-x86_64` | **not available**; experimental once enabled, see below |
 | Windows arm64 | none | none | not built, see below |
 | Linux | `.deb`, AppImage | none | experimental, no auto-update |
 
 ## macOS: Apple silicon and Intel
+
+**Not released for now.** There is no Apple Developer account, so the macOS legs are skipped: they only run
+when the repository variable `RELEASE_MACOS` is `true` and the `APPLE_*` secrets are set (see
+[RELEASING.md](RELEASING.md)). Everything below describes the setup once that is enabled.
 
 The release matrix builds each Mac architecture on a native runner (`macos-latest` is arm64,
 `macos-15-intel` is x86_64), so there is no cross-compile and no universal binary. The Intel entry is marked

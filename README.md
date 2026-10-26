@@ -139,7 +139,7 @@ A permission prompt or question turns the dot red; `idle_prompt` is only idle. T
 | --- | --- |
 | Windows x64 | Main platform. Everything is developed and tested here, including the real-app E2E. CI runs the engine tests on Windows, macOS and Linux. |
 | Linux | Experimental. CI lints and tests the engine (core, daemon, CLI) on Ubuntu and runs the CLI smoke there. The desktop host is only compile-checked. Nobody has run the app on a Linux desktop. |
-| macOS | The release builds an Apple silicon `.dmg` (and an experimental Intel one). CI runs the engine tests and lints there. **The app's runtime is not verified**: no one has run the desktop app on macOS. |
+| macOS | **No release builds yet**: there is no Apple Developer account, so the macOS release jobs are off (set the repository variable `RELEASE_MACOS=true` and the `APPLE_*` secrets to enable them, see `docs/RELEASING.md`). Once on, the release builds an Apple silicon `.dmg` (and an experimental Intel one). CI runs the engine tests and lints there. **The app's runtime is not verified**: no one has run the desktop app on macOS. |
 
 ## Install
 
@@ -148,15 +148,15 @@ Download the latest installer from the [Releases page](https://github.com/DevFra
 | Platform | File |
 | --- | --- |
 | Windows (x64) | `Axelstra_<version>_x64-setup.exe` |
-| macOS (Apple silicon) | `Axelstra_<version>_aarch64.dmg` |
-| macOS (Intel, experimental) | a `.dmg`, only if that job succeeded for the release |
+| macOS (Apple silicon) | not available until Apple signing exists (`Axelstra_<version>_aarch64.dmg` once enabled) |
+| macOS (Intel, experimental) | not available; a `.dmg` only once macOS releases are enabled and that job succeeded |
 | Linux (experimental) | `.deb` and AppImage |
 
 Requirements: `git`, plus the agent CLI you use (`claude`, `codex` or `gemini`) on your `PATH`; `gh` for pull requests, `docker` for the Docker tab. The welcome screen shows which it found.
 
 **Windows updates.** Axelstra checks GitHub Releases at launch, every 6 hours and when the window regains focus. A newer version is downloaded and verified in the background; a card offers *Reiniciar agora* or *Mais tarde*, and a downloaded update is also installed when you close the app. Terminals and agents are not interrupted: they belong to the daemon, which the installer moves aside instead of stopping. The daemon only picks up new code when it next starts (reboot, or when the app finds it too old, in which case its terminals are restored). The first install is manual.
 
-**macOS.** The `.dmg` is the first install; after that the app updates itself. Releases are signed with a Developer ID and notarized (a real release fails without the Apple secrets). A build made without them is unsigned: open it with right-click, Open, or `xattr -dr com.apple.quarantine /Applications/Axelstra.app`. The first dictation asks for microphone access.
+**macOS.** Not released for now (see the table above); the rest of this paragraph applies once releases are enabled. The `.dmg` is the first install; after that the app updates itself. Releases are signed with a Developer ID and notarized (a real release fails without the Apple secrets). A build made without them is unsigned: open it with right-click, Open, or `xattr -dr com.apple.quarantine /Applications/Axelstra.app`. The first dictation asks for microphone access.
 
 **Windows signature.** The installer is signed for the updater but not yet with an Authenticode certificate, so SmartScreen may warn on first run. See [Known limitations](#known-limitations).
 

@@ -1,9 +1,11 @@
 name: release
 # Push a tag `vX.Y.Z` to build the installers and attach them to the GitHub Release. The Windows
 # installer and the macOS .app.tar.gz are signed for the in-app updater; a last job merges the platform
-# entries into latest.json, which the app reads from releases/latest/download. The macOS app is signed
-# with a Developer ID and notarized; a real release FAILS if the Apple secrets are missing (a dry run
-# only warns and builds unsigned). See docs/RELEASING.md for key custody, rotation and the setup.
+# entries into latest.json, which the app reads from releases/latest/download. macOS is OFF by default
+# (no Apple Developer account): the Mac legs only exist when the repository variable RELEASE_MACOS is
+# 'true'. Then the app is signed with a Developer ID and notarized, and a real release FAILS if the Apple
+# secrets are missing (a dry run only warns and builds unsigned). latest.json lists only the platforms that
+# were built. See docs/RELEASING.md for key custody, rotation and the setup.
 #
 # Signing secrets live in the protected GitHub Environment `release` (required reviewers, deployment
 # branches/tags limited to `v*`), not in repository secrets: TAURI_SIGNING_PRIVATE_KEY and
@@ -109,12 +111,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: windows-latest, key: windows-x86_64, experimental: false }
-          - { os: macos-latest, key: darwin-aarch64, experimental: false }
-          # Intel mac, built natively. Experimental until a release proves it: a failure here does not block the
-          # release, latest.json just has no darwin-x86_64 entry (Intel installs get no update until it ships).
-          - { os: macos-15-intel, key: darwin-x86_64, experimental: true }
+        # macOS is built only when the repository variable RELEASE_MACOS is 'true' (Apple signing set up, see
+        # docs/RELEASING.md); otherwise the matrix is Windows alone and the Mac legs do not exist. Once enabled,
+        # darwin-aarch64 is required (its failure fails `release`, so nothing publishes); the Intel mac, built
+        # natively, is experimental: a failure there does not block the release, latest.json just has no
+        # darwin-x86_64 entry (Intel installs get no update until it ships).
+        include: ${{ fromJSON(vars.RELEASE_MACOS == 'true' && '[{"os":"windows-latest","key":"windows-x86_64","experimental":false},{"os":"macos-latest","key":"darwin-aarch64","experimental":false},{"os":"macos-15-intel","key":"darwin-x86_64","experimental":true}]' || '[{"os":"windows-latest","key":"windows-x86_64","experimental":false}]') }}
     # Swap for the self-hosted runner label if the repo gets access to one.
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental }}
@@ -416,6 +418,9 @@ jobs:
   manifest:
     name: latest.json
     needs: release
+    # only the platforms that were built have a platform-*.json: a Mac leg that did not run (variable unset) or
+    # an experimental one that failed simply leaves no fragment, and the merge globs what is there
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -463,7 +468,8 @@ jobs:
   publish:
     name: publish release
     needs: [manifest, linux]
-    if: github.event_name == 'push'
+    # waits for linux to finish but tolerates its failure (experimental); manifest must have succeeded
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.manifest.result == 'success' && contains(fromJSON('["success","failure","skipped"]'), needs.linux.result) }}
     runs-on: ubuntu-latest
     # last gate before clients see the release: put a required reviewer on this Environment
     environment: release-publish
