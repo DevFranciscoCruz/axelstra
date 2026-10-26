@@ -25,6 +25,15 @@ bare `serve`, in a test. Unit tests in `src` that need the data dir set `AXELSTR
 `isolate()` in `crates/cli/src/lock.rs`). Scripts (`tools/smoke.mjs`, `tools/e2e.mjs`) pass `AXELSTRA_DATA_DIR` plus a
 temp `LOCALAPPDATA`.
 
+### Lock files (`locks/`)
+
+`axelstra lock NAME` keeps one file per slot, `locks/NAME-<slot>.lock` (slot 0..`--slots`-1), as an OS file lock. There is no
+per-process file, ticket or queue file: the OS releases the lock when the owner dies, and a named file is shared by every
+caller, so it is never deleted (deleting a file another process holds would break mutual exclusion). The `s<pid>-<n>.lock`
+and `t<pid>-<n>.lock` files seen in the real data dir were made by the unit tests in `lock.rs` (lock names `s<pid>`/`t<pid>`)
+before they were isolated (commit a3009b5, 2026-10-24). Since then the tests use a temp `AXELSTRA_DATA_DIR` and remove their
+own files (`Cleanup` in `lock.rs`). The old ones can be deleted by hand (`locks/[st]<digits>-<digits>.lock`).
+
 ## Audit (every test or script that can reach the data dir or the pipe)
 
 | Where | What it reaches | Isolation |

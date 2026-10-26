@@ -127,10 +127,23 @@ mod tests {
         });
     }
 
+    /// Removes the lock files a test made (names are per-process, `<name>-<slot>.lock`) so the temp dir stays empty.
+    struct Cleanup(String);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            if let Ok(d) = dir() {
+                for i in 0..2 {
+                    let _ = std::fs::remove_file(d.join(format!("{}-{i}.lock", self.0)));
+                }
+            }
+        }
+    }
+
     #[test]
     fn a_second_holder_waits_until_the_first_lets_go() {
         isolate();
         let name = format!("t{}", std::process::id());
+        let _clean = Cleanup(name.clone());
         let (a, _) = acquire(&name, 1, Duration::from_secs(1)).unwrap();
         assert!(acquire(&name, 1, Duration::from_millis(600)).is_err());
         drop(a);
@@ -148,6 +161,7 @@ mod tests {
     fn two_slots_allow_two_holders() {
         isolate();
         let name = format!("s{}", std::process::id());
+        let _clean = Cleanup(name.clone());
         let (a, _) = acquire(&name, 2, Duration::from_secs(1)).unwrap();
         let (b, _) = acquire(&name, 2, Duration::from_secs(1)).unwrap();
         assert!(acquire(&name, 2, Duration::from_millis(600)).is_err());
