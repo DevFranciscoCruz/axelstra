@@ -4,6 +4,7 @@ export { Button, buttonVariants } from "./button";
 export { Badge, badgeVariants } from "./badge";
 export { Input, Textarea } from "./input";
 export { Field } from "./field";
+export { CopyWord } from "./copy-word";
 export { Checkbox } from "./checkbox";
 export { CheckboxInput } from "./checkbox-input";
 export { cn } from "./cn";

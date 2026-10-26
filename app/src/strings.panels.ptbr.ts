@@ -14,6 +14,8 @@ export const ptBRP: Widen<typeof ptP> = {
     keepEditing: "Continuar editando",
     discardAsk: (what: string) => `${what} Descartar as alterações?`,
     typeToConfirm: (want: string) => `Digite "${want}" para confirmar`,
+    copy: "Copiar",
+    copied: "Copiado",
   },
   sidebar: {
     addProject: "+ Adicionar projeto",

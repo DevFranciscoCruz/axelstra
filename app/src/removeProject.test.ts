@@ -97,7 +97,7 @@ describe("remove project dialog", () => {
     radio("all").click();
     await new Promise((r) => setTimeout(r, 0));
     expect(ok().disabled).toBe(true);
-    const input = document.querySelector<HTMLInputElement>("input[placeholder='meu']")!;
+    const input = document.querySelector<HTMLInputElement>("input[autocomplete='off']")!;
     input.value = "meu";
     input.dispatchEvent(new InputEvent("input", { bubbles: true }));
     await new Promise((r) => setTimeout(r, 0));

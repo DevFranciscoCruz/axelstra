@@ -14,6 +14,8 @@ export const enP: Widen<typeof ptP> = {
     keepEditing: "Keep editing",
     discardAsk: (what: string) => `${what} Discard the changes?`,
     typeToConfirm: (want: string) => `Type "${want}" to confirm`,
+    copy: "Copy",
+    copied: "Copied",
   },
   sidebar: {
     addProject: "+ Add project",

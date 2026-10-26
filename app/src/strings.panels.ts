@@ -16,6 +16,8 @@ export const ptP = {
     keepEditing: "Continuar a editar",
     discardAsk: (what: string) => `${what} Descartar as alterações?`,
     typeToConfirm: (want: string) => `Escreve "${want}" para confirmar`,
+    copy: "Copiar",
+    copied: "Copiado",
   },
   sidebar: {
     addProject: "+ Adicionar projeto",

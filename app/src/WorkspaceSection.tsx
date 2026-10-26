@@ -10,7 +10,7 @@ import {
 import { errorText } from "./settingsLogic";
 import { setError, showNotice } from "./store";
 import { WS } from "./strings.workspace";
-import { Button, Dialog, Field, Input, RadioGroup } from "./ui";
+import { Button, CopyWord, Dialog, Field, Input, RadioGroup } from "./ui";
 import {
   KINDS,
   SKIPPED_SHOWN,
@@ -168,6 +168,7 @@ export function WorkspaceSection() {
               <div class="text-sm text-destructive" role="alert">
                 {WS.replaceWarn(pv.projects.local_only)}
               </div>
+              <CopyWord text={WS.replaceWord} />
               <Field label={WS.replaceType(WS.replaceWord)}>
                 <Input
                   value={typed()}

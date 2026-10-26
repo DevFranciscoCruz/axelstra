@@ -5,7 +5,7 @@ import { type RemoveMode, removeProjectPreview } from "./api";
 import { errorText } from "./appError";
 import { type Preview, canChoose, effectLines, needsTyped, riskLines } from "./removeProjectLogic";
 import { P } from "./strings.panels";
-import { Button, Input, RadioGroup, cn } from "./ui";
+import { Button, CopyWord, Input, RadioGroup, cn } from "./ui";
 
 type Pending = { id: string; name: string; resolve: (m: RemoveMode | null) => void };
 const [pending, setPending] = createSignal<Pending | null>(null);
@@ -70,9 +70,12 @@ function Body(props: Pending) {
         </div>
       </Show>
       <Show when={needsTyped(mode(), prev())}>
+        <div class="auto-note">{T.typeToConfirm(props.name)}</div>
+        <CopyWord text={props.name} />
         <Input
           aria-label={T.typeToConfirm(props.name)}
-          placeholder={props.name}
+          autocomplete="off"
+          spellcheck={false}
           value={typed()}
           onInput={(e) => setTyped(e.currentTarget.value)}
           onKeyDown={(e) => e.key === "Enter" && ready() && answer(mode())}
