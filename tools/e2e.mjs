@@ -207,6 +207,7 @@ ${dataDirReport()}`,
   });
   let seq = 0;
   const pending = new Map();
+  const nav = []; // navigation trail, dumped when the UI never renders
   ws.onmessage = (m) => {
     const msg = JSON.parse(m.data);
     if (msg.id && pending.has(msg.id)) {
@@ -221,6 +222,8 @@ ${dataDirReport()}`,
       problems.push(
         `uncaught: ${msg.params.exceptionDetails.exception?.description ?? msg.params.exceptionDetails.text}`,
       );
+    } else if (msg.method === "Page.frameNavigated" && !msg.params.frame.parentId) {
+      nav.push(`${Math.round(performance.now())}ms navigated ${msg.params.frame.url}`);
     } else if (msg.method === "Audits.issueAdded") {
       const i = msg.params.issue;
       if (i.code === "ContentSecurityPolicyIssue")
@@ -243,9 +246,21 @@ ${dataDirReport()}`,
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? "evaluate failed");
     return r.result.value;
   };
-  // the CSP issues that fired before Audits.enable are replayed by a reload
+  // A reload while the first navigation is still in flight (slow runner) aborts it and leaves about:blank, so wait for
+  // the app's page to be loaded first (a condition, not a sleep), then reload to replay the CSP issues that fired
+  // before Audits.enable. If the page is blank anyway, navigate back to the app's own URL.
+  const loaded = () =>
+    evaluate("location.href !== 'about:blank' && document.readyState === 'complete'").catch(() => false);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 60000 && !(await loaded())) await sleep(300);
   await send("Page.reload");
-  return { send, evaluate, close: () => ws.close() };
+  const t1 = Date.now();
+  while (Date.now() - t1 < 15000 && !(await loaded())) await sleep(300);
+  if ((await evaluate("location.href").catch(() => "about:blank")) === "about:blank") {
+    nav.push(`blank after reload, navigating to ${target.url}`);
+    await send("Page.navigate", { url: target.url });
+  }
+  return { send, evaluate, close: () => ws.close(), nav, target };
 }
 
 async function until(label, fn, ms = 30000) {
@@ -364,14 +379,36 @@ let failed = null;
 try {
   launch();
   let page = await connect();
-  await until("the UI to render", () => page.evaluate("document.getElementById('root')?.children.length > 0")).catch(
+  // The first load on a cold runner (WebView2 profile creation, debug host) can take a minute: poll the real condition.
+  // A page stuck at about:blank is sent back to the app URL every 20 s.
+  let blankSince = 0;
+  await until(
+    "the UI to render",
+    async () => {
+      const { u, n } = JSON.parse(
+        await page.evaluate(
+          "JSON.stringify({ u: location.href, n: document.getElementById('root')?.children.length ?? 0 })",
+        ),
+      );
+      if (n > 0) return true;
+      if (u !== "about:blank") blankSince = 0;
+      else if (!blankSince) blankSince = Date.now();
+      else if (Date.now() - blankSince > 20000) {
+        blankSince = Date.now();
+        page.nav.push(`still blank, navigating to ${page.target.url}`);
+        await page.send("Page.navigate", { url: page.target.url });
+      }
+      return false;
+    },
+    120000,
+  ).catch(
     async (e) => {
       const st = await page
         .evaluate(
           "JSON.stringify({url: location.href, ready: document.readyState, html: document.body?.innerHTML.slice(0, 300)})",
         )
         .catch((x) => String(x));
-      throw new Error(`${e.message}\npage: ${st}\nproblems: ${[...new Set(problems)].join(" | ")}\n${dataDirReport()}`);
+      throw new Error(`${e.message}\npage: ${st}\ntarget: ${page.target.url}\nnavigation: ${page.nav.join(" | ")}\nproblems: ${[...new Set(problems)].join(" | ")}\n${dataDirReport()}`);
     },
   );
   console.log("ok  boot: the frontend rendered");

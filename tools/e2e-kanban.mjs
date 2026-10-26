@@ -99,7 +99,15 @@ async function connect() {
     return r.result.value;
   };
   await send("Runtime.enable");
+  // a reload while the first navigation is in flight (slow runner) leaves about:blank: wait for the loaded page first,
+  // and go back to the app URL if it is blank anyway
+  const loaded = () =>
+    evaluate("location.href !== 'about:blank' && document.readyState === 'complete'").catch(() => false);
+  for (let t0 = Date.now(); Date.now() - t0 < 60000 && !(await loaded()); ) await sleep(300);
   await send("Page.reload");
+  for (let t1 = Date.now(); Date.now() - t1 < 15000 && !(await loaded()); ) await sleep(300);
+  if ((await evaluate("location.href").catch(() => "about:blank")) === "about:blank")
+    await send("Page.navigate", { url: target.url });
   return { send, evaluate, close: () => ws.close() };
 }
 

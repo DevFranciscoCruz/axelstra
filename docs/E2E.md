@@ -174,3 +174,13 @@ register the long one (`C:\Users\runneradmin\...`), so a repo path built from th
 of a registered project". `e2e.mjs` also ignores console noise that is environment, not a bug (`BENIGN_CONSOLE`: Tauri's
 "IPC custom protocol failed ... Failed to fetch" fallback to postMessage, a missing callback id after a reload, the updater
 endpoint answering 404).
+
+## Boot reliability (CI cold start)
+
+A run on the release workflow failed with `timeout waiting for the UI to render` and `page: {"url":"about:blank","html":""}`:
+the script attached to the page target and sent `Page.reload` while the first navigation was still in flight (slow cold
+WebView2 start on the runner), which aborted it and left the window blank. `connect()` now polls for a real condition
+before reloading (`location.href` not `about:blank` and `readyState` complete, up to 60 s), reloads, and if the page is
+blank anyway navigates back to the target URL. The render wait is 120 s and re-navigates a page stuck at `about:blank`
+every 20 s. On a timeout the report adds the target URL and a navigation trail (`Page.frameNavigated`, recoveries) to the
+existing environment, process and `chrome_debug.log` dump. `e2e-kanban.mjs` and `e2e-html-link.mjs` have the same guard.
