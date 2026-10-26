@@ -2,6 +2,8 @@
 
 # Axelstra
 
+<p align="center"><a href="https://github.com/DevFranciscoCruz/axelstra/actions/workflows/ci.yml"><img src="https://github.com/DevFranciscoCruz/axelstra/actions/workflows/ci.yml/badge.svg" alt="CI"></a> <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a></p>
+
 Axelstra runs several AI coding agents in parallel, each in its own git worktree. It has three parts: a desktop app (Tauri + Rust, SolidJS frontend), a background daemon that owns the terminals and sessions, and the `axelstra` command line, which talks to the same daemon so agents can start and coordinate other agents themselves. Windows is the main platform; see [Platforms](#platforms) for what is verified elsewhere.
 
 The interface comes in Portuguese (pt-PT), Brazilian Portuguese and English, picked in Settings. The CLI, the docs and the commit messages are in English.
@@ -35,6 +37,8 @@ The interface comes in Portuguese (pt-PT), Brazilian Portuguese and English, pic
 - **Automatic cleanup (janitor):** a background sweep, every 10 minutes and shortly after each `done` or merge, removes `ax/*` worktrees whose work is integrated. It is safe by default: see [Worktree cleanup](#worktree-cleanup).
 - **Sessions and safe restore:** terminals live in the daemon. After a reboot or an update they reopen where they were and Claude Code resumes its conversation (a `/clear` is followed). A task that reported `done` is marked in its spec and is never restored.
 - **Waiting for an answer:** the red dot, the bell and the OS notification are driven by an event, never by reading the screen. The sources are `axelstra ask`/`escalate` and the agent's own hook (see [Agents](#agents)).
+- **Awaiting something external:** `axelstra await --reason "CI #3703" [--for-min N]` marks the caller's own session as only waiting for CI, a deploy or another process. The app shows a state of its own (neither working, idle nor the red waiting) and the stall watchdog stays quiet. It ends when you type, new output arrives, the agent reports `done`, the process exits, `axelstra await --clear` runs or the limit passes (default and cap 2 h).
+- **Finished sessions leave the list:** a session that ends on its own disappears from the list and from the saved state at once, with no leftovers to restore. A terminal that failed (non-zero exit) keeps its tab and shows the exit code until you close it. After a restart, sessions come back once, without duplicates or empty shells.
 - **Stalled-agent watchdog:** an agent that goes quiet for a few minutes without reporting, asking or having running children gets an orange hourglass; its lead and the app are told once. `stall_minutes` in Settings sets the time, 0 turns it off.
 - **Worktree env files:** list the untracked files a new worktree needs (`.env`, local config) in a `.worktreeinclude` at the repo root; they are copied in at creation.
 
@@ -46,19 +50,19 @@ The interface comes in Portuguese (pt-PT), Brazilian Portuguese and English, pic
 - **Conflict assistant:** warns when worktrees edit the same files and rebases a worktree on `main` in one click.
 - **CI triggers:** when a pull request's CI fails, an agent can be launched in its worktree to fix it.
 - **Timeline:** per worktree, reports, tokens, CI and commits in order; exportable (ISO timestamps).
-- **Kanban and orchestrator:** a markdown board of ideas; the orchestrator dispatches one agent per card and merges the results into an integration branch.
+- **Kanban and orchestrator:** a markdown board of ideas, with cards you drag between columns; the orchestrator dispatches one agent per card and merges the results into an integration branch.
 - **Automations:** scheduled agent runs in fresh worktrees (interval, daily, weekly).
 - **Docker:** a *Docker* tab lists containers (compose groups with start, stop and restart), state, ports, CPU and memory, with info, logs, terminal and files per container, plus volumes, images and networks.
 
 **Terminal and app**
 
-- **Terminals:** split view, command palette (`Ctrl+K`), dev-server ports as chips that open in the browser. URLs and file paths in the output are clickable (Ctrl+click: code opens in the editor, `.html` in the browser; any other file, program or folder asks first and can be shown in its folder, opened or, for programs inside the project, run).
+- **Terminals:** split view, command palette (`Ctrl+K`), dev-server ports as chips that open in the browser. URLs and file paths in the output are clickable (Ctrl+click: code opens in the editor, `.html` in the browser; any other file, program or folder asks first in a confirmation dialog, with *Cancelar* focused, and can be shown in its folder, opened or, for programs inside the project, run). Paths that the terminal broke across lines are put back together.
 - **Context menu:** right-click menus on sidebar rows, files, changes and Docker items.
 - **Voice:** `Ctrl+Shift+M` dictates a prompt into the active terminal. Speech is recognized locally (Whisper, downloaded once, about 160 MB).
 - **Search and usage:** `Ctrl+Shift+F` searches past Claude, Codex and Gemini conversations and resumes one. Tokens (input, output, cache) per worktree are read from the agent logs; no cost is estimated.
 - **Budgets and limits:** daily and weekly token limits per worktree; you are notified when one is near or over, and a runaway agent can be paused. `axelstra limit N` caps concurrent workers.
 - **Notifications:** a bell lists the last 100 events (agent finished or waiting, CI changed, merge done, errors), kept across restarts. On Windows, clicking the toast opens that session; elsewhere the worktree gets an attention dot instead.
-- **Status bar:** keep-awake switch, memory, terminals, listening ports, total agent tokens, a list of running agents and a worktree overview.
+- **Status bar:** keep-awake switch, memory, terminals, listening ports, total agent tokens, a list of running agents and a worktree overview. The bell, terminals, branches and ports each open a popover.
 - **Remote hosts:** projects on a WSL distro or an SSH host run on that machine's own daemon, driven from the same app ([`docs/remote-daemon.md`](docs/remote-daemon.md) says what is not supported there).
 - **Workspace transfer:** `axelstra workspace export|import` and the Settings buttons move projects, automations, settings and Kanban cards between machines (no tokens, no sessions; the import shows a preview first).
 - **Backup and diagnostics:** Settings exports and restores the daemon's state (rotating copies are also kept) and copies a diagnostics report. A state file that cannot be read is set aside, never overwritten, and you are told.
@@ -85,6 +89,10 @@ Axelstra never asks for, stores or passes a token: clone and GitHub use your own
 page sends: clone accepts only `https://`, `ssh://` and `user@host:path` (no leading `-`, no `ext::`, no spaces; `file://` only under test),
 the destination must be absolute and empty or missing, a new project name is one folder name, and a discovered repository must be one
 the last scan returned.
+
+### Remove project
+
+Removing a project asks what to do. *Only from the list* just drops it from Axelstra. *Remove everything* also closes the project's sessions and terminals, removes its worktrees (only those under `.axelstra-wt`) with their `ax/*` branches, and deletes its records (task notes, dispatcher entries, triggers, automations, flows, janitor events). A preview first lists the sessions, terminals and worktrees, and warns about worktrees with uncommitted changes or unintegrated work; removing those anyway needs you to type the project name. The project's own checkout is never touched. A folder still held by a process Axelstra does not own stays whole and is retried later.
 
 ### Worktree cleanup
 
@@ -129,9 +137,9 @@ A permission prompt or question turns the dot red; `idle_prompt` is only idle. T
 
 | Platform | State |
 | --- | --- |
-| Windows x64 | Main platform. Everything is developed and tested here, including the real-app E2E. |
-| Linux | Experimental. CI lints and tests the engine (core, daemon, CLI) on Ubuntu and runs the CLI smoke there; the engine tests also ran in a Linux container. The desktop host is only compile-checked. Nobody has run the app on a Linux desktop. |
-| macOS | The release builds an Apple silicon `.dmg` (and an experimental Intel one). CI only checks and lints it. **Its runtime is not verified**: no one has run the app or the engine tests there. |
+| Windows x64 | Main platform. Everything is developed and tested here, including the real-app E2E. CI runs the engine tests on Windows, macOS and Linux. |
+| Linux | Experimental. CI lints and tests the engine (core, daemon, CLI) on Ubuntu and runs the CLI smoke there. The desktop host is only compile-checked. Nobody has run the app on a Linux desktop. |
+| macOS | The release builds an Apple silicon `.dmg` (and an experimental Intel one). CI runs the engine tests and lints there. **The app's runtime is not verified**: no one has run the desktop app on macOS. |
 
 ## Install
 
@@ -225,16 +233,15 @@ Signing secrets are GitHub Environment secrets: the `release` Environment holds 
 
 ## Known limitations
 
-- **macOS runtime is not verified.** Only compile checks and lints run there. Known risks: no subreaper, so a fully detached agent process can be classified as a user process, and no parent-death signal for `axelstra lock`.
+- **macOS runtime is not verified.** CI runs the engine tests, compile checks and lints there, but nobody has run the desktop app. Known risks: no subreaper, so a fully detached agent process can be classified as a user process, and no parent-death signal for `axelstra lock`.
 - **Codex has no hook installer.** `axelstra hook codex` understands its events, but nothing installs them (Codex asks to trust each hook), so Codex sessions are only working or idle.
 - **Windows Authenticode is not configured.** The optional Azure Trusted Signing step in `release.yml` exists but has not run; SmartScreen warns about the installer until a certificate is set up.
 - **Linux is experimental** and no one has run the desktop app there.
+- **Installer warning when updating over a running app (Windows):** not verified end to end; the installer moves the daemon aside instead of stopping it, but the prompt shown when the app is still running has not been checked.
 - **The release workflow has not been proven on GitHub**: run a dry run before relying on a tag (the Apple and updater secrets must exist in the `release` Environment).
 - **Remote hosts:** Docker, screen control, automations and `open` are refused for remote projects, and ssh needs a key (no password or 2FA prompts). See [`docs/remote-daemon.md`](docs/remote-daemon.md).
-- **Add project dialog:** a folder dropped on the *Pasta local* zone only shows which folder to pick in the system dialog, because the webview gets no path it may hand to `project.add` (the dialog is the only way a path enters). Opening an existing worktree or branch and `worktree.from_pr` are not in the dialog: add the project first, then use the sidebar. There is no token entry (private repositories need `gh auth login` or a git credential helper set up outside Axelstra),. Git never prompts from the dialog (`GIT_TERMINAL_PROMPT=0`, ssh `BatchMode`), so a clone that needs a password you have not stored fails with git's message.
+- **Add project dialog:** a folder dropped on the *Pasta local* zone only shows which folder to pick in the system dialog, because the webview gets no path it may hand to `project.add` (the dialog is the only way a path enters). Opening an existing worktree or branch and `worktree.from_pr` are not in the dialog: add the project first, then use the sidebar. There is no token entry (private repositories need `gh auth login` or a git credential helper set up outside Axelstra). Git never prompts from the dialog (`GIT_TERMINAL_PROMPT=0`, ssh `BatchMode`), so a clone that needs a password you have not stored fails with git's message.
 - **B3, open:** the "Incluir CI" option in the timeline once showed "Maximum call stack size exceeded" in an installed build; it does not reproduce on current code. If it comes back, report the devtools stack trace and the project.
-
-[`ROADMAP.md`](ROADMAP.md) has the full history of what was done and what was verified.
 
 ## More documentation
 
@@ -242,4 +249,4 @@ Signing secrets are GitHub Environment secrets: the `release` Environment holds 
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE), © 2026 Francisco Cruz.
