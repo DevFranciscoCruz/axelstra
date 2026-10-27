@@ -48,7 +48,6 @@ import {
   selectIfStill,
   openIfStill,
   navStamp,
-  openSession,
   sessionsOf,
   overview,
   refreshOverview,
@@ -103,7 +102,7 @@ export function Sidebar() {
   const [overlaps, setOverlaps] = createSignal<OverlapFiles | null>(null);
   const pollOverlaps = () => dispatchOverlapFiles().then(setOverlaps, () => setOverlaps(null));
   void pollOverlaps();
-  const overlapPoller = createPoller(pollOverlaps, 20000);
+  const overlapPoller = createPoller(pollOverlaps, 30000);
   onCleanup(overlapPoller.stop);
 
   // the worktree being renamed

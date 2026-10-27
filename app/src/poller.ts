@@ -11,7 +11,7 @@ export type Poller = {
   stop: () => void;
 };
 
-/** setInterval for polling: starts ticking at once, skips hidden windows and overlapping calls, and cannot throw into the timer. */
+/** setInterval for polling: starts ticking at once, skips hidden windows (and runs once when the window shows again) and overlapping calls, and cannot throw into the timer. */
 export const createPoller = (fn: () => unknown | Promise<unknown>, ms: number, opts: PollerOpts = {}): Poller => {
   const visibleOnly = opts.visibleOnly ?? true;
   const guardInflight = opts.inflight ?? true;
@@ -39,5 +39,17 @@ export const createPoller = (fn: () => unknown | Promise<unknown>, ms: number, o
     if (visibleOnly && typeof document !== "undefined" && document.hidden) return;
     run();
   }, ms);
-  return { now: run, stop: () => clearInterval(timer) };
+  // a window that comes back to the foreground catches up at once instead of waiting for the next tick
+  const onVisible = () => {
+    if (!document.hidden) run();
+  };
+  const watchVisibility = visibleOnly && typeof document !== "undefined";
+  if (watchVisibility) document.addEventListener("visibilitychange", onVisible);
+  return {
+    now: run,
+    stop: () => {
+      clearInterval(timer);
+      if (watchVisibility) document.removeEventListener("visibilitychange", onVisible);
+    },
+  };
 };

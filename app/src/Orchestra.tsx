@@ -38,7 +38,7 @@ export function Orchestra() {
   };
   onMount(() => {
     void pollRes();
-    const t = createPoller(pollRes, 3000);
+    const t = createPoller(pollRes, 5000);
     onCleanup(t.stop);
   });
   const mb = (n: number) => (n >= 1024 ** 3 ? `${fmtFixed(n / 1024 ** 3, 1)} GB` : `${Math.round(n / 1024 ** 2)} MB`);

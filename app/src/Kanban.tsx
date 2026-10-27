@@ -60,7 +60,7 @@ export function Kanban(props: { project: string }) {
     }
   };
 
-  // only the newest answer counts: the 3s poll and a manual reload can overlap
+  // only the newest answer counts: the poll and a manual reload can overlap
   let reloadReq = 0;
   const reload = async () => {
     const r = ++reloadReq;
@@ -78,7 +78,7 @@ export function Kanban(props: { project: string }) {
     void reload();
     void pollRun();
     // agents move cards while the orchestrator runs
-    const t = createPoller(() => draft() === null && !moving && drag() === null && Promise.all([reload(), pollRun()]), 3000);
+    const t = createPoller(() => draft() === null && !moving && drag() === null && Promise.all([reload(), pollRun()]), 5000);
     onCleanup(t.stop);
   });
 

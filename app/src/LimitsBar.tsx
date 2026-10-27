@@ -71,7 +71,7 @@ export function LimitsBar() {
       return key ? agentStatus(key).then((v) => alive && v && setClaude(v)).catch(() => 0) : undefined;
     };
     load();
-    const t = createPoller(load, 5000);
+    const t = createPoller(load, 10000);
     onCleanup(() => {
       alive = false;
       t.stop();

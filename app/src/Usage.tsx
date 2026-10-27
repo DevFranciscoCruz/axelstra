@@ -131,7 +131,7 @@ export function UsageChip() {
         .then((u) => alive && setUsage(u))
         .catch(() => alive && setUsage(null));
     if (!document.hidden) void load();
-    const t = createPoller(load, 15000);
+    const t = createPoller(load, 30000);
     onCleanup(() => {
       alive = false;
       t.stop();

@@ -144,15 +144,12 @@ export function StatusBar() {
 
   onMount(() => {
     if (awake()) void invoke<boolean>("keep_awake", { on: true }).then(setAwakeOk).catch(() => 0);
-    // memory every 5 s while the window shows; the counts come from the poll the sidebar shares (store.watchOverview)
-    const mem = createPoller(poll, 5000);
+    // memory every 10 s while the window shows; the counts come from the poll the sidebar shares (store.watchOverview)
+    const mem = createPoller(poll, 10000);
     const unwatch = watchOverview();
-    const vis = () => !document.hidden && mem.now();
-    document.addEventListener("visibilitychange", vis);
     onCleanup(() => {
       mem.stop();
       unwatch();
-      document.removeEventListener("visibilitychange", vis);
     });
   });
 

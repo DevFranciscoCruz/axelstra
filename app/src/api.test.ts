@@ -49,26 +49,40 @@ describe("shQuote", () => {
 
 describe("agentLine", () => {
   const hooks = "C:/d/hooks.json";
-  it("starts claude fresh with a session id", () => {
-    expect(agentLine("claude", "abc", false, true, hooks)).toBe("claude --settings 'C:/d/hooks.json' --session-id abc");
+  const id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  it("starts claude fresh with a quoted session id", () => {
+    expect(agentLine("claude", id, false, true, hooks)).toBe(`claude --settings 'C:/d/hooks.json' --session-id '${id}'`);
   });
   it("starts other agents by name", () => {
     expect(agentLine("codex", undefined, false, false, hooks)).toBe("codex");
   });
   it("resumes with a fallback to a fresh start, in each shell's syntax", () => {
-    expect(agentLine("claude", "abc", true, true, hooks)).toBe(
-      "claude --settings 'C:/d/hooks.json' --resume abc; if (!$?) { claude --settings 'C:/d/hooks.json' --session-id abc }",
+    expect(agentLine("claude", id, true, true, hooks)).toBe(
+      `claude --settings 'C:/d/hooks.json' --resume '${id}'; if (!$?) { claude --settings 'C:/d/hooks.json' --session-id '${id}' }`,
     );
-    expect(agentLine("claude", "abc", true, false, hooks)).toBe(
-      "claude --settings 'C:/d/hooks.json' --resume abc || claude --settings 'C:/d/hooks.json' --session-id abc",
+    expect(agentLine("claude", id, true, false, hooks)).toBe(
+      `claude --settings 'C:/d/hooks.json' --resume '${id}' || claude --settings 'C:/d/hooks.json' --session-id '${id}'`,
     );
     expect(agentLine("codex", undefined, true, false, hooks)).toBe("codex resume --last || codex");
   });
   it("survives a quote in the data dir and in the rules", () => {
-    expect(agentLine("claude", "abc", false, true, "C:/o'brien/hooks.json", "be brief; it's fine")).toBe(
-      "claude --settings 'C:/o''brien/hooks.json' --append-system-prompt 'be brief; it''s fine' --session-id abc",
+    expect(agentLine("claude", id, false, true, "C:/o'brien/hooks.json", "be brief; it's fine")).toBe(
+      `claude --settings 'C:/o''brien/hooks.json' --append-system-prompt 'be brief; it''s fine' --session-id '${id}'`,
     );
-    expect(agentLine("claude", "abc", false, false, "/home/o'b/hooks.json")).toBe("claude --settings '/home/o'\\''b/hooks.json' --session-id abc");
+    expect(agentLine("claude", id, false, false, "/home/o'b/hooks.json")).toBe(`claude --settings '/home/o'\\''b/hooks.json' --session-id '${id}'`);
+  });
+  it("never puts a malicious resume id on the line", () => {
+    for (const bad of ["x; calc", "$(id)", "abc", "a b", `${id}'; calc; '`]) {
+      for (const ps of [true, false]) {
+        for (const restoring of [true, false]) {
+          const line = agentLine("claude", bad, restoring, ps, hooks);
+          expect(line).not.toContain("calc");
+          expect(line).not.toContain("$(id)");
+          expect(line).not.toContain("--resume");
+          expect(line).not.toContain("--session-id");
+        }
+      }
+    }
   });
 });
 

@@ -167,14 +167,18 @@ export const geminiResumeId = (resume: string | undefined) => {
   return /^[A-Za-z0-9_-]{1,80}$/.test(id) ? id : null;
 };
 
+/** A Claude conversation id is a UUID; anything else (it can come from a file an agent wrote) is dropped, never run. */
+export const claudeResumeId = (resume: string | undefined) => (resume && /^[0-9a-fA-F-]{8,64}$/.test(resume) ? resume : null);
+
 /** Command line for an agent. On restore it resumes the earlier conversation, falling back to a fresh start. */
 export const agentLine = (cli: string, resume: string | undefined, restoring: boolean, ps: boolean, hooks: string, rules?: string | null) => {
   const style = rules ? ` --append-system-prompt ${shQuote(rules, ps)}` : "";
   const claude = (flags: string) => `claude --settings ${shQuote(hooks, ps)}${style} ${flags}`;
-  const fresh = cli === "claude" && resume ? claude(`--session-id ${resume}`) : cli;
+  const cid = cli === "claude" ? claudeResumeId(resume) : null;
+  const fresh = cid ? claude(`--session-id ${shQuote(cid, ps)}`) : cli === "claude" && resume ? claude("").trimEnd() : cli;
   if (!restoring) return fresh;
   const gem = cli === "gemini" ? geminiResumeId(resume) : null;
-  const back = cli === "claude" && resume ? claude(`--resume ${resume}`) : gem ? `gemini --resume ${gem}` : RESUME_LINE[cli] ?? cli;
+  const back = cid ? claude(`--resume ${shQuote(cid, ps)}`) : gem ? `gemini --resume ${gem}` : RESUME_LINE[cli] ?? cli;
   return ps ? `${back}; if (!$?) { ${fresh} }` : `${back} || ${fresh}`;
 };
 
