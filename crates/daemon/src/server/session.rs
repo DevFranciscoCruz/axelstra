@@ -170,6 +170,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 kind,
                 text: axelstra_core::waiting::clean_text(p["text"].as_str().unwrap_or_default()),
             });
+            // the permission mode the agent reports (additive; an old hook sends none)
+            if let Some(m) = p["mode"].as_str().map(axelstra_core::waiting::clean_text).filter(|m| !m.is_empty() && m.len() <= 40) {
+                reg.modes.lock_recover().insert(id, m);
+            }
             reg.hints.set(id, state, wait);
             reg.tell_parent_waiting(id);
             Ok(json!({}))

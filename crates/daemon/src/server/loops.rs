@@ -36,104 +36,124 @@ pub(super) fn tell_main_not_integrated(reg: &Arc<Registry>, item: &Value) {
     reg.deliver_untrusted(id, s, &crate::msgbus::notice(&m, "axelstra"));
 }
 
-/// An agent that reported with `axelstra done` and then stays quiet for `REPORTED_IDLE_MS` is closed by itself (leads and
-/// plain workers too; ephemeral ones have `spawn_reaper`): its process tree ends and its tab and record go. One the user
-/// typed into after the report is theirs again and stays open. A session opened by hand that never said `done` is never
-/// closed here. Woken by the pulse, one timer for the quiet spell.
-pub(super) fn spawn_done_closer(reg: Arc<Registry>, id: u32) {
-    std::thread::spawn(move || {
-        let armed = Instant::now();
-        let mut seen = reg.pulse.now();
-        loop {
-            let Some(s) = reg.get(id) else { return };
-            if s.try_wait().is_some() || reg.bus.finished(id).is_none() {
-                return;
-            }
-            if s.since_input_ms() < armed.elapsed().as_millis() as u64 {
-                return;
-            }
-            let idle = s.idle_ms();
-            if idle >= REPORTED_IDLE_MS {
-                break;
-            }
-            seen = reg.pulse.wait(seen, Some(Duration::from_millis(REPORTED_IDLE_MS - idle + 20)));
-        }
-        let Some(s) = reg.get(id) else { return };
-        // a question asked after the report is still a question
-        if reg.wait_of(id, s.since_input_ms(), s.idle_ms()).is_some() {
-            return;
-        }
-        let wt = reg.metas.lock_recover().get(&id).and_then(|m| m["worktree"].as_str().map(String::from));
-        reg.tear_down(&[s]);
-        reg.forget_session(id);
-        if let Some(w) = wt {
-            reg.note_activity(&w);
-        }
-        reg.persist();
-        reg.pulse.bump();
-        reg.janitor.bump();
-    });
+/// Everything that closes a session by itself when it has been quiet: the reapers of ephemeral workers and leads, and
+/// the done-closers of agents left running after `axelstra done`. ONE thread serves all of them (not one per worker):
+/// it evaluates every task when the pulse moves and otherwise sleeps until the earliest deadline among them (the moment
+/// a session would count as idle long enough, or the end of a drain). With no task the thread ends; the next task
+/// starts it again. No fixed sleep anywhere.
+#[derive(Default)]
+pub(super) struct Reapers {
+    state: Mutex<ReaperState>,
+    /// scheduler threads started so far (tests: many tasks still make one)
+    pub(super) threads_started: AtomicU64,
 }
 
-/// The shortest quiet spell after which an ephemeral worker may be nudged and then closed. An agent in a long tool call,
-/// a slow network or a build that prints nothing is silent for a minute without being done; a plain command is not.
-pub(crate) fn reaper_min_idle_secs(agent: bool) -> u64 {
-    if agent {
-        120
-    } else {
-        3
+#[derive(Default)]
+struct ReaperState {
+    tasks: Vec<Task>,
+    running: bool,
+}
+
+impl Reapers {
+    /// Tasks waiting right now (one being evaluated counts as none).
+    #[cfg(test)]
+    pub(super) fn pending(&self) -> usize {
+        self.state.lock_recover().tasks.len()
     }
 }
 
-pub(super) fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: bool, idle_secs: u64, lines: usize) {
-    std::thread::spawn(move || {
-        let mut worked = false;
-        let mut done_by_idle = false;
-        let mut nudged = false;
-        let mut seen = reg.pulse.now();
-        loop {
-            let Some(s) = reg.get(id) else { return };
-            let exited = s.try_wait();
-            let idle = s.idle_ms();
-            if idle < 3000 {
-                worked = true;
-            }
-            if exited.is_some() || reg.bus.finished(id).is_some() {
-                break;
-            }
-            if idle_mode && worked && idle >= idle_secs * 1000 {
-                // it said it waits for an answer (hook event, ask, escalate): not finished, keep it. The parent was told
-                // when the event came in.
-                // or that it only waits for CI or a deploy (`axelstra await`): quiet on purpose
-                if reg.wait_of(id, s.since_input_ms(), idle).is_some() || reg.awaiting_of(id, s.since_input_ms(), idle).is_some() {
-                    worked = false;
-                } else if !nudged && reg.metas.lock_recover().get(&id).map(|m| m["kind"] == "agent").unwrap_or(false) {
-                    // first quiet spell: ask the worker to report through the bus instead of scraping its screen
-                    crate::msgbus::deliver(s.clone(), crate::msgbus::paste(crate::prompts::IDLE_NUDGE));
-                    nudged = true;
-                    worked = false;
-                } else {
-                    done_by_idle = true;
-                    break;
-                }
-            }
-            // no polling: the program exiting, `axelstra done`, output after a quiet spell and every request bump the
-            // pulse; the one timer is the moment the session would count as idle for `idle_secs`
-            let limit = idle_secs * 1000;
-            let timeout = (idle_mode && worked && idle < limit).then(|| Duration::from_millis(limit - idle + 20));
-            seen = reg.pulse.wait(seen, timeout);
+/// How long the output pipe gets to drain after a worker's process ended, before its screen is read.
+const DRAIN: Duration = Duration::from_millis(300);
+
+enum Task {
+    Reaper(ReaperTask),
+    Closer(CloserTask),
+}
+
+struct ReaperTask {
+    id: u32,
+    parent: Option<u32>,
+    idle_mode: bool,
+    idle_secs: u64,
+    lines: usize,
+    worked: bool,
+    done_by_idle: bool,
+    nudged: bool,
+    /// set once it decided to end: the report goes out when this moment came
+    drain_until: Option<Instant>,
+}
+
+struct CloserTask {
+    id: u32,
+    armed: Instant,
+}
+
+/// What a task wants after a look at its session.
+enum Step {
+    /// look again at the next pulse, or at this moment
+    Wait(Option<Instant>),
+    /// nothing left to do
+    Drop,
+    /// the report is due now
+    Finish,
+    /// the done-closer's quiet spell is over
+    Close,
+}
+
+impl ReaperTask {
+    fn new(id: u32, parent: Option<u32>, idle_mode: bool, idle_secs: u64, lines: usize) -> Self {
+        ReaperTask { id, parent, idle_mode, idle_secs, lines, worked: false, done_by_idle: false, nudged: false, drain_until: None }
+    }
+
+    fn step(&mut self, reg: &Arc<Registry>, now: Instant) -> Step {
+        if let Some(t) = self.drain_until {
+            return if now >= t { Step::Finish } else { Step::Wait(Some(t)) };
         }
+        let Some(s) = reg.get(self.id) else { return Step::Drop };
+        let exited = s.try_wait();
+        let idle = s.idle_ms();
+        if idle < 3000 {
+            self.worked = true;
+        }
+        let mut end = exited.is_some() || reg.bus.finished(self.id).is_some();
+        if !end && self.idle_mode && self.worked && idle >= self.idle_secs * 1000 {
+            // it said it waits for an answer (hook event, ask, escalate): not finished, keep it. The parent was told
+            // when the event came in.
+            // or that it only waits for CI or a deploy (`axelstra await`): quiet on purpose
+            if reg.wait_of(self.id, s.since_input_ms(), idle).is_some() || reg.awaiting_of(self.id, s.since_input_ms(), idle).is_some() {
+                self.worked = false;
+            } else if !self.nudged && reg.metas.lock_recover().get(&self.id).map(|m| m["kind"] == "agent").unwrap_or(false) {
+                // first quiet spell: ask the worker to report through the bus instead of scraping its screen
+                crate::msgbus::deliver(s.clone(), crate::msgbus::paste(crate::prompts::IDLE_NUDGE));
+                self.nudged = true;
+                self.worked = false;
+            } else {
+                self.done_by_idle = true;
+                end = true;
+            }
+        }
+        if end {
+            // give the output pipe a moment to drain after the process ended
+            self.drain_until = Some(now + DRAIN);
+            return Step::Wait(self.drain_until);
+        }
+        // the one timer: the moment the session would count as idle for `idle_secs`
+        let limit = self.idle_secs * 1000;
+        Step::Wait((self.idle_mode && self.worked && idle < limit).then(|| now + Duration::from_millis(limit - idle + 20)))
+    }
+
+    /// Reports to the parent and removes the session.
+    fn finish(self, reg: &Arc<Registry>) {
+        let id = self.id;
         let Some(s) = reg.get(id) else { return };
-        // give the output pipe a moment to drain after the process ended
-        std::thread::sleep(Duration::from_millis(300));
         let code = s.try_wait();
         let done_msg = reg.bus.finished(id);
         // what the terminal shows, not the escape-code soup of a TUI redrawing itself
         // for an agent TUI only its last reply, not the banner, tool-run lines and status bar around it
-        let tail = axelstra_core::screen::last_reply(&s.screen_lines(200)).unwrap_or_else(|| s.screen_lines(lines).join("\n"));
+        let tail = axelstra_core::screen::last_reply(&s.screen_lines(200)).unwrap_or_else(|| s.screen_lines(self.lines).join("\n"));
         let label = reg.labels.lock_recover().get(&id).cloned().unwrap_or_else(|| crate::prompts::session_name(id));
-        let status = crate::prompts::worker_status(done_msg.is_some(), done_by_idle, code);
-        if let Some(parent) = parent.and_then(|p| reg.get(p).map(|s| (p, s))) {
+        let status = crate::prompts::worker_status(done_msg.is_some(), self.done_by_idle, code);
+        if let Some(parent) = self.parent.and_then(|p| reg.get(p).map(|s| (p, s))) {
             let agent = reg.metas.lock_recover().get(&parent.0).and_then(|m| m["kind"].as_str().map(|k| k == "agent")).unwrap_or(false);
             let body = crate::prompts::worker_body(done_msg.as_ref().map(|d| d["text"].as_str().unwrap_or_default()), &tail);
             let msg = crate::prompts::worker_report(&label, &status, &body);
@@ -148,7 +168,123 @@ pub(super) fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idl
         s.kill();
         // the report went to the parent above; now the session leaves the registry (and the watchers hear it)
         reg.retire(id, code);
-    });
+    }
+}
+
+impl CloserTask {
+    fn step(&self, reg: &Arc<Registry>, now: Instant) -> Step {
+        let Some(s) = reg.get(self.id) else { return Step::Drop };
+        if s.try_wait().is_some() || reg.bus.finished(self.id).is_none() {
+            return Step::Drop;
+        }
+        // the user typed after the report: the session is theirs again
+        if s.since_input_ms() < self.armed.elapsed().as_millis() as u64 {
+            return Step::Drop;
+        }
+        let idle = s.idle_ms();
+        if idle >= REPORTED_IDLE_MS {
+            return Step::Close;
+        }
+        Step::Wait(Some(now + Duration::from_millis(REPORTED_IDLE_MS - idle + 20)))
+    }
+
+    /// Closes the session unless a question was asked after the report. Runs on its own short-lived thread: ending the
+    /// process tree can take seconds and must not hold up the other tasks.
+    fn close(self, reg: Arc<Registry>) {
+        let id = self.id;
+        std::thread::spawn(move || {
+            let Some(s) = reg.get(id) else { return };
+            // a question asked after the report is still a question
+            if reg.wait_of(id, s.since_input_ms(), s.idle_ms()).is_some() {
+                return;
+            }
+            let wt = reg.metas.lock_recover().get(&id).and_then(|m| m["worktree"].as_str().map(String::from));
+            reg.tear_down(&[s]);
+            reg.forget_session(id);
+            if let Some(w) = wt {
+                reg.note_activity(&w);
+            }
+            reg.persist();
+            reg.pulse.bump();
+            reg.janitor.bump();
+        });
+    }
+}
+
+/// An agent that reported with `axelstra done` and then stays quiet for `REPORTED_IDLE_MS` is closed by itself (leads and
+/// plain workers too; ephemeral ones have `spawn_reaper`): its process tree ends and its tab and record go. One the user
+/// typed into after the report is theirs again and stays open. A session opened by hand that never said `done` is never
+/// closed here.
+pub(super) fn spawn_done_closer(reg: Arc<Registry>, id: u32) {
+    add_task(&reg, Task::Closer(CloserTask { id, armed: Instant::now() }));
+}
+
+/// The shortest quiet spell after which an ephemeral worker may be nudged and then closed. An agent in a long tool call,
+/// a slow network or a build that prints nothing is silent for a minute without being done; a plain command is not.
+pub(crate) fn reaper_min_idle_secs(agent: bool) -> u64 {
+    if agent {
+        120
+    } else {
+        3
+    }
+}
+
+pub(super) fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: bool, idle_secs: u64, lines: usize) {
+    add_task(&reg, Task::Reaper(ReaperTask::new(id, parent, idle_mode, idle_secs, lines)));
+}
+
+/// Queues a task and makes sure the scheduler thread runs.
+fn add_task(reg: &Arc<Registry>, task: Task) {
+    {
+        let mut st = reg.reapers.state.lock_recover();
+        st.tasks.push(task);
+        if !st.running {
+            st.running = true;
+            reg.reapers.threads_started.fetch_add(1, Ordering::SeqCst);
+            let r = reg.clone();
+            std::thread::spawn(move || run_reapers(r));
+        }
+    }
+    // a thread that is already running looks at the new task now
+    reg.pulse.bump();
+}
+
+/// The scheduler thread: evaluates every task when the pulse moves, otherwise sleeps until the earliest deadline.
+fn run_reapers(reg: Arc<Registry>) {
+    let mut seen = reg.pulse.now();
+    loop {
+        let batch = std::mem::take(&mut reg.reapers.state.lock_recover().tasks);
+        let now = Instant::now();
+        let mut keep = Vec::with_capacity(batch.len());
+        let mut deadline: Option<Instant> = None;
+        for mut task in batch {
+            let step = match &mut task {
+                Task::Reaper(t) => t.step(&reg, now),
+                Task::Closer(t) => t.step(&reg, now),
+            };
+            match (step, task) {
+                (Step::Wait(at), task) => {
+                    deadline = match (deadline, at) {
+                        (Some(a), Some(b)) => Some(a.min(b)),
+                        (a, b) => a.or(b),
+                    };
+                    keep.push(task);
+                }
+                (Step::Finish, Task::Reaper(t)) => t.finish(&reg),
+                (Step::Close, Task::Closer(t)) => t.close(reg.clone()),
+                _ => {}
+            }
+        }
+        {
+            let mut st = reg.reapers.state.lock_recover();
+            st.tasks.extend(keep);
+            if st.tasks.is_empty() {
+                st.running = false;
+                return;
+            }
+        }
+        seen = reg.pulse.wait(seen, deadline.map(|d| d.saturating_duration_since(Instant::now())));
+    }
 }
 
 /// Kills the live sessions whose worktree folder no longer exists on disk (they would only keep using memory).
@@ -213,6 +349,10 @@ pub(super) fn spawn_scheduler(reg: Arc<Registry>) {
                         })
                         .collect()
                 };
+                if !claimed.is_empty() {
+                    // their last run moved
+                    r.broadcast("automations.changed");
+                }
                 for a in claimed {
                     if let Err(e) = launch_automation(&r, &a) {
                         eprintln!("automation {} failed: {e:#}", a.id);
@@ -536,21 +676,21 @@ pub(super) fn stall_facts(
     }
 }
 
-/// Every 10 s: an agent that became stalled gets one message to its parent (until it works again).
+/// An agent that became stalled gets one message to its parent (until it works again). No tick: it looks when the pulse
+/// moves (a session changed, a message, a hint, the settings) and at the one moment the quietest agent would reach the
+/// threshold (`stall::next_check_ms`).
 pub(super) fn spawn_stall_watchdog(reg: Arc<Registry>) {
-    std::thread::spawn(move || loop {
-        // tests shorten the threshold to seconds and then need a faster pass too
-        std::thread::sleep(if std::env::var_os("AXELSTRA_STALL_SECS").is_some() {
-            Duration::from_millis(300)
-        } else {
-            Duration::from_secs(10)
-        });
-        stall_tick(&reg);
+    std::thread::spawn(move || {
+        let mut seen = reg.pulse.now();
+        loop {
+            let next = stall_tick(&reg);
+            seen = reg.pulse.wait(seen, next);
+        }
     });
 }
 
-/// One pass of the watchdog.
-pub(super) fn stall_tick(reg: &Arc<Registry>) {
+/// One pass of the watchdog. Returns how long until time alone could make another session stalled.
+pub(super) fn stall_tick(reg: &Arc<Registry>) -> Option<Duration> {
     let threshold = reg.with_settings(crate::stall::threshold_ms);
     let minutes = crate::stall::display_minutes(threshold);
     let picked: Vec<Picked> = {
@@ -561,8 +701,14 @@ pub(super) fn stall_tick(reg: &Arc<Registry>) {
     };
     let busy = busy_parents(reg, &picked);
     let mut stalled = Vec::new();
+    let mut next: Option<u64> = None;
+    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
     for (id, s, view, label, meta) in &picked {
         let facts = stall_facts(reg, *id, s.try_wait().is_none(), view.idle_ms(), view.since_input_ms(), meta.as_ref(), &busy);
+        let await_left = reg.awaiting_of(*id, view.since_input_ms(), view.idle_ms()).map(|a| a.until.saturating_sub(now_ms));
+        if let Some(ms) = crate::stall::next_check_ms(&facts, threshold, await_left) {
+            next = Some(next.map_or(ms, |n| n.min(ms)));
+        }
         if crate::stall::is_stalled(&facts, threshold) {
             let parent = meta.as_ref().and_then(|m| m["parent"].as_u64()).map(|p| p as u32);
             stalled.push((*id, label.clone(), parent, view.screen_tail(12)));
@@ -584,4 +730,5 @@ pub(super) fn stall_tick(reg: &Arc<Registry>) {
             reg.deliver_untrusted(pid, ps, &crate::msgbus::notice(&m, &format!("{label} ({})", crate::prompts::session_name(id))));
         }
     }
+    next.map(Duration::from_millis)
 }

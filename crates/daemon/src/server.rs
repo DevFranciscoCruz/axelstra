@@ -864,6 +864,119 @@ mod project_main_tests {
 }
 
 #[cfg(test)]
+mod bypass_tests {
+    use super::*;
+
+    #[test]
+    fn mode_names_and_settings_files_decide_bypass() {
+        for m in ["bypassPermissions", "yolo", "dontAsk", "dangerously-skip"] {
+            assert!(mode_is_bypass(m), "{m}");
+        }
+        for m in ["default", "plan", "acceptEdits", "auto"] {
+            assert!(!mode_is_bypass(m), "{m}");
+        }
+        assert!(settings_default_bypass(&json!({"permissions": {"defaultMode": "bypassPermissions"}})));
+        assert!(!settings_default_bypass(&json!({"permissions": {"defaultMode": "plan"}})));
+        assert!(!settings_default_bypass(&json!({})));
+    }
+
+    #[test]
+    fn the_reported_mode_beats_the_start_arguments_and_goes_with_the_session() {
+        let dir = std::env::temp_dir().join(format!("axl-bypass-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wt = dir.join("wt");
+        std::fs::create_dir_all(wt.join(".claude")).unwrap();
+        let reg = Arc::new(Registry::new(dir.join("projects.json"), "p".into(), "t".into()));
+        reg.metas.lock_recover().insert(7, json!({"worktree": wt.to_string_lossy()}));
+        reg.metas.lock_recover().insert(8, json!({}));
+        // the worktree's own settings make bypass the default
+        std::fs::write(wt.join(".claude").join("settings.local.json"), r#"{"permissions":{"defaultMode":"bypassPermissions"}}"#).unwrap();
+        assert!(reg.runs_in_bypass(7));
+        assert!(!reg.runs_in_bypass(8));
+        // a Shift+Tab switch reported by the hook wins both ways
+        reg.modes.lock_recover().insert(7, "default".into());
+        reg.modes.lock_recover().insert(8, "bypassPermissions".into());
+        assert!(!reg.runs_in_bypass(7));
+        assert!(reg.runs_in_bypass(8));
+        // the start arguments still count when nothing was reported
+        reg.specs.lock_recover().insert(9, json!({"args": ["--dangerously-skip-permissions"]}));
+        assert!(reg.runs_in_bypass(9));
+    }
+}
+
+#[cfg(test)]
+mod reaper_scheduler_tests {
+    use super::*;
+
+    fn long_sleep() -> Spawn {
+        let (prog, args): (&str, Vec<String>) =
+            if cfg!(windows) { ("cmd", vec!["/c".into(), "ping -n 30 127.0.0.1 >nul".into()]) } else { ("sleep", vec!["30".into()]) };
+        Spawn { program: prog.into(), args, cwd: None, env: vec![], cols: 80, rows: 24 }
+    }
+
+    fn registry(tag: &str) -> Arc<Registry> {
+        let dir = std::env::temp_dir().join(format!("axl-reaper-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Arc::new(Registry::new(dir.join("projects.json"), "p".into(), "t".into()))
+    }
+
+    fn until(what: &str, mut ok: impl FnMut() -> bool) {
+        let t = Instant::now();
+        while !ok() {
+            assert!(t.elapsed() < Duration::from_secs(20), "{what}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn many_workers_share_one_scheduler_thread_that_ends_when_none_is_left() {
+        let reg = registry("one");
+        let ids: Vec<u32> = (0..5).map(|_| reg.spawn(&long_sleep(), None, Some(json!({"kind": "shell"}))).unwrap()).collect();
+        for id in &ids {
+            spawn_reaper(reg.clone(), *id, None, false, 20, 10);
+        }
+        assert_eq!(reg.reapers.threads_started.load(Ordering::SeqCst), 1, "one thread for five workers");
+        assert_eq!(reg.reapers.pending(), 5);
+        // a worker ending is an event: its reaper reports and the session leaves, with no request in between
+        for id in &ids {
+            reg.get(*id).unwrap().kill();
+        }
+        until("workers not retired", || ids.iter().all(|id| reg.get(*id).is_none()));
+        until("scheduler kept tasks", || reg.reapers.pending() == 0);
+        // with nothing to watch the thread has ended; a new worker starts a new one
+        let id = reg.spawn(&long_sleep(), None, Some(json!({"kind": "shell"}))).unwrap();
+        until("scheduler thread did not end", || {
+            spawn_reaper(reg.clone(), id, None, false, 20, 10);
+            reg.reapers.threads_started.load(Ordering::SeqCst) == 2
+        });
+        reg.get(id).unwrap().kill();
+    }
+
+    #[test]
+    fn a_quiet_worker_is_closed_at_its_deadline_without_any_event() {
+        let reg = registry("deadline");
+        let id = reg.spawn(&long_sleep(), None, Some(json!({"kind": "shell"}))).unwrap();
+        // the first look sees it as just started (output counts as work); no pulse comes after it: only the deadline
+        spawn_reaper(reg.clone(), id, None, true, 3, 10);
+        let t = Instant::now();
+        until("quiet worker not closed", || reg.get(id).is_none());
+        assert!(t.elapsed() >= Duration::from_secs(2), "closed before its quiet spell: {:?}", t.elapsed());
+    }
+
+    #[test]
+    fn a_worker_that_reported_is_retired_by_the_scheduler_on_the_event() {
+        let reg = registry("done");
+        let id = reg.spawn(&long_sleep(), None, Some(json!({"kind": "shell"}))).unwrap();
+        spawn_reaper(reg.clone(), id, None, false, 20, 10);
+        assert!(reg.get(id).is_some());
+        reg.bus.send(Some(id), 999, "done", "ok: done", None, None);
+        reg.pulse.bump();
+        until("reported worker not retired", || reg.get(id).is_none());
+        assert_eq!(reg.exited_of(id).map(|e| e.1), Some(true));
+    }
+}
+
+#[cfg(test)]
 mod pulse_tests {
     use super::*;
 
