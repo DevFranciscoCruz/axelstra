@@ -55,3 +55,20 @@ pub fn wait_ready(pipe: &str, token: &str) {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
+
+/// The records in `<root>/sessions.json` once `ok` holds for them (saves that follow each other closely are written
+/// together a quarter of a second later), or what is there after 10 s.
+pub fn saved_sessions_until(root: &std::path::Path, ok: impl Fn(&[serde_json::Value]) -> bool) -> Vec<serde_json::Value> {
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let list: Vec<serde_json::Value> = std::fs::read_to_string(root.join("sessions.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|j| j["data"].as_array().cloned())
+            .unwrap_or_default();
+        if ok(&list) || std::time::Instant::now() >= end {
+            return list;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}

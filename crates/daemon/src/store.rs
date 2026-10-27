@@ -160,9 +160,19 @@ pub fn write_backed_up(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 /// Saves `value` in the versioned envelope `{"v":N,"data":...}` with rotating backups.
 pub fn write_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> io::Result<()> {
+    write_json_with(path, value, true)
+}
+
+/// `write_json`, rotating the backups only when `rotate` is set: a file saved many times a minute rotates every few
+/// minutes, so its copies stay older than the last few saves.
+pub fn write_json_with<T: Serialize + ?Sized>(path: &Path, value: &T, rotate: bool) -> io::Result<()> {
     let env = serde_json::json!({"v": CURRENT_VERSION, "data": value});
     let bytes = serde_json::to_vec_pretty(&env).map_err(io::Error::other)?;
-    write_backed_up(path, &bytes)
+    if rotate {
+        write_backed_up(path, &bytes)
+    } else {
+        write_atomic(path, &bytes)
+    }
 }
 
 /// Upgrades `data` one version step (`from` -> `from + 1`). v0 is the legacy unversioned layout; v0 -> v1 only wraps

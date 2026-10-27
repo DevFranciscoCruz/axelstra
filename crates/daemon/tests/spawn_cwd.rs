@@ -124,7 +124,9 @@ fn a_new_worktree_has_only_its_lead_and_a_finished_task_is_not_restored() {
     let task = agent(&mut c, &wt, None, &wt).unwrap();
     assert_eq!(info(&mut c, task)["label"], "Tarefa 1");
     c.call("msg.send", json!({"from": task, "to": lead, "kind": "done", "text": "ok\nall green"})).unwrap();
-    let saved: Value = serde_json::from_str(&std::fs::read_to_string(root.join("sessions.json")).unwrap()).unwrap();
+    let data =
+        common::saved_sessions_until(&root, |l| l.iter().any(|s| s["label"] == "main") && !l.iter().any(|s| s["label"] == "Tarefa 1"));
+    let saved = json!({"v": 1, "data": data});
     let labels: Vec<&str> = saved["data"].as_array().unwrap().iter().filter_map(|s| s["label"].as_str()).collect();
     assert!(labels.contains(&"main") && !labels.contains(&"Tarefa 1"), "{labels:?}");
     // a file saved before the report was recorded (the mark is in the record) is not handed out either
@@ -143,6 +145,6 @@ fn a_new_worktree_has_only_its_lead_and_a_finished_task_is_not_restored() {
     assert_eq!(names, vec!["main"], "of the agents only the lead comes back");
     // new work for a finished task makes it restorable again
     c.call("msg.send", json!({"from": lead, "to": task, "kind": "message", "text": "one more thing"})).unwrap();
-    let saved: Value = serde_json::from_str(&std::fs::read_to_string(root.join("sessions.json")).unwrap()).unwrap();
-    assert!(saved["data"].as_array().unwrap().iter().any(|s| s["label"] == "Tarefa 1"));
+    let data = common::saved_sessions_until(&root, |l| l.iter().any(|s| s["label"] == "Tarefa 1"));
+    assert!(data.iter().any(|s| s["label"] == "Tarefa 1"));
 }

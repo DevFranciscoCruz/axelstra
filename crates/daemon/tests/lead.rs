@@ -89,8 +89,7 @@ fn the_first_agent_of_a_worktree_leads_and_tasks_report_to_it() {
     assert!(info(&mut c, w)["meta"]["lead"].is_null());
 
     // sessions.json keeps the roles
-    let saved: Value = serde_json::from_str(&std::fs::read_to_string(root.join("sessions.json")).unwrap()).unwrap();
-    let specs = saved["data"].as_array().unwrap();
+    let specs = &common::saved_sessions_until(&root, |l| l.iter().any(|s| s["label"] == "main" && s["meta"]["lead"] == true));
     let spec = |label: &str, wt: &str| specs.iter().find(|s| s["label"] == label && s["meta"]["worktree"] == wt).cloned().unwrap();
     assert_eq!(spec("main", &wt_a)["meta"]["lead"], true);
     assert!(spec("Tarefa 1", &wt_a)["meta"]["lead"].is_null());

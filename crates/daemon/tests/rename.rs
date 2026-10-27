@@ -43,10 +43,11 @@ fn rename_persists_with_the_session() {
     let list = c.call("session.list", json!({})).unwrap();
     assert_eq!(list[0]["label"], "build");
     // the saved restore data carries the new name
-    let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join("sessions.json")).unwrap()).unwrap();
+    let data = common::saved_sessions_until(&root, |l| l.iter().any(|s| s["label"] == "build"));
+    assert!(data.iter().any(|s| s["label"] == "build"));
     // sessions.json is the versioned envelope {"v":N,"data":[...]}
+    let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join("sessions.json")).unwrap()).unwrap();
     assert_eq!(saved["v"], 1);
-    assert!(saved["data"].as_array().unwrap().iter().any(|s| s["label"] == "build"));
 
     // an empty name brings back the one the session started with; unknown sessions are refused
     let r = c.call("session.rename", json!({"id": sid, "label": "   "})).unwrap();

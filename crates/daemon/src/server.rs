@@ -107,7 +107,28 @@ struct Registry {
     exited: Mutex<std::collections::VecDeque<Exited>>,
     /// the janitor's time constants (tests shorten them)
     timing: JanitorTiming,
+    /// this registry as the background threads see it (set once the daemon serves): a save that is too soon after
+    /// the last one is finished by a thread that needs it. Unset in unit tests, where a save is always immediate
+    me: std::sync::OnceLock<std::sync::Weak<Registry>>,
+    /// when `sessions.json` was last saved, and whether a save is already waiting for its turn
+    save_turn: Mutex<SaveTurn>,
+    /// the number of the last snapshot written and when the backups were last rotated; held while writing, so writes
+    /// that race on disk keep the newest
+    save_written: Mutex<(u64, Option<Instant>)>,
+    /// numbers the snapshots of the saved state (taken under the `specs`/`pending` locks)
+    save_gen: AtomicU64,
 }
+
+#[derive(Default)]
+struct SaveTurn {
+    last: Option<Instant>,
+    queued: bool,
+}
+
+/// Saves of `sessions.json` closer together than this are one save, written at the end of the spell.
+const SAVE_DEBOUNCE: Duration = Duration::from_millis(250);
+/// The rotating backups of `sessions.json` are shifted at most this often.
+const SAVE_ROTATE_EVERY: Duration = Duration::from_secs(5 * 60);
 
 /// How long the janitor waits for things that become true with time, not with an event.
 #[derive(Clone, Copy)]
@@ -227,31 +248,82 @@ impl Registry {
         self.broadcast("projects.changed");
     }
 
+    /// Asks for sessions.json to be rewritten. The first save after a quiet spell is written at once; ones that follow
+    /// within `SAVE_DEBOUNCE` become one save at the end of the spell (restoring N sessions saves twice, not N times).
+    /// `persist_now` is the save itself, for the moments that must not wait (shutdown).
+    fn persist(&self) {
+        let Some(me) = self.me.get().and_then(std::sync::Weak::upgrade) else { return self.persist_now() };
+        let wait = {
+            let mut turn = self.save_turn.lock_recover();
+            let since = turn.last.map(|l| l.elapsed());
+            match since.filter(|s| *s < SAVE_DEBOUNCE) {
+                None => {
+                    turn.last = Some(Instant::now());
+                    None
+                }
+                Some(_) if turn.queued => return,
+                Some(s) => {
+                    turn.queued = true;
+                    Some(SAVE_DEBOUNCE - s)
+                }
+            }
+        };
+        match wait {
+            None => self.persist_now(),
+            Some(wait) => {
+                std::thread::spawn(move || {
+                    std::thread::sleep(wait);
+                    {
+                        let mut turn = me.save_turn.lock_recover();
+                        turn.queued = false;
+                        turn.last = Some(Instant::now());
+                    }
+                    me.persist_now();
+                });
+            }
+        }
+    }
+
     /// Rewrites sessions.json: still-pending sessions first, then the live ones. A record of a deleted worktree or of a
     /// session that reported with `axelstra done` is not kept: it is dropped here, with its `sid/` file, so the
-    /// clean-up is continuous (every persist) and not only the one at start.
-    fn persist(&self) {
-        // both locks stay held through the write, so two persists cannot land out of order
-        let specs = self.specs.lock_recover();
-        let mut pending = self.pending.lock_recover();
+    /// clean-up is continuous (every save) and not only the one at start. The vector is built from a snapshot taken under
+    /// the registry locks; the folder checks and the disk write happen after they are released.
+    fn persist_now(&self) {
+        let (pending, specs, gen) = {
+            let specs = self.specs.lock_recover();
+            let pending = self.pending.lock_recover();
+            let mut ids: Vec<_> = specs.keys().copied().collect();
+            ids.sort();
+            let live: Vec<(u32, Value)> = ids.into_iter().map(|i| (i, specs[&i].clone())).collect();
+            (pending.clone(), live, self.save_gen.fetch_add(1, Ordering::SeqCst) + 1)
+        };
         let dead: Vec<Value> = pending.iter().filter(|r| !rec_alive(r)).cloned().collect();
-        pending.retain(rec_alive);
-        for r in &dead {
-            self.drop_sid_of(r);
+        if !dead.is_empty() {
+            self.pending.lock_recover().retain(|r| !dead.contains(r));
+            for r in &dead {
+                self.drop_sid_of(r);
+            }
         }
-        let mut v = pending.clone();
-        let mut ids: Vec<_> = specs.keys().copied().collect();
-        ids.sort();
+        let mut v: Vec<Value> = pending.into_iter().filter(|r| !dead.contains(r)).collect();
         // a session that reported with `axelstra done` is finished: restoring it would only start an agent with nothing to do
-        v.extend(ids.iter().filter(|i| self.bus.finished(**i).is_none() && rec_alive(&specs[*i])).map(|i| specs[i].clone()));
+        v.extend(specs.into_iter().filter(|(i, s)| self.bus.finished(*i).is_none() && rec_alive(s)).map(|(_, s)| s));
         // the bus forgets a `done` with the daemon: the mark in the spec keeps a finished task from coming back
         v.retain(|r| r["meta"]["done"] != true);
         // a bare shell (no folder, no meta) is not kept; one conversation (same key) is saved once
         v.retain(|r| !rec_junk(r));
         let mut keys = std::collections::HashSet::new();
         v.retain(|r| r["meta"]["key"].as_str().is_none_or(|k| keys.insert(k.to_string())));
-        if !real_dir_under_test(&self.saved) {
-            let _ = write_json(&self.saved, &v);
+        if real_dir_under_test(&self.saved) {
+            return;
+        }
+        // one writer at a time; a snapshot older than the one already on disk is not written over it
+        let mut written = self.save_written.lock_recover();
+        if gen <= written.0 {
+            return;
+        }
+        let rotate = written.1.is_none_or(|at| at.elapsed() >= SAVE_ROTATE_EVERY);
+        if crate::store::write_json_with(&self.saved, &v, rotate).is_ok() {
+            *written = (gen, if rotate { Some(Instant::now()) } else { written.1 });
         }
     }
 
@@ -358,6 +430,10 @@ impl Registry {
             closed: Default::default(),
             exited: Default::default(),
             timing: Default::default(),
+            me: Default::default(),
+            save_turn: Default::default(),
+            save_written: Mutex::new((0, None)),
+            save_gen: AtomicU64::new(0),
         }
     }
 
@@ -1463,6 +1539,7 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     crate::proto::refuse_real_when_testing(&pipe, store.parent().unwrap_or(std::path::Path::new("")))?;
     origin::adopt_orphans();
     let reg = Arc::new(Registry::new(store, pipe.clone(), token.clone()));
+    let _ = reg.me.set(Arc::downgrade(&reg));
     let dir = reg.saved.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
     let _ = std::fs::create_dir_all(&dir);
     write_hooks_json(&dir, std::env::current_exe().ok().as_deref());
@@ -1598,6 +1675,7 @@ fn spawn_idle_exit(reg: Arc<Registry>) {
             }
             let left = limit.saturating_sub(idle_since.get_or_insert_with(Instant::now).elapsed());
             if left.is_zero() {
+                reg.persist_now();
                 std::process::exit(0);
             }
             seen = reg.pulse.wait(seen, Some(left));
@@ -2237,6 +2315,67 @@ mod registry_tests {
         reg.closing.store(true, Ordering::SeqCst);
         axelstra_core::git::purge_trash(std::path::Path::new(&wt.path).parent().unwrap());
         let _ = axelstra_core::git::remove_tree(&root);
+    }
+
+    /// A burst of saves is written once at the end of the spell, and the backup copies are not shifted each time.
+    #[test]
+    fn saves_in_a_burst_are_debounced_and_do_not_rotate_the_backups() {
+        let dir = std::env::temp_dir().join(format!("axl-reg-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let reg = Arc::new(Registry::new(dir.join("projects.json"), "p".into(), "t".into()));
+        let _ = reg.me.set(Arc::downgrade(&reg));
+        let rec =
+            |key: &str| json!({"program": "x", "cwd": dir.to_string_lossy(), "meta": {"worktree": dir.to_string_lossy(), "key": key}});
+        let saved = || -> Vec<Value> {
+            let text = std::fs::read_to_string(dir.join("sessions.json")).unwrap_or_default();
+            serde_json::from_str::<Value>(&text).map(|v| v["data"].as_array().cloned().unwrap_or_default()).unwrap_or_default()
+        };
+        // the first save after a quiet spell is immediate
+        reg.specs.lock_recover().insert(1, rec("k1"));
+        reg.persist();
+        assert_eq!(saved().len(), 1);
+        // the next ones come within the spell: they wait, and become one write
+        for i in 2..=6 {
+            reg.specs.lock_recover().insert(i, rec(&format!("k{i}")));
+            reg.persist();
+        }
+        assert_eq!(saved().len(), 1, "saved before the end of the spell");
+        let t = Instant::now();
+        while saved().len() < 6 {
+            assert!(t.elapsed() < Duration::from_secs(10), "the last save never came");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // two writes happened in a row, and neither shifted a backup over the other
+        assert!(!dir.join("sessions.json.1").exists(), "a backup of a few seconds ago");
+        // an immediate save (shutdown) is written whatever the spell
+        reg.specs.lock_recover().insert(7, rec("k7"));
+        reg.persist_now();
+        assert_eq!(saved().len(), 7);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Writes that race keep the newest snapshot on disk.
+    #[test]
+    fn racing_saves_leave_the_newest_state_on_disk() {
+        let reg = temp_registry("racesave");
+        let dir = reg.saved.parent().unwrap().to_path_buf();
+        let rec =
+            |key: &str| json!({"program": "x", "cwd": dir.to_string_lossy(), "meta": {"worktree": dir.to_string_lossy(), "key": key}});
+        let mut hs = vec![];
+        for t in 0..4 {
+            let (r, rec) = (reg.clone(), rec(&format!("k{t}")));
+            hs.push(std::thread::spawn(move || {
+                r.specs.lock_recover().insert(t, rec);
+                r.persist_now();
+            }));
+        }
+        for h in hs {
+            h.join().unwrap();
+        }
+        reg.persist_now();
+        let text = std::fs::read_to_string(dir.join("sessions.json")).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["data"].as_array().unwrap().len(), 4);
     }
 
     fn temp_registry(tag: &str) -> Arc<Registry> {

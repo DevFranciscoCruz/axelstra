@@ -41,6 +41,11 @@ fn saved(root: &Path) -> Vec<Value> {
     j["data"].as_array().cloned().unwrap_or_default()
 }
 
+/// `saved`, once it has `n` records (a save that follows another closely is written a moment later).
+fn saved_len(root: &Path, n: usize) -> Vec<Value> {
+    common::saved_sessions_until(root, |l| l.len() == n)
+}
+
 fn temp(tag: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!("axelstra-junk-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -76,9 +81,9 @@ fn a_bare_shell_is_never_saved_and_a_killed_session_leaves_file_and_list() {
         .unwrap()["id"]
         .as_u64()
         .unwrap();
-    assert_eq!(saved(&root).len(), 1, "only the terminal with a worktree is saved");
+    assert_eq!(saved_len(&root, 1).len(), 1, "only the terminal with a worktree is saved");
     c.call("session.kill", json!({"id": kept})).unwrap();
-    assert!(saved(&root).is_empty(), "a killed session's spec must leave sessions.json");
+    assert!(saved_len(&root, 0).is_empty(), "a killed session's spec must leave sessions.json");
     let mut ids =
         || -> Vec<u64> { c.call("session.list", json!({})).unwrap().as_array().unwrap().iter().filter_map(|s| s["id"].as_u64()).collect() };
     assert!(!ids().contains(&kept), "a killed session must leave the list");
@@ -145,7 +150,7 @@ fn a_session_that_exits_by_itself_leaves_the_list_announced_with_its_code() {
     assert_eq!((ev["id"].as_u64(), ev["code"].as_i64()), (Some(id), Some(3)));
     let ids: Vec<u64> = c.call("session.list", json!({})).unwrap().as_array().unwrap().iter().filter_map(|s| s["id"].as_u64()).collect();
     assert!(!ids.contains(&id), "an exited session must leave the list");
-    assert!(saved(&root).is_empty());
+    assert!(saved_len(&root, 0).is_empty());
     // the code stays answerable for `axelstra wait` and flows
     let st = c.call("session.status", json!({"id": id})).unwrap();
     assert_eq!((st["running"].as_bool(), st["code"].as_i64(), st["gone"].as_bool()), (Some(false), Some(3), Some(true)));

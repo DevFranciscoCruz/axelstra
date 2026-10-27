@@ -313,7 +313,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 }
             }
             reg.closing.store(true, Ordering::SeqCst);
-            reg.persist();
+            // a save still waiting out its debounce must not be lost with the process
+            reg.persist_now();
             // keep what each agent terminal showed, so the restored tab is not empty
             save_histories(reg);
             // end every terminal and agent now (their specs stay in sessions.json, so they restore on the next start)
