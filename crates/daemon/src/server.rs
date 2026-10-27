@@ -692,7 +692,13 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         "budget.check" | "budget.events" => true,
         // they list the file system outside any worktree
         "host.info" | "host.browse" => true,
-        "settings.set" => p.get("budgets").is_some() || p.get("hosts").is_some(),
+        // notifications, the stall watchdog, installs and the shell are what keeps the user informed and safe
+        "settings.set" => ["budgets", "hosts", "notify_mode", "notify_sound", "stall_minutes", "auto_install", "shell"]
+            .iter()
+            .any(|k| p.get(*k).is_some()),
+        // the saved sessions are the user's to drop, and an agent must not stop the daemon or switch the clean-up off
+        "daemon.shutdown" | "session.pending_clear" => true,
+        "janitor.auto" => p.get("on").is_some(),
         "project.add"
         | "project.remove"
         | "project.remove_preview"
@@ -727,6 +733,32 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         | "files.path_action" => true,
         _ => false,
     }
+}
+
+/// True when the agent session `me` may drive `target`: it is `me` itself or a session `me` started, found by walking
+/// the bus parent chain up from `target`. A lead keeps driving its workers; a worker cannot touch its siblings or parents.
+fn agent_drives(reg: &Registry, me: u32, target: u32) -> bool {
+    let mut cur = target;
+    // the chain is short; the bound only protects against a cycle
+    for _ in 0..64 {
+        if cur == me {
+            return true;
+        }
+        match reg.bus.parent_of(cur) {
+            Some(parent) => cur = parent,
+            None => return false,
+        }
+    }
+    false
+}
+
+/// The refusal an agent gets when it reaches for a session that is not its own or one of its descendants.
+fn not_own_tree(method: &str) -> anyhow::Error {
+    axelstra_core::coded!(
+        "rpc.agent_own_tree",
+        "{method} is only allowed for the agent's own session and the sessions it started",
+        method = method
+    )
 }
 
 /// True when `path` is `root` or lies below it, comparing whole path components (`/a/wt-2` is not inside `/a/wt`).
@@ -1678,13 +1710,19 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
     };
     // keystrokes have their own ordered worker, so a program that does not read its input delays only this queue
     let (in_tx, mut in_rx) = mpsc::channel::<(u32, Vec<u8>)>(INPUT_QUEUE);
+    // the session this connection is, when it is an agent's (id + 1; 0 for the app and the CLI of the user). It is set by
+    // the handshake before any input frame is read, and lives outside `st` because a running call holds that lock.
+    let who = Arc::new(AtomicU64::new(0));
     let input_worker = {
-        let (reg, tx) = (reg.clone(), tx.clone());
+        let (reg, tx, who) = (reg.clone(), tx.clone(), who.clone());
         tokio::spawn(async move {
             while let Some((id, data)) = in_rx.recv().await {
                 let Some(s) = reg.get(id) else { continue };
+                let me = who.load(Ordering::SeqCst);
+                // an agent types only into itself and the sessions it started: keys are how a prompt gets approved
+                let allowed = me == 0 || agent_drives(&reg, (me - 1) as u32, id);
                 let t0 = std::time::Instant::now();
-                let ok = tokio::task::spawn_blocking(move || write_input(&s, &data)).await.unwrap_or(false);
+                let ok = allowed && tokio::task::spawn_blocking(move || write_input(&s, &data)).await.unwrap_or(false);
                 crate::lag::note("daemon pty write", t0.elapsed(), 20);
                 if !ok {
                     // the client learns that keys were lost instead of typing into the void
@@ -1717,6 +1755,9 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
                     run_call(req, &reg, &tx, &st, &token).await;
                     if !st.lock_recover().authed {
                         break;
+                    }
+                    if let Some(me) = st.lock_recover().agent {
+                        who.store(u64::from(me) + 1, Ordering::SeqCst);
                     }
                     authed = true;
                 } else if call_tx.send(req).await.is_err() {

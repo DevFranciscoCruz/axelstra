@@ -5,6 +5,14 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
     let (p, reg, tx) = (c.p, c.reg, c.tx);
     let subs = &mut *c.subs;
     let after = &mut *c.after;
+    // an agent connection reaches only its own session and the ones it started (the app and the user's CLI reach all)
+    let agent: Option<u32> = *c.agent;
+    let own_tree = |id: u32| -> Result<()> {
+        match agent {
+            Some(me) if !agent_drives(reg, me, id) => Err(not_own_tree(&req.method)),
+            _ => Ok(()),
+        }
+    };
     let sid = || -> Result<u32> { p.get("id").and_then(Value::as_u64).and_then(|x| u32::try_from(x).ok()).ok_or_else(|| missing("id")) };
     let session = || -> Result<Arc<Session>> {
         let id = sid()?;
@@ -200,6 +208,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "session.subscribe" => {
             let id = sid()?;
             let s = session()?;
+            own_tree(id)?;
             if let Some(old) = subs.remove(&id) {
                 old.store(true, Ordering::SeqCst);
             }
@@ -307,6 +316,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "session.remove" => {
             let id = sid()?;
+            own_tree(id)?;
             if let Some(stop) = subs.remove(&id) {
                 stop.store(true, Ordering::SeqCst);
             }
@@ -344,7 +354,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 let latest = std::fs::read_to_string(sid_dir.join(format!("{key}.json")))
                     .ok()
                     .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-                    .and_then(|j| j["session_id"].as_str().map(String::from));
+                    .and_then(|j| j["session_id"].as_str().filter(|s| valid_resume_id(s)).map(String::from));
                 if let Some(id) = latest {
                     // a conversation with no replies (cleared, never used) is not worth resuming: start clean
                     let cwd = rec["cwd"].as_str().or(rec["meta"]["worktree"].as_str()).unwrap_or("");
@@ -384,6 +394,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "session.kill" => {
             let s = session()?;
             let id = sid()?;
+            own_tree(id)?;
             s.kill();
             // a killed session leaves the list and sessions.json right away (the exit watcher only ends its stream)
             reg.forget_session(id);
@@ -416,5 +427,25 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({"peak_mem_bytes": mem, "cpu_100ns": cpu}))
         }
         m => anyhow::bail!("unknown method {m}"),
+    }
+}
+
+/// A conversation id read from `sid/<key>.json`, which the agent's own hook writes and so is untrusted: only a
+/// UUID-shaped value (hex digits and dashes, 8 to 64 long) may become `meta.resume`, because the app puts it into a shell line.
+fn valid_resume_id(id: &str) -> bool {
+    (8..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_resume_id;
+
+    #[test]
+    fn only_uuid_shaped_resume_ids_pass() {
+        assert!(valid_resume_id("0f8fad5b-d9cb-469f-a165-70867728950e"));
+        assert!(valid_resume_id("abcdef12"));
+        for bad in ["", "abc", "x; calc", "$(id)", "0f8fad5b-d9cb-469f-a165-70867728950e; calc", "abc def12", "ghijklmn", &"a".repeat(65)] {
+            assert!(!valid_resume_id(bad), "{bad}");
+        }
     }
 }

@@ -57,6 +57,8 @@ export const pt = {
   "rebase.failed": "O rebase falhou: {detail}",
   "worktree.not_found": "Não é um worktree deste projeto.",
   "worktree.remove_main": "Não se pode remover o worktree principal.",
+  "worktree.agent_not_own": "Um agente só pode remover o seu próprio worktree ou os que iniciou.",
+  "worktree.agent_unsaved": "O worktree tem alterações por guardar ou commits por integrar: só o utilizador o pode remover na app.",
   "worktree.no_lead": "Não há nenhum lead ativo neste worktree: inicia primeiro o main dele.",
   "worktree.park": "Não foi possível pôr {path} de lado.\n({detail})",
   "worktree.folder_busy":
@@ -127,6 +129,8 @@ export const en: Widen<typeof pt> = {
   "rebase.failed": "The rebase failed: {detail}",
   "worktree.not_found": "Not a worktree of this project.",
   "worktree.remove_main": "The main worktree cannot be removed.",
+  "worktree.agent_not_own": "An agent can only remove its own worktree or the ones it started.",
+  "worktree.agent_unsaved": "The worktree has uncommitted changes or commits that are not integrated: only the user can remove it in the app.",
   "worktree.no_lead": "No lead is running in this worktree: start its main agent first.",
   "worktree.park": "Could not move {path} out of the way.\n({detail})",
   "worktree.folder_busy":
@@ -198,6 +202,8 @@ export const ptBR: Widen<typeof pt> = {
   "rebase.failed": "O rebase falhou: {detail}",
   "worktree.not_found": "Não é um worktree deste projeto.",
   "worktree.remove_main": "Não é possível remover o worktree principal.",
+  "worktree.agent_not_own": "Um agente só pode remover o seu próprio worktree ou os que ele iniciou.",
+  "worktree.agent_unsaved": "O worktree tem alterações não salvas ou commits que não foram integrados: só o usuário pode removê-lo no app.",
   "worktree.no_lead": "Não há nenhum lead ativo neste worktree: inicie primeiro o main dele.",
   "worktree.park": "Não foi possível tirar {path} do caminho.\n({detail})",
   "worktree.folder_busy":

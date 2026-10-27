@@ -165,6 +165,13 @@ Every method the frontend calls must also be in `ALLOWED_METHODS` in `app/src-ta
 something in the daemon that must not keep running after an update (sessions are restored on restart). Agents get a
 per-session token (`AXELSTRA_AGENT_TOKEN`) and the `role=agent` connection is refused the app-only methods listed in
 `agent_forbidden` (server.rs): add new privileged methods there. `docs/s3-app-secret.md` explains what is still open.
+Current: 3. Besides `agent_forbidden`, a `role=agent` connection is held to its own session tree: `INPUT` frames,
+`session.subscribe`, `session.kill` and `session.remove` are allowed only on the agent's own session and on sessions it started
+(`agent_drives` walks the bus parent chain, so a lead keeps driving its workers and flows keep cleaning theirs; a worker cannot
+touch a sibling or its parent: it talks to them with `msg.*`). `worktree.remove` by an agent works only on its own worktree or
+one it started, refuses a dirty or unintegrated one and deletes the branch with `-d`; the app keeps the forcing behaviour.
+`agent.search` is limited to the agent's project. `session.pending` hands out a resume id from `sid/<key>.json` only when it is
+UUID-shaped, because the app puts it into a shell line.
 
 ## data_dir
 

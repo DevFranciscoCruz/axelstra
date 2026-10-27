@@ -280,10 +280,36 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             // refuse before touching any session: the main worktree (or a stranger path) must keep its terminals
             let known = axelstra_core::git::worktree_list(std::path::Path::new(&pr.path))?;
             let gone = crate::projects::norm_path(path);
-            match known.iter().find(|w| crate::projects::norm_path(&w.path) == gone) {
+            let target = match known.iter().find(|w| crate::projects::norm_path(&w.path) == gone) {
                 None => return Err(axelstra_core::coded!("worktree.not_found", "not a worktree of this project")),
                 Some(w) if w.is_main => return Err(axelstra_core::coded!("worktree.remove_main", "cannot remove the main worktree")),
-                _ => {}
+                Some(w) => w,
+            };
+            // an agent removes only what is its own and holds nothing unsaved; forcing it is the user's call, in the app
+            let by_agent = *c.agent;
+            if let Some(me) = by_agent {
+                if !agent_owns_worktree(reg, me, &pr, &gone) {
+                    return Err(axelstra_core::coded!(
+                        "worktree.agent_not_own",
+                        "an agent can only remove its own worktree or the ones it started"
+                    ));
+                }
+                let repo = std::path::Path::new(&pr.path);
+                let (dirty, unmerged) = tokio::task::block_in_place(|| {
+                    let wt = std::path::Path::new(&target.path);
+                    let dirty = wt.exists() && axelstra_core::git::has_changes(wt).unwrap_or(true);
+                    let default = axelstra_core::git::default_branch(repo);
+                    let unmerged = target.branch.as_deref().is_some_and(|b| {
+                        crate::integrate::ahead_of(repo, b, &default) > 0 && !crate::cleanup::squash_merged(repo, b, &default)
+                    });
+                    (dirty, unmerged)
+                });
+                if dirty || unmerged {
+                    return Err(axelstra_core::coded!(
+                        "worktree.agent_unsaved",
+                        "the worktree has uncommitted changes or commits that are not integrated: only the user can remove it, in the app"
+                    ));
+                }
             }
             // a live session keeps its cwd open, which on Windows makes the folder impossible to remove: kill and
             // wait for them first
@@ -299,11 +325,45 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     .collect()
             };
             tokio::task::block_in_place(|| kill_and_wait(&doomed, Duration::from_secs(5)));
-            tokio::task::block_in_place(|| crate::projects::worktree_remove(&pr, path))?;
+            if by_agent.is_some() {
+                // checked clean and integrated above: the folder goes, the branch only if git agrees it is merged (`-d`)
+                let repo = std::path::Path::new(&pr.path);
+                tokio::task::block_in_place(|| -> Result<()> {
+                    axelstra_core::git::worktree_remove(repo, std::path::Path::new(&target.path))?;
+                    if let Some(b) = &target.branch {
+                        let _ = axelstra_core::git::run(repo, &["branch", "-d", b]);
+                    }
+                    Ok(())
+                })?;
+            } else {
+                tokio::task::block_in_place(|| crate::projects::worktree_remove(&pr, path))?;
+            }
             let _ = crate::projects::forget_parent(&reg.store, &pr.id, path);
             reg.persist();
             Ok(json!({}))
         }
         m => anyhow::bail!("unknown method {m}"),
     }
+}
+
+/// True when the agent session `me` may remove the worktree `gone` (normalized): it is the worktree `me` works in, a
+/// worktree below it in the project's parent tree, or one where a session that `me` started works.
+fn agent_owns_worktree(reg: &Registry, me: u32, pr: &crate::projects::Project, gone: &str) -> bool {
+    let metas = reg.metas.lock_recover();
+    let mine = metas.get(&me).and_then(|m| m["worktree"].as_str()).map(crate::projects::norm_path);
+    if mine.as_deref() == Some(gone) {
+        return true;
+    }
+    if let Some(mine) = &mine {
+        let mut cur = gone.to_string();
+        // the bound only protects against a cycle in the saved parents
+        for _ in 0..32 {
+            match pr.parents.get(&cur) {
+                Some(par) if par == mine => return true,
+                Some(par) => cur = par.clone(),
+                None => break,
+            }
+        }
+    }
+    metas.iter().any(|(id, m)| m["worktree"].as_str().is_some_and(|w| crate::projects::norm_path(w) == gone) && agent_drives(reg, me, *id))
 }

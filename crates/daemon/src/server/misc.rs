@@ -131,7 +131,26 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "agent.search" => {
             let q = p["query"].as_str().unwrap_or_default().to_string();
             let max = p["max"].as_u64().unwrap_or(30).clamp(1, 200) as usize;
-            let hits = tokio::task::block_in_place(|| crate::agentlog::search(&q, max));
+            let Some(me) = *agent else {
+                let hits = tokio::task::block_in_place(|| crate::agentlog::search(&q, max));
+                return Ok(json!({"hits": hits}));
+            };
+            // an agent reads only the conversations of its own project: its checkout and worktrees. A hit with no folder
+            // (Gemini keeps only a hash) cannot be placed, so it stays out.
+            let project = reg.metas.lock_recover().get(&me).and_then(|m| m["project"].as_str().map(String::from));
+            let roots: Vec<String> = project
+                .and_then(|id| crate::projects::find(&reg.store, &id).ok())
+                .map(|pr| {
+                    let mut v = vec![pr.path.clone()];
+                    v.extend(
+                        axelstra_core::git::worktree_list(std::path::Path::new(&pr.path)).unwrap_or_default().into_iter().map(|w| w.path),
+                    );
+                    v
+                })
+                .unwrap_or_default();
+            let mut hits = tokio::task::block_in_place(|| crate::agentlog::search(&q, 200));
+            hits.retain(|h| !h.cwd.is_empty() && roots.iter().any(|r| axelstra_core::paths::is_within(&h.cwd, r)));
+            hits.truncate(max);
             Ok(json!({"hits": hits}))
         }
         "agent.usage" => {

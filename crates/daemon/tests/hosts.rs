@@ -105,7 +105,7 @@ fn an_agent_cannot_change_the_host_registry() {
     assert_eq!(app.call("settings.get", json!({})).unwrap()["hosts"], json!([]));
     // an agent may still read them and change other settings
     assert!(agent.call("settings.get", json!({})).is_ok());
-    assert!(agent.call("settings.set", json!({"notify_sound": false})).is_ok());
+    assert!(agent.call("settings.set", json!({"terse": "short"})).is_ok());
 }
 
 fn names(r: &Value) -> Vec<(String, bool)> {

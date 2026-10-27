@@ -166,7 +166,7 @@ fn an_agent_cannot_change_or_take_the_budget_events() {
         assert!(e.contains("not allowed to agents"), "{m}: {e}");
     }
     // the rest of settings and the read-only status stay available to it
-    assert!(agent.call("settings.set", json!({"notify_sound": false})).is_ok());
+    assert!(agent.call("settings.set", json!({"terse": "short"})).is_ok());
     assert!(agent.call("budget.status", json!({"worktrees": []})).is_ok());
     assert_eq!(app.call("settings.get", json!({})).unwrap()["budgets"], json!({}));
     let _ = std::fs::remove_dir_all(&root);

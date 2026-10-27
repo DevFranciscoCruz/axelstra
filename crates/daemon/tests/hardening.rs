@@ -108,6 +108,15 @@ fn agent_role_cannot_use_app_only_calls() {
         ("files.resolve_html", json!({"session": 1, "path": "a.html"})),
         ("files.resolve_path", json!({"session": 1, "path": "a.exe"})),
         ("files.path_action", json!({"session": 1, "path": "a.exe", "action": "run"})),
+        // the daemon's life, the clean-up switch and what keeps the user informed are the user's
+        ("daemon.shutdown", json!({})),
+        ("janitor.auto", json!({"on": false})),
+        ("session.pending_clear", json!({})),
+        ("settings.set", json!({"notify_mode": "off"})),
+        ("settings.set", json!({"notify_sound": false})),
+        ("settings.set", json!({"stall_minutes": 0})),
+        ("settings.set", json!({"auto_install": true})),
+        ("settings.set", json!({"shell": "cmd"})),
     ] {
         let e = agent.call(m, p).unwrap_err().to_string();
         assert!(e.contains("not allowed to agents"), "{m}: {e}");

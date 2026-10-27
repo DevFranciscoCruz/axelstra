@@ -20,7 +20,11 @@ pub const PROTO: u64 = 26;
 /// the daemon that must not keep running after an update. The app restarts a daemon that reports less (or nothing).
 /// 2: roles come from the process on the other end of a connection (S3b), not from the token it presents; a daemon
 /// below this still trusts any holder of the token file as the user.
-pub const SECURITY_MIN: u64 = 2;
+/// 3: an agent connection is held to its own session tree (input frames, `session.subscribe`, `session.kill`,
+/// `session.remove`), `worktree.remove` by an agent refuses foreign, dirty or unintegrated worktrees, more calls are
+/// app-only (`daemon.shutdown`, `session.pending_clear`, `janitor.auto` with `on`, notification, stall, install and shell
+/// keys of `settings.set`), `agent.search` stays in the agent's project, and a resume id from `sid/*.json` must be a UUID.
+pub const SECURITY_MIN: u64 = 3;
 
 /// Identifies this build. `hello` and `ping` report it, so an app can tell a daemon left over from an older release.
 pub const BUILD_ID: &str = concat!(env!("CARGO_PKG_VERSION"), "+", env!("CARGO_PKG_NAME"));
