@@ -85,8 +85,7 @@ fn connect() -> Result<Client> {
         }
         // the launched process ended: it handed over to a daemon that already runs or failed; one last look, no more waiting
         if child.try_wait().ok().flatten().is_some() {
-            return Client::connect(&pipe, &token)
-                .map_err(|_| axelstra_core::coded!("daemon.start_failed", "the daemon did not start"));
+            return Client::connect(&pipe, &token).map_err(|_| axelstra_core::coded!("daemon.start_failed", "the daemon did not start"));
         }
         std::thread::sleep(nap);
         nap = (nap * 2).min(Duration::from_millis(200));

@@ -179,7 +179,7 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
                     }
                 }
             });
-                        let mut raw = Vec::new();
+            let mut raw = Vec::new();
             // the snapshot is the first frame and holds the whole replay, so there is no quiet window to wait out: take it and
             // stop; the limit only covers a session that has printed nothing (then no frame comes at all)
             if let Ok(d) = rx.recv_timeout(Duration::from_millis(1500)) {
