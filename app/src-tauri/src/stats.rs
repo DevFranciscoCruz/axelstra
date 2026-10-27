@@ -2,6 +2,7 @@
 //! daemon, every terminal and agent below the daemon) plus the dev-server ports they listen on.
 
 use axelstra_core::procs;
+use axelstra_core::sync::LockRecover;
 use axelstra_daemon::ports;
 use serde::Serialize;
 use std::sync::Mutex;
@@ -80,6 +81,7 @@ fn daemon_pid() -> u32 {
 
 #[cfg(windows)]
 mod imp {
+    use axelstra_core::sync::LockRecover;
     use std::collections::HashMap;
     use std::os::windows::io::AsRawHandle;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -135,7 +137,7 @@ mod imp {
     pub fn cpu_percent(pids: &[u32]) -> Option<f64> {
         let now: HashMap<u32, u64> = pids.iter().filter_map(|p| cpu_time(*p).map(|t| (*p, t))).collect();
         let at = Instant::now();
-        let mut g = LAST_CPU.lock().unwrap();
+        let mut g = LAST_CPU.lock_recover();
         let out = g.as_ref().and_then(|(t0, before)| {
             let dt = at.duration_since(*t0).as_secs_f64();
             if dt < 0.5 {
@@ -156,7 +158,7 @@ mod imp {
     /// GPU use of these processes: the busiest engine type summed over them (what Task Manager shows), plus the same per adapter.
     pub fn gpu(pids: &[u32]) -> (Option<f64>, Vec<(String, f64)>) {
         use windows_sys::Win32::System::Performance::*;
-        let mut g = GPU_QUERY.lock().unwrap();
+        let mut g = GPU_QUERY.lock_recover();
         unsafe {
             let Some((q, c)) = *g else {
                 let mut q: isize = 0;
@@ -368,7 +370,7 @@ pub fn keep_awake(on: bool) -> bool {
     #[cfg(windows)]
     {
         use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
-        let mut g = AWAKE.lock().unwrap();
+        let mut g = AWAKE.lock_recover();
         // dropping the sender releases the thread, which clears the request on its way out
         *g = None;
         if on {
@@ -385,7 +387,7 @@ pub fn keep_awake(on: bool) -> bool {
     #[cfg(target_os = "macos")]
     {
         let _ = &AWAKE;
-        let mut g = CAFFEINATE.lock().unwrap();
+        let mut g = CAFFEINATE.lock_recover();
         if let Some(mut c) = g.take() {
             let _ = c.kill();
             let _ = c.wait();
@@ -398,7 +400,7 @@ pub fn keep_awake(on: bool) -> bool {
     #[cfg(target_os = "linux")]
     {
         let _ = &AWAKE;
-        let mut g = INHIBIT.lock().unwrap();
+        let mut g = INHIBIT.lock_recover();
         if let Some(mut c) = g.take() {
             let _ = c.kill();
             let _ = c.wait();

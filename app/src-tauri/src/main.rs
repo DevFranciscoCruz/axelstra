@@ -4,6 +4,7 @@
 //! The daemon owns terminals and orchestration, so closing this window loses nothing.
 
 use anyhow::{Context, Result};
+use axelstra_core::sync::LockRecover;
 use axelstra_daemon::client::{Client, Frame};
 use axelstra_daemon::proto;
 use serde_json::{json, Value};
@@ -87,7 +88,7 @@ fn connect() -> Result<Client> {
             return Ok(c);
         }
     }
-    anyhow::bail!("daemon did not start")
+    Err(axelstra_core::coded!("daemon.start_failed", "the daemon did not start"))
 }
 
 /// Starts `axelstra daemon` detached, so it outlives this window.
@@ -382,7 +383,7 @@ const RECONNECT_WAIT: Duration = Duration::from_secs(12);
 fn reconnect_into(slot: &Mutex<Option<Client>>) -> Result<()> {
     let deadline = std::time::Instant::now() + RECONNECT_WAIT;
     loop {
-        if slot.lock().unwrap().is_some() {
+        if slot.lock_recover().is_some() {
             return Ok(());
         }
         let gate = match RECONNECT.try_lock() {
@@ -392,11 +393,11 @@ fn reconnect_into(slot: &Mutex<Option<Client>>) -> Result<()> {
         };
         if let Some(_gate) = gate {
             // another caller may have finished while this one took the gate
-            if slot.lock().unwrap().is_some() {
+            if slot.lock_recover().is_some() {
                 return Ok(());
             }
             let c = reconnect()?;
-            *slot.lock().unwrap() = Some(c);
+            *slot.lock_recover() = Some(c);
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {
@@ -407,11 +408,11 @@ fn reconnect_into(slot: &Mutex<Option<Client>>) -> Result<()> {
 }
 
 fn with_client<T>(slot: &Mutex<Option<Client>>, retry: bool, f: impl Fn(&mut Client) -> Result<T>) -> Result<T> {
-    let mut g = slot.lock().unwrap();
+    let mut g = slot.lock_recover();
     if g.is_none() {
         drop(g);
         reconnect_into(slot)?;
-        g = slot.lock().unwrap();
+        g = slot.lock_recover();
     }
     let Some(c) = g.as_mut() else { return Err(axelstra_core::coded!("app.no_daemon", "no connection to the daemon")) };
     match f(c) {
@@ -426,7 +427,7 @@ fn with_client<T>(slot: &Mutex<Option<Client>>, retry: bool, f: impl Fn(&mut Cli
             drop(g);
             reconnect_into(slot)?;
             if retry || never_sent {
-                match slot.lock().unwrap().as_mut() {
+                match slot.lock_recover().as_mut() {
                     Some(c) => f(c),
                     None => Err(e),
                 }
@@ -816,7 +817,7 @@ fn input_sender(st: &Arc<State>, slot: u32) -> InputTx {
 #[tauri::command]
 fn session_write(state: tauri::State<'_, Arc<State>>, id: u32, data: String) -> Result<(), CallError> {
     // keystrokes only go to a session this window has open (attached), not to any id a page can guess
-    if !state.attachments.lock().unwrap().get(&id).is_some_and(|m| !m.is_empty()) {
+    if !state.attachments.lock_recover().get(&id).is_some_and(|m| !m.is_empty()) {
         return Err(host_err!("app.session_not_attached", "session {id} is not attached", id = id));
     }
     input_sender(state.inner(), hosts::split_gid(id).0).send((id, data.into_bytes())).map_err(|e| CallError::from(e.to_string()))
@@ -828,11 +829,11 @@ async fn session_attach(state: tauri::State<'_, Arc<State>>, id: u32, on_data: C
     static NEXT_TOKEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let token = NEXT_TOKEN.fetch_add(1, Ordering::SeqCst);
     let stop = Arc::new(AtomicBool::new(false));
-    state.attachments.lock().unwrap().entry(id).or_default().insert(token, stop.clone());
+    state.attachments.lock_recover().entry(id).or_default().insert(token, stop.clone());
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<u64, CallError> {
         let forget = || {
-            if let Some(m) = st.attachments.lock().unwrap().get_mut(&id) {
+            if let Some(m) = st.attachments.lock_recover().get_mut(&id) {
                 m.remove(&token);
             }
         };
@@ -899,7 +900,7 @@ async fn watch_start(
         let c = connect().map_err(|e| CallError::from(&e))?;
         let mut rd = c.try_clone().map_err(|e| CallError::from(&e))?;
         {
-            let mut w = st.watch.lock().unwrap();
+            let mut w = st.watch.lock_recover();
             if st.watch_gen.load(Ordering::SeqCst) != gen {
                 return Ok(());
             }
@@ -935,7 +936,7 @@ async fn watch_start(
 async fn watch_set(state: tauri::State<'_, Arc<State>>, worktree: Option<String>) -> Result<(), CallError> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<(), CallError> {
-        let mut g = st.watch.lock().unwrap();
+        let mut g = st.watch.lock_recover();
         let c = g.as_mut().ok_or("watch not started")?;
         // a remote worktree is watched by that host's daemon; this machine's one then watches nothing
         match hosts::watch_target(worktree.as_deref()).map_err(|e| CallError::from(&e))? {
@@ -951,7 +952,7 @@ async fn watch_set(state: tauri::State<'_, Arc<State>>, worktree: Option<String>
 #[tauri::command]
 /// Stops the attach `token` returned by `session_attach`; without a token, every attach of the session.
 fn session_detach(state: tauri::State<'_, Arc<State>>, id: u32, token: Option<u64>) {
-    let mut g = state.attachments.lock().unwrap();
+    let mut g = state.attachments.lock_recover();
     let Some(m) = g.get_mut(&id) else { return };
     match token {
         Some(t) => {
@@ -1118,10 +1119,15 @@ fn log_frontend_error(kind: String, message: String, stack: Option<String>) {
     logging::log_frontend(&kind, &message, stack.as_deref().unwrap_or(""));
 }
 
+/// Where pasted clipboard images go: a folder of the per-user data dir (never the shared temp dir, where another
+/// local user could plant links), private to the user on Unix.
+fn paste_dir() -> std::path::PathBuf {
+    proto::data_dir().join("paste")
+}
+
 /// Deletes pasted clipboard images older than a day.
 fn clean_pastes() {
-    let dir = std::env::temp_dir().join("axelstra-paste");
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(paste_dir()) else { return };
     let cutoff = Duration::from_secs(24 * 3600);
     for e in rd.flatten() {
         let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|age| age > cutoff).unwrap_or(false);
@@ -1129,6 +1135,29 @@ fn clean_pastes() {
             let _ = std::fs::remove_file(e.path());
         }
     }
+}
+
+/// A hard-to-guess file stem: the std hasher is randomly keyed per instance, mixed with the clock and process id.
+fn random_stem() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    let ns = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    h.write_u128(ns);
+    h.write_u32(std::process::id());
+    format!("paste-{:016x}", h.finish())
+}
+
+/// Creates a new PNG file in the paste dir; `create_new` refuses an existing name or a planted link.
+fn create_paste_file(dir: &std::path::Path) -> Result<(std::fs::File, std::path::PathBuf), CallError> {
+    for _ in 0..8 {
+        let path = dir.join(format!("{}.png", random_stem()));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(f) => return Ok((f, path)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(CallError::from(e.to_string())),
+        }
+    }
+    Err(CallError::from("could not create a paste file".to_string()))
 }
 
 /// The terminal to start: this machine's, or (with `host`) the login shell of that remote host.
@@ -1165,16 +1194,19 @@ struct UpdateInfo {
 }
 
 /// Native clipboard: WebView2 gates `navigator.clipboard` behind a permission prompt.
-/// Images are saved as PNG in the temp dir and returned as a path to type into the terminal.
+/// Images are saved as PNG in the user's data dir and returned as a path to type into the terminal.
 #[tauri::command]
 fn clipboard_read() -> Result<Value, CallError> {
     let mut cb = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     if let Ok(img) = cb.get_image() {
-        let dir = std::env::temp_dir().join("axelstra-paste");
+        let dir = paste_dir();
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-        let path = dir.join(format!("paste-{ts}.png"));
-        let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
+        let (file, path) = create_paste_file(&dir)?;
         let mut enc = png::Encoder::new(std::io::BufWriter::new(file), img.width as u32, img.height as u32);
         enc.set_color(png::ColorType::Rgba);
         enc.set_depth(png::BitDepth::Eight);
@@ -1249,7 +1281,7 @@ async fn update_check(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, CallE
 #[tauri::command]
 async fn update_download(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>, expected: String) -> Result<(), CallError> {
     use tauri_plugin_updater::UpdaterExt;
-    if let Some((u, _)) = state.pending.lock().unwrap().as_ref() {
+    if let Some((u, _)) = state.pending.lock_recover().as_ref() {
         if u.version == expected {
             return Ok(());
         }
@@ -1267,7 +1299,7 @@ async fn update_download(app: tauri::AppHandle, state: tauri::State<'_, Arc<Stat
         .download(|_, _| {}, || {})
         .await
         .map_err(|_| host_err!("app.update_download_failed", "download or signature check failed"))?;
-    *state.pending.lock().unwrap() = Some((update, bytes));
+    *state.pending.lock_recover() = Some((update, bytes));
     Ok(())
 }
 
@@ -1275,7 +1307,7 @@ async fn update_download(app: tauri::AppHandle, state: tauri::State<'_, Arc<Stat
 /// instead of killing it, so terminals and agents keep running through the update.
 #[tauri::command]
 fn update_apply(app: tauri::AppHandle, state: tauri::State<'_, Arc<State>>) -> Result<(), CallError> {
-    let (update, bytes) = state.pending.lock().unwrap().take().ok_or("no update downloaded")?;
+    let (update, bytes) = state.pending.lock_recover().take().ok_or("no update downloaded")?;
     update.restart_after_install(true).install(bytes).map_err(|_| "install failed".to_string())?;
     app.restart();
 }
@@ -1433,7 +1465,7 @@ fn main() {
             // a downloaded update is installed when the window is closed, without relaunching the app
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let state = app.state::<Arc<State>>();
-                let pending = state.pending.lock().unwrap().take();
+                let pending = state.pending.lock_recover().take();
                 if let Some((update, bytes)) = pending {
                     let _ = update.restart_after_install(false).install(bytes);
                 }

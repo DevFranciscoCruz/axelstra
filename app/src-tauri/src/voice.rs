@@ -1,5 +1,6 @@
 //! Local speech to text: Whisper (base, int8) through sherpa-onnx. Audio never leaves the machine.
 //! The webview records 16 kHz mono PCM and sends it as raw little-endian i16 bytes.
+use axelstra_core::sync::LockRecover;
 use serde::Serialize;
 use sha2::Digest;
 use sherpa_rs::whisper::{WhisperConfig, WhisperRecognizer};
@@ -131,8 +132,8 @@ pub async fn voice_transcribe(app: AppHandle, request: Request<'_>) -> Result<St
     let dir = model_dir(&app)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let voice = app.state::<Voice>();
-        let mut rec = voice.rec.lock().unwrap();
-        let mut cur = voice.lang.lock().unwrap();
+        let mut rec = voice.rec.lock_recover();
+        let mut cur = voice.lang.lock_recover();
         if rec.is_none() || *cur != lang {
             if !installed(&dir) {
                 return Err("voice model not installed".into());
