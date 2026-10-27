@@ -3,7 +3,7 @@
 //! on every start) is checked by the daemon before any of this code runs, and every call of an agent is audited, so
 //! nothing depends on the CLI behaving. Windows uses the Win32 API directly, macOS the system tools.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use base64::Engine;
 use serde_json::{json, Value};
 
@@ -76,7 +76,7 @@ pub fn call(method: &str, p: &Value) -> Result<Value> {
             sys::focus(window_arg(p).ok_or_else(|| axelstra_core::coded!("computer.window_required", "window is required"))?)?;
             Ok(json!({}))
         }
-        _ => bail!("unknown method {method}"),
+        _ => Err(crate::server::unknown_method(method)),
     }
 }
 

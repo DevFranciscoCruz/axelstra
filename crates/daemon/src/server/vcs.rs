@@ -21,7 +21,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "git.diff" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
-            let path = p["path"].as_str().ok_or_else(|| anyhow::anyhow!("missing path"))?;
+            let path = p["path"].as_str().ok_or_else(|| missing("path"))?;
             let base = p["base"].as_str();
             let text = tokio::task::block_in_place(|| crate::changes::diff(&wt, path, base))?;
             Ok(json!({"diff": text}))
@@ -79,15 +79,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "gh.comments" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let n = p["number"].as_u64().ok_or_else(|| anyhow::anyhow!("missing number"))?;
+            let n = p["number"].as_u64().ok_or_else(|| missing("number"))?;
             let (comments, reviews) = tokio::task::block_in_place(|| crate::gh::review_comments(std::path::Path::new(&pr.path), n))?;
             Ok(json!({"comments": comments, "reviews": reviews}))
         }
         "gh.send_comment" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
-            let n = p["number"].as_u64().ok_or_else(|| anyhow::anyhow!("missing number"))?;
-            let id = p["comment_id"].as_u64().ok_or_else(|| anyhow::anyhow!("missing comment_id"))?;
+            let n = p["number"].as_u64().ok_or_else(|| missing("number"))?;
+            let id = p["comment_id"].as_u64().ok_or_else(|| missing("comment_id"))?;
             // the lead is looked up first: no point asking GitHub when nobody can take the task
             let dry = p["dry_run"].as_bool() == Some(true);
             let lead = find_lead(reg, &wt.to_string_lossy());
@@ -103,7 +103,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             reg.deliver_untrusted(lead, target, &crate::msgbus::notice(&m, crate::prompts::REVIEW_SENDER));
             Ok(json!({"text": text, "sent": true, "session": lead, "message": m.id}))
         }
-        m => anyhow::bail!("unknown method {m}"),
+        m => Err(unknown_method(m)),
     }
 }
 

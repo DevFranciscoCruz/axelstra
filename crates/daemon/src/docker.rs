@@ -1,7 +1,7 @@
 //! A small Docker Desktop on top of the `docker` CLI. Every call is a fixed argument list (never a shell), has a timeout,
 //! and every id, name and image reference is checked before it reaches the command line.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use axelstra_core::pty::Spawn;
 use axelstra_core::{coded, msg};
 use serde::Serialize;
@@ -681,7 +681,7 @@ pub fn call(store: &Path, method: &str, p: &Value) -> Result<Value> {
         "docker.images" => json!({"images": images()?}),
         "docker.volumes" => json!({"volumes": volumes()?}),
         "docker.action" => {
-            let a = p["action"].as_str().ok_or_else(|| anyhow::anyhow!("missing action"))?;
+            let a = p["action"].as_str().ok_or_else(|| crate::server::missing("action"))?;
             let wt = if a.starts_with("compose.") { Some(worktree(p)?) } else { None };
             let output = action(
                 a,
@@ -692,7 +692,7 @@ pub fn call(store: &Path, method: &str, p: &Value) -> Result<Value> {
             )?;
             json!({"output": output})
         }
-        _ => bail!("unknown method {method}"),
+        _ => return Err(crate::server::unknown_method(method)),
     })
 }
 

@@ -29,7 +29,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     "fs.read" => serde_json::to_value(fsops::read(&wt, path)?)?,
                     "fs.stat" => json!({"hash": fsops::stat_hash(&wt, path)?}),
                     _ => {
-                        let text = p["text"].as_str().ok_or_else(|| anyhow::anyhow!("missing text"))?;
+                        let text = p["text"].as_str().ok_or_else(|| missing("text"))?;
                         let eol = p["eol"].as_str().unwrap_or("lf");
                         let bom = p["bom"].as_bool().unwrap_or(false);
                         match fsops::write(&wt, path, text, eol, bom, p["base_hash"].as_str())? {
@@ -143,6 +143,6 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             res?;
             Ok(json!({"path": info.path}))
         }
-        m => anyhow::bail!("unknown method {m}"),
+        m => Err(unknown_method(m)),
     }
 }

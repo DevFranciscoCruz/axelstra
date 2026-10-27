@@ -43,7 +43,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "project.clone_cancel" => tokio::task::block_in_place(|| clone_cancel(p["id"].as_str().ok_or_else(|| missing("id"))?)),
         "project.init" => tokio::task::block_in_place(|| init(reg, p)),
         "gh.repos" => tokio::task::block_in_place(|| gh_repos(p)),
-        m => anyhow::bail!("unknown method {m}"),
+        m => Err(unknown_method(m)),
     }
 }
 

@@ -965,6 +965,11 @@ pub(crate) fn missing(name: &str) -> anyhow::Error {
     axelstra_core::coded!("rpc.missing_param", "missing {name}", name = name)
 }
 
+/// The error of a request for a method this daemon does not have (the English text is what older callers look for).
+pub(crate) fn unknown_method(method: &str) -> anyhow::Error {
+    axelstra_core::coded!("rpc.unknown_method", "unknown method {method}", method = method)
+}
+
 /// Copies the keys of a `settings.set` patch that are present into `saved`, rejecting invalid values.
 pub(crate) fn apply_ui_settings(saved: &mut Value, p: &Value) -> Result<()> {
     if let Some(s) = p["shell"].as_str() {
@@ -2271,7 +2276,7 @@ fn dispatch_call(c: &mut Ctx) -> Result<Value> {
         "msg" | "notes" => messaging::call(c),
         "agent" | "agents" | "codex" | "computer" | "settings" | "flow" | "app" | "hooks" | "ping" | "audit" | "notices" | "daemon"
         | "hello" | "backup" | "env" | "budget" | "workspace" | "host" => misc::call(c),
-        _ => anyhow::bail!("unknown method {}", req.method),
+        _ => Err(unknown_method(&req.method)),
     }
 }
 

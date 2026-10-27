@@ -334,7 +334,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             });
             Ok(json!({}))
         }
-        m => anyhow::bail!("unknown method {m}"),
+        m => Err(unknown_method(m)),
     }
 }
 

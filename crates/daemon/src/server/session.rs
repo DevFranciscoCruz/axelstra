@@ -427,7 +427,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let (mem, cpu) = session()?.job_usage();
             Ok(json!({"peak_mem_bytes": mem, "cpu_100ns": cpu}))
         }
-        m => anyhow::bail!("unknown method {m}"),
+        m => Err(unknown_method(m)),
     }
 }
 

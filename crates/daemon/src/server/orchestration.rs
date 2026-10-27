@@ -197,6 +197,6 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             reg.auto_wake.notify_one();
             res
         }
-        m => anyhow::bail!("unknown method {m}"),
+        m => Err(unknown_method(m)),
     }
 }

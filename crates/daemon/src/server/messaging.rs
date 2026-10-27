@@ -110,6 +110,6 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let id = p["id"].as_u64().ok_or_else(|| missing("id"))?;
             Ok(json!({"reply": reg.bus.reply_to(id), "original": reg.bus.get(id)}))
         }
-        m => anyhow::bail!("unknown method {m}"),
+        m => Err(unknown_method(m)),
     }
 }

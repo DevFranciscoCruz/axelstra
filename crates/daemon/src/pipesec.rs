@@ -90,7 +90,11 @@ pub fn verify_server_owner(pipe: &std::fs::File) -> Result<()> {
         CloseHandle(token);
         let (theirs, mine) = (theirs?, current_user_sid()?);
         if theirs != mine {
-            bail!("the pipe is served by another user ({theirs}); refusing to send the token");
+            return Err(axelstra_core::coded!(
+                "pipe.foreign_owner",
+                "the pipe is served by another user ({sid}); refusing to send the token",
+                sid = theirs
+            ));
         }
         Ok(())
     }

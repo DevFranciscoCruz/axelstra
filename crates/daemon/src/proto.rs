@@ -140,7 +140,7 @@ pub fn default_data_dir() -> anyhow::Result<std::path::PathBuf> {
     } else {
         var("XDG_DATA_HOME").or_else(|| home().map(|h| h.join(".local").join("share")))
     };
-    base.map(|b| b.join("axelstra")).ok_or_else(|| anyhow::anyhow!("no per-user data directory (LOCALAPPDATA / HOME is not set)"))
+    base.map(|b| b.join("axelstra")).ok_or_else(|| axelstra_core::coded!("daemon.no_data_dir", "no per-user data directory (LOCALAPPDATA / HOME is not set)"))
 }
 
 /// Per-user private state (token, project list, socket). Reads that cannot name a directory get the temp dir (never

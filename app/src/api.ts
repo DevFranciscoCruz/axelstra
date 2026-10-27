@@ -67,7 +67,8 @@ export const callBg = <T = unknown>(method: string, params: Record<string, unkno
   guard(method, invoke<T>("daemon_call_bg", { method, params }));
 
 /** true when the running daemon is older than the app and lacks `method` */
-export const isUnknownMethod = (e: unknown) => /unknown method/i.test(e instanceof Error ? e.message : String(e));
+export const isUnknownMethod = (e: unknown) =>
+  (e instanceof AppError && e.code === "rpc.unknown_method") || /unknown method/i.test(e instanceof Error ? e.message : String(e));
 /** `call` that answers `fallback` instead of failing when the daemon does not know the method yet */
 export const callOr = <T>(method: string, params: Record<string, unknown>, fallback: T): Promise<T> =>
   call<T>(method, params).catch((e) => (isUnknownMethod(e) ? fallback : Promise.reject(e)));

@@ -59,9 +59,12 @@ export const pt = {
   "rpc.agent_forbidden": "{method} não é permitido a agentes: é o utilizador que o faz na app.",
   "rpc.agent_own_session": "{method} só é permitido para a sessão do próprio agente.",
   "rpc.agent_own_tree": "{method} só é permitido para a sessão do próprio agente e as sessões que ele iniciou.",
+  "rpc.unknown_method": "O daemon não conhece o método {method}.",
   "daemon.already_running": "Já há outro daemon à escuta em {path}.",
   "daemon.internal_error": "Erro interno do daemon em {method} (vê o crash.log).",
   "daemon.no_home": "Não há pasta pessoal.",
+  "daemon.no_data_dir": "Não há pasta de dados por utilizador (LOCALAPPDATA / HOME não está definido).",
+  "pipe.foreign_owner": "O pipe é servido por outro utilizador ({sid}); o token não será enviado.",
   "daemon.no_id": "O daemon não devolveu nenhum id.",
 
   // screen control
@@ -138,9 +141,12 @@ export const en: Widen<typeof pt> = {
   "rpc.agent_forbidden": "{method} is not allowed to agents: the user does it in the app.",
   "rpc.agent_own_session": "{method} is only allowed for the agent's own session.",
   "rpc.agent_own_tree": "{method} is only allowed for the agent's own session and the sessions it started.",
+  "rpc.unknown_method": "The daemon does not know the method {method}.",
   "daemon.already_running": "Another daemon is already listening on {path}.",
   "daemon.internal_error": "Internal daemon error in {method} (see crash.log).",
   "daemon.no_home": "There is no home directory.",
+  "daemon.no_data_dir": "There is no per-user data folder (LOCALAPPDATA / HOME is not set).",
+  "pipe.foreign_owner": "The pipe is served by another user ({sid}); the token will not be sent.",
   "daemon.no_id": "The daemon returned no id.",
 
   "computer.off":
@@ -217,9 +223,12 @@ export const ptBR: Widen<typeof pt> = {
   "rpc.agent_forbidden": "{method} não é permitido a agentes: é o usuário que faz isso no app.",
   "rpc.agent_own_session": "{method} só é permitido para a sessão do próprio agente.",
   "rpc.agent_own_tree": "{method} só é permitido para a sessão do próprio agente e para as sessões que ele iniciou.",
+  "rpc.unknown_method": "O daemon não conhece o método {method}.",
   "daemon.already_running": "Já existe outro daemon escutando em {path}.",
   "daemon.internal_error": "Erro interno do daemon em {method} (veja o crash.log).",
   "daemon.no_home": "Não há pasta pessoal.",
+  "daemon.no_data_dir": "Não há pasta de dados por usuário (LOCALAPPDATA / HOME não está definido).",
+  "pipe.foreign_owner": "O pipe é servido por outro usuário ({sid}); o token não será enviado.",
   "daemon.no_id": "O daemon não devolveu nenhum id.",
 
   "computer.off":

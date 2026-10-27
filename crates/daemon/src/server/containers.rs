@@ -12,6 +12,6 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         | "docker.inspect" | "docker.logs" | "docker.fs_list" | "docker.fs_read" | "docker.action" => {
             tokio::task::block_in_place(|| crate::docker::call(&reg.store, &req.method, p))
         }
-        m => anyhow::bail!("unknown method {m}"),
+        m => Err(unknown_method(m)),
     }
 }

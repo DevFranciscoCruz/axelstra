@@ -168,6 +168,6 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             trig::save(&path, &all)?;
             Ok(out)
         }
-        m => anyhow::bail!("unknown method {m}"),
+        m => Err(unknown_method(m)),
     }
 }
