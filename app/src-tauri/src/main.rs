@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::Manager;
 
@@ -66,34 +66,55 @@ async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, par
 fn connect() -> Result<Client> {
     let token = proto::load_or_create_token()?;
     let pipe = proto::pipe_name();
-    if let Ok(mut c) = Client::connect(&pipe, &token) {
+    if let Ok(c) = Client::connect(&pipe, &token) {
         if c.proto >= proto::PROTO && c.security >= proto::SECURITY_MIN {
             return Ok(c);
         }
         // A daemon from before an update keeps running (so terminals and agents survive it). One that
         // is too old for this app, or older than the oldest one with the current security fixes (it reports
         // no `security` at all before they existed), is replaced; its terminals come back through session restore.
-        let _ = c.call("daemon.shutdown", json!({}));
-        drop(c);
-        for _ in 0..40 {
-            std::thread::sleep(Duration::from_millis(100));
-            if Client::connect(&pipe, &token).is_err() {
-                break;
-            }
-        }
+        wait_daemon_gone(c, &pipe, &token, Duration::from_secs(4));
     }
-    start_daemon()?;
-    for _ in 0..40 {
-        std::thread::sleep(Duration::from_millis(100));
+    let mut child = start_daemon()?;
+    // no event announces a named pipe (or socket) appearing: bounded backoff, ended early by the daemon process dying
+    let mut nap = Duration::from_millis(10);
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while Instant::now() < deadline {
         if let Ok(c) = Client::connect(&pipe, &token) {
             return Ok(c);
         }
+        // the launched process ended: it handed over to a daemon that already runs or failed; one last look, no more waiting
+        if child.try_wait().ok().flatten().is_some() {
+            return Client::connect(&pipe, &token)
+                .map_err(|_| axelstra_core::coded!("daemon.start_failed", "the daemon did not start"));
+        }
+        std::thread::sleep(nap);
+        nap = (nap * 2).min(Duration::from_millis(200));
     }
     Err(axelstra_core::coded!("daemon.start_failed", "the daemon did not start"))
 }
 
+/// After `daemon.shutdown`, waits for the daemon to be gone. The event is the daemon closing our connection when its
+/// process ends (a thread blocks on the read; `limit` only bounds a daemon that hangs). If something still answers on
+/// the pipe afterwards (another daemon took over), a bounded backoff looks again until `limit`.
+fn wait_daemon_gone(mut c: Client, pipe: &str, token: &str, limit: Duration) {
+    let _ = c.call("daemon.shutdown", json!({}));
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        while c.read().is_ok() {}
+        let _ = tx.send(());
+    });
+    let end = Instant::now() + limit;
+    let _ = rx.recv_timeout(limit);
+    let mut nap = Duration::from_millis(10);
+    while Client::connect(pipe, token).is_ok() && Instant::now() < end {
+        std::thread::sleep(nap);
+        nap = (nap * 2).min(Duration::from_millis(200));
+    }
+}
+
 /// Starts `axelstra daemon` detached, so it outlives this window.
-fn start_daemon() -> Result<()> {
+fn start_daemon() -> Result<std::process::Child> {
     let name = if cfg!(windows) { "axelstra.exe" } else { "axelstra" };
     let beside = std::env::current_exe()?.with_file_name(name);
     // never `axelstra` from PATH in a release: whatever sits first on PATH would run as the daemon, holding the token
@@ -113,8 +134,7 @@ fn start_daemon() -> Result<()> {
         // own process group: closing the app (or its terminal) does not signal the daemon
         cmd.process_group(0);
     }
-    cmd.spawn().context("start axelstra daemon (build it with `cargo build -p axelstra`)")?;
-    Ok(())
+    cmd.spawn().context("start axelstra daemon (build it with `cargo build -p axelstra`)")
 }
 
 static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
@@ -218,6 +238,7 @@ const ALLOWED_METHODS: &[&str] = &[
     "fs.stat",
     "fs.write",
     "gh.comments",
+    "gh.pr_refresh",
     "gh.list",
     "gh.repos",
     "gh.send_comment",
@@ -1028,15 +1049,8 @@ async fn app_quit(app: tauri::AppHandle, keep: Option<bool>) {
         let _ = tauri::async_runtime::spawn_blocking(|| {
             if let Ok(token) = proto::load_or_create_token() {
                 let pipe = proto::pipe_name();
-                if let Ok(mut c) = Client::connect(&pipe, &token) {
-                    let _ = c.call("daemon.shutdown", json!({}));
-                    drop(c);
-                    for _ in 0..30 {
-                        std::thread::sleep(Duration::from_millis(100));
-                        if Client::connect(&pipe, &token).is_err() {
-                            break;
-                        }
-                    }
+                if let Ok(c) = Client::connect(&pipe, &token) {
+                    wait_daemon_gone(c, &pipe, &token, Duration::from_secs(3));
                 }
             }
         })

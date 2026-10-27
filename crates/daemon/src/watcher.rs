@@ -13,7 +13,7 @@ use notify::{RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Flush quickly when files in the worktree changed: latency matters.
@@ -39,8 +39,25 @@ pub enum Kind {
 const MAX_WATCHES: usize = 10_000;
 /// Events queued between the OS callback and the debouncing thread; a burst past it is folded into one "something changed".
 const QUEUE: usize = 4096;
-/// How often an idle watcher checks whether it was told to stop (nothing else wakes it).
-const STOP_CHECK: Duration = Duration::from_secs(5);
+type Waker = (Arc<AtomicBool>, mpsc::SyncSender<notify::Event>);
+
+/// Running watchers: their stop flag and the channel that wakes their thread. `wake_stopped` wakes the ones whose
+/// flag was set, so an idle watcher ends at once instead of looking at the flag on a timer.
+fn wakers() -> &'static Mutex<Vec<Waker>> {
+    static W: OnceLock<Mutex<Vec<Waker>>> = OnceLock::new();
+    W.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Call after setting a watcher's stop flag: every watcher whose flag is set wakes up, sees it and ends.
+pub fn wake_stopped() {
+    let list = wakers().lock().unwrap_or_else(|e| e.into_inner());
+    for (flag, tx) in list.iter() {
+        if flag.load(Ordering::SeqCst) {
+            // a full queue means the thread has events to read and checks the flag on its way
+            let _ = tx.try_send(notify::Event::new(notify::EventKind::Other));
+        }
+    }
+}
 
 /// The `.gitignore` files of a worktree, each applied to its own folder and below, as git does, plus
 /// `.git/info/exclude` for the root. Loaded lazily and kept until a `.gitignore` changes.
@@ -159,7 +176,7 @@ fn git_dir(root: &Path) -> Result<PathBuf> {
 }
 
 /// Starts watching `root`; `emit` runs (on the watcher thread) once per debounced batch.
-/// The thread ends when `stop` is set.
+/// The thread ends when `stop` is set and `wake_stopped()` is called (it sleeps until the OS reports something).
 pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'static) -> Result<()> {
     // FSEvents reports real paths (`/private/var/...` for a `/var/...` folder), so events would never sit under a
     // symlinked root; Windows keeps its path as given (canonicalize would add the `\?\` prefix)
@@ -172,6 +189,7 @@ pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'sta
 
     // bounded: a runaway writer cannot grow the queue without limit; what does not fit is remembered as one flag
     let (tx, rx) = mpsc::sync_channel(QUEUE);
+    let wake_tx = tx.clone();
     let overflow = Arc::new(AtomicBool::new(false));
     let of = overflow.clone();
     let mut w = notify::recommended_watcher(move |ev: notify::Result<notify::Event>| match ev {
@@ -208,17 +226,28 @@ pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'sta
         }
     }
 
+    wakers().lock().unwrap_or_else(|e| e.into_inner()).push((stop.clone(), wake_tx));
     std::thread::spawn(move || {
         let mut w = w; // the watcher lives as long as this thread
         let mut due: Option<Instant> = None;
+        // leaves the list of wakers however the thread ends
+        struct Unlist(Arc<AtomicBool>);
+        impl Drop for Unlist {
+            fn drop(&mut self) {
+                wakers().lock().unwrap_or_else(|e| e.into_inner()).retain(|(f, _)| !Arc::ptr_eq(f, &self.0));
+            }
+        }
+        let _unlist = Unlist(stop.clone());
         loop {
             if stop.load(Ordering::SeqCst) {
                 return;
             }
-            // asleep until the OS reports a change or the flush is due; `stop` has no wake-up of its own, so an idle
-            // watcher looks at it every STOP_CHECK
-            let wait = due.map(|d| d.saturating_duration_since(Instant::now())).unwrap_or(STOP_CHECK);
-            match rx.recv_timeout(wait.min(STOP_CHECK)) {
+            // asleep until the OS reports a change, the flush is due, or `wake_stopped` says to stop: no timer
+            let received = match due {
+                Some(d) => rx.recv_timeout(d.saturating_duration_since(Instant::now())),
+                None => rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+            };
+            match received {
                 Ok(ev) => {
                     if matches!(ev.kind, notify::EventKind::Access(_)) {
                         continue;
@@ -394,8 +423,21 @@ mod tests {
         settle(800);
         put(&d.join("src/new/f.rs"), "x");
         assert!(wait_for(3), "a file inside the new folder");
+        let listed = || wakers().lock().unwrap().iter().any(|(f, _)| Arc::ptr_eq(f, &stop));
+        assert!(listed());
         stop.store(true, Ordering::SeqCst);
-        settle(700);
+        wake_stopped();
+        assert!(wait_until(|| !listed()), "an idle watcher must end when woken, without a timer");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    fn wait_until(f: impl Fn() -> bool) -> bool {
+        for _ in 0..100 {
+            if f() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
     }
 }

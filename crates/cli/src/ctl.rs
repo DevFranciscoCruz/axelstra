@@ -179,13 +179,11 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
                     }
                 }
             });
-            // the snapshot is the first frame; keep taking frames until the stream goes quiet
-            let mut raw = Vec::new();
+                        let mut raw = Vec::new();
+            // the snapshot is the first frame and holds the whole replay, so there is no quiet window to wait out: take it and
+            // stop; the limit only covers a session that has printed nothing (then no frame comes at all)
             if let Ok(d) = rx.recv_timeout(Duration::from_millis(1500)) {
                 raw.extend(d);
-                while let Ok(d) = rx.recv_timeout(Duration::from_millis(150)) {
-                    raw.extend(d);
-                }
             }
             let text = strip_ansi(&String::from_utf8_lossy(&raw));
             let all: Vec<&str> = text.lines().map(str::trim_end).collect();

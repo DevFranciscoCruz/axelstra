@@ -46,6 +46,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             if let Some(old) = subs.remove(&u32::MAX) {
                 old.store(true, Ordering::SeqCst);
+                crate::watcher::wake_stopped();
             }
             let stop = Arc::new(AtomicBool::new(false));
             let (tx2, path) = (tx.clone(), wt.to_string_lossy().to_string());
@@ -70,6 +71,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             ensure_session_notifier(reg, tx, subs);
             if let Some(old) = subs.remove(&u32::MAX) {
                 old.store(true, Ordering::SeqCst);
+                crate::watcher::wake_stopped();
             }
             Ok(json!({}))
         }

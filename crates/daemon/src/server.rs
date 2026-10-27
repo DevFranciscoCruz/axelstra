@@ -671,6 +671,7 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
             stop.store(true, Ordering::SeqCst);
         }
     });
+        crate::watcher::wake_stopped();
 }
 
 /// Lets a watching client hear when the state of any session changed (started, exited, went quiet, escalated, got a

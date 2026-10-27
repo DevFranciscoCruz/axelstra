@@ -107,9 +107,24 @@ struct Shared {
     generation: AtomicU64,
     screens: Mutex<Vec<ScreenCache>>,
     wake: Mutex<Option<WakeHook>>,
+    /// wakes `wait_eof` when the output stream ends
+    eof_cv: (Mutex<()>, std::sync::Condvar),
 }
 
 impl Shared {
+    fn set_eof(&self) {
+        self.eof.store(true, Ordering::SeqCst);
+        let _g = self.eof_cv.0.lock_recover();
+        self.eof_cv.1.notify_all();
+    }
+
+    fn wait_eof(&self) {
+        let mut g = self.eof_cv.0.lock_recover();
+        while !self.eof.load(Ordering::SeqCst) {
+            g = self.eof_cv.1.wait(g).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
     fn new() -> Shared {
         Shared {
             ring: Mutex::new(Ring { buf: VecDeque::new(), subs: Vec::new(), esc: EscTracker::new() }),
@@ -119,6 +134,7 @@ impl Shared {
             generation: AtomicU64::new(0),
             screens: Mutex::new(Vec::new()),
             wake: Mutex::new(None),
+            eof_cv: (Mutex::new(()), std::sync::Condvar::new()),
         }
     }
 
@@ -360,7 +376,7 @@ impl Session {
                 sh.publish(&rest);
             }
             let mut r = sh.ring.lock_recover();
-            sh.eof.store(true, Ordering::SeqCst);
+            sh.set_eof();
             // dropping the senders tells subscribers the stream ended
             r.subs.clear();
         });
@@ -400,7 +416,7 @@ impl Session {
     /// when the pipe closes.
     pub fn end_stream(&self) {
         let mut r = self.shared.ring.lock_recover();
-        self.shared.eof.store(true, Ordering::SeqCst);
+        self.shared.set_eof();
         r.subs.clear();
     }
 
@@ -462,8 +478,13 @@ impl Session {
                 }
             }
         }
+        // no pid and no handle: the end of the output stream is the signal (the reader thread sets it when the pipe
+        // closes); only if the program closed it without exiting do we back off, bounded, instead of a fixed poll
+        self.shared.wait_eof();
+        let mut delay = std::time::Duration::from_millis(50);
         while self.try_wait().is_none() {
-            std::thread::sleep(std::time::Duration::from_secs(1));
+            std::thread::sleep(delay);
+            delay = (delay * 2).min(std::time::Duration::from_secs(5));
         }
     }
 
