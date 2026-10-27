@@ -76,7 +76,7 @@ fn an_agent_drives_only_its_own_session_tree() {
 
     // `b` reaches neither its parent nor a stranger: no stream, no kill, no remove
     for target in [a, c] {
-        for m in ["session.subscribe", "session.kill", "session.remove"] {
+        for m in ["session.subscribe", "session.screen", "session.kill", "session.remove"] {
             let e = agent_b.call(m, json!({"id": target})).unwrap_err().to_string();
             assert!(e.contains("only allowed for the agent's own session"), "{m} {target}: {e}");
         }
@@ -96,6 +96,8 @@ fn an_agent_drives_only_its_own_session_tree() {
     assert!(!screen(&mut app, a).contains("HOSTILE_KEYS_2"), "a worker typed into its parent");
     // the lead may stream and close its worker; it may not close a stranger
     agent_a.call("session.subscribe", json!({"id": b})).unwrap();
+    assert!(agent_a.call("session.screen", json!({"id": b})).is_ok());
+    assert!(agent_a.call("session.screen", json!({"id": a})).is_ok());
     assert!(agent_a.call("session.kill", json!({"id": c})).is_err());
     agent_a.call("session.kill", json!({"id": b})).unwrap();
     // the user's own connection is not limited

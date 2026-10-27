@@ -50,7 +50,7 @@ whose process knows the master token and tries the app-only calls; `computer_act
 
 ## Migration and compatibility
 
-- `SECURITY_MIN` is 2. An app that finds a daemon reporting less (an older release, still running) shuts it down and
+- `SECURITY_MIN` is 3. An app that finds a daemon reporting less (an older release, still running) shuts it down and
   starts the current one; its sessions come back through session restore. That is the one-off cost of the update, and
   the reason an old daemon is never kept: it would trust anything holding the token file.
 - Old app / old CLI against a new daemon: they send the same `hello`; the only difference is the role of processes

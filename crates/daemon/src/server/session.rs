@@ -405,6 +405,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         // the last lines as the terminal shows them (replayed through an emulator), for `axelstra read` and flow reports
         "session.screen" => {
             let s = session()?;
+            own_tree(sid()?)?;
             let n = p["lines"].as_u64().unwrap_or(40).clamp(1, 500) as usize;
             Ok(json!({"lines": tokio::task::block_in_place(|| s.screen_lines(n))}))
         }
