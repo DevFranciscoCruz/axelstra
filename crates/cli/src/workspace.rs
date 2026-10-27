@@ -95,6 +95,22 @@ fn render(pv: &Value) -> String {
     if risky > 0 {
         out.push_str(&format!("warning: {risky} card(s) run with permission checks off or with an acceptance command\n"));
     }
+    if let Some(list) = pv["risky_automations"].as_array().filter(|l| !l.is_empty()) {
+        out.push_str(&format!(
+            "warning: {} automation(s) would run an agent with these prompts (they arrive disabled):
+",
+            list.len()
+        ));
+        for a in list {
+            out.push_str(&format!(
+                "  automation {} (agent {}): {}
+",
+                a["name"].as_str().unwrap_or("?"),
+                a["agent"].as_str().unwrap_or("?"),
+                a["prompt"].as_str().unwrap_or("?")
+            ));
+        }
+    }
     out
 }
 
@@ -190,13 +206,15 @@ mod tests {
             "automations": {"new": [], "present": [], "conflict": [], "skipped": [], "local_only": 0},
             "settings": {"new": ["terse"], "present": [], "conflict": [], "skipped": [], "local_only": 0},
             "cards": {"new": [], "present": [], "conflict": [], "skipped": [], "local_only": 0},
-            "risky_cards": 2
+            "risky_cards": 2,
+            "risky_automations": [{"name": "nightly", "agent": "claude", "prompt": "do the thing"}]
         });
         let t = render(&pv);
         assert!(t.contains("projects: 1 new, 0 already here, 1 different, 1 skipped, 2 here only"), "{t}");
         assert!(t.contains("different: b (/b)"), "{t}");
         assert!(t.contains("skipped (missing): c (/c)"), "{t}");
         assert!(t.contains("2 card(s) run with permission checks off"), "{t}");
+        assert!(t.contains("automation nightly (agent claude): do the thing"), "{t}");
     }
 
     #[test]

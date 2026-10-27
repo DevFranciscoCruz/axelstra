@@ -3,7 +3,7 @@ import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [tailwindcss(), solid()],
+  plugins: [tailwindcss(), solid({ hot: !process.env.VITEST })],
   clearScreen: false,
   server: { port: 1420, strictPort: true },
   build: { target: "es2022", chunkSizeWarningLimit: 900 },

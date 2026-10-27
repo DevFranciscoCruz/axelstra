@@ -191,8 +191,5 @@ jobs:
         with: { node-version-file: .nvmrc }
       - run: npm audit --omit=dev --audit-level=high
         working-directory: app
-      # Advisory for now: the lockfile has a critical tinypool advisory (via vitest) that `npm audit fix` clears.
-      # Drop continue-on-error once the lockfile is updated.
       - run: npm audit --audit-level=critical
         working-directory: app
-        continue-on-error: true
