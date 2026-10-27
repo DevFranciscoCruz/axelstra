@@ -21,6 +21,8 @@ export const createSizeSync = (d: SizeDeps) => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   // true once xterm resized (so it reflowed) after the last size the PTY was told
   let reflowed = false;
+  // after a failed send the size is tried once more; a second failure waits for the next resize or show (no retry loop)
+  let retried = false;
   const push = () => {
     clearTimeout(timer);
     if (d.gone() || !d.visible()) return;
@@ -33,11 +35,14 @@ export const createSizeSync = (d: SizeDeps) => {
     const sent = nudge ? d.send(cols, Math.max(1, rows - 1)).then(() => d.send(cols, rows)) : d.send(cols, rows);
     sent.then(
       () => {
+        retried = false;
         const now = d.size();
         if (now.cols === cols && now.rows === rows) told = key;
       },
       () => {
         reflowed = reflowed || nudge;
+        if (retried) return;
+        retried = true;
         timer = setTimeout(push, 500);
       },
     );
@@ -47,6 +52,7 @@ export const createSizeSync = (d: SizeDeps) => {
     /** dragging a panel fires many sizes; only the last one is sent (each resize makes the agent redraw everything) */
     resized: () => {
       reflowed = true;
+      retried = false;
       clearTimeout(timer);
       timer = setTimeout(push, 80);
     },

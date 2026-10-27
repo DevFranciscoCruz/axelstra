@@ -43,4 +43,3 @@ export const nameOf = (e: unknown) => String(e).replace(/^Error: /, "");
 
 /** shell sessions started from the detail pane, per container id, so coming back to the tab finds the same shell */
 export const shells = new Map<string, number>();
-export const FAST_MS = 3000;

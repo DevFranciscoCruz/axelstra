@@ -8,11 +8,19 @@ const daemon = vi.hoisted(() => ({
   overview: 0,
   failSessions: null as unknown,
   failRename: false,
+  subs: new Map<string, Set<() => void>>(),
 }));
+const emit = (name: string) => daemon.subs.get(name)?.forEach((f) => f());
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("./Confirm", () => ({ ask: vi.fn(async () => true) }));
 vi.mock("./api", () => ({
+  onDaemonEvent: (name: string, fn: () => void) => {
+    let set = daemon.subs.get(name);
+    if (!set) daemon.subs.set(name, (set = new Set()));
+    set.add(fn);
+    return () => void set!.delete(fn);
+  },
   listSessions: async () => {
     if (daemon.failSessions) throw daemon.failSessions;
     return daemon.sessions;
@@ -60,6 +68,7 @@ beforeEach(() => {
   daemon.sessions = [];
   daemon.projects = [];
   daemon.overview = 0;
+  daemon.subs.clear();
   daemon.failSessions = null;
   daemon.failRename = false;
 });
@@ -228,22 +237,32 @@ describe("persisted JSON is validated on load (F10)", () => {
   });
 });
 
-describe("shared overview poll (F12)", () => {
-  it("polls once for any number of watchers and stops with the last", async () => {
+describe("shared overview refresh (event driven)", () => {
+  it("one subscription for any number of watchers, a refresh per event, no timer, and it ends with the last", async () => {
     vi.useFakeTimers();
     const s = await load();
     const stopA = s.watchOverview();
     const stopB = s.watchOverview();
     await vi.advanceTimersByTimeAsync(0);
     expect(daemon.overview).toBe(1);
-    await vi.advanceTimersByTimeAsync(15_000);
-    expect(daemon.overview).toBe(2);
-    stopA();
-    await vi.advanceTimersByTimeAsync(15_000);
-    expect(daemon.overview).toBe(3);
-    stopB();
+    expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(daemon.overview).toBe(3);
+    expect(daemon.overview).toBe(1);
+    for (const ev of ["projects.changed", "session.changed", "dispatch.changed", "janitor.events", "pr.changed"]) {
+      const before = daemon.overview;
+      emit(ev);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(daemon.overview, ev).toBe(before + 1);
+    }
+    stopA();
+    const mid = daemon.overview;
+    emit("projects.changed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(daemon.overview).toBe(mid + 1);
+    stopB();
+    emit("projects.changed");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(daemon.overview).toBe(mid + 1);
   });
 });
 

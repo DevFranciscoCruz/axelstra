@@ -1,6 +1,6 @@
 import { P } from "./strings.panels";
 import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
-import { createPoller } from "./poller";
+import { createLive } from "./live";
 import { Icon } from "./Icon";
 import { SessionInfo, SessionRes, killSession, removeSession, sessionResources, workerLimits } from "./api";
 import { ask } from "./Confirm";
@@ -37,9 +37,10 @@ export function Orchestra() {
     }
   };
   onMount(() => {
-    void pollRes();
-    const t = createPoller(pollRes, 5000);
-    onCleanup(t.stop);
+    // a reading when the sessions change (and `resources.changed`, where the daemon sends it) and when the window shows again
+    const live = createLive(pollRes, ["session.changed", "resources.changed"]);
+    live.now();
+    onCleanup(live.stop);
   });
   const mb = (n: number) => (n >= 1024 ** 3 ? `${fmtFixed(n / 1024 ** 3, 1)} GB` : `${Math.round(n / 1024 ** 2)} MB`);
 

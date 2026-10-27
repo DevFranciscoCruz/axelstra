@@ -231,8 +231,10 @@ export const cancelNudge = (id: number) => {
   nudges.delete(id);
 };
 
-/** Types a note into a resumed agent once its screen has settled after booting. Fire and forget; gives up quietly when
- *  the session is gone, was written to by the user meanwhile, or `cancelNudge` was called. */
+/** Types a note into a resumed agent once its screen has settled after booting: the daemon says `session.changed` when the
+ *  session goes quiet, and it is looked at then (no polling; `NUDGE_LIMIT_MS` is the one-shot limit). Fire and forget; gives up
+ *  quietly when the session is gone, was written to by the user meanwhile, or `cancelNudge` was called. */
+const NUDGE_LIMIT_MS = 90000;
 export const nudge = async (id: number, text: string) => {
   cancelNudge(id);
   const ac = new AbortController();
@@ -242,16 +244,31 @@ export const nudge = async (id: number, text: string) => {
       const t = setTimeout(() => done(!ac.signal.aborted), ms);
       ac.signal.addEventListener("abort", () => (clearTimeout(t), done(false)), { once: true });
     });
+  const settled = () =>
+    new Promise<boolean>((done) => {
+      let over = false;
+      let off = () => {};
+      const finish = (ok: boolean) => {
+        if (over) return;
+        over = true;
+        off();
+        clearTimeout(timer);
+        done(ok);
+      };
+      const check = async () => {
+        if (over) return;
+        const s = (await sessionsShared().catch(() => null))?.find((x) => x.id === id);
+        if (over) return;
+        if (ac.signal.aborted || !s || !s.running) return finish(false);
+        if ((s.idle_ms ?? 0) >= 2500) finish(true);
+      };
+      const timer = setTimeout(() => finish(false), NUDGE_LIMIT_MS);
+      off = onDaemonEvent("session.changed", () => void check());
+      ac.signal.addEventListener("abort", () => finish(false), { once: true });
+      void check();
+    });
   try {
-    const start = Date.now();
-    if (!(await wait(4000))) return;
-    while (Date.now() - start < 90000) {
-      const s = (await sessionsShared().catch(() => null))?.find((x) => x.id === id);
-      if (ac.signal.aborted || !s || !s.running) return;
-      if ((s.idle_ms ?? 0) >= 2500) break;
-      if (!(await wait(1000))) return;
-    }
-    if (ac.signal.aborted) return;
+    if (!(await settled()) || ac.signal.aborted) return;
     await rawWrite(id, text);
     if (!(await wait(400))) return;
     await rawWrite(id, "\r");
@@ -365,15 +382,34 @@ let handlers: WatchHandlers | null = null;
 let lastWorktree: string | null = null;
 let wanted = false;
 let watchReady: Promise<void> | null = null;
-let channel: Channel<{ event?: string; worktree?: string; id?: number; code?: number | null }> | null = null;
+type WatchMsg = DaemonEventData & { id?: string | number; code?: number | null };
+let channel: Channel<WatchMsg> | null = null;
 let unlisteners: Promise<() => void>[] = [];
 
 /** Events the daemon pushes on the watch stream besides the file, session and project ones: the app takes what changed
  *  when one arrives instead of asking on a timer. */
-export type DaemonEvent = "janitor.events" | "triggers.events" | "budget.events" | "dispatch.changed";
-const eventSubs = new Map<string, Set<() => void>>();
-/** Runs `fn` each time the daemon announces `name` (and after the stream reconnects, in case one was missed); returns the unsubscribe. */
-export const onDaemonEvent = (name: DaemonEvent, fn: () => void): (() => void) => {
+export type DaemonEvent =
+  | "janitor.events"
+  | "triggers.events"
+  | "budget.events"
+  | "dispatch.changed"
+  | "session.changed"
+  | "fs.changed"
+  | "projects.changed"
+  | "kanban.changed"
+  | "orch.changed"
+  | "clone.changed"
+  | "docker.changed"
+  | "limits.changed"
+  | "usage.changed"
+  | "resources.changed"
+  | "pr.changed";
+/** What an event carries besides its name (`kanban.changed {project}`, `orch.changed {run, project}`, `clone.changed {id}`...). */
+export type DaemonEventData = { event?: string; project?: string; run?: string; id?: string | number; worktree?: string; [k: string]: unknown };
+const eventSubs = new Map<string, Set<(d: DaemonEventData) => void>>();
+/** Runs `fn` each time the daemon announces `name` (and after the stream reconnects, in case one was missed); returns the unsubscribe.
+ *  `fn` gets the event's payload (empty after a reconnect). */
+export const onDaemonEvent = (name: DaemonEvent, fn: (d: DaemonEventData) => void): (() => void) => {
   let set = eventSubs.get(name);
   if (!set) eventSubs.set(name, (set = new Set()));
   set.add(fn);
@@ -387,7 +423,7 @@ export const onSessionExited = (fn: (e: SessionExit) => void): (() => void) => {
   exitSubs.add(fn);
   return () => void exitSubs.delete(fn);
 };
-const fire = (name: string) => eventSubs.get(name)?.forEach((f) => f());
+const fire = (name: string, data: DaemonEventData = {}) => eventSubs.get(name)?.forEach((f) => f(data));
 
 /** Drops the current Channel: its late messages go nowhere. (Tauri has no close for a Channel; the host replaces its end on the next watch_start.) */
 const dropChannel = () => {
@@ -397,16 +433,21 @@ const dropChannel = () => {
 };
 const startWatch = () => {
   dropChannel();
-  const ch = new Channel<{ event?: string; worktree?: string; id?: number; code?: number | null }>();
+  const ch = new Channel<WatchMsg>();
   channel = ch;
   // the handlers are read when a message arrives, so the newest ones from watchWorktree win
   ch.onmessage = (m) => {
     if (ch !== channel || !handlers) return;
-    if (m?.event === "fs.changed" && m.worktree) handlers.onChanged(m.worktree);
-    else if (m?.event === "session.changed") handlers.onSessions?.();
-    else if (m?.event === "projects.changed") handlers.onProjects?.();
-    else if (m?.event === "session.exited" && typeof m.id === "number") exitSubs.forEach((f) => f({ id: m.id!, code: m.code ?? null }));
-    else if (m?.event) fire(m.event);
+    if (m?.event === "fs.changed" && m.worktree) {
+      handlers.onChanged(m.worktree);
+      fire(m.event, m);
+    }
+    else if (m?.event === "session.exited" && typeof m.id === "number") exitSubs.forEach((f) => f({ id: m.id as number, code: m.code ?? null }));
+    else if (m?.event) {
+      if (m.event === "session.changed") handlers.onSessions?.();
+      else if (m.event === "projects.changed") handlers.onProjects?.();
+      fire(m.event, m);
+    }
   };
   return tauriInvoke<void>("watch_start", { onEvent: ch });
 };

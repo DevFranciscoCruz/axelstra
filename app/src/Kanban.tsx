@@ -1,8 +1,8 @@
 import { Badge, Button, Field, Input, Select, Textarea } from "./ui";
-import { createPoller } from "./poller";
+import { createLive } from "./live";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
-import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { AgentInfo, Board, KCard, agentOptions, agentWarning, agentsList, OrchRun, gitPr, gitPush, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchRetry, orchStart, orchStatus, orchTrustInfo } from "./api";
 import { Modal } from "./Modal";
 import { refreshProjects, selectWorktree, setError, setShowKanban, toast } from "./store";
@@ -42,7 +42,7 @@ export function Kanban(props: { project: string }) {
       // the integration worktree appears in the sidebar once the run starts
       if (r.state !== prev) void refreshProjects();
     } catch {
-      /* daemon briefly unavailable: the next tick retries */
+      /* daemon briefly unavailable: the next event or focus retries */
     }
   };
   const start = async () => {
@@ -73,13 +73,27 @@ export function Kanban(props: { project: string }) {
       if (r === reloadReq) setErr(String(e));
     }
   };
+  // agents move cards while the orchestrator runs: the daemon says so (`kanban.changed`, `orch.changed`); a board being edited
+  // or dragged is left alone and caught up when that ends
+  let stale = false;
+  const sync = async () => {
+    if (draft() !== null || moving || drag() !== null) {
+      stale = true;
+      return;
+    }
+    stale = false;
+    await Promise.all([reload(), pollRun()]);
+  };
   onMount(() => {
     agentsList().then(setAgents, () => {});
     void reload();
     void pollRun();
-    // agents move cards while the orchestrator runs
-    const t = createPoller(() => draft() === null && !moving && drag() === null && Promise.all([reload(), pollRun()]), 5000);
-    onCleanup(t.stop);
+    const mine = (d: { project?: string }) => !d.project || d.project === props.project;
+    const live = createLive(sync, ["kanban.changed", "orch.changed"], { match: mine });
+    createEffect(() => {
+      if (draft() === null && drag() === null && stale) live.now();
+    });
+    onCleanup(live.stop);
   });
 
   const inCol = (id: string) => board().cards.filter((c) => c.meta.status === id);

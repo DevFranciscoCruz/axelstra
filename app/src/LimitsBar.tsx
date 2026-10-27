@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
-import { createPoller } from "./poller";
+import { createLive } from "./live";
 import { ClaudeStatus, CodexLimits, CodexWindow, agentStatus, codexLimits } from "./api";
 import { activeSession, sessions } from "./store";
 import { P } from "./strings.panels";
@@ -70,8 +70,9 @@ export function LimitsBar() {
       setNow(Date.now() / 1000);
       return key ? agentStatus(key).then((v) => alive && v && setClaude(v)).catch(() => 0) : undefined;
     };
-    load();
-    const t = createPoller(load, 10000);
+    // the status line file changes when the agent works (`limits.changed`); a session change or the window showing again also looks
+    const t = createLive(load, ["limits.changed", "session.changed"]);
+    t.now();
     onCleanup(() => {
       alive = false;
       t.stop();
@@ -79,8 +80,8 @@ export function LimitsBar() {
   }));
   createEffect(() => {
     const load = () => codexLimits().then((v) => v && setCodex(v)).catch(() => 0);
-    void load();
-    const t = createPoller(load, 30000);
+    const t = createLive(load, ["limits.changed"]);
+    t.now();
     onCleanup(t.stop);
   });
 

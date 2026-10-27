@@ -4,7 +4,6 @@ import { lazy, lazyPair } from "./i18n";
 import { coded } from "./msg";
 
 /** how often the PR state is read while the panel is on screen and the window has focus */
-export const SHIP_POLL_MS = 20_000;
 
 /** [icon, word]: the word is the cue that does not depend on colour */
 export const CI_LABEL: Record<ShipStatus["ci"], [string, string]> = {

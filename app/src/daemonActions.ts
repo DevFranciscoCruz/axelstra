@@ -19,7 +19,7 @@ export async function restartDaemonFlow(
   onState?.(true);
   try {
     await daemonShutdown().catch((e) => console.debug("daemon.shutdown", e)); // the connection drops with the daemon
-    if (!(await waitUntil(() => call("ping"), 20, 500))) throw new Error(S.daemonSilent);
+    if (!(await waitUntil(() => call("ping"), 20))) throw new Error(S.daemonSilent);
     await after?.();
     return true;
   } catch (e) {

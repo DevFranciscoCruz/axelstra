@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Button } from "./ui";
-import { createPoller } from "./poller";
 import { errorText } from "./appError";
 import { S } from "./strings";
 import { readString, writeString } from "./persist";
@@ -15,8 +14,7 @@ const saveDismissed = (v: string) => writeString(DISMISSED_KEY, v); // storage u
 
 type Info = { version: string; notes: string | null };
 
-// check at launch, every 6 h and when the window regains focus (throttled); never install without a click
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// check at launch and when the window regains focus (throttled); never install without a click
 const FOCUS_THROTTLE_MS = 5 * 60 * 1000;
 
 /**
@@ -49,8 +47,8 @@ export function UpdateToast() {
   };
 
   onMount(() => {
-    const first = setTimeout(() => void check(), 5000);
-    const again = createPoller(check, CHECK_INTERVAL_MS, { visibleOnly: false });
+    // once at start and then whenever the window comes back after a while: no timer
+    void check();
     let unlisten: (() => void) | undefined;
     let gone = false;
     void getCurrentWindow()
@@ -62,8 +60,6 @@ export function UpdateToast() {
       .catch((e) => console.debug("onFocusChanged", e));
     onCleanup(() => {
       gone = true;
-      clearTimeout(first);
-      again.stop();
       unlisten?.();
     });
   });

@@ -11,13 +11,13 @@ import {
   dockerLogs,
   dockerOpenShell,
 } from "../api";
-import { createPoller } from "../poller";
+import { createLive } from "../live";
 import { Icon } from "../Icon";
 import { Badge, Button, Checkbox, Input, cn } from "../ui";
 import { TerminalView } from "../TerminalView";
 import { createLatest, isRunning, isSecretKey, joinPath, portChips, searchLog, stateInfo } from "../dockerLogic";
 import { findWorktree, refreshSessions, selectedWorktree, sessions } from "../store";
-import { FAST_MS, nameOf, shells, DTab, DTABS } from "./shared";
+import { nameOf, shells, DTab, DTABS } from "./shared";
 import { Empty } from "./Lists";
 import { P } from "../strings.panels";
 import { fmtFixed } from "../i18n";
@@ -276,7 +276,7 @@ export function LogsTab(props: { c: DockerContainer; onOpenTab: () => void }) {
   const [follow, setFollow] = createSignal(true);
   const [query, setQuery] = createSignal("");
   let pre!: HTMLPreElement;
-  // one request at a time (the poller skips a tick while one is out) and a token so an answer that arrives after
+  // one request at a time (`createLive` runs the next load after the one in flight) and a token so an answer that arrives after
   // the component moved on never overwrites a newer one
   const latest = createLatest();
   let gone = false;
@@ -294,7 +294,7 @@ export function LogsTab(props: { c: DockerContainer; onOpenTab: () => void }) {
       },
     );
   };
-  const poller = createPoller(() => follow() && load(), FAST_MS);
+  const poller = createLive(() => follow() && load(), ["docker.changed"]);
   poller.now();
   onCleanup(() => {
     gone = true;

@@ -28,6 +28,7 @@ const auto = {
 };
 
 vi.mock("./api", () => ({
+  onDaemonEvent: () => () => {},
   kanbanList: vi.fn(async () => ({ cards: [card], broken: [] })),
   kanbanMove: vi.fn(),
   kanbanSave: vi.fn(async () => ({})),

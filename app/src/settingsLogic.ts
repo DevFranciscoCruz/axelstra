@@ -7,14 +7,15 @@ export const classifySettingsError = (e: unknown): "old-daemon" | "other" => (/u
 /** The error text without the "Error: " prefix the runtime adds to thrown values. */
 export const errorText = (e: unknown) => String((e as { message?: unknown })?.message ?? e).replace(/^Error:\s*/, "");
 
-/** Keeps calling `probe` until it succeeds (true) or the tries run out (false). Used to wait for the daemon to come back. */
-export const waitUntil = async (probe: () => Promise<unknown>, tries: number, delay: number, sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))) => {
+/** Calls `probe` until it succeeds (true) or the tries run out (false). Used to wait for the daemon to come back: each failed
+ *  call already took the time the host needs to start and connect to it, so there is nothing to sleep between tries. */
+export const waitUntil = async (probe: () => Promise<unknown>, tries: number) => {
   for (let i = 0; i < tries; i++) {
     try {
       await probe();
       return true;
     } catch {
-      await sleep(delay);
+      /* the daemon is not back yet: the next call asks the host to start and reach it again */
     }
   }
   return false;

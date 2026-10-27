@@ -15,7 +15,13 @@ const h = vi.hoisted(() => ({
   inited: [] as Record<string, unknown>[],
   folder: "/home/me/code" as string | null,
   info: { wsl_distros: [] as string[], ssh_hosts: [] as string[] },
+  subs: new Set<(d: Record<string, unknown>) => void>(),
+  statusCalls: 0,
 }));
+const cloneEvent = async (d: Record<string, unknown> = { id: "c1" }) => {
+  h.subs.forEach((f) => f(d));
+  await vi.advanceTimersByTimeAsync(0);
+};
 
 vi.mock("@tauri-apps/api/core", () => ({ Channel: class {}, invoke: async () => undefined }));
 vi.mock("@tauri-apps/api/webview", () => ({
@@ -24,6 +30,11 @@ vi.mock("@tauri-apps/api/webview", () => ({
 vi.mock("./tauriEvents", () => ({ onTauriEvent: () => () => undefined }));
 vi.mock("./api", async (orig) => ({
   ...(await orig<typeof import("./api")>()),
+  onDaemonEvent: (name: string, fn: (d: Record<string, unknown>) => void) => {
+    if (name !== "clone.changed") return () => {};
+    h.subs.add(fn);
+    return () => void h.subs.delete(fn);
+  },
   hostsList: async () => [{ id: "lab", name: "Lab", spec: "ssh:lab", slot: 1, state: "ok" }],
   hostInfo: async () => ({
     os: "windows",
@@ -55,7 +66,10 @@ vi.mock("./api", async (orig) => ({
     h.cloned.push(p);
     return { id: "c1" };
   },
-  projectCloneStatus: async () => h.status.shift() ?? { state: "running" },
+  projectCloneStatus: async () => {
+    h.statusCalls++;
+    return h.status.shift() ?? { state: "running" };
+  },
   projectCloneCancel: async (id: string) => {
     h.cancelled.push(id);
     return { ok: true };
@@ -109,6 +123,8 @@ beforeEach(async () => {
   h.pickResult = null;
   h.added = [];
   h.cloned = [];
+  h.subs.clear();
+  h.statusCalls = 0;
   h.cancelled = [];
   h.status = [];
   h.gh = { state: "ok", repos: [] };
@@ -287,14 +303,14 @@ describe("clonar repositório", () => {
     fireEvent.click(document.querySelector<HTMLElement>("[data-ap-primary]")!);
     await vi.advanceTimersByTimeAsync(0);
     h.status = [{ state: "running", percent: 40, phase: "Receiving objects" }];
-    await vi.advanceTimersByTimeAsync(500);
+    await cloneEvent();
     expect(document.querySelector("progress")?.getAttribute("value")).toBe("40");
     expect(document.body.textContent).toContain("Receiving objects");
     fireEvent.click(button("Cancelar clonagem"));
     await vi.advanceTimersByTimeAsync(0);
     expect(h.cancelled).toEqual(["c1"]);
     h.status = [{ state: "cancelled" }];
-    await vi.advanceTimersByTimeAsync(500);
+    await cloneEvent();
     expect(document.body.textContent).toContain("Clonagem cancelada.");
     vi.useRealTimers();
   });
@@ -310,10 +326,51 @@ describe("clonar repositório", () => {
     fireEvent.click(document.querySelector<HTMLElement>("[data-ap-primary]")!);
     await vi.advanceTimersByTimeAsync(0);
     h.status = [{ state: "failed", error: "fatal: repository not found" }];
-    await vi.advanceTimersByTimeAsync(500);
+    await cloneEvent();
     const alerts = [...document.querySelectorAll("[role=alert]")].map((a) => a.textContent);
     expect(alerts.some((t) => t?.includes("A clonagem falhou: fatal: repository not found"))).toBe(true);
     expect(overlay()).not.toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("reads the status only when clone.changed arrives for its id (or the window shows again), never on a timer", async () => {
+    await open("clone");
+    type(
+      document.querySelector<HTMLInputElement>("input[placeholder^='https://github.com']")!,
+      "https://github.com/o/repo.git",
+    );
+    type(input("ap-clone-parent"), "/w");
+    vi.useFakeTimers();
+    fireEvent.click(document.querySelector<HTMLElement>("[data-ap-primary]")!);
+    await vi.advanceTimersByTimeAsync(0);
+    const first = h.statusCalls;
+    expect(first).toBe(1);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(h.statusCalls).toBe(first);
+    await cloneEvent({ id: "other" });
+    expect(h.statusCalls).toBe(first);
+    await cloneEvent({ id: "c1" });
+    expect(h.statusCalls).toBe(first + 1);
+    // an older daemon never sends the event: the window showing again looks once
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.statusCalls).toBe(first + 2);
+    vi.useRealTimers();
+  });
+
+  it("stops following when the clone ends", async () => {
+    await open("clone");
+    type(
+      document.querySelector<HTMLInputElement>("input[placeholder^='https://github.com']")!,
+      "https://github.com/o/repo.git",
+    );
+    type(input("ap-clone-parent"), "/w");
+    vi.useFakeTimers();
+    fireEvent.click(document.querySelector<HTMLElement>("[data-ap-primary]")!);
+    await vi.advanceTimersByTimeAsync(0);
+    h.status = [{ state: "failed", error: "boom" }];
+    await cloneEvent();
+    expect(h.subs.size).toBe(0);
     vi.useRealTimers();
   });
 });

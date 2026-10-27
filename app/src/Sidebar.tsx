@@ -1,4 +1,4 @@
-import { createPoller } from "./poller";
+import { createLive } from "./live";
 import { askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { getSettings, detectPackageManagers, createWorktree, launchDefaultAgent, listSessions, setProjectSetup, dispatchOverlapFiles, worktreeRename } from "./api";
@@ -102,8 +102,9 @@ export function Sidebar() {
   const [overlaps, setOverlaps] = createSignal<OverlapFiles | null>(null);
   const pollOverlaps = () => dispatchOverlapFiles().then(setOverlaps, () => setOverlaps(null));
   void pollOverlaps();
-  const overlapPoller = createPoller(pollOverlaps, 30000);
-  onCleanup(overlapPoller.stop);
+  // who edits what changes with the files, the worktrees and the dispatcher's plan
+  const overlapLive = createLive(pollOverlaps, ["fs.changed", "projects.changed", "dispatch.changed"]);
+  onCleanup(overlapLive.stop);
 
   // the worktree being renamed
   const [renamingWt, setRenamingWt] = createSignal<{ path: string; name: string } | null>(null);

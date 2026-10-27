@@ -10,7 +10,10 @@ const h = vi.hoisted(() => ({
   answer: true,
   asked: [] as { message: string; opts: Record<string, unknown> }[],
   started: [] as unknown[][],
+  subs: new Map<string, Set<(d: Record<string, unknown>) => void>>(),
 }));
+const emit = (name: string, d: Record<string, unknown> = {}) =>
+  h.subs.get(name)?.forEach((f) => f({ event: name, ...d }));
 
 const card = {
   meta: { id: "k1", title: "Fix it", status: "todo", agent: "claude", depends_on: [], priority: 0, acceptance: null },
@@ -18,6 +21,12 @@ const card = {
 };
 
 vi.mock("./api", () => ({
+  onDaemonEvent: (name: string, fn: (d: Record<string, unknown>) => void) => {
+    let set = h.subs.get(name);
+    if (!set) h.subs.set(name, (set = new Set()));
+    set.add(fn);
+    return () => void set!.delete(fn);
+  },
   kanbanList: vi.fn(async () => ({ cards: [card], broken: [] })),
   kanbanMove: vi.fn(),
   kanbanSave: vi.fn(),
@@ -61,6 +70,7 @@ beforeEach(() => {
   h.answer = true;
   h.asked.length = 0;
   h.started.length = 0;
+  h.subs.clear();
 });
 afterEach(() => cleanup());
 
@@ -102,5 +112,48 @@ describe("Kanban start orchestration", () => {
     await settle();
     expect(h.asked[0].opts.typeToConfirm).toBeUndefined();
     expect(h.started[0]).toEqual(["p", 3, false, undefined]);
+  });
+});
+
+describe("Kanban follows the daemon (kanban.changed / orch.changed)", () => {
+  it("reloads the board and the run on kanban.changed for its project only, and sets no timer", async () => {
+    const api = await import("./api");
+    vi.useFakeTimers();
+    const r = render(() => createComponent(Kanban, { project: "p" }));
+    await vi.advanceTimersByTimeAsync(0);
+    const list = vi.mocked(api.kanbanList);
+    const status = vi.mocked(api.orchStatus);
+    const l0 = list.mock.calls.length;
+    const s0 = status.mock.calls.length;
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(list.mock.calls.length).toBe(l0);
+    emit("kanban.changed", { project: "other" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(list.mock.calls.length).toBe(l0);
+    emit("kanban.changed", { project: "p" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(list.mock.calls.length).toBe(l0 + 1);
+    expect(status.mock.calls.length).toBe(s0 + 1);
+    emit("orch.changed", { run: "r1", project: "p" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(list.mock.calls.length).toBe(l0 + 2);
+    r.unmount();
+    expect(h.subs.get("kanban.changed")?.size ?? 0).toBe(0);
+    expect(h.subs.get("orch.changed")?.size ?? 0).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("an event while a card is being edited waits and catches up when the editor closes", async () => {
+    const api = await import("./api");
+    const r = render(() => createComponent(Kanban, { project: "p" }));
+    await settle();
+    const list = vi.mocked(api.kanbanList);
+    fireEvent.click(r.container.querySelector<HTMLElement>(".kcard, [data-id]")!);
+    await settle();
+    const before = list.mock.calls.length;
+    emit("kanban.changed", { project: "p" });
+    await settle();
+    expect(list.mock.calls.length).toBe(before);
   });
 });
