@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
-import { createPoller } from "./poller";
+import { createLive } from "./live";
 import { TokenUsage, agentUsage, worktreeUsage } from "./api";
 import { activeSession, projects, sessions } from "./store";
 import { WtUsage, fmtTokens as fmt, ranked, spentOf, totalOf, usageTip } from "./usageFormat";
@@ -12,14 +12,12 @@ import { rowsFor, worstLevel } from "./budgetLogic";
 import { fmtNumber } from "./i18n";
 
 const [wtUsage, setWtUsage] = createSignal<WtUsage[]>([]);
-let lastLoad = 0;
 
-/** per-worktree totals are shared by this view and the status bar: asked for at most every 20 s */
+/** per-worktree totals are shared by this view and the status bar; `createLive` runs one load at a time */
 export const loadWtUsage = () => {
-  if (document.hidden || Date.now() - lastLoad < 20000) return;
+  if (document.hidden) return;
   const paths = projects().flatMap((p) => p.worktrees.map((w) => w.path));
   if (!paths.length) return;
-  lastLoad = Date.now();
   void loadBudgets(paths);
   void worktreeUsage(paths)
     .then(setWtUsage)
@@ -28,11 +26,11 @@ export const loadWtUsage = () => {
     });
 };
 
-/** polls the totals while the component that calls this is on screen */
+/** keeps the totals fresh (daemon events, no timer) while the component that calls this is on screen */
 export const pollWtUsage = () => {
   onMount(() => {
-    loadWtUsage();
-    const t = createPoller(loadWtUsage, 30000);
+    const t = createLive(loadWtUsage, ["usage.changed", "budget.events", "session.changed"]);
+    t.now();
     onCleanup(t.stop);
   });
   return wtUsage;
@@ -130,8 +128,8 @@ export function UsageChip() {
       agentUsage(cwd, conv)
         .then((u) => alive && setUsage(u))
         .catch(() => alive && setUsage(null));
-    if (!document.hidden) void load();
-    const t = createPoller(load, 30000);
+    const t = createLive(load, ["usage.changed", "session.changed"]);
+    if (!document.hidden) t.now();
     onCleanup(() => {
       alive = false;
       t.stop();

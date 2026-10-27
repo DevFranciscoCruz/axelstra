@@ -14,7 +14,7 @@ import {
 import { apiContext } from "../apiContext";
 import { errorText } from "../appError";
 import { norm } from "../paths";
-import { createPoller, type Poller } from "../poller";
+import { createLive, type Live } from "../live";
 import type { OverviewProject } from "../statusGroups";
 import { clearError, setError } from "./notify";
 import { refreshSessions, selectedWorktree } from "./sessions";
@@ -36,17 +36,23 @@ export const refreshOverview = () =>
       /* the badges are a nicety: an old daemon without it, or one that is busy, just shows the last counts */
     },
   );
-const OVERVIEW_MS = 15_000;
 let overviewUsers = 0;
-let overviewPoll: Poller | undefined;
-/** call from a component that shows `overview`; returns the function that stops watching (the poll ends with the last one) */
+let overviewLive: Live | undefined;
+/** call from a component that shows `overview`; returns the function that stops watching (the subscription ends with the last one) */
 export const watchOverview = () => {
   if (overviewUsers++ === 0) {
-    void refreshOverview();
-    overviewPoll = createPoller(refreshOverview, OVERVIEW_MS);
+    // the counts move with worktrees, sessions, the dispatcher, the janitor and PRs: the daemon says so
+    overviewLive = createLive(refreshOverview, [
+      "projects.changed",
+      "session.changed",
+      "dispatch.changed",
+      "janitor.events",
+      "pr.changed",
+    ]);
+    overviewLive.now();
   }
   return () => {
-    if (--overviewUsers === 0) overviewPoll?.stop();
+    if (--overviewUsers === 0) overviewLive?.stop();
   };
 };
 

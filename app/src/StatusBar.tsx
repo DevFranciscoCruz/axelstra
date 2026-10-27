@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { createPersistedFlag } from "./persist";
-import { createPoller } from "./poller";
+import { createLive } from "./live";
 import { S } from "./strings";
 import { invoke } from "@tauri-apps/api/core";
 import { findWorktree, openSession, overview, refreshOverview, refreshProjects, selectWorktree, selectedWorktree, sessionState, setShowShortcuts, sessions, showNotice, tabLabel, watchOverview } from "./store";
@@ -144,8 +144,9 @@ export function StatusBar() {
 
   onMount(() => {
     if (awake()) void invoke<boolean>("keep_awake", { on: true }).then(setAwakeOk).catch(() => 0);
-    // memory every 10 s while the window shows; the counts come from the poll the sidebar shares (store.watchOverview)
-    const mem = createPoller(poll, 10000);
+    // memory is read when sessions change and when the window shows again; the counts come from the events the sidebar shares (store.watchOverview)
+    const mem = createLive(poll, ["session.changed", "resources.changed"]);
+    mem.now();
     const unwatch = watchOverview();
     onCleanup(() => {
       mem.stop();

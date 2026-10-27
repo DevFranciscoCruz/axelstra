@@ -72,9 +72,27 @@ pub fn event_of(agent: &str, event: &str, payload: &Value) -> Option<Event> {
     }
 }
 
-/// Events whose stdin JSON carries the text of a wait.
-fn reads_payload(event: &str) -> bool {
-    matches!(event.to_ascii_lowercase().as_str(), "notification" | "permissionrequest")
+/// Events whose stdin JSON we read: the text of a wait, and for Claude the `permission_mode` every hook payload carries.
+fn reads_payload(agent: &str, event: &str) -> bool {
+    agent == "claude" || matches!(event.to_ascii_lowercase().as_str(), "notification" | "permissionrequest")
+}
+
+/// The permission mode Claude reports in its hook JSON (`default`, `plan`, `acceptEdits`, `bypassPermissions`, ...), sent
+/// to the daemon as the optional `mode` of `session.hint`. The other agents do not send one.
+pub fn mode_of(agent: &str, payload: &Value) -> Option<String> {
+    if agent != "claude" {
+        return None;
+    }
+    field(payload, &["permission_mode"]).map(String::from)
+}
+
+/// The `session.hint` params: `mode` only when the agent told it.
+fn hint_params(id: u32, ev: &Event, mode: Option<String>) -> Value {
+    let mut p = json!({"id": id, "state": ev.state, "kind": ev.kind, "text": ev.text});
+    if let Some(m) = mode {
+        p["mode"] = json!(m);
+    }
+    p
 }
 
 /// Longest the hook may take, daemon down or hung included: a hook must never hold the agent up.
@@ -133,10 +151,11 @@ pub fn run(agent: &str, event: &str) {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let sent = (|| {
-            let payload = if reads_payload(&event) { read_payload() } else { Value::Null };
+            let payload = if reads_payload(&agent, &event) { read_payload() } else { Value::Null };
             let ev = event_of(&agent, &event, &payload)?;
+            let mode = mode_of(&agent, &payload);
             let mut c = Client::connect_cli(&proto::pipe_name(), &proto::load_or_create_token().ok()?).ok()?;
-            c.call("session.hint", json!({"id": id, "state": ev.state, "kind": ev.kind, "text": ev.text})).ok()
+            c.call("session.hint", hint_params(id, &ev, mode)).ok()
         })();
         let _ = tx.send(sent.is_some());
     });
@@ -175,6 +194,19 @@ mod tests {
         assert_eq!(ev("claude", "Stop", Value::Null), Some(("idle", None, String::new())));
         assert_eq!(ev("claude", "UserPromptSubmit", Value::Null).unwrap().0, "working");
         assert_eq!(ev("claude", "PreToolUse", Value::Null), None);
+    }
+
+    #[test]
+    fn claude_permission_mode_goes_into_the_hint_as_mode() {
+        let p = json!({"permission_mode": "bypassPermissions", "hook_event_name": "Stop"});
+        assert_eq!(mode_of("claude", &p).as_deref(), Some("bypassPermissions"));
+        assert_eq!(mode_of("claude", &json!({"permission_mode": "  "})), None);
+        assert_eq!(mode_of("claude", &Value::Null), None);
+        assert_eq!(mode_of("gemini", &p), None);
+        let e = event_of("claude", "Stop", &p).unwrap();
+        assert_eq!(hint_params(7, &e, mode_of("claude", &p))["mode"], "bypassPermissions");
+        assert!(hint_params(7, &e, None).get("mode").is_none());
+        assert!(reads_payload("claude", "Stop") && !reads_payload("gemini", "Stop") && reads_payload("gemini", "Notification"));
     }
 
     #[test]

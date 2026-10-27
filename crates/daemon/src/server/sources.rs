@@ -11,6 +11,13 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+impl Registry {
+    /// The clone `id` moved (progress, or its end): the app reads `project.clone_status` then instead of asking on a timer.
+    pub(super) fn clone_changed(&self, id: &str) {
+        self.broadcast_event(json!({"event": "clone.changed", "id": id}));
+    }
+}
+
 pub(super) fn handles(method: &str) -> bool {
     matches!(
         method,
@@ -354,7 +361,8 @@ fn clone_error(tail: &[String], exit: Option<i32>) -> anyhow::Error {
 }
 
 /// Reads git's stderr (progress lines end in `\r`, the rest in `\n`) into the job's status.
-fn read_progress(j: &CloneJob, mut err: impl Read, tail: &mut Vec<String>) {
+/// `moved` runs when the visible progress (percent or phase) changed, so the app reads the status then.
+fn read_progress(j: &CloneJob, mut err: impl Read, tail: &mut Vec<String>, moved: &dyn Fn()) {
     let (mut buf, mut chunk) = (Vec::<u8>::new(), [0u8; 4096]);
     let mut line = |bytes: &[u8]| {
         let text = String::from_utf8_lossy(bytes).trim().to_string();
@@ -363,11 +371,18 @@ fn read_progress(j: &CloneJob, mut err: impl Read, tail: &mut Vec<String>) {
         }
         match parse_progress(&text) {
             Some((phase, pct)) => {
-                let mut s = j.status.lock_recover();
-                if let Some(o) = overall(&phase, pct) {
-                    s.percent = Some(s.percent.map_or(o, |p| p.max(o)));
+                let changed = {
+                    let mut s = j.status.lock_recover();
+                    let before = (s.percent, s.phase.clone());
+                    if let Some(o) = overall(&phase, pct) {
+                        s.percent = Some(s.percent.map_or(o, |p| p.max(o)));
+                    }
+                    s.phase = Some(phase);
+                    before != (s.percent, s.phase.clone())
+                };
+                if changed {
+                    moved();
                 }
-                s.phase = Some(phase);
             }
             None => {
                 tail.push(text);
@@ -467,11 +482,12 @@ fn start_clone(reg: &Arc<Registry>, p: &Value) -> Result<Value> {
             return Err(err);
         }
     };
-    let (reg, jj) = (reg.clone(), j.clone());
+    let (reg, jj, cid) = (reg.clone(), j.clone(), id.clone());
     std::thread::spawn(move || {
+        let announce = || reg.clone_changed(&cid);
         let mut tail = Vec::new();
         if let Some(err) = child.stderr.take() {
-            read_progress(&jj, err, &mut tail);
+            read_progress(&jj, err, &mut tail, &announce);
         }
         let exit = child.wait();
         #[cfg(unix)]
@@ -479,6 +495,7 @@ fn start_clone(reg: &Arc<Registry>, p: &Value) -> Result<Value> {
         if jj.cancelled.load(Ordering::SeqCst) {
             cleanup(&jj);
             jj.finish(|s| s.state = "cancelled");
+            announce();
             return;
         }
         match exit {
@@ -500,6 +517,7 @@ fn start_clone(reg: &Arc<Registry>, p: &Value) -> Result<Value> {
                 jj.fail(&clone_error(&tail, other.ok().and_then(|s| s.code())));
             }
         }
+        announce();
     });
     Ok(json!({"id": id}))
 }

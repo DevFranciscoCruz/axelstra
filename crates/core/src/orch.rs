@@ -3,6 +3,7 @@ use crate::card::{self, Card};
 use crate::git::{self, Merge};
 use crate::msg::Coded;
 use crate::runner::{AgentSpawn, Handle, ProcessRunner, Runner};
+use crate::wake::Wake;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -22,6 +23,9 @@ pub struct Options {
     pub wt_root: PathBuf,
     /// Program + args; `{prompt_file}` is substituted. Overrides per-card agent.
     pub agent_override: Option<Vec<String>>,
+    /// Ceiling, in ms, of the pause between two looks at a runner whose handle cannot push its exit
+    /// (`Handle::on_exit` false): the pause starts short and doubles up to this. Handles that push (child processes) and
+    /// the `result.json` of every task are waited for by event, so this does not set the pace of a run.
     pub poll_ms: u64,
     /// None = headless child processes.
     pub runner: Option<Arc<dyn Runner>>,
@@ -81,6 +85,10 @@ struct Live {
     wt: PathBuf,
     branch: String,
     started: Instant,
+    /// the handle bumps the run's `Wake` when the process is gone
+    pushed: bool,
+    /// watches `.axelstra/` for `result.json` and bumps the run's `Wake`; dropping it stops the watch
+    _watch: Option<notify::RecommendedWatcher>,
 }
 
 #[derive(Deserialize)]
@@ -243,7 +251,13 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
     // aborting the whole run: an early `?` would leave the other cards "in-progress" with their agents running.
     let mut errors: Vec<String> = Vec::new();
 
+    // Everything the loop waits for bumps this: a task process exiting, `result.json` appearing, and nothing else. The
+    // count is read before the state is looked at, so a bump during the look makes the wait return at once.
+    let wake = Wake::new();
+    let mut idle_backoff = Duration::from_millis(25);
     loop {
+        let seen = wake.now();
+        let before: Vec<_> = tasks.values().map(|t| (t.card.meta.id.clone(), t.st, t.attempts)).collect();
         // 1. promote Blocked -> Ready once every dependency is Merged
         let merged_ids: Vec<String> = tasks.values().filter(|t| t.st == St::Merged).map(|t| t.card.meta.id.clone()).collect();
         for t in tasks.values_mut() {
@@ -350,7 +364,7 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
             let t = tasks.get_mut(&id).unwrap();
             t.attempts += 1;
             log_ev(&mut log, Ev::Spawned { task: id.clone(), attempt: t.attempts }, &mut errors);
-            match spawn(&repo, &integ_branch, o, &run_dir, t) {
+            match spawn(&repo, &integ_branch, o, &run_dir, t, &wake) {
                 Ok(live) => {
                     t.live = Some(live);
                     t.st = St::Running;
@@ -386,7 +400,33 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
         if !active {
             break;
         }
-        std::thread::sleep(Duration::from_millis(o.poll_ms));
+        // 5. wait for the next thing that can matter: a bump, or the earliest deadline of a running task
+        let mut limit: Option<Duration> = None;
+        let mut any_running = false;
+        let mut unpushed = false;
+        for t in tasks.values().filter(|t| t.st == St::Running) {
+            any_running = true;
+            if let Some(live) = &t.live {
+                let left = timeout_of(t.card.meta.timeout_min).saturating_sub(live.started.elapsed()) + Duration::from_millis(1);
+                limit = Some(limit.map_or(left, |l| l.min(left)));
+                unpushed |= !live.pushed || live._watch.is_none();
+            }
+        }
+        let after: Vec<_> = tasks.values().map(|t| (t.card.meta.id.clone(), t.st, t.attempts)).collect();
+        if !any_running && before == after {
+            // nothing runs and nothing moved: waiting would never end
+            break;
+        }
+        if !any_running {
+            continue;
+        }
+        if unpushed {
+            // a runner that cannot say when its process ends is asked again after a pause that grows to `poll_ms`
+            let pause = idle_backoff.min(Duration::from_millis(o.poll_ms.max(1)));
+            limit = Some(limit.map_or(pause, |l| l.min(pause)));
+        }
+        let moved = wake.wait(seen, limit) != seen;
+        idle_backoff = if moved { Duration::from_millis(25) } else { idle_backoff * 2 };
     }
 
     let by = |s: St| {
@@ -519,7 +559,7 @@ fn read_sentinel(wt: &Path) -> Option<Result_> {
     serde_json::from_str(&s).ok()
 }
 
-fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task) -> Result<Live> {
+fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task, wake: &Wake) -> Result<Live> {
     let id = &t.card.meta.id;
     if !card::valid_slug(id) || !card::valid_slug(&o.name) {
         return Err(crate::coded!("orch.bad_id", "invalid card id or run name"));
@@ -569,7 +609,9 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
         ));
     }
 
-    let handle = runner.spawn(&AgentSpawn {
+    // watched before the agent starts, so a `result.json` written at any moment is seen
+    let watch = watch_result(&dot, wake);
+    let mut handle = runner.spawn(&AgentSpawn {
         program: spec[0].clone(),
         args: spec[1..].to_vec(),
         cwd: wt.clone(),
@@ -577,7 +619,25 @@ fn spawn(repo: &Path, integ_branch: &str, o: &Options, run_dir: &Path, t: &Task)
         label: format!("{}/{}", o.name, id),
         log: Some(run_dir.join("logs").join(format!("{id}.log"))),
     })?;
-    Ok(Live { handle, wt, branch, started: Instant::now() })
+    let pushed = handle.on_exit(wake);
+    // one look right after the start covers whatever happened before the watches were in place
+    wake.bump();
+    Ok(Live { handle, wt, branch, started: Instant::now(), pushed, _watch: watch })
+}
+
+/// Bumps `wake` when something happens in `dir` (where the agent writes `result.json`). `None` when the OS refuses the
+/// watch: the loop then looks at that task on a backoff instead.
+fn watch_result(dir: &Path, wake: &Wake) -> Option<notify::RecommendedWatcher> {
+    use notify::Watcher;
+    let w = wake.clone();
+    let mut watcher = notify::recommended_watcher(move |ev: notify::Result<notify::Event>| {
+        if !matches!(ev, Ok(ref e) if matches!(e.kind, notify::EventKind::Access(_))) {
+            w.bump();
+        }
+    })
+    .ok()?;
+    watcher.watch(dir, notify::RecursiveMode::NonRecursive).ok()?;
+    Some(watcher)
 }
 
 /// Command line for a card's agent, from the agents table. An agent with no way to take a prompt in its TUI

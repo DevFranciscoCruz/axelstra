@@ -8,6 +8,7 @@ import {
   projectCloneStatus,
 } from "../api";
 import { errorText } from "../appError";
+import { createLive } from "../live";
 import { coded } from "../msg";
 import {
   navStamp,
@@ -23,9 +24,7 @@ import {
 import { AP } from "../strings.sources";
 import { repoNameFromUrl } from "./logic";
 
-/** How often the daemon is asked how far the clone is. */
-export const POLL_MS = 500;
-/** consecutive failed polls before the job is given up on */
+/** consecutive failed status reads before the job is given up on */
 const MAX_POLL_ERRORS = 3;
 
 export type CloneJob = {
@@ -49,7 +48,9 @@ export const cloneActive = (j: CloneJob | null = cloneJob()): boolean =>
 let gen = 0;
 let cancelAsked = false;
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** looks at the clone now and ends the follow-up when it is over (set while a job is followed) */
+let lookNow: (() => void) | null = null;
+let stopFollow: (() => void) | null = null;
 const patch = (mine: number, p: Partial<CloneJob>) => {
   if (mine === gen) setCloneJob((j) => (j ? { ...j, ...p } : j));
 };
@@ -80,31 +81,45 @@ const finish = async (mine: number, st: CloneStatus) => {
   }
 };
 
-const poll = async (mine: number, id: string) => {
-  let errors = 0;
-  while (mine === gen) {
-    await sleep(POLL_MS);
-    if (mine !== gen) return;
-    let st: CloneStatus;
-    try {
-      st = await projectCloneStatus(id);
-      errors = 0;
-    } catch (e) {
-      if (++errors < MAX_POLL_ERRORS) continue;
-      patch(mine, { state: "failed", error: errorText(e) });
-      return;
-    }
-    if (st.state === "running") patch(mine, { state: "running", percent: st.percent, phase: st.phase });
-    else {
+/** Follows a clone until it ends: the daemon says `clone.changed {id}` when it moved and the status is read then (and when the
+ *  window shows again, for a daemon that does not send it). Resolves when the job is over or given up on. */
+const follow = (mine: number, id: string): Promise<void> =>
+  new Promise<void>((resolve) => {
+    let errors = 0;
+    const end = () => {
+      live.stop();
+      if (stopFollow === end) stopFollow = lookNow = null;
+      resolve();
+    };
+    const look = async () => {
+      if (mine !== gen) return end();
+      let st: CloneStatus;
+      try {
+        st = await projectCloneStatus(id);
+        errors = 0;
+      } catch (e) {
+        if (++errors < MAX_POLL_ERRORS) return;
+        patch(mine, { state: "failed", error: errorText(e) });
+        return end();
+      }
+      if (mine !== gen) return end();
+      if (st.state === "running") {
+        patch(mine, { state: "running", percent: st.percent, phase: st.phase });
+        return;
+      }
+      end();
       await finish(mine, st);
-      return;
-    }
-  }
-};
+    };
+    const live = createLive(look, ["clone.changed"], { match: (d) => d.id === undefined || String(d.id) === id });
+    stopFollow = end;
+    lookNow = live.now;
+    live.now();
+  });
 
 /** Starts `git clone` as a daemon job and follows it until it ends. Does nothing while another clone runs. */
 export const startClone = async (p: CloneParams): Promise<void> => {
   if (cloneActive()) return;
+  stopFollow?.();
   const mine = ++gen;
   cancelAsked = false;
   const name = repoNameFromUrl(p.url) || p.dest.split(/[\\/]/).filter(Boolean).pop() || p.dest;
@@ -119,10 +134,10 @@ export const startClone = async (p: CloneParams): Promise<void> => {
   if (mine !== gen) return;
   patch(mine, { state: "running", id });
   if (cancelAsked) void projectCloneCancel(id).catch((e) => console.debug("project.clone_cancel", e));
-  await poll(mine, id);
+  await follow(mine, id);
 };
 
-/** Stops the clone in flight; the daemon kills git and removes the partial folder, and the next poll reports `cancelled`. */
+/** Stops the clone in flight; the daemon kills git and removes the partial folder, and the next status read reports `cancelled`. */
 export const cancelClone = async (): Promise<void> => {
   const j = cloneJob();
   if (!cloneActive(j) || !j) return;
@@ -130,6 +145,7 @@ export const cancelClone = async (): Promise<void> => {
   if (!j.id) return;
   try {
     await projectCloneCancel(j.id);
+    lookNow?.();
   } catch (e) {
     setError(errorText(e));
   }
@@ -143,6 +159,7 @@ export const dismissClone = () => {
 /** Drops the job and stops following it (tests, and a clean start). */
 export const resetClone = () => {
   gen++;
+  stopFollow?.();
   cancelAsked = false;
   setCloneJob(null);
 };

@@ -196,6 +196,51 @@ pub fn delete(repo: &Path, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Quiet time after the last file event before a change is reported (a card write is a few events).
+const WATCH_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// Watches `<repo>/.kanban` (cards written by the daemon, an orchestrator run, an agent or an editor) and calls `emit`
+/// once per burst on a plain thread. `emit` returns false to stop. `done` runs when the thread ends (the folder was
+/// removed, the stop above), so the caller can watch again later. Errors when the folder does not exist or cannot be watched.
+pub fn watch(repo: &Path, emit: impl Fn() -> bool + Send + 'static, done: impl FnOnce() + Send + 'static) -> Result<()> {
+    use notify::{RecursiveMode, Watcher};
+    let d = dir(repo);
+    let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+    let mut w = notify::recommended_watcher(move |ev| {
+        let _ = tx.send(ev);
+    })
+    .map_err(|e| coded!("watch.create_failed", "create watcher: {detail}", detail = e))?;
+    w.watch(&d, RecursiveMode::NonRecursive).map_err(|e| coded!("watch.create_failed", "create watcher: {detail}", detail = e))?;
+    std::thread::spawn(move || {
+        let _w = w; // the watcher lives as long as this thread
+        'outer: while let Ok(first) = rx.recv() {
+            let mut gone = false;
+            let mut seen = false;
+            let mut take = |ev: notify::Result<notify::Event>| match ev {
+                Ok(ev) if matches!(ev.kind, notify::EventKind::Access(_)) => {}
+                Ok(ev) => {
+                    seen = true;
+                    gone |= matches!(ev.kind, notify::EventKind::Remove(_)) && ev.paths.iter().any(|p| p == &d);
+                }
+                // the OS dropped events: say "something changed"
+                Err(_) => seen = true,
+            };
+            take(first);
+            while let Ok(more) = rx.recv_timeout(WATCH_DEBOUNCE) {
+                take(more);
+            }
+            if seen && !emit() {
+                break 'outer;
+            }
+            if gone || !d.is_dir() {
+                break;
+            }
+        }
+        done();
+    });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,7 +9,17 @@ const h = vi.hoisted(() => ({
   fail: false,
 }));
 
+const bus = vi.hoisted(() => {
+  const subs = new Set<() => void>();
+  return { subs, emit: () => subs.forEach((f) => f()) };
+});
+
 vi.mock("./api", () => ({
+  onDaemonEvent: (name: string, fn: () => void) => {
+    if (name !== "docker.changed") return () => {};
+    bus.subs.add(fn);
+    return () => void bus.subs.delete(fn);
+  },
   dockerStatus: vi.fn(async () => {
     h.statusCalls++;
     if (h.fail) throw new Error("daemon busy");
@@ -53,46 +63,62 @@ beforeEach(() => {
   h.fail = false;
   h.statusCalls = 0;
   h.containerCalls = 0;
+  bus.subs.clear();
 });
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
 
-describe("DockerView polling", () => {
-  it("polls at 3 s while docker answers and stops when unmounted", async () => {
+describe("DockerView follows docker.changed", () => {
+  it("loads once on open, again on each docker.changed, and sets no timer", async () => {
     const r = render(() => createComponent(DockerView, {}));
     await settle();
     expect(h.statusCalls).toBe(1);
-    await vi.advanceTimersByTimeAsync(3000);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(h.statusCalls).toBe(1);
+    bus.emit();
+    await settle();
     expect(h.statusCalls).toBe(2);
     expect(h.containerCalls).toBe(2);
     r.unmount();
-    await vi.advanceTimersByTimeAsync(30000);
-    expect(h.statusCalls).toBe(2);
   });
 
-  it("slows to 10 s while docker is not running", async () => {
+  it("stops listening when unmounted", async () => {
+    const r = render(() => createComponent(DockerView, {}));
+    await settle();
+    expect(bus.subs.size).toBe(1);
+    r.unmount();
+    expect(bus.subs.size).toBe(0);
+    bus.emit();
+    await settle();
+    expect(h.statusCalls).toBe(1);
+  });
+
+  it("does not ask for containers while docker is not running, and picks it up when docker.changed says it started", async () => {
     h.running = false;
     const r = render(() => createComponent(DockerView, {}));
     await settle();
     expect(h.statusCalls).toBe(1);
-    await vi.advanceTimersByTimeAsync(3000);
-    expect(h.statusCalls).toBe(1);
-    await vi.advanceTimersByTimeAsync(7000);
-    expect(h.statusCalls).toBe(2);
     expect(h.containerCalls).toBe(0);
+    h.running = true;
+    bus.emit();
+    await settle();
+    expect(h.statusCalls).toBe(2);
+    expect(h.containerCalls).toBe(1);
     r.unmount();
   });
 
-  it("keeps polling after a failed call", async () => {
+  it("recovers after a failed call on the next event", async () => {
     h.fail = true;
     const r = render(() => createComponent(DockerView, {}));
     await settle();
     h.fail = false;
-    h.running = true;
-    await vi.advanceTimersByTimeAsync(10000);
-    expect(h.statusCalls).toBeGreaterThanOrEqual(2);
+    bus.emit();
+    await settle();
+    expect(h.statusCalls).toBe(2);
+    expect(h.containerCalls).toBe(1);
     r.unmount();
   });
 });

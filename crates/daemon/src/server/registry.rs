@@ -39,6 +39,8 @@ pub(super) struct Registry {
     pub(super) computer: AtomicBool,
     /// what agents' own hooks said they are doing (`session.hint`)
     pub(super) hints: axelstra_core::waiting::Hints,
+    /// the permission mode an agent's own hook last reported (`session.hint` `mode`), by session
+    pub(super) modes: Mutex<HashMap<u32, String>>,
     /// sessions that said they only wait for something external (`session.await`)
     pub(super) awaits: axelstra_core::waiting::Awaits,
     /// sessions the stall watchdog already told their parent about (until they work again)
@@ -52,6 +54,8 @@ pub(super) struct Registry {
     /// bumped by anything that may change what `session.list` shows or whether the daemon is idle (a request, a
     /// connection coming or going, a session starting, exiting or printing after a quiet spell); see `spawn_session_monitor`
     pub(super) pulse: Pulse,
+    /// the one scheduler of the reapers and done-closers (see `Reapers`)
+    pub(super) reapers: Reapers,
     /// connections that get `session.changed` and `projects.changed` (their `watch.subscribe`), with their stop flag
     pub(super) watchers: Mutex<Vec<(Arc<AtomicBool>, Tx)>>,
     /// the automation list changed: the scheduler works out its next due time again
@@ -127,6 +131,17 @@ pub(super) fn janitor_wake(t: &JanitorTiming, started: Duration, left: impl Iter
         .filter_map(|elapsed| t.quiet.checked_sub(elapsed).filter(|d| !d.is_zero()))
         .min()
         .map_or(t.slow, |d| (d + Duration::from_millis(20)).min(t.slow))
+}
+
+/// Whether a permission mode name (as an agent reports it) means no prompts.
+pub(super) fn mode_is_bypass(mode: &str) -> bool {
+    let m = mode.to_ascii_lowercase();
+    m.contains("bypass") || m.contains("yolo") || m == "dontask" || m.contains("dangerously")
+}
+
+/// Whether an agent settings file makes bypass the default mode.
+pub(super) fn settings_default_bypass(v: &Value) -> bool {
+    v["permissions"]["defaultMode"].as_str().is_some_and(mode_is_bypass) || v["defaultMode"].as_str().is_some_and(mode_is_bypass)
 }
 
 /// How many ended sessions `Registry::exited` remembers.
@@ -398,12 +413,14 @@ impl Registry {
             clients: Default::default(),
             computer: AtomicBool::new(false),
             hints: Default::default(),
+            modes: Default::default(),
             awaits: Default::default(),
             stall_notified: Default::default(),
             wt_gen: AtomicU64::new(0),
             audit,
             bad_hellos: AtomicU32::new(0),
             pulse: Default::default(),
+            reapers: Default::default(),
             watchers: Default::default(),
             auto_wake: Default::default(),
             budget_wake: Default::default(),
@@ -430,9 +447,35 @@ impl Registry {
     }
 
     /// True when the agent in this session runs without permission prompts: whatever is typed and sent with Enter runs.
+    /// The mode its own hook reported wins (it follows a Shift+Tab switch); else the start arguments, then the
+    /// `defaultMode` of the agent's settings files (user level, and the worktree's `.claude/settings*.json`).
     pub(super) fn runs_in_bypass(&self, id: u32) -> bool {
+        if let Some(m) = self.modes.lock_recover().get(&id) {
+            return mode_is_bypass(m);
+        }
         let spec = self.specs.lock_recover().get(&id).map(|s| s.to_string().to_ascii_lowercase()).unwrap_or_default();
-        ["bypasspermissions", "dangerously", "--yolo", "never-ask"].iter().any(|k| spec.contains(k))
+        if ["bypasspermissions", "dangerously", "--yolo", "never-ask"].iter().any(|k| spec.contains(k)) {
+            return true;
+        }
+        let dir = {
+            let metas = self.metas.lock_recover();
+            let m = metas.get(&id);
+            m.and_then(|m| m["worktree"].as_str().map(String::from))
+        };
+        let mut files: Vec<std::path::PathBuf> = vec![];
+        if let Some(h) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+            files.push(std::path::Path::new(&h).join(".claude").join("settings.json"));
+        }
+        if let Some(d) = dir {
+            for f in ["settings.json", "settings.local.json"] {
+                files.push(std::path::Path::new(&d).join(".claude").join(f));
+            }
+        }
+        files
+            .iter()
+            .filter_map(|f| std::fs::read_to_string(f).ok())
+            .filter_map(|t| serde_json::from_str::<Value>(&t).ok())
+            .any(|v| settings_default_bypass(&v))
     }
 
     /// Types text that came from another session into an agent. No Enter follows when that agent runs in bypass mode:
@@ -751,6 +794,7 @@ pub(super) fn watch_exit(reg: &Arc<Registry>, id: u32, s: Arc<Session>) {
             reg.note_activity(&w);
         }
         reg.hints.clear(id);
+        reg.modes.lock_recover().remove(&id);
         reg.awaits.clear(id);
         // a session that ended (killed, `exit`, finished) is not brought back by a restart, and leaves the registry
         // (`retire`: list, `ls`, sessions.json, `session.exited`). A daemon shutdown keeps them on purpose (`closing`):

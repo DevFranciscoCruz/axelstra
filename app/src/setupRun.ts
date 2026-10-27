@@ -1,4 +1,4 @@
-import { call, defaultShell, spawnSession, writeSession } from "./api";
+import { call, defaultShell, onDaemonEvent, spawnSession, writeSession } from "./api";
 import { waitShellReady } from "./shellReady";
 
 /** The commands of a project's setup text: one per line, blank lines and `#` comments dropped. */
@@ -23,7 +23,9 @@ export async function runSetup(projectId: string, worktree: string, text: string
   const [program, args] = await defaultShell(worktree);
   const { id } = await spawnSession(program, args, "setup", worktree, { project: projectId, worktree, kind: "shell" });
   // type only once the shell has printed its prompt (a slow profile can take seconds); if it never does, type anyway
-  void waitShellReady(() => call<{ lines: string[] }>("session.screen", { id, lines: 5 }).then((r) => r.lines))
+  void waitShellReady(() => call<{ lines: string[] }>("session.screen", { id, lines: 5 }).then((r) => r.lines), {
+    changes: (fn) => onDaemonEvent("session.changed", fn),
+  })
     .then(() => writeSession(id, setupInput(cmds)))
     .catch(() => 0);
   return true;

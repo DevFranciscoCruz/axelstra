@@ -65,6 +65,21 @@ describe("createSizeSync", () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
+  it("retries a failed send once, not in a loop; a new resize starts over", async () => {
+    const send = vi.fn().mockRejectedValue(new Error("down"));
+    const { s } = make({ send });
+    s.push();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(send).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+    s.resized();
+    await vi.advanceTimersByTimeAsync(80);
+    expect(send).toHaveBeenCalledTimes(3);
+  });
+
   it("sends only the last size of a drag", () => {
     const { state, send, s } = make();
     for (const c of [90, 95, 99]) {

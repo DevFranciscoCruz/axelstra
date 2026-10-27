@@ -73,6 +73,20 @@ pub fn is_stalled(f: &Facts, threshold_ms: u64) -> bool {
         && f.idle_ms.min(f.since_input_ms) >= threshold_ms
 }
 
+/// When to look at this session again, in ms, if nothing happens meanwhile: the moment its quiet spell reaches the
+/// threshold, or (while it awaits something) the moment the await expires. `None`: nothing time alone can change, an
+/// event (pulse) will say. This is what lets the watchdog sleep instead of ticking.
+pub fn next_check_ms(f: &Facts, threshold_ms: u64, await_left_ms: Option<u64>) -> Option<u64> {
+    if threshold_ms == 0 || !f.agent || f.main || !f.running || f.reported || f.escalated || f.live_children {
+        return None;
+    }
+    if f.awaiting {
+        return await_left_ms.map(|l| l + 20);
+    }
+    let quiet = f.idle_ms.min(f.since_input_ms);
+    (quiet < threshold_ms).then(|| threshold_ms - quiet + 20)
+}
+
 /// The English text typed into the parent's session (agent-facing, so it stays English).
 pub fn parent_text(label: &str, id: u32, minutes: u64, last_line: &str) -> String {
     format!(
@@ -123,6 +137,39 @@ mod tests {
             assert!(!is_stalled(&f, 300_000), "{f:?}");
         }
         assert!(!is_stalled(&quiet(), 0), "0 turns the watchdog off");
+    }
+
+    #[test]
+    fn next_check_is_the_moment_the_quiet_spell_reaches_the_threshold() {
+        assert_eq!(next_check_ms(&Facts { idle_ms: 400_000, ..quiet() }, 300_000, None), None, "already stalled: nothing to wait for");
+        let f = Facts { idle_ms: 100_000, since_input_ms: 250_000, ..quiet() };
+        assert_eq!(next_check_ms(&f, 300_000, None), Some(200_020));
+        // typing moves it
+        assert_eq!(next_check_ms(&Facts { since_input_ms: 10_000, ..f }, 300_000, None), Some(290_020));
+        assert_eq!(next_check_ms(&Facts { idle_ms: 0, ..quiet() }, 300_000, None), Some(300_020));
+    }
+
+    #[test]
+    fn next_check_ignores_what_only_an_event_can_change() {
+        let f = Facts { idle_ms: 0, ..quiet() };
+        for g in [
+            Facts { reported: true, ..f },
+            Facts { escalated: true, ..f },
+            Facts { live_children: true, ..f },
+            Facts { running: false, ..f },
+            Facts { main: true, ..f },
+            Facts { agent: false, ..f },
+        ] {
+            assert_eq!(next_check_ms(&g, 300_000, None), None, "{g:?}");
+        }
+        assert_eq!(next_check_ms(&f, 0, None), None, "0 turns the watchdog off");
+    }
+
+    #[test]
+    fn next_check_of_an_awaiting_session_is_the_end_of_the_await() {
+        let f = Facts { idle_ms: 0, awaiting: true, ..quiet() };
+        assert_eq!(next_check_ms(&f, 300_000, Some(5_000)), Some(5_020));
+        assert_eq!(next_check_ms(&f, 300_000, None), None);
     }
 
     #[test]

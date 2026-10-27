@@ -6,6 +6,7 @@ use crate::proto;
 use crate::store::LockRecover;
 use anyhow::Result;
 use axelstra_core::runner::{AgentSpawn, Handle, Runner};
+use axelstra_core::wake::Wake;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -28,6 +29,8 @@ impl DaemonRunner {
 
 struct SessionHandle {
     client: Arc<Mutex<Client>>,
+    pipe: String,
+    token: String,
     id: u32,
 }
 
@@ -45,7 +48,7 @@ impl Runner for DaemonRunner {
         )?;
         let id = r["id"].as_u64().ok_or_else(|| axelstra_core::coded!("daemon.no_id", "daemon returned no id"))? as u32;
         accept_trust_prompt(self.pipe.clone(), self.token.clone(), id);
-        Ok(Box::new(SessionHandle { client: self.client.clone(), id }))
+        Ok(Box::new(SessionHandle { client: self.client.clone(), pipe: self.pipe.clone(), token: self.token.clone(), id }))
     }
 
     fn interactive(&self) -> bool {
@@ -61,6 +64,27 @@ impl Handle for SessionHandle {
 
     fn kill(&mut self) {
         let _ = self.client.lock_recover().call("session.kill", json!({"id": self.id}));
+    }
+
+    /// A thread on its own connection subscribed to the session: the daemon sends `session.exit` when the process ends
+    /// (or the session is removed), which bumps `wake`. A session that is already gone makes `subscribe` fail: bump at once,
+    /// `try_wait` then answers from the daemon's memory of retired sessions.
+    fn on_exit(&mut self, wake: &Wake) -> bool {
+        let (pipe, token, id, wake) = (self.pipe.clone(), self.token.clone(), self.id, wake.clone());
+        let spawned = std::thread::Builder::new().name("session-exit".into()).spawn(move || {
+            let Ok(mut c) = Client::connect(&pipe, &token) else { return wake.bump() };
+            if c.call("session.subscribe", json!({"id": id})).is_err() {
+                return wake.bump();
+            }
+            while let Ok(f) = c.read() {
+                if matches!(&f, Frame::Event(e) if e["event"] == "session.exit") {
+                    break;
+                }
+            }
+            // also when the connection broke: the loop then looks once and asks `try_wait`
+            wake.bump();
+        });
+        spawned.is_ok()
     }
 }
 

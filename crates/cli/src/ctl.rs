@@ -200,6 +200,8 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
         Cmd::Wait { id, idle_secs, timeout } => {
             let t0 = Instant::now();
             let idle_ms = idle_secs * 1000;
+            // subscribe before the first look: a change in between is already queued
+            let changes = crate::events::Changes::open()?;
             loop {
                 let v = c.call("session.list", json!({}))?;
                 match v.as_array().and_then(|a| a.iter().find(|s| s["id"].as_u64() == Some(id as u64))) {
@@ -222,11 +224,19 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
                     }
                     _ => {}
                 }
-                if t0.elapsed() >= Duration::from_secs(timeout) {
+                let left = Duration::from_secs(timeout).saturating_sub(t0.elapsed());
+                if left.is_zero() {
                     eprintln!("timeout after {timeout}s");
                     std::process::exit(2);
                 }
-                std::thread::sleep(Duration::from_millis(500));
+                // woken by the daemon; the deadlines are the moment the session would have been idle long enough
+                // (the daemon pushes nothing at that moment) and the command's own timeout
+                let idle_at = v
+                    .as_array()
+                    .and_then(|a| a.iter().find(|s| s["id"].as_u64() == Some(id as u64)))
+                    .and_then(|s| s["idle_ms"].as_u64())
+                    .map(|idle| Duration::from_millis(idle_ms.saturating_sub(idle) + 1));
+                changes.wait(idle_at.map_or(left, |d| d.min(left)))?;
             }
         }
         Cmd::Search { text, max } => match c.call("agent.search", json!({"query": text, "max": max})) {

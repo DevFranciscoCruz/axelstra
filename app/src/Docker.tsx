@@ -8,8 +8,8 @@ import { Filter, pruneShells, filterContainers, groupByProject, isRunning } from
 import { findWorktree, keepSame, navStamp, openIfStill, refreshSessions, selectedWorktree, sessions, setShowDocker, showDocker } from "./store";
 import { say, nameOf, shells, DTab } from "./docker/shared";
 import { Empty, Unavailable, ComposeBar, Row, VolumesList, ImagesList, NetworksList } from "./docker/Lists";
-import { FAST_MS } from "./docker/shared";
 import { Detail } from "./docker/Detail";
+import { createLive } from "./live";
 import { P } from "./strings.panels";
 import "./docker.css";
 
@@ -18,7 +18,6 @@ export { showDocker, setShowDocker };
 
 type Nav = "containers" | "volumes" | "images" | "networks";
 const NAV: [Nav, string][] = (["containers", "volumes", "images", "networks"] as Nav[]).map((n) => [n, P.docker.nav[n]]);
-const SLOW_MS = 10000;
 
 
 // ---- data, refreshed by one poll that only runs while the view is mounted and the window is visible ----
@@ -47,12 +46,9 @@ export function DockerView() {
   const [busy, setBusy] = createSignal(false);
   let search!: HTMLInputElement;
 
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let polling = false;
   let alive = true;
   const poll = async () => {
-    if (polling) return;
-    polling = true;
+    if (document.hidden) return;
     try {
       const st = await dockerStatus();
       setStatus(st);
@@ -70,25 +66,19 @@ export function DockerView() {
     } catch (e) {
       setLoadErr(nameOf(e));
     } finally {
-      polling = false;
       setLoaded(true);
     }
   };
-  // 3 s while docker answers, 10 s while it does not; nothing while the window is hidden
-  const loop = async () => {
-    if (!document.hidden) await poll();
-    if (alive) timer = setTimeout(loop, status()?.running ? FAST_MS : SLOW_MS);
-  };
-  onMount(() => void loop());
+  // the daemon says when docker changed (`docker.changed`: containers, images, volumes, networks, docker going up or down);
+  // the window showing again also looks once. `createLive` runs one load at a time.
+  const live = createLive(poll, ["docker.changed"]);
+  onMount(() => live.now());
   onCleanup(() => {
     alive = false;
-    clearTimeout(timer);
+    live.stop();
   });
-  const pollNow = () => {
-    clearTimeout(timer);
-    void loop();
-  };
-  createEffect(on([nav, selectedWorktree], () => status()?.running && void poll(), { defer: true }));
+  const pollNow = () => live.now();
+  createEffect(on([nav, selectedWorktree], () => status()?.running && live.now(), { defer: true }));
 
   const selected = createMemo(() => containers().find((c) => c.id === selId()) ?? null);
   // the selected container went away (removed): close its pane

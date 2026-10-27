@@ -6,10 +6,10 @@ import { ask } from "./Confirm";
 import { Icon } from "./Icon";
 import { CheckItem, ShipStatus, gitChecks, gitMerge, gitPr, gitSuggestPr } from "./api";
 import { push, shipEvents } from "./notifications";
-import { CHECK_LABEL, CI_LABEL, GenEvent, REVIEW_LABEL, SHIP_POLL_MS, applySuggestion, autoMergeQuestion, canAutoMerge, canCreatePr, canGenerate, genInitial, genReduce, generateLabel, mergeLabel, mergeQuestion, problemText, shouldPoll } from "./shipLogic";
+import { CHECK_LABEL, CI_LABEL, GenEvent, REVIEW_LABEL, applySuggestion, autoMergeQuestion, canAutoMerge, canCreatePr, canGenerate, genInitial, genReduce, generateLabel, mergeLabel, mergeQuestion, problemText, shouldPoll } from "./shipLogic";
 import { findWorktree, selectedWorktree, setError, showNotice } from "./store";
 import "./ship.css";
-import { createPoller } from "./poller";
+import { createLive } from "./live";
 import { P } from "./strings.panels";
 
 /** last state read per worktree, so a change is noticed even after looking at another worktree in between */
@@ -114,7 +114,8 @@ export function ShipPanel() {
 
   onMount(() => {
     const tick = () => shouldPoll(document.hidden, focused) && void load();
-    const poller = createPoller(() => shouldPoll(document.hidden, focused) && load(), SHIP_POLL_MS);
+    // CI, reviews and the PR move on GitHub: `pr.changed` from the daemon, plus the files and worktrees of this checkout; focus is handled below
+    const poller = createLive(() => shouldPoll(document.hidden, focused) && load(), ["pr.changed", "fs.changed", "projects.changed"], { onFocus: false });
     const onFocus = () => {
       focused = true;
       tick();

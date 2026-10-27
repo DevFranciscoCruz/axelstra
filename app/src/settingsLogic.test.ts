@@ -19,12 +19,12 @@ describe("classifySettingsError", () => {
 describe("waitUntil", () => {
   it("retries until the probe works", async () => {
     const probe = vi.fn().mockRejectedValueOnce(new Error("x")).mockRejectedValueOnce(new Error("x")).mockResolvedValue(1);
-    expect(await waitUntil(probe, 5, 1, () => Promise.resolve())).toBe(true);
+    expect(await waitUntil(probe, 5)).toBe(true);
     expect(probe).toHaveBeenCalledTimes(3);
   });
   it("gives up after the tries", async () => {
     const probe = vi.fn().mockRejectedValue(new Error("x"));
-    expect(await waitUntil(probe, 3, 1, () => Promise.resolve())).toBe(false);
+    expect(await waitUntil(probe, 3)).toBe(false);
     expect(probe).toHaveBeenCalledTimes(3);
   });
 });

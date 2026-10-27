@@ -76,6 +76,7 @@ import {
   nudge,
   restoreSessions,
   stopWatch,
+  onDaemonEvent,
   watchWorktree,
   writeSession,
   CALL_TIMEOUT_MS,
@@ -205,40 +206,144 @@ describe("watchWorktree lifecycle", () => {
 });
 
 describe("nudge", () => {
-  const idle = () => (state.sessions = [{ id: 7, running: true, idle_ms: 5000, label: null, meta: null }]);
-
-  it("types the note once the screen has settled", async () => {
+  // each test starts an hour later than the last: the shared session list is cached by Date.now() and must look stale
+  let clock = Date.now();
+  const fakeClock = () => {
     vi.useFakeTimers();
-    idle();
+    vi.setSystemTime((clock += 3_600_000));
+  };
+  const session = (idle_ms: number) => (state.sessions = [{ id: 7, running: true, idle_ms, label: null, meta: null }]);
+  /** the daemon tells the session changed; a second passes first so the shared list is read again */
+  const changed = async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+    state.channels[0].onmessage({ event: "session.changed" });
+    await vi.advanceTimersByTimeAsync(0);
+  };
+
+  it("waits for session.changed and types the note once the session is quiet, with no polling", async () => {
+    fakeClock();
+    await watchWorktree("C:/a", vi.fn());
+    session(100);
+    await vi.advanceTimersByTimeAsync(1000);
+    const listCalls = () => calls.filter((c) => c.method === "session.list").length;
     const p = nudge(7, "note");
-    await vi.advanceTimersByTimeAsync(4000 + 400 + 50);
+    await vi.advanceTimersByTimeAsync(0);
+    const first = listCalls();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(listCalls()).toBe(first);
+    expect(writes).toHaveLength(0);
+    session(5000);
+    await changed();
+    await vi.advanceTimersByTimeAsync(450);
+    await p;
+    expect(writes.map((w) => w.data)).toEqual(["note", "\r"]);
+  });
+
+  it("an event while the session is still busy keeps waiting", async () => {
+    fakeClock();
+    await watchWorktree("C:/a", vi.fn());
+    session(100);
+    await vi.advanceTimersByTimeAsync(1000);
+    const p = nudge(7, "note");
+    await changed();
+    expect(writes).toHaveLength(0);
+    session(4000);
+    await changed();
+    await vi.advanceTimersByTimeAsync(450);
     await p;
     expect(writes.map((w) => w.data)).toEqual(["note", "\r"]);
   });
 
   it("writes nothing when the user typed in the session first", async () => {
-    vi.useFakeTimers();
-    idle();
+    fakeClock();
+    await watchWorktree("C:/a", vi.fn());
+    session(100);
+    await vi.advanceTimersByTimeAsync(1000);
     const p = nudge(7, "note");
     await vi.advanceTimersByTimeAsync(1000);
     await writeSession(7, "hello");
+    session(5000);
+    await changed();
     await vi.advanceTimersByTimeAsync(10_000);
     await p;
     expect(writes.map((w) => w.data)).toEqual(["hello"]);
   });
 
   it("can be cancelled and gives up quietly when the session is gone", async () => {
-    vi.useFakeTimers();
-    idle();
+    fakeClock();
+    await watchWorktree("C:/a", vi.fn());
+    session(100);
+    await vi.advanceTimersByTimeAsync(1000);
     const p = nudge(7, "note");
     cancelNudge(7);
+    session(5000);
+    await changed();
     await vi.advanceTimersByTimeAsync(10_000);
     await p;
     expect(writes).toHaveLength(0);
     state.sessions = [];
     const q = nudge(7, "note");
+    await changed();
     await vi.advanceTimersByTimeAsync(10_000);
     await q;
     expect(writes).toHaveLength(0);
+  });
+
+  it("gives up at the limit when the session never goes quiet", async () => {
+    fakeClock();
+    await watchWorktree("C:/a", vi.fn());
+    session(100);
+    await vi.advanceTimersByTimeAsync(1000);
+    const p = nudge(7, "note");
+    await vi.advanceTimersByTimeAsync(91_000);
+    await p;
+    expect(writes).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("daemon events carry their payload", () => {
+  it("onDaemonEvent hands the subscriber the event data (kanban.changed {project}, orch.changed {run})", async () => {
+    const seen: unknown[] = [];
+    const off = onDaemonEvent("kanban.changed", (d) => seen.push(d));
+    const orch: unknown[] = [];
+    const off2 = onDaemonEvent("orch.changed", (d) => orch.push(d));
+    await watchWorktree("C:/a", vi.fn());
+    state.channels[0].onmessage({ event: "kanban.changed", project: "p1" });
+    state.channels[0].onmessage({ event: "orch.changed", run: "r9", project: "p1" });
+    state.channels[0].onmessage({ event: "docker.changed" });
+    expect(seen).toEqual([{ event: "kanban.changed", project: "p1" }]);
+    expect(orch).toEqual([{ event: "orch.changed", run: "r9", project: "p1" }]);
+    off();
+    state.channels[0].onmessage({ event: "kanban.changed", project: "p2" });
+    expect(seen).toHaveLength(1);
+    off2();
+  });
+
+  it("session.changed, projects.changed and fs.changed reach both the handlers and the subscribers", async () => {
+    const onSessions = vi.fn();
+    const onProjects = vi.fn();
+    const onChanged = vi.fn();
+    const sub = vi.fn();
+    const offs = (["session.changed", "projects.changed", "fs.changed"] as const).map((e) => onDaemonEvent(e, sub));
+    await watchWorktree("C:/a", onChanged, onSessions, onProjects);
+    state.channels[0].onmessage({ event: "session.changed" });
+    state.channels[0].onmessage({ event: "projects.changed" });
+    state.channels[0].onmessage({ event: "fs.changed", worktree: "C:/a" });
+    expect(onSessions).toHaveBeenCalledTimes(1);
+    expect(onProjects).toHaveBeenCalledTimes(1);
+    expect(onChanged).toHaveBeenCalledWith("C:/a");
+    expect(sub).toHaveBeenCalledTimes(3);
+    offs.forEach((f) => f());
+  });
+
+  it("every subscriber looks once after the stream reconnects, in case an event was missed", async () => {
+    const sub = vi.fn();
+    const off = onDaemonEvent("kanban.changed", sub);
+    await watchWorktree("C:/a", vi.fn());
+    state.listeners.get("daemon-restarted")![0]();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(sub).toHaveBeenCalledWith({});
+    off();
   });
 });

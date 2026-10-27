@@ -2,10 +2,13 @@
 //! this trait, so agents can run headless in-process or inside a daemon PTY.
 
 use crate::job::Job;
+use crate::sync::LockRecover;
+use crate::wake::Wake;
 use anyhow::{Context, Result};
 use std::fs::File;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::{Arc, Condvar, Mutex};
 
 #[derive(Debug, Clone)]
 pub struct AgentSpawn {
@@ -24,6 +27,11 @@ pub trait Handle: Send {
     fn try_wait(&mut self) -> Result<Option<String>>;
     /// Kills the whole process tree and waits for it.
     fn kill(&mut self);
+    /// Asks the handle to `bump` `wake` the moment the process is gone (at once when it already is). Returns whether it
+    /// can: a handle that cannot push (default) has to be asked with `try_wait` now and then.
+    fn on_exit(&mut self, _wake: &Wake) -> bool {
+        false
+    }
 }
 
 pub trait Runner: Send + Sync {
@@ -38,8 +46,22 @@ pub struct ProcessRunner;
 struct ProcHandle {
     /// the exit was already seen (and the group cleaned up once): never signal the group id again
     gone: bool,
-    child: Child,
+    pid: u32,
+    exit: Arc<Exit>,
     job: Job,
+}
+
+/// What the thread that waits for the child leaves behind.
+struct Exit {
+    slot: Mutex<ExitSlot>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct ExitSlot {
+    /// `Some(Ok)` once the child was reaped; `Some(Err)` when waiting for it failed
+    status: Option<std::result::Result<ExitStatus, String>>,
+    wake: Option<Wake>,
 }
 
 impl Runner for ProcessRunner {
@@ -54,8 +76,21 @@ impl Runner for ProcessRunner {
             cmd.stdout(log.try_clone()?).stderr(log);
         }
         let job = Job::new()?;
-        let child = job.spawn(&mut cmd).with_context(|| format!("run {}", s.program))?;
-        Ok(Box::new(ProcHandle { gone: false, child, job }))
+        let mut child = job.spawn(&mut cmd).with_context(|| format!("run {}", s.program))?;
+        let pid = child.id();
+        let exit = Arc::new(Exit { slot: Mutex::new(ExitSlot::default()), changed: Condvar::new() });
+        // a thread blocked in the OS wait: the exit is pushed, nobody has to ask
+        let e = exit.clone();
+        std::thread::Builder::new().name("proc-exit".into()).spawn(move || {
+            let st = child.wait().map_err(|e| e.to_string());
+            let mut g = e.slot.lock_recover();
+            g.status = Some(st);
+            if let Some(w) = &g.wake {
+                w.bump();
+            }
+            e.changed.notify_all();
+        })?;
+        Ok(Box::new(ProcHandle { gone: false, pid, exit, job }))
     }
 
     fn interactive(&self) -> bool {
@@ -65,19 +100,33 @@ impl Runner for ProcessRunner {
 
 impl Handle for ProcHandle {
     fn try_wait(&mut self) -> Result<Option<String>> {
-        let Some(s) = self.child.try_wait()? else { return Ok(None) };
+        let st = match &self.exit.slot.lock_recover().status {
+            None => return Ok(None),
+            Some(Ok(s)) => *s,
+            Some(Err(e)) => anyhow::bail!("{e}"),
+        };
         if self.gone {
-            return Ok(Some(format!("exited ({s})")));
+            return Ok(Some(format!("exited ({st})")));
         }
         self.gone = true;
         // the agent is gone and reaped: what it left running in its group must not outlive it (and the group id is
         // not signalled again later, when the number may belong to someone else)
-        self.job.kill_and_forget(self.child.id());
-        Ok(Some(format!("exited ({s})")))
+        self.job.kill_and_forget(self.pid);
+        Ok(Some(format!("exited ({st})")))
     }
 
     fn kill(&mut self) {
         self.job.kill();
-        let _ = self.child.wait();
+        let g = self.exit.slot.lock_recover();
+        drop(self.exit.changed.wait_while(g, |g| g.status.is_none()).unwrap_or_else(std::sync::PoisonError::into_inner));
+    }
+
+    fn on_exit(&mut self, wake: &Wake) -> bool {
+        let mut g = self.exit.slot.lock_recover();
+        if g.status.is_some() {
+            wake.bump();
+        }
+        g.wake = Some(wake.clone());
+        true
     }
 }

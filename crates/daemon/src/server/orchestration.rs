@@ -10,6 +10,56 @@ fn run_error(name: &str, e: &anyhow::Error) -> Value {
     v
 }
 
+impl Registry {
+    /// A card or the board of `project` changed: the app reloads it instead of asking on a timer.
+    pub(super) fn kanban_changed(&self, project: &str) {
+        self.broadcast_event(json!({"event": "kanban.changed", "project": project}));
+    }
+
+    /// The state of the run `run` (its name, `orch/<run>`) of `project` changed: started, a card moved, finished, retried.
+    pub(super) fn orch_changed(&self, run: &str, project: &str) {
+        self.broadcast_event(json!({"event": "orch.changed", "run": run, "project": project}));
+    }
+}
+
+/// Watched projects, per registry (several daemons can live in one test process).
+static KANBAN_WATCHES: Mutex<Vec<(usize, String)>> = Mutex::new(Vec::new());
+
+/// Makes sure the `.kanban` folder of the project is watched: a change anywhere (the orchestrator moving a card, an
+/// agent or an editor writing one) becomes `kanban.changed`, and `orch.changed` while a run is going. A project with no
+/// folder yet is watched from the first call after the folder exists.
+fn ensure_kanban_watch(reg: &Arc<Registry>, project: &str, repo: &std::path::Path) {
+    let key = (Arc::as_ptr(reg) as usize, project.to_string());
+    {
+        let mut w = KANBAN_WATCHES.lock_recover();
+        if w.contains(&key) || !repo.join(".kanban").is_dir() {
+            return;
+        }
+        w.push(key.clone());
+    }
+    let (weak, pid) = (Arc::downgrade(reg), project.to_string());
+    let started = crate::kanban::watch(
+        repo,
+        move || {
+            let Some(reg) = weak.upgrade() else { return false };
+            reg.kanban_changed(&pid);
+            let run =
+                reg.runs.lock_recover().get(&pid).filter(|r| r["state"] == "running").and_then(|r| r["name"].as_str().map(String::from));
+            if let Some(run) = run {
+                reg.orch_changed(&run, &pid);
+            }
+            true
+        },
+        {
+            let key = key.clone();
+            move || KANBAN_WATCHES.lock_recover().retain(|k| k != &key)
+        },
+    );
+    if started.is_err() {
+        KANBAN_WATCHES.lock_recover().retain(|k| k != &key);
+    }
+}
+
 pub(super) fn call(c: &mut Ctx) -> Result<Value> {
     let req = c.req;
     let (p, reg) = (c.p, c.reg);
@@ -38,9 +88,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 }
                 runs.insert(pr.id.clone(), started.clone());
             }
+            reg.orch_changed(&name, &pr.id);
+            ensure_kanban_watch(reg, &pr.id, std::path::Path::new(&pr.path));
             // a failure before the run thread exists gives the claim back
             let release = |e: anyhow::Error| {
                 reg.runs.lock_recover().insert(pr.id.clone(), run_error(&name, &e));
+                reg.orch_changed(&name, &pr.id);
                 e
             };
             let repo = axelstra_core::git::canon(std::path::Path::new(&pr.path)).map_err(release)?;
@@ -85,7 +138,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                         "reason_codes": r.reason_codes.iter().map(|(id, c)| (id.clone(), c.fields())).collect::<serde_json::Map<_, _>>()}),
                     Err(e) => run_error(&n2, &e),
                 };
-                reg2.runs.lock_recover().insert(pid, v);
+                reg2.runs.lock_recover().insert(pid.clone(), v);
+                reg2.orch_changed(&n2, &pid);
+                reg2.kanban_changed(&pid);
                 // the run removes worktrees with git directly: their sessions go, the app hears of it, the janitor looks
                 reap_orphans(&reg2);
                 reg2.projects_changed();
@@ -108,6 +163,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     v.retain(|e| e[0] != id.as_str());
                 }
             }
+            reg.orch_changed(&name, &pr.id);
+            reg.kanban_changed(&pr.id);
             // the last card waiting for review is merged: the run is finished after all, so it is cleaned up and integrated
             let state = reg.runs.lock_recover().get(&pr.id).cloned().unwrap_or_default();
             if crate::orchend::state_is_clean(&state) {
@@ -116,6 +173,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 reap_orphans(reg);
                 reg.projects_changed();
                 reg.announce_events();
+                reg.orch_changed(&name, &pr.id);
             }
             Ok(json!({}))
         }
@@ -127,7 +185,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let repo = std::path::PathBuf::from(&pr.path);
             let s = |k: &str| p[k].as_str().unwrap_or_default().to_string();
-            tokio::task::block_in_place(|| -> Result<Value> {
+            let out = tokio::task::block_in_place(|| -> Result<Value> {
                 use crate::kanban;
                 Ok(match req.method.as_str() {
                     "kanban.list" => serde_json::to_value(kanban::list(&repo)?)?,
@@ -143,7 +201,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                         json!({})
                     }
                 })
-            })
+            });
+            ensure_kanban_watch(reg, &pr.id, &repo);
+            if out.is_ok() && req.method != "kanban.list" {
+                reg.kanban_changed(&pr.id);
+            }
+            out
         }
         "automation.list" => {
             let _g = reg.auto_lock.lock_recover();
@@ -179,6 +242,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             crate::automations::save_all(&path, &list)?;
             // the scheduler sleeps until the next due run: it works that out again with this one
             reg.auto_wake.notify_one();
+            reg.broadcast("automations.changed");
             Ok(serde_json::to_value(a)?)
         }
         "automation.delete" => {
@@ -188,6 +252,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             list.retain(|x| x.id != p["id"].as_str().unwrap_or_default());
             crate::automations::save_all(&path, &list)?;
             reg.auto_wake.notify_one();
+            reg.broadcast("automations.changed");
             Ok(json!({}))
         }
         "automation.run" => {
@@ -195,6 +260,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let res = tokio::task::block_in_place(|| run_automation(reg, &path, p["id"].as_str().unwrap_or_default()));
             // its last run moved: so does its next one
             reg.auto_wake.notify_one();
+            // its last run moved even when the start failed
+            reg.broadcast("automations.changed");
             res
         }
         m => Err(unknown_method(m)),
