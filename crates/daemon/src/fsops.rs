@@ -339,6 +339,13 @@ pub fn read(wt: &Path, rel: &str) -> Result<Opened> {
 
 pub fn stat_hash(wt: &Path, rel: &str) -> Result<Option<String>> {
     let p = resolve(wt, rel)?;
+    match std::fs::metadata(&p) {
+        Ok(md) if md.len() > MAX_FILE_BYTES => {
+            return Err(coded!("fs.too_big", "file is larger than {mb} MB", mb = MAX_FILE_BYTES >> 20));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        _ => {}
+    }
     match std::fs::read(&p) {
         Ok(b) => Ok(Some(hash(&b))),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
