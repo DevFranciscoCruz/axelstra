@@ -14,15 +14,15 @@ fn home() -> Option<PathBuf> {
     std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from)
 }
 
-fn claude_root() -> Option<PathBuf> {
+pub(crate) fn claude_root() -> Option<PathBuf> {
     Some(home()?.join(".claude").join("projects"))
 }
 
-fn codex_root() -> Option<PathBuf> {
+pub(crate) fn codex_root() -> Option<PathBuf> {
     Some(home()?.join(".codex").join("sessions"))
 }
 
-fn gemini_root() -> Option<PathBuf> {
+pub(crate) fn gemini_root() -> Option<PathBuf> {
     Some(home()?.join(".gemini").join("tmp"))
 }
 

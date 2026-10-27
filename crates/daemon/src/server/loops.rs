@@ -2,6 +2,8 @@
 //! Each sleeps until an event wakes it (see `Pulse`); the timers are the moments something becomes due.
 
 use super::*;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 pub(super) static SWEEP_QUEUED: AtomicBool = AtomicBool::new(false);
 /// A backoff retry of a pending removal is already waiting.
@@ -379,22 +381,154 @@ pub(super) fn spawn_scheduler(reg: Arc<Registry>) {
     });
 }
 
-/// Reads the spending and reports level crossings. With no budget set it sleeps until the settings change
-/// (`budget_wake`); with one it looks every two minutes, as often as the agents' usage logs it reads are worth
-/// reading (they have no event to wait on).
+/// Reads the spending and reports level crossings. It sleeps until something that can change the spending happens
+/// (`budget_wake`): the settings changed, the usage watcher saw an agent's log grow (`spawn_usage_watch`), or a session
+/// changed state. A burst of wake-ups is one reading (the permit of `Notify` does not queue, and the short pause
+/// lets the burst finish first).
 pub(super) fn spawn_budget_loop(reg: Arc<Registry>) {
+    spawn_usage_watch(reg.clone());
     tokio::spawn(async move {
         loop {
             let r = reg.clone();
-            let has = tokio::task::spawn_blocking(move || !misc::budget_check(&r).is_empty()).await.unwrap_or(false);
-            if has {
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(120)) => {}
-                    _ = reg.budget_wake.notified() => {}
-                }
-            } else {
-                reg.budget_wake.notified().await;
+            let _ = tokio::task::spawn_blocking(move || misc::budget_check(&r)).await;
+            reg.budget_wake.notified().await;
+            tokio::time::sleep(BUDGET_COALESCE).await;
+        }
+    });
+}
+
+/// Pause after a wake-up of the budget loop, so the writes of one agent turn are read once.
+const BUDGET_COALESCE: Duration = Duration::from_millis(500);
+/// A usage burst is announced after this much quiet, or at the latest after `USAGE_MAX_WAIT` of constant writing.
+const USAGE_QUIET: Duration = Duration::from_millis(400);
+const USAGE_MAX_WAIT: Duration = Duration::from_secs(3);
+
+/// What an agent's files say changed: `usage` (tokens spent) and/or `limits` (rate limits, context).
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub(super) struct UsageKinds {
+    pub usage: bool,
+    pub limits: bool,
+}
+
+impl UsageKinds {
+    fn merge(&mut self, o: UsageKinds) {
+        self.usage |= o.usage;
+        self.limits |= o.limits;
+    }
+}
+
+/// A folder the usage watcher looks at, what a change under it means, and whether only `*.json` files count.
+pub(super) struct UsageRoot {
+    pub dir: PathBuf,
+    pub kinds: UsageKinds,
+    pub json_only: bool,
+}
+
+/// The folders of the agents' usage files: Claude's transcripts (tokens), Codex's session files (tokens and its rate
+/// limits), Gemini's chats (tokens) and the status line files `axelstra statusline-tee` saves in `status/` (Claude's
+/// context and 5 h / weekly limits).
+pub(super) fn usage_roots(data_dir: &Path) -> Vec<UsageRoot> {
+    let usage = UsageKinds { usage: true, limits: false };
+    let mut v = vec![UsageRoot { dir: data_dir.join("status"), kinds: UsageKinds { usage: false, limits: true }, json_only: true }];
+    if let Some(d) = crate::agentlog::claude_root() {
+        v.push(UsageRoot { dir: d, kinds: usage, json_only: false });
+    }
+    if let Some(d) = crate::agentlog::codex_root() {
+        v.push(UsageRoot { dir: d, kinds: UsageKinds { usage: true, limits: true }, json_only: false });
+    }
+    if let Some(d) = crate::agentlog::gemini_root() {
+        v.push(UsageRoot { dir: d, kinds: usage, json_only: false });
+    }
+    v
+}
+
+/// What a file system event means for `roots` (none for a read, or a path outside them).
+fn usage_kinds_of(ev: &notify::Event, roots: &[UsageRoot]) -> UsageKinds {
+    let mut k = UsageKinds::default();
+    if matches!(ev.kind, notify::EventKind::Access(_)) {
+        return k;
+    }
+    for p in &ev.paths {
+        for r in roots {
+            if p.starts_with(&r.dir) && (!r.json_only || p.extension().is_some_and(|x| x == "json")) {
+                k.merge(r.kinds);
             }
+        }
+    }
+    k
+}
+
+/// Watches `roots` and calls `emit` once per burst of writes, with what changed. Asleep until the OS reports a write. A
+/// folder that does not exist yet (the user never ran that agent) is watched through its nearest existing parent and
+/// picked up when it appears. Runs on its own thread until the process ends.
+pub(super) fn watch_usage(roots: Vec<UsageRoot>, emit: impl Fn(UsageKinds) + Send + 'static) {
+    use notify::{RecursiveMode, Watcher};
+    std::thread::spawn(move || {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let Ok(mut w) = notify::recommended_watcher(tx) else { return };
+        let mut pending: Vec<usize> = vec![];
+        let try_watch = |w: &mut notify::RecommendedWatcher, pending: &mut Vec<usize>| -> UsageKinds {
+            let mut came = UsageKinds::default();
+            pending.retain(|&i| {
+                if roots[i].dir.is_dir() && w.watch(&roots[i].dir, RecursiveMode::Recursive).is_ok() {
+                    came.merge(roots[i].kinds);
+                    return false;
+                }
+                true
+            });
+            came
+        };
+        let mut parents: HashSet<PathBuf> = HashSet::new();
+        // the nearest existing folder above each missing root: it tells when the next level appears
+        let arm_parents = |w: &mut notify::RecommendedWatcher, pending: &[usize], parents: &mut HashSet<PathBuf>| {
+            for &i in pending {
+                if let Some(up) = roots[i].dir.ancestors().skip(1).find(|a| a.is_dir()) {
+                    if parents.insert(up.to_path_buf()) {
+                        let _ = w.watch(up, RecursiveMode::NonRecursive);
+                    }
+                }
+            }
+        };
+        pending.extend(0..roots.len());
+        let _ = try_watch(&mut w, &mut pending);
+        arm_parents(&mut w, &pending, &mut parents);
+        while let Ok(first) = rx.recv() {
+            let mut kinds = UsageKinds::default();
+            let mut take = |ev: notify::Result<notify::Event>, w: &mut notify::RecommendedWatcher, pending: &mut Vec<usize>| {
+                let Ok(ev) = ev else { return };
+                kinds.merge(usage_kinds_of(&ev, &roots));
+                // a watched folder's parent saw something: the folder may exist now
+                if !pending.is_empty() && !matches!(ev.kind, notify::EventKind::Access(_)) {
+                    kinds.merge(try_watch(w, pending));
+                    arm_parents(w, pending, &mut parents);
+                }
+            };
+            take(first, &mut w, &mut pending);
+            // one burst, one announcement: wait for quiet, but never past the cap while an agent keeps writing
+            let start = Instant::now();
+            while let Some(left) = USAGE_MAX_WAIT.checked_sub(start.elapsed()) {
+                match rx.recv_timeout(USAGE_QUIET.min(left)) {
+                    Ok(ev) => take(ev, &mut w, &mut pending),
+                    Err(_) => break,
+                }
+            }
+            if kinds != UsageKinds::default() {
+                emit(kinds);
+            }
+        }
+    });
+}
+
+/// Starts the usage watcher: `usage.changed` and `limits.changed` on the watch stream, and a wake-up of the budget loop.
+fn spawn_usage_watch(reg: Arc<Registry>) {
+    let Some(dir) = reg.saved.parent().map(Path::to_path_buf) else { return };
+    watch_usage(usage_roots(&dir), move |k| {
+        if k.usage {
+            reg.broadcast("usage.changed");
+            reg.budget_wake.notify_one();
+        }
+        if k.limits {
+            reg.broadcast("limits.changed");
         }
     });
 }
@@ -559,6 +693,9 @@ pub(super) fn spawn_session_monitor(reg: Arc<Registry>) {
                     now.iter().filter(|n| (!n.1 || n.2) && last.iter().any(|l| l.0 == n.0 && l.1 && !l.2)).map(|n| n.0).collect();
                 last = now;
                 reg.broadcast("session.changed");
+                // sessions started, ended or went quiet/working: what they cost in memory and tokens moved with them
+                reg.broadcast("resources.changed");
+                reg.budget_wake.notify_one();
                 save_histories_of(&reg, &settled);
             }
             seen = reg.pulse.wait(seen, next.map(|ms| Duration::from_millis(ms + 20)));
