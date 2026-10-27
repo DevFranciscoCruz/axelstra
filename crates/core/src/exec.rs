@@ -31,7 +31,7 @@ use anyhow::Result;
 use std::io::Read;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -116,26 +116,23 @@ pub fn run_capped(cmd: &mut Command, timeout: Duration, max_bytes: usize) -> Res
     let out = drain(child.stdout.take().expect("piped stdout"), max_bytes);
     let err = drain(child.stderr.take().expect("piped stderr"), max_bytes);
 
-    let start = Instant::now();
+    // a thread blocked in the OS wait for the child tells us the moment it exits; the deadline is the only timer
+    let (done_tx, done_rx) = channel();
+    std::thread::spawn(move || {
+        let _ = done_tx.send(child.wait().ok());
+    });
     let mut timed_out = false;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(st)) => break Some(st),
-            Ok(None) => {}
-            Err(_) => break None,
-        }
-        if start.elapsed() >= timeout {
+    let status = match done_rx.recv_timeout(timeout) {
+        Ok(st) => st,
+        Err(RecvTimeoutError::Timeout) => {
             timed_out = true;
-            break None;
+            // the whole tree, leader included (a Job holds every process it started); the waiter reaps the leader
+            job.kill();
+            let _ = done_rx.recv_timeout(DRAIN_GRACE);
+            None
         }
-        std::thread::sleep(Duration::from_millis(10));
+        Err(RecvTimeoutError::Disconnected) => None,
     };
-    if status.is_none() {
-        // still running (or unobservable): the tree first, then reap the leader
-        job.kill();
-        let _ = child.kill();
-        let _ = child.wait();
-    }
     // stragglers of the finished tree must not keep the pipes open
     job.kill_and_forget(pid);
 
@@ -189,6 +186,14 @@ mod tests {
         let t = Instant::now();
         let o = run_capped(&mut sh(line), Duration::from_millis(300), 1024).unwrap();
         assert!(o.timed_out && !o.success() && o.status.is_none());
+        assert!(t.elapsed() < Duration::from_secs(10), "took {:?}", t.elapsed());
+    }
+
+    #[test]
+    fn a_quick_exit_returns_at_once_not_at_the_deadline() {
+        let t = Instant::now();
+        let o = run_capped(&mut sh("exit 0"), Duration::from_secs(120), 1024).unwrap();
+        assert!(o.success() && !o.timed_out);
         assert!(t.elapsed() < Duration::from_secs(10), "took {:?}", t.elapsed());
     }
 

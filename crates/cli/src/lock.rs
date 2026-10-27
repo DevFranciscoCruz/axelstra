@@ -6,9 +6,11 @@ use anyhow::{bail, Result};
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::time::Duration;
 
-/// Ceiling for `--slots`: each slot is a file and a polling try-lock per round.
+/// Ceiling for `--slots`: each slot is a file and, while waiting, a blocked thread.
 pub const MAX_SLOTS: usize = 64;
 
 fn dir() -> Result<PathBuf> {
@@ -17,28 +19,60 @@ fn dir() -> Result<PathBuf> {
     Ok(d)
 }
 
+fn open_slot(dir: &std::path::Path, name: &str, i: usize) -> std::io::Result<File> {
+    OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(format!("{name}-{i}.lock")))
+}
+
 /// Waits for a free slot; returns the held file (dropping it releases the slot).
+///
+/// A free slot is taken at once. Otherwise one thread per slot blocks in the OS lock call, which returns the moment the
+/// holder lets go (or dies): no sleeping and retrying. The first thread to get a slot wins; a thread that gets one later
+/// lets it go again straight away. The timeout is the wait on the winner's channel.
 fn acquire(name: &str, slots: usize, timeout: Duration) -> Result<(File, usize)> {
     let dir = dir()?;
-    let start = Instant::now();
-    let mut announced = false;
-    loop {
-        for i in 0..slots {
-            let f = OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(format!("{name}-{i}.lock")))?;
-            match f.try_lock() {
-                Ok(()) => return Ok((f, i)),
-                Err(TryLockError::WouldBlock) => {}
-                Err(TryLockError::Error(e)) => return Err(e.into()),
+    for i in 0..slots {
+        let f = open_slot(&dir, name, i)?;
+        match f.try_lock() {
+            Ok(()) => return Ok((f, i)),
+            Err(TryLockError::WouldBlock) => {}
+            Err(TryLockError::Error(e)) => return Err(e.into()),
+        }
+    }
+    if timeout.is_zero() {
+        bail!("timed out waiting for lock '{name}'");
+    }
+    eprintln!("axelstra lock: '{name}' is busy ({slots} at a time), waiting...");
+    let claimed = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::channel::<Result<(File, usize)>>();
+    for i in 0..slots {
+        let (dir, name, claimed, tx) = (dir.clone(), name.to_string(), claimed.clone(), tx.clone());
+        std::thread::Builder::new().name(format!("lock-{i}")).spawn(move || {
+            let got = open_slot(&dir, &name, i).and_then(|f| f.lock().map(|()| f));
+            match got {
+                // a slot got after another thread won (or after the timeout) is let go at once
+                Ok(f) => {
+                    if !claimed.swap(true, Ordering::SeqCst) {
+                        let _ = tx.send(Ok((f, i)));
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(e.into()));
+                }
             }
+        })?;
+    }
+    drop(tx);
+    match rx.recv_timeout(timeout) {
+        Ok(r) => r,
+        Err(_) => {
+            // a winner may have claimed in the instant between the timeout and here
+            if claimed.swap(true, Ordering::SeqCst) {
+                if let Ok(r) = rx.recv_timeout(Duration::from_secs(5)) {
+                    return r;
+                }
+            }
+            bail!("timed out waiting for lock '{name}'")
         }
-        if start.elapsed() > timeout {
-            bail!("timed out waiting for lock '{name}'");
-        }
-        if !announced {
-            eprintln!("axelstra lock: '{name}' is busy ({slots} at a time), waiting...");
-            announced = true;
-        }
-        std::thread::sleep(Duration::from_millis(500));
     }
 }
 
@@ -148,6 +182,41 @@ mod tests {
         assert!(acquire(&name, 1, Duration::from_millis(600)).is_err());
         drop(a);
         assert!(acquire(&name, 1, Duration::from_secs(1)).is_ok());
+    }
+
+    #[test]
+    fn a_waiter_wakes_when_the_holder_lets_go_not_on_a_poll_tick() {
+        isolate();
+        let name = format!("w{}", std::process::id());
+        let _clean = Cleanup(name.clone());
+        let (a, _) = acquire(&name, 1, Duration::from_secs(1)).unwrap();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            drop(a);
+        });
+        let t = std::time::Instant::now();
+        assert!(acquire(&name, 1, Duration::from_secs(20)).is_ok());
+        // the old retry period was 500 ms: a waiter that took the slot sooner was woken by the release
+        assert!(t.elapsed() < Duration::from_millis(450), "took {:?}", t.elapsed());
+        releaser.join().unwrap();
+    }
+
+    #[test]
+    fn with_several_slots_the_one_that_frees_is_the_one_taken() {
+        isolate();
+        let name = format!("m{}", std::process::id());
+        let _clean = Cleanup(name.clone());
+        let (a, ia) = acquire(&name, 2, Duration::from_secs(1)).unwrap();
+        let (b, ib) = acquire(&name, 2, Duration::from_secs(1)).unwrap();
+        assert_ne!(ia, ib);
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            drop(b);
+        });
+        let (_c, ic) = acquire(&name, 2, Duration::from_secs(20)).unwrap();
+        assert_eq!(ic, ib);
+        releaser.join().unwrap();
+        drop(a);
     }
 
     #[test]

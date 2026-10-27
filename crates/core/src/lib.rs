@@ -14,3 +14,4 @@ pub mod screen;
 pub mod sync;
 pub mod termseq;
 pub mod waiting;
+pub mod wake;

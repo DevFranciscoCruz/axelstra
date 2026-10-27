@@ -359,3 +359,111 @@ fn a_poll_error_fails_that_task_and_the_run_carries_on() {
     assert_eq!(e.status("c"), "done");
     assert_eq!(e.status("after"), "todo");
 }
+
+// ---- the run waits for events, not for a poll tick ----
+
+/// Runs `f` on a thread and fails the test if it does not finish: a loop that waits for a tick that never comes would
+/// otherwise hang the suite.
+fn within<T: Send + 'static>(secs: u64, f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(secs)).expect("the run did not finish: it waits for a poll tick")
+}
+
+const AN_HOUR_MS: u64 = 3_600_000;
+
+#[test]
+fn process_exits_and_results_are_events_a_huge_poll_period_changes_nothing() {
+    let e = setup("evdag");
+    e.card("a", &[], "");
+    e.card("b", &["a"], "");
+    e.card("c", &[], "");
+    let mut o = run_opts(&e, "t");
+    o.max_concurrency = 2;
+    o.poll_ms = AN_HOUR_MS;
+    o.agent_override = Some(fake_agent(&e));
+    let r = within(120, move || orch::run(&o).unwrap());
+    assert_eq!(r.merged, ["a", "b", "c"]);
+}
+
+#[test]
+fn the_timeout_is_a_deadline_not_a_poll() {
+    let e = setup("evtimeout");
+    e.card("hang", &[], "timeout_min: 0.03\n");
+    let mut o = run_opts(&e, "t");
+    o.poll_ms = AN_HOUR_MS;
+    o.agent_override = Some(fake_agent(&e));
+    let r = within(120, move || orch::run(&o).unwrap());
+    assert_eq!(r.failed.len(), 1);
+    assert!(r.failed[0].1.contains("timeout"), "{:?}", r.failed);
+}
+
+#[cfg(unix)]
+#[test]
+fn result_json_ends_the_task_even_while_the_agent_keeps_running() {
+    let e = setup("evsentinel");
+    e.card("a", &[], "");
+    let mut o = run_opts(&e, "t");
+    o.poll_ms = AN_HOUR_MS;
+    // an interactive agent writes its result and stays open
+    o.agent_override = Some(
+        ["sh", "-c", "echo x > $AXELSTRA_TASK.txt; mkdir -p .axelstra; printf '{\"status\":\"done\",\"summary\":\"ok\"}' > .axelstra/result.json; sleep 600"]
+            .map(String::from)
+            .to_vec(),
+    );
+    let t = std::time::Instant::now();
+    let r = within(120, move || orch::run(&o).unwrap());
+    assert_eq!(r.merged, ["a"]);
+    assert!(t.elapsed() < std::time::Duration::from_secs(60), "took {:?}", t.elapsed());
+}
+
+#[cfg(unix)]
+#[test]
+fn an_agent_that_dies_without_a_result_is_noticed_at_once() {
+    let e = setup("evdeath");
+    e.card("a", &[], "");
+    let mut o = run_opts(&e, "t");
+    o.poll_ms = AN_HOUR_MS;
+    o.agent_override = Some(["sh", "-c", "exit 0"].map(String::from).to_vec());
+    let r = within(120, move || orch::run(&o).unwrap());
+    assert_eq!(r.failed.len(), 1);
+    assert!(r.failed[0].1.contains("without result.json"), "{:?}", r.failed);
+}
+
+/// Delegates to the real process runner but hides that it can push its exit, like a runner that has to be asked.
+struct NoPush(Arc<dyn Runner>);
+struct NoPushHandle(Box<dyn Handle>);
+
+impl Handle for NoPushHandle {
+    fn try_wait(&mut self) -> anyhow::Result<Option<String>> {
+        self.0.try_wait()
+    }
+    fn kill(&mut self) {
+        self.0.kill()
+    }
+}
+
+impl Runner for NoPush {
+    fn spawn(&self, s: &AgentSpawn) -> anyhow::Result<Box<dyn Handle>> {
+        Ok(Box::new(NoPushHandle(self.0.spawn(s)?)))
+    }
+    fn interactive(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn a_runner_that_cannot_push_is_asked_again_on_a_backoff_capped_by_poll_ms() {
+    let e = setup("evnopush");
+    e.card("a", &[], "");
+    e.card("c", &[], "");
+    let mut o = run_opts(&e, "t");
+    o.max_concurrency = 2;
+    o.poll_ms = 200;
+    o.agent_override = Some(fake_agent(&e));
+    o.runner = Some(Arc::new(NoPush(Arc::new(ProcessRunner))));
+    let r = within(120, move || orch::run(&o).unwrap());
+    assert_eq!(r.merged, ["a", "c"]);
+}

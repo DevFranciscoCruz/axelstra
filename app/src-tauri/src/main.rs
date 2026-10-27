@@ -36,6 +36,7 @@ struct State {
 
 #[cfg(all(windows, target_env = "msvc", debug_assertions))]
 mod debugcrt;
+mod gate;
 mod gpu;
 mod hosts;
 mod logging;
@@ -374,7 +375,7 @@ fn check_call(method: &str, params: &Value) -> Result<(), CallError> {
 }
 
 /// Only one caller restarts the daemon connection at a time; the others wait for it outside any slot lock.
-static RECONNECT: Mutex<()> = Mutex::new(());
+static RECONNECT: gate::Gate = gate::Gate::new();
 /// How long a caller waits for another one's reconnect before giving up.
 const RECONNECT_WAIT: Duration = Duration::from_secs(12);
 
@@ -386,24 +387,22 @@ fn reconnect_into(slot: &Mutex<Option<Client>>) -> Result<()> {
         if slot.lock_recover().is_some() {
             return Ok(());
         }
-        let gate = match RECONNECT.try_lock() {
-            Ok(g) => Some(g),
-            Err(std::sync::TryLockError::Poisoned(p)) => Some(p.into_inner()),
-            Err(std::sync::TryLockError::WouldBlock) => None,
-        };
-        if let Some(_gate) = gate {
-            // another caller may have finished while this one took the gate
-            if slot.lock_recover().is_some() {
+        // the one that reconnects leads; the others sleep until it ends (no timer) or `deadline` passes
+        match RECONNECT.enter(deadline) {
+            gate::Entry::Lead(_lead) => {
+                // another caller may have finished while this one took the gate
+                if slot.lock_recover().is_some() {
+                    return Ok(());
+                }
+                let c = reconnect()?;
+                *slot.lock_recover() = Some(c);
                 return Ok(());
             }
-            let c = reconnect()?;
-            *slot.lock_recover() = Some(c);
-            return Ok(());
+            gate::Entry::Waited => {}
+            gate::Entry::TimedOut => {
+                return Err(axelstra_core::coded!("app.daemon_restarting", "the daemon is restarting; try again in a moment"));
+            }
         }
-        if std::time::Instant::now() >= deadline {
-            return Err(axelstra_core::coded!("app.daemon_restarting", "the daemon is restarting; try again in a moment"));
-        }
-        std::thread::sleep(Duration::from_millis(50));
     }
 }
 

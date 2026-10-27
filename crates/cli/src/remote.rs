@@ -13,9 +13,22 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 /// The daemon for a command: the local one, or the one `host` names (`--host`, else `AXELSTRA_HOST`).
 pub fn connect(host: Option<&str>) -> Result<Client> {
     let env = std::env::var("AXELSTRA_HOST").ok();
-    match host.or(env.as_deref()).map(str::trim).filter(|h| !h.is_empty()) {
+    let host = host.or(env.as_deref()).map(str::trim).filter(|h| !h.is_empty());
+    let _ = CHOSEN.set(host.map(str::to_string));
+    match host {
         None => Client::connect_cli(&proto::pipe_name(), &proto::load_or_create_token()?),
         Some(h) => Client::connect_remote(&remote_spec(h, in_agent_session())?, CONNECT_TIMEOUT),
+    }
+}
+
+/// The host `connect` picked, so a command can open a second connection to the same daemon (its event stream).
+static CHOSEN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// Another connection to the daemon the command already talks to.
+pub fn connect_same() -> Result<Client> {
+    match CHOSEN.get() {
+        Some(h) => connect(h.as_deref()),
+        None => connect(None),
     }
 }
 

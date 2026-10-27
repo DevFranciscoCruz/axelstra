@@ -69,17 +69,20 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
                 .as_u64()
                 .unwrap_or(0);
             let t0 = Instant::now();
+            // the reply lands in our inbox, which the daemon announces; subscribe before the first look
+            let changes = crate::events::Changes::open()?;
             loop {
                 let r = c.call("msg.reply_of", json!({"id": q}))?;
                 if let Some(text) = r["reply"]["text"].as_str() {
                     println!("{text}");
                     return Ok(());
                 }
-                if t0.elapsed() >= Duration::from_secs(timeout) {
+                let left = Duration::from_secs(timeout).saturating_sub(t0.elapsed());
+                if left.is_zero() {
                     eprintln!("no answer after {timeout}s (question #{q} is still in session {to}'s inbox)");
                     std::process::exit(2);
                 }
-                std::thread::sleep(Duration::from_millis(500));
+                changes.wait(left)?;
             }
         }
         Cmd::Reply { id, text } => {
@@ -349,7 +352,11 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resu
     let mut worked: HashMap<String, bool> = HashMap::new();
     let mut told_waiting: HashMap<String, bool> = HashMap::new();
     let t0 = Instant::now();
+    // woken by the daemon's change events; subscribed before the first look so nothing in between is lost
+    let changes = crate::events::Changes::open()?;
     loop {
+        // the earliest moment a running agent task would count as quiet: no event announces that moment
+        let mut next_check: Option<Duration> = None;
         // tasks whose dependencies failed can never run
         for t in &tasks {
             if st[&t.id] == St::Pending && t.after.iter().any(|d| matches!(st[d], St::Failed | St::Blocked)) {
@@ -399,6 +406,13 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resu
                     Some((true, "went quiet".into()))
                 }
                 Some(s) => {
+                    if t.agent.is_some() {
+                        let need = t.idle_secs.unwrap_or(20) * 1000;
+                        let idle = s["idle_ms"].as_u64().unwrap_or(0);
+                        // a task already past the threshold (waiting for an answer) is looked at again after one more span
+                        let at = Duration::from_millis(if idle < need { need - idle + 1 } else { need.max(1) });
+                        next_check = Some(next_check.map_or(at, |n| n.min(at)));
+                    }
                     if s["waiting"] == json!(true) && told_waiting.insert(t.id.clone(), true).is_none() {
                         println!(
                             "[flow] {}: waiting for an answer (session {id}); use `axelstra read {id}` and `axelstra say {id} \"…\"`",
@@ -430,6 +444,7 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resu
         }
         publish(&mut c, &flow_id, &state_file, &tasks, &st, &mut last_published);
         // start what is ready
+        let mut started_any = false;
         for t in &tasks {
             if st[&t.id] != St::Pending || !t.after.iter().all(|d| st[d] == St::Ok) {
                 continue;
@@ -454,6 +469,7 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resu
             };
             match started {
                 Ok(id) => {
+                    started_any = true;
                     println!("[flow] {}: started (session {id})", t.id);
                     sess.insert(t.id.clone(), id);
                     st.insert(t.id.clone(), St::Running);
@@ -469,14 +485,18 @@ fn flow(mut c: Client, file: &std::path::Path, timeout: u64, cleanup: bool, resu
         if st.values().all(|s| !matches!(s, St::Pending | St::Running)) {
             break;
         }
-        if t0.elapsed() >= Duration::from_secs(timeout) {
+        let left = Duration::from_secs(timeout).saturating_sub(t0.elapsed());
+        if left.is_zero() {
             eprintln!(
                 "[flow] timeout after {timeout}s; still running: {}",
                 tasks.iter().filter(|t| st[&t.id] == St::Running).map(|t| t.id.as_str()).collect::<Vec<_>>().join(", ")
             );
             std::process::exit(2);
         }
-        std::thread::sleep(Duration::from_millis(1000));
+        // a task just started is looked at again at once (its first output marks it as having worked)
+        if !started_any {
+            changes.wait(next_check.map_or(left, |n| n.min(left)))?;
+        }
     }
     publish(&mut c, &flow_id, &state_file, &tasks, &st, &mut last_published);
     let _ = c.call("flow.clear", json!({"flow": flow_id}));

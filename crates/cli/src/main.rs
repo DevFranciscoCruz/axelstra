@@ -405,6 +405,7 @@ enum WtCmd {
 mod computer;
 mod ctl;
 mod dispatch;
+mod events;
 mod hook;
 mod lock;
 mod orchcmd;
