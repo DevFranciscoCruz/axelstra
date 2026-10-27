@@ -152,39 +152,29 @@ pub fn integrate_with(p: &Project, wt: &git::Worktree, close_sessions: &dyn Fn()
     if ahead_of(repo, &branch, &default) == 0 {
         return Ok(Outcome::Nothing);
     }
-    // the default branch is checked out in the main checkout (or another worktree): merge there, never touching a dirty one
-    let host = git::worktree_list(repo)?
-        .into_iter()
-        .find(|w| w.branch.as_deref() == Some(default.as_str()))
-        .ok_or_else(|| coded!("integrate.default_elsewhere", "{into} is not checked out in any worktree", into = default))?;
-    let host_dir = Path::new(&host.path);
-    if tracked_dirty(host_dir) {
-        return Err(coded!("integrate.default_dirty", "{into} has uncommitted changes in its checkout", into = default));
-    }
-    let how = if git::run(host_dir, &["merge", "--ff-only", "--quiet", &branch]).map(|o| o.ok).unwrap_or(false) {
-        "ff"
-    } else {
-        let msg = format!("Merge {branch}");
-        match git::merge(host_dir, &branch, &msg) {
-            Ok(git::Merge::Clean) => "merge",
-            Ok(git::Merge::Conflict) => {
-                return Err(coded!(
-                    "integrate.conflict",
-                    "merging {branch} into {into} has conflicts; nothing was changed",
-                    branch = branch,
-                    into = default
-                ))
+    // checked out in the main checkout (or another worktree): merge there, never touching a dirty one. Checked out
+    // nowhere (the main checkout sits on another branch): move the ref without touching any checkout.
+    let host = git::worktree_list(repo)?.into_iter().find(|w| w.branch.as_deref() == Some(default.as_str()));
+    let how = match &host {
+        Some(host) => {
+            let host_dir = Path::new(&host.path);
+            if tracked_dirty(host_dir) {
+                return Err(coded!("integrate.default_dirty", "{into} has uncommitted changes in its checkout", into = default));
             }
-            Err(e) => {
-                return Err(coded!(
-                    "integrate.failed",
-                    "could not integrate {branch}: {detail}",
-                    branch = branch,
-                    detail = format!("{e:#}")
-                ))
+            if git::run(host_dir, &["merge", "--ff-only", "--quiet", &branch]).map(|o| o.ok).unwrap_or(false) {
+                "ff"
+            } else {
+                let msg = format!("Merge {branch}");
+                match git::merge(host_dir, &branch, &msg) {
+                    Ok(git::Merge::Clean) => "merge",
+                    Ok(git::Merge::Conflict) => return Err(conflict(&branch, &default)),
+                    Err(e) => return Err(failed(&branch, &e)),
+                }
             }
         }
+        None => advance_unchecked(repo, &branch, &default)?,
     };
+    let host_dir = host.as_ref().map(|h| Path::new(&h.path)).unwrap_or(repo);
     let (pushed, push_error) = if p.push_after_integrate {
         match push(host_dir, &default) {
             Ok(()) => (Some(true), None),
@@ -197,6 +187,68 @@ pub fn integrate_with(p: &Project, wt: &git::Worktree, close_sessions: &dyn Fn()
     let closed = close_sessions();
     let removed = projects::worktree_remove_strict(p, &wt.path).is_ok();
     Ok(Outcome::Integrated { into: default, how, pushed, removed, push_error, closed })
+}
+
+fn conflict(branch: &str, into: &str) -> anyhow::Error {
+    coded!("integrate.conflict", "merging {branch} into {into} has conflicts; nothing was changed", branch = branch, into = into)
+}
+
+fn failed(branch: &str, e: &anyhow::Error) -> anyhow::Error {
+    coded!("integrate.failed", "could not integrate {branch}: {detail}", branch = branch, detail = format!("{e:#}"))
+}
+
+fn rev(repo: &Path, spec: &str) -> Result<String> {
+    git::must(repo, &["rev-parse", "--verify", "--quiet", spec])
+}
+
+/// `git update-ref refs/heads/<default> <new> <old>`: fails with `integrate.default_moved` when the ref is no longer `old`.
+pub fn cas_ref(repo: &Path, default: &str, branch: &str, new: &str, old: &str) -> Result<()> {
+    match git::run(repo, &["update-ref", &format!("refs/heads/{default}"), new, old]) {
+        Ok(o) if o.ok => Ok(()),
+        _ => Err(coded!(
+            "integrate.default_moved",
+            "{into} changed while {branch} was being integrated; nothing was changed, try again",
+            into = default,
+            branch = branch
+        )),
+    }
+}
+
+/// Moves `refs/heads/<default>` to include `branch` while `default` is checked out nowhere. Fast-forward: the ref is
+/// updated with a compare-and-swap, no checkout is touched. Otherwise the merge happens in a throwaway detached worktree
+/// that is always removed. Returns `ff` or `merge`; the ref moved only when it is `Ok`.
+fn advance_unchecked(repo: &Path, branch: &str, default: &str) -> Result<&'static str> {
+    let default_ref = format!("refs/heads/{default}");
+    let (old, tip) = match (rev(repo, &default_ref), rev(repo, &format!("refs/heads/{branch}"))) {
+        (Ok(o), Ok(t)) => (o, t),
+        (Err(e), _) | (_, Err(e)) => return Err(failed(branch, &e)),
+    };
+    let swap = |new: &str| cas_ref(repo, default, branch, new, &old);
+    if git::run(repo, &["merge-base", "--is-ancestor", &old, &tip]).map(|o| o.ok).unwrap_or(false) {
+        swap(&tip)?;
+        return Ok("ff");
+    }
+    let tmp = std::env::temp_dir().join(format!(
+        "axl-integ-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+    ));
+    let result = (|| -> Result<&'static str> {
+        git::must(repo, &["-c", "core.longpaths=true", "worktree", "add", "--detach", "-q", &tmp.to_string_lossy(), &old])?;
+        match git::merge(&tmp, branch, &format!("Merge {branch}")) {
+            Ok(git::Merge::Clean) => {
+                swap(&git::head(&tmp)?)?;
+                Ok("merge")
+            }
+            Ok(git::Merge::Conflict) => Err(conflict(branch, default)),
+            Err(e) => Err(failed(branch, &e)),
+        }
+    })();
+    let _ = git::run(repo, &["worktree", "remove", "--force", &tmp.to_string_lossy()]);
+    let _ = git::remove_tree(&tmp);
+    let _ = git::run(repo, &["worktree", "prune"]);
+    git::forget_worktree_lists();
+    result
 }
 
 fn push(dir: &Path, default: &str) -> std::result::Result<(), Coded> {

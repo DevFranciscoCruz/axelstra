@@ -100,6 +100,11 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   `store/sessions.ts`, registered by `useBootstrap`) runs the usual done/stopped notifications on the last list it had,
   shows a non-zero code as an error toast (`L.notify.exitCode`) and keeps the tab of a failed terminal (not agents) as a
   local row until the user closes it (`dismissExited`): that row is never in `ls` or `sessions.json`.
+- `integrate::integrate_with` also works when the default branch is checked out in no worktree (the main checkout sits on
+  another branch): a fast-forward is `git update-ref refs/heads/<default> <tip> <old>` (compare-and-swap, no checkout
+  touched); otherwise the merge runs in a throwaway detached worktree under the temp dir (always removed) and the ref is moved
+  with the same CAS. A moved ref is `integrate.default_moved`; a conflict is `integrate.conflict` and changes nothing. When
+  the default branch is checked out somewhere the old path (dirty check, merge there) is kept. `integrate.default_elsewhere` is gone.
 - The lead is a dispatcher, not an implementer: its prompt (`FOOTER` in `crates/cli/src/dispatch.rs`) tells it to plan
   the request into subtasks, start workers in its own worktree (`axelstra agent . --report-to $AXELSTRA_SESSION`, they
   show as `Tarefa N` under `main`), not edit code or run heavy builds itself (only integrate commits and run the final

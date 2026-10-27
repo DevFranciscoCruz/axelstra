@@ -10,8 +10,7 @@ export const pt = {
     "{branch} traz código de um pull request ou não é uma branch do Axelstra: nunca é integrada sozinha. Revê-a e junta-a à mão.",
   "integrate.default_dirty":
     "O checkout principal do projeto tem alterações por guardar (ou uma junção a meio), por isso {into} não pode ser atualizada. Limpa-o e tenta outra vez.",
-  "integrate.default_elsewhere":
-    "{into} não está aberta em nenhum worktree, por isso não pode ser atualizada. Abre-a no checkout principal e tenta outra vez.",
+  "integrate.default_moved": "{into} mudou enquanto {branch} era integrada; nada foi alterado. Tenta outra vez.",
   "integrate.not_ok":
     "O agente de {branch} reportou falha ou bloqueio, por isso o trabalho não foi integrado. Abre o main do worktree para ver o motivo.",
   "integrate.busy": "Ainda há um agente a trabalhar no worktree de {branch}. Espera que acabe e tenta outra vez.",
@@ -29,8 +28,7 @@ export const en: Widen<typeof pt> = {
     "{branch} carries code from a pull request or is not an Axelstra branch: it is never integrated by itself. Review it and merge it by hand.",
   "integrate.default_dirty":
     "The project's main checkout has uncommitted changes (or a merge in progress), so {into} cannot be updated. Clean it up and try again.",
-  "integrate.default_elsewhere":
-    "{into} is not checked out in any worktree, so it cannot be updated. Check it out in the main checkout and try again.",
+  "integrate.default_moved": "{into} changed while {branch} was being integrated; nothing was changed, try again.",
   "integrate.not_ok":
     "The agent of {branch} reported a failure or a block, so its work was not integrated. Open the worktree's main to see why.",
   "integrate.busy": "An agent is still working in the worktree of {branch}. Wait for it to finish and try again.",
@@ -50,8 +48,7 @@ export const ptBR: Widen<typeof pt> = {
     "{branch} traz código de um pull request ou não é uma branch do Axelstra: ela nunca é integrada sozinha. Revise e mescle manualmente.",
   "integrate.default_dirty":
     "O checkout principal do projeto tem alterações não commitadas (ou uma mesclagem em andamento), então {into} não pode ser atualizada. Limpe-o e tente novamente.",
-  "integrate.default_elsewhere":
-    "{into} não está em checkout em nenhum worktree, então não pode ser atualizada. Faça o checkout dela no checkout principal e tente novamente.",
+  "integrate.default_moved": "{into} mudou enquanto {branch} era integrada; nada foi alterado. Tente novamente.",
   "integrate.not_ok":
     "O agente de {branch} informou falha ou bloqueio, então o trabalho não foi integrado. Abra o main do worktree para ver o motivo.",
   "integrate.busy": "Ainda há um agente trabalhando no worktree de {branch}. Espere ele terminar e tente novamente.",
