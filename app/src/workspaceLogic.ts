@@ -17,6 +17,8 @@ export type WorkspacePreview = {
   settings: WsSection;
   cards: WsSection;
   risky_cards: number;
+  /** automations that come disabled; absent from an old daemon */
+  risky_automations?: { name: string; agent: string; prompt: string }[];
   /** folder map chosen so far: [path in the file, path here] */
   map: [string, string][];
   file: string;

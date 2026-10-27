@@ -37,6 +37,8 @@ export const ptWS = {
   mapClear: "Limpar mapeamentos",
   risky: (n: number) =>
     `${count(n, "cartão corre", "cartões correm")} com as permissões desligadas ou com um comando de aceitação. Lê ${plural(n, "o cartão", "os cartões")} antes de o${plural(n, "", "s")} executares.`,
+  riskyAutos: (n: number) =>
+    `${count(n, "automatização vem", "automatizações vêm")} desativada${plural(n, "", "s")}. Lê o texto que ${plural(n, "vai", "vão")} enviar ao agente e ativa só o que reconheces.`,
   mode: "Modo",
   modeMerge: "Juntar",
   modeMergeHint: "Acrescenta o que falta e mantém o que já existe.",

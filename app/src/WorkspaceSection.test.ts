@@ -29,6 +29,7 @@ const pv = (o: Partial<WorkspacePreview> = {}): WorkspacePreview => ({
   settings: sec({ conflict: ["terse"] }),
   cards: sec({ new: ["a/one"] }),
   risky_cards: 1,
+  risky_automations: [{ name: "nightly", agent: "claude", prompt: "do the thing" }],
   map: [],
   file: "ws.json",
   ...o,
@@ -69,6 +70,8 @@ describe("WorkspaceSection", () => {
     expect(text).toContain("1 novo");
     expect(text).toContain(WS.reasons.missing);
     expect(text).toContain(WS.risky(1));
+    expect(text).toContain(WS.riskyAutos(1));
+    expect(text).toContain("do the thing");
     expect(api.applyWorkspaceImport).not.toHaveBeenCalled();
   });
 

@@ -35,6 +35,8 @@ export const enWS: Widen<typeof ptWS> = {
   mapClear: "Clear mappings",
   risky: (n: number) =>
     `${count(n, "card runs", "cards run")} with permissions off or with an acceptance command. Read ${plural(n, "it", "them")} before you run ${plural(n, "it", "them")}.`,
+  riskyAutos: (n: number) =>
+    `${count(n, "automation comes", "automations come")} disabled. Read the prompt ${plural(n, "it sends", "they send")} to the agent and turn on only what you recognise.`,
   mode: "Mode",
   modeMerge: "Merge",
   modeMergeHint: "Adds what is missing and keeps what already exists.",

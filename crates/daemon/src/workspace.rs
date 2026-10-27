@@ -402,6 +402,16 @@ pub struct Preview {
     pub cards: Section,
     /// cards that would be written and run with permission checks off or with an acceptance command
     pub risky_cards: usize,
+    /// automations the file marks as enabled and that would be written; they are imported disabled, and the prompt is
+    /// shown so the user can read it before turning them on
+    pub risky_automations: Vec<RiskyAutomation>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct RiskyAutomation {
+    pub name: String,
+    pub agent: String,
+    pub prompt: String,
 }
 
 struct ProjPlan {
@@ -481,6 +491,7 @@ fn plan(store: &Path, p: Parsed, map: &[(String, String)]) -> Result<Plan> {
         settings: Section::default(),
         cards: Section::default(),
         risky_cards: 0,
+        risky_automations: vec![],
     };
 
     // projects: the folder decides who is who, the id of the file is only a name inside it
@@ -563,6 +574,9 @@ fn plan(store: &Path, p: Parsed, map: &[(String, String)]) -> Result<Plan> {
             }
         };
         pv.automations.put(st, auto.name.clone());
+        if auto.enabled && st != St::Present {
+            pv.risky_automations.push(RiskyAutomation { name: auto.name.clone(), agent: auto.agent.clone(), prompt: auto.prompt.clone() });
+        }
         autos.push(AutoPlan { st, existing, auto });
     }
     pv.automations.local_only = cur_autos.iter().filter(|c| !autos.iter().any(|a| a.auto.id == c.id)).count();
@@ -749,6 +763,8 @@ pub fn import(store: &Path, path: &str, o: &Options) -> Result<Outcome> {
         let mut a = ap.auto.clone();
         // nothing fires retroactively: a new automation starts counting now; an edited one keeps its history
         a.last_run = automations::now_ts();
+        // a shared file must not schedule agents by itself: the user turns each automation on after reading its prompt
+        a.enabled = false;
         if let Some(i) = ap.existing {
             let old = &plan.cur_autos[i];
             if serde_json::to_value(&old.schedule)? == serde_json::to_value(&a.schedule)? {
@@ -932,6 +948,8 @@ mod tests {
         assert_eq!((pv.projects.new.len(), pv.automations.new.len(), pv.cards.new.len()), (1, 1, 1));
         assert_eq!(pv.settings.new.len(), 3);
         assert!(!dst.exists(), "preview wrote");
+        assert_eq!(pv.risky_automations.len(), 1);
+        assert!(!pv.risky_automations[0].prompt.is_empty(), "the prompt must be visible in the preview");
 
         let out = import(&dst, &file, &Options { replace: false, overwrite: false, map }).unwrap();
         assert_eq!((out.projects_added, out.automations_added, out.cards_written), (1, 1, 1));
@@ -941,6 +959,7 @@ mod tests {
         let autos = automations::load(&automations::store_path(&dst));
         assert_eq!((autos.len(), autos[0].project.as_str()), (1, ps[0].id.as_str()));
         assert_ne!(autos[0].last_run, 5, "a new automation must not fire retroactively");
+        assert!(!autos[0].enabled, "an imported automation must start disabled");
         let s: Value = read_json(&settings_path(&dst)).unwrap().unwrap();
         assert_eq!(s["terse"], "short");
         assert_eq!(s["ui"]["axelstra.pins"], "[\"a\"]");

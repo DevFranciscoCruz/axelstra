@@ -142,6 +142,18 @@ export function WorkspaceSection() {
                 {WS.risky(pv.risky_cards)}
               </div>
             </Show>
+            <Show when={(pv.risky_automations?.length ?? 0) > 0}>
+              <div class="text-sm text-destructive" role="alert">
+                {WS.riskyAutos(pv.risky_automations!.length)}
+              </div>
+              <For each={pv.risky_automations}>
+                {(a) => (
+                  <div class="auto-note">
+                    <strong>{a.name}</strong> ({a.agent}): <code>{a.prompt}</code>
+                  </div>
+                )}
+              </For>
+            </Show>
             <RadioGroup
               label={WS.mode}
               value={mode()}
