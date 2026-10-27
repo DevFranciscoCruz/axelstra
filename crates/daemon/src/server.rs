@@ -117,6 +117,8 @@ struct Registry {
     save_written: Mutex<(u64, Option<Instant>)>,
     /// numbers the snapshots of the saved state (taken under the `specs`/`pending` locks)
     save_gen: AtomicU64,
+    /// settings.json as last read or written (the daemon is its only writer): a leaf lock. `settings_changed` drops it
+    settings: Mutex<Option<Value>>,
 }
 
 #[derive(Default)]
@@ -246,6 +248,22 @@ impl Registry {
     fn projects_changed(&self) {
         forget_project_list(self);
         self.broadcast("projects.changed");
+    }
+
+    /// The settings, from memory once read. `f` runs under a leaf lock: it must not take another.
+    fn with_settings<R>(&self, f: impl FnOnce(&Value) -> R) -> R {
+        f(self.settings.lock_recover().get_or_insert_with(|| read_settings(&self.saved)))
+    }
+
+    /// A copy of the settings.
+    fn settings(&self) -> Value {
+        self.with_settings(Value::clone)
+    }
+
+    /// settings.json was written (`settings.set`, a project removal) or replaced (`backup.restore`, `workspace.import`):
+    /// the next read goes to the disk.
+    fn settings_changed(&self) {
+        *self.settings.lock_recover() = None;
     }
 
     /// Asks for sessions.json to be rewritten. The first save after a quiet spell is written at once; ones that follow
@@ -434,6 +452,7 @@ impl Registry {
             save_turn: Default::default(),
             save_written: Mutex::new((0, None)),
             save_gen: AtomicU64::new(0),
+            settings: Default::default(),
         }
     }
 
@@ -1774,8 +1793,68 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
     for f in after {
         f();
     }
-    // a request may have changed what sessions show (a message, a hint, a removal): the monitor looks once
-    reg.pulse.bump();
+    // a request may have changed what sessions show (a message, a hint, a removal): the monitor looks once. A read
+    // changed nothing, and with the app listing and polling all day each bump would wake every reaper and monitor.
+    if !reads_only(&req.method) {
+        reg.pulse.bump();
+    }
+}
+
+/// Whether `method` only reads (or touches the disk or git, never a session, its messages or the bus), so the
+/// background waiters that watch the pulse have nothing new to look at after it.
+fn reads_only(method: &str) -> bool {
+    let prefix = method.split('.').next().unwrap_or_default();
+    matches!(prefix, "fs" | "files" | "git" | "watch" | "open" | "docker" | "ports" | "host" | "env" | "audit" | "pm" | "agents" | "codex")
+        || matches!(
+            method,
+            "session.list"
+                | "session.status"
+                | "session.screen"
+                | "session.resources"
+                | "session.usage"
+                | "session.pending"
+                | "session.resize"
+                | "session.subscribe"
+                | "session.unsubscribe"
+                | "settings.get"
+                | "project.list"
+                | "project.logo"
+                | "project.log"
+                | "project.discover"
+                | "project.clone_status"
+                | "project.env_preview"
+                | "worktree.status"
+                | "worktree.overview"
+                | "dispatch.meta"
+                | "dispatch.overlaps"
+                | "dispatch.overlap_files"
+                | "triggers.get"
+                | "triggers.preview"
+                | "agent.status"
+                | "agent.search"
+                | "agent.usage"
+                | "agent.worktree_usage"
+                | "budget.status"
+                | "hooks.status"
+                | "orch.limits"
+                | "orch.trust_info"
+                | "orch.status"
+                | "kanban.list"
+                | "automation.list"
+                | "flow.list"
+                | "computer.status"
+                | "app.dir"
+                | "gh.list"
+                | "gh.comments"
+                | "gh.repos"
+                | "msg.thread"
+                | "msg.reply_of"
+                | "notes.read"
+                | "notes.read_file"
+                | "notes.export"
+                | "notes.worktree"
+                | "ping"
+        )
 }
 
 /// Writes one chunk of keystrokes; a full backlog (the program is not reading) is waited out for a while rather than
@@ -2016,7 +2095,7 @@ fn spawn_stall_watchdog(reg: Arc<Registry>) {
 
 /// One pass of the watchdog.
 fn stall_tick(reg: &Arc<Registry>) {
-    let threshold = crate::stall::threshold_ms(&read_settings(&reg.saved));
+    let threshold = reg.with_settings(crate::stall::threshold_ms);
     let minutes = crate::stall::display_minutes(threshold);
     let picked: Vec<Picked> = {
         let l = reg.sessions.lock_recover();
@@ -2060,7 +2139,7 @@ fn session_list(reg: &Registry) -> Vec<Value> {
         let metas = reg.metas.lock_recover();
         l.iter().map(|(id, s)| (*id, s.clone(), s.view(), labels.get(id).cloned(), metas.get(id).cloned())).collect()
     };
-    let stall_ms = crate::stall::threshold_ms(&read_settings(&reg.saved));
+    let stall_ms = reg.with_settings(crate::stall::threshold_ms);
     let stall_min = crate::stall::display_minutes(stall_ms);
     let busy = busy_parents(reg, &picked);
     let mut v: Vec<Value> = picked
@@ -2193,6 +2272,38 @@ fn dispatch_call(c: &mut Ctx) -> Result<Value> {
         "agent" | "agents" | "codex" | "computer" | "settings" | "flow" | "app" | "hooks" | "ping" | "audit" | "notices" | "daemon"
         | "hello" | "backup" | "env" | "budget" | "workspace" | "host" => misc::call(c),
         _ => anyhow::bail!("unknown method {}", req.method),
+    }
+}
+
+#[cfg(test)]
+mod pulse_tests {
+    use super::*;
+
+    #[test]
+    fn listing_and_reading_do_not_wake_the_background_waiters_but_changes_do() {
+        for m in ["session.list", "session.status", "settings.get", "fs.read", "fs.write", "git.log", "git.merge", "project.list", "ping"] {
+            assert!(reads_only(m), "{m}");
+        }
+        // sessions, messages, the bus and the hints are what the monitor, reapers and done-closers look at
+        for m in [
+            "session.spawn",
+            "session.kill",
+            "session.remove",
+            "session.rename",
+            "session.hint",
+            "session.await",
+            "msg.send",
+            "msg.inbox",
+            "msg.reply",
+            "notes.append",
+            "gh.send_comment",
+            "daemon.shutdown",
+            "worktree.remove",
+            "flow.set",
+            "settings.set",
+        ] {
+            assert!(!reads_only(m), "{m}");
+        }
     }
 }
 
@@ -2376,6 +2487,25 @@ mod registry_tests {
         reg.persist_now();
         let text = std::fs::read_to_string(dir.join("sessions.json")).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["data"].as_array().unwrap().len(), 4);
+    }
+
+    /// Settings are read from the disk once, and again only after something says the file changed.
+    #[test]
+    fn settings_come_from_memory_until_they_are_marked_changed() {
+        let reg = temp_registry("settingscache");
+        let file = reg.saved.with_file_name("settings.json");
+        write_json(&file, &json!({"terse": "short"})).unwrap();
+        assert_eq!(reg.settings()["terse"], "short");
+        // the file changes behind the cache's back: still the old value
+        write_json(&file, &json!({"terse": "tiny"})).unwrap();
+        assert_eq!(reg.settings()["terse"], "short");
+        assert_eq!(reg.with_settings(|s| s["terse"].clone()), "short");
+        reg.settings_changed();
+        assert_eq!(reg.settings()["terse"], "tiny");
+        // a missing file reads as no settings
+        std::fs::remove_file(&file).unwrap();
+        reg.settings_changed();
+        assert_eq!(reg.settings(), json!({}));
     }
 
     fn temp_registry(tag: &str) -> Arc<Registry> {

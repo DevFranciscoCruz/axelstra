@@ -104,11 +104,12 @@ impl Registry {
                 self.auto_wake.notify_one();
             }
         }
-        let mut settings = read_settings(&self.saved);
+        let mut settings = self.settings();
         if crate::removal::forget_ui(&mut settings, &pr.id) {
             if let Err(e) = crate::removal::save_settings(&self.saved, &settings) {
                 eprintln!("project removal: settings: {e:#}");
             }
+            self.settings_changed();
         }
         for p in paths {
             crate::integrate::clear_attention(p);

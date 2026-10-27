@@ -123,7 +123,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "pm.detect" => {
             let path =
                 p["id"].as_str().and_then(|id| crate::projects::find(&reg.store, id).ok()).map(|pr| std::path::PathBuf::from(pr.path));
-            let preferred = read_settings(&reg.saved)["pm"].as_str().map(String::from);
+            let preferred = reg.with_settings(|s| s["pm"].as_str().map(String::from));
             let (installed, suggested) =
                 tokio::task::block_in_place(|| crate::projects::package_managers(path.as_deref(), preferred.as_deref()));
             let has_package_json = path.as_ref().map(|p| p.join("package.json").is_file()).unwrap_or(false);

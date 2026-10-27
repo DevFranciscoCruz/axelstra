@@ -73,7 +73,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "app.dir" => Ok(json!({"dir": reg.saved.parent().unwrap_or(std::path::Path::new("")).to_string_lossy().replace('\\', "/")})),
         "settings.get" => {
-            let saved = read_settings(&reg.saved);
+            let saved = reg.settings();
             // `terse` in the request asks for the rules of that level instead of the saved one (a project's own choice)
             let terse = p["terse"].as_str().or(saved["terse"].as_str()).filter(|l| ["off", "short", "tiny"].contains(l)).unwrap_or("off");
             let installed = tokio::task::block_in_place(|| crate::projects::package_managers(None, None).0);
@@ -88,7 +88,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "settings.set" => {
             // partial update: only the keys present are changed
-            let mut saved = read_settings(&reg.saved);
+            let mut saved = reg.settings();
             if let Some(level) = p["terse"].as_str() {
                 if !["off", "short", "tiny"].contains(&level) {
                     return Err(axelstra_core::coded!("settings.bad_terse", "terse must be off, short or tiny"));
@@ -123,7 +123,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             if let Some(h) = p.get("hosts") {
                 saved["hosts"] = crate::hosts::validate(h)?;
             }
-            write_json(&reg.saved.with_file_name("settings.json"), &saved)?;
+            let written = write_json(&reg.saved.with_file_name("settings.json"), &saved);
+            reg.settings_changed();
+            written?;
             // the budget loop sleeps while there is no budget: it reads the settings again
             reg.budget_wake.notify_one();
             Ok(json!({}))
@@ -166,7 +168,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         // spending against the token limits (read only); `worktrees` limits it to those paths, else every project worktree
         "budget.status" => {
-            let budgets = crate::budget::parse(&read_settings(&reg.saved));
+            let budgets = reg.with_settings(crate::budget::parse);
             let asked: Option<Vec<String>> =
                 p["worktrees"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
             let rows = tokio::task::block_in_place(|| {
@@ -208,7 +210,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| axelstra_core::coded!("workspace.path_required", "path is required"))?;
             let dir = reg.saved.parent().unwrap_or(std::path::Path::new("")).to_path_buf();
-            let restored = tokio::task::block_in_place(|| crate::backup::restore(&dir, std::path::Path::new(src)))?;
+            let restored = tokio::task::block_in_place(|| crate::backup::restore(&dir, std::path::Path::new(src)));
+            reg.settings_changed();
+            let restored = restored?;
             if restored.iter().any(|f| f == "sessions.json") {
                 // the restored sessions wait for the UI like those of a daemon restart; live ones are kept
                 let v = read_json::<Vec<Value>>(&reg.saved).ok().flatten().unwrap_or_default();
@@ -250,7 +254,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let o = crate::workspace::Options { replace, overwrite, map: crate::workspace::parse_map(&p["map"])? };
             let out = {
                 let _g = reg.auto_lock.lock_recover();
-                tokio::task::block_in_place(|| crate::workspace::import(&reg.store, path, &o))?
+                let out = tokio::task::block_in_place(|| crate::workspace::import(&reg.store, path, &o));
+                // it may have replaced settings.json, even when it failed midway
+                reg.settings_changed();
+                out?
             };
             *reg.plist.lock_recover() = None;
             reg.wt_gen.fetch_add(1, Ordering::SeqCst);
@@ -383,7 +390,7 @@ fn pause_agents(reg: &Registry, path: &str) -> Vec<u32> {
 /// into (`auto_pause`) interrupts agents, and only when its limit is passed. Returns the current rows.
 pub(super) fn budget_check(reg: &Arc<Registry>) -> Vec<crate::budget::Row> {
     use crate::budget;
-    let budgets = budget::parse(&read_settings(&reg.saved));
+    let budgets = reg.with_settings(budget::parse);
     if budgets.is_empty() {
         return vec![];
     }
