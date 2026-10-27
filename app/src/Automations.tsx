@@ -1,5 +1,6 @@
-import { For, Show, createResource, createSignal } from "solid-js";
+import { For, Show, createResource, createSignal, onCleanup } from "solid-js";
 import { Icon } from "./Icon";
+import { createLive } from "./live";
 import { Automation, agentOptions, agentWarning, agentsList, deleteAutomation, listAutomations, runAutomation, saveAutomation } from "./api";
 import { Modal } from "./Modal";
 import { ask, askDiscard } from "./Confirm";
@@ -32,6 +33,9 @@ const blank = (project: string): Automation => ({
 export function Automations() {
   const [list, { refetch }] = createResource(listAutomations);
   const [agents] = createResource(agentsList);
+  // the daemon says `automations.changed` when one was saved, deleted or run (by the scheduler too): reload then, never on a timer
+  const live = createLive(() => refetch(), ["automations.changed"]);
+  onCleanup(live.stop);
   const [draft, setDraft] = createSignal<Automation | null>(null);
   // the draft as it was when the editor opened: leaving with anything different asks first
   const [base, setBase] = createSignal("");

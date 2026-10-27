@@ -398,6 +398,7 @@ export type DaemonEvent =
   | "projects.changed"
   | "kanban.changed"
   | "orch.changed"
+  | "automations.changed"
   | "clone.changed"
   | "docker.changed"
   | "limits.changed"
