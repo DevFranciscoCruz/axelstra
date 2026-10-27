@@ -272,6 +272,7 @@ mod sys {
             _ => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP),
         };
         unsafe { SetCursorPos(x, y) };
+        // kept: the target app has no signal for "cursor moved / click handled"; a fixed settle delay between synthetic inputs
         std::thread::sleep(std::time::Duration::from_millis(40));
         for _ in 0..if double { 2 } else { 1 } {
             send(&[mouse(down, 0), mouse(up, 0)]);
@@ -352,6 +353,7 @@ mod sys {
             send(&[keyboard(VK_MENU, 0, 0), keyboard(VK_MENU, 0, KEYEVENTF_KEYUP)]);
             SetForegroundWindow(h);
         }
+        // kept: Windows gives no event for "foreground switch finished"; settle before the next synthetic input
         std::thread::sleep(std::time::Duration::from_millis(150));
         Ok(())
     }

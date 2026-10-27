@@ -241,14 +241,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                             Err(RecvTimeoutError::Disconnected) => break,
                         }
                     }
-                    let mut code = None;
-                    for _ in 0..40 {
-                        code = s.try_wait();
-                        if code.is_some() {
-                            break;
-                        }
-                        std::thread::sleep(Duration::from_millis(50));
-                    }
+                    // the stream only ends once the program is gone (`watch_exit`), so the OS exit signal is already there
+                    s.wait_exit();
+                    let code = s.try_wait();
                     let ev = json!({"event": "session.exit", "id": id, "code": code});
                     let _ = tx.blocking_send(encode(EVENT, ev.to_string().as_bytes()));
                 });

@@ -59,6 +59,7 @@ fn ensure_docker_watch(reg: &Arc<Registry>) {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
                 Err(_) => {
                     drop(reg);
+                    // kept: bounded exponential backoff while `docker` cannot be started (external program)
                     std::thread::sleep(delay);
                     delay = (delay * 2).min(DOCKER_BACKOFF_MAX);
                     continue;
@@ -79,6 +80,7 @@ fn ensure_docker_watch(reg: &Arc<Registry>) {
             let Some(reg) = weak.upgrade() else { break };
             reg.broadcast("docker.changed");
             drop(reg);
+            // kept: bounded exponential backoff before re-attaching to `docker events` after docker went away
             std::thread::sleep(delay);
             delay = (delay * 2).min(DOCKER_BACKOFF_MAX);
         }

@@ -329,6 +329,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 s.kill();
             }
             std::thread::spawn(|| {
+                // kept: lets the reply to this call reach the client before the process ends (no flush event exists)
                 std::thread::sleep(std::time::Duration::from_millis(300));
                 std::process::exit(0);
             });

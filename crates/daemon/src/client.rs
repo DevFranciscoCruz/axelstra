@@ -386,7 +386,10 @@ fn open_pipe(pipe: &str) -> Result<Conn> {
             // ERROR_PIPE_BUSY: the daemon is between instances
             Err(e) if e.raw_os_error() == Some(231) && tries < 20 => {
                 tries += 1;
-                std::thread::sleep(Duration::from_millis(50));
+                // the OS wakes us the moment an instance is free (bounded at 50 ms per try)
+                use std::os::windows::ffi::OsStrExt;
+                let wide: Vec<u16> = std::ffi::OsStr::new(pipe).encode_wide().chain(std::iter::once(0)).collect();
+                unsafe { windows_sys::Win32::System::Pipes::WaitNamedPipeW(wide.as_ptr(), 50) };
             }
             Err(e) => return Err(e).with_context(|| format!("daemon not reachable at {pipe}")),
         }
@@ -425,6 +428,7 @@ impl Read for PeekRead {
                 let n = buf.len().min(avail as usize);
                 return self.0.read(&mut buf[..n]);
             }
+            // kept: a synchronous pipe handle has no readiness event (a pending ReadFile would block writes), so a short backoff
             std::thread::sleep(nap);
             nap = (nap * 2).min(Duration::from_millis(10));
         }
@@ -724,6 +728,7 @@ impl Client {
                 if avail > 0 {
                     break;
                 }
+                // kept: same as PeekRead, no readiness event on a synchronous pipe handle
                 std::thread::sleep(nap);
                 nap = (nap * 2).min(Duration::from_millis(10));
             }

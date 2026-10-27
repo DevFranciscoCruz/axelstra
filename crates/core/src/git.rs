@@ -201,6 +201,7 @@ pub fn worktree_remove(repo: &Path, path: &Path) -> Result<()> {
         if std::fs::rename(path, &trash).is_ok() {
             must(repo, &["worktree", "prune"])?;
             if let Some(dir) = trash.parent().map(Path::to_path_buf) {
+                // kept: bounded background purge retries while a process still holds files in the trash folder
                 std::thread::spawn(move || {
                     for wait in [0u64, 10, 10, 30, 60] {
                         sleep(Duration::from_secs(wait));
@@ -216,6 +217,7 @@ pub fn worktree_remove(repo: &Path, path: &Path) -> Result<()> {
         if run(repo, &["worktree", "remove", "--force", &p])?.ok {
             return Ok(());
         }
+        // kept: bounded backoff for handles of a just-killed process (no OS event for "folder released")
         sleep(Duration::from_millis(ms));
     }
     // "Filename too long": git cannot walk a deep tree on Windows, remove_tree can
@@ -229,6 +231,7 @@ pub fn worktree_remove(repo: &Path, path: &Path) -> Result<()> {
             .map_err(|e| coded!("worktree.park", "could not park {path}: {detail}", path = path.display(), detail = e))?;
         // the parked folder (node_modules and all) is deleted in the background once whatever held it lets go
         if let Some(dir) = trash.parent().map(Path::to_path_buf) {
+            // kept: bounded background purge of the parked folder (6 x 10 s) while something holds it
             std::thread::spawn(move || {
                 for _ in 0..6 {
                     sleep(Duration::from_secs(10));
@@ -256,6 +259,7 @@ pub fn worktree_remove_strict(repo: &Path, path: &Path) -> Result<()> {
         path.with_file_name(format!(".axelstra-trash-{}-{stamp}", path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default()));
     let mut last = None;
     // the handles of a process that was just killed take a moment to go
+    // kept: bounded backoff, Windows has no event for "last handle on the folder closed"
     for ms in [0u64, 100, 300, 1000] {
         sleep(Duration::from_millis(ms));
         match std::fs::rename(path, &trash) {
@@ -280,6 +284,7 @@ pub fn worktree_remove_strict(repo: &Path, path: &Path) -> Result<()> {
         return Err(e);
     }
     if let Some(dir) = trash.parent().map(Path::to_path_buf) {
+        // kept: same bounded background purge as in `worktree_remove`
         std::thread::spawn(move || {
             for wait in [0u64, 10, 10, 30, 60] {
                 sleep(Duration::from_secs(wait));

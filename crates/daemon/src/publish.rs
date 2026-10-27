@@ -170,12 +170,10 @@ fn run_agent(prompt: &str) -> Result<String> {
     no_cwd_lookup(&mut cmd);
     axelstra_core::git::quiet(&mut cmd);
     // outside the repo, so the agent works from the prompt alone and does not wander through the project
-    let mut child = cmd
-        .current_dir(neutral_cwd())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+    // a Job holds the whole process tree, so the deadline kill also takes what the agent started
+    let job = axelstra_core::job::Job::new()?;
+    let mut child = job
+        .spawn(cmd.current_dir(neutral_cwd()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()))
         .map_err(|e| coded!("publish.claude_spawn", "could not start the `claude` CLI: {detail}", detail = e))?;
     let mut stdin = child.stdin.take().context("no stdin")?;
     let text = prompt.to_string();
@@ -183,40 +181,37 @@ fn run_agent(prompt: &str) -> Result<String> {
         let _ = stdin.write_all(text.as_bytes());
     });
     // wait_with_output would not stop at the deadline; the shared runner owns stdin as null, so drain by hand with a bound
-    let (mut out, mut err) = (child.stdout.take().context("no stdout")?, child.stderr.take().context("no stderr")?);
-    let cap = |r: &mut dyn std::io::Read| {
-        let mut b = Vec::new();
-        let _ = r.take(SUGGEST_MAX_OUT as u64).read_to_end(&mut b);
-        b
-    };
+    let (out, err) = (child.stdout.take().context("no stdout")?, child.stderr.take().context("no stderr")?);
     use std::io::Read;
-    let out_t = std::thread::spawn(move || cap(&mut out));
-    let err_t = std::thread::spawn(move || cap(&mut err));
-    let deadline = std::time::Instant::now() + SUGGEST_TIMEOUT;
-    let status = loop {
-        if let Some(s) = child.try_wait()? {
-            break s;
-        }
-        if std::time::Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+    use std::sync::mpsc::{channel, Receiver};
+    let cap = |mut r: Box<dyn Read + Send>| -> Receiver<Vec<u8>> {
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let mut b = Vec::new();
+            let _ = r.by_ref().take(SUGGEST_MAX_OUT as u64).read_to_end(&mut b);
+            let _ = tx.send(b);
+        });
+        rx
+    };
+    let (out_rx, err_rx) = (cap(Box::new(out)), cap(Box::new(err)));
+    // a thread blocked in the OS wait for the child reports the exit the moment it happens; the deadline is the only timer
+    let (done_tx, done_rx) = channel();
+    std::thread::spawn(move || {
+        let _ = done_tx.send(child.wait());
+    });
+    let status = match done_rx.recv_timeout(SUGGEST_TIMEOUT) {
+        Ok(st) => st?,
+        Err(_) => {
+            job.kill();
+            let _ = done_rx.recv_timeout(std::time::Duration::from_secs(2));
             return Err(coded!("publish.agent_timeout", "the agent took longer than {secs}s", secs = SUGGEST_TIMEOUT.as_secs()));
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     };
+    // stragglers of the finished tree must not keep the pipes open
+    job.kill();
     // the pipes close with the child; a straggler holding them is not waited for
-    let join = |t: std::thread::JoinHandle<Vec<u8>>| {
-        let end = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while !t.is_finished() && std::time::Instant::now() < end {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        if t.is_finished() {
-            String::from_utf8_lossy(&t.join().unwrap_or_default()).into_owned()
-        } else {
-            String::new()
-        }
-    };
-    let (out, err) = (join(out_t), join(err_t));
+    let join = |rx: Receiver<Vec<u8>>| String::from_utf8_lossy(&rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap_or_default()).into_owned();
+    let (out, err) = (join(out_rx), join(err_rx));
     if !status.success() {
         return Err(coded!("publish.agent_failed", "claude failed: {detail}", detail = cap_chars(err.trim(), 300)));
     }

@@ -149,6 +149,7 @@ fn accept_trust_prompt(pipe: String, token: String, id: u32) {
                     if plain(&seen).contains("trust this folder") {
                         // keys sent before the menu is interactive get lost, and Enter
                         // would then pick the default "No, exit"
+                        // kept: the agent's menu announces no "interactive now"; keys sent earlier are lost
                         std::thread::sleep(Duration::from_millis(1500));
                         let _ = c.send_input(id, b"\x1b[B"); // Down: "Yes, I trust this folder"
                         std::thread::sleep(Duration::from_millis(400));

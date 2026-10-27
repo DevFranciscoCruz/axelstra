@@ -7,6 +7,7 @@ use axelstra_core::job::Job;
 use axelstra_core::msg::Coded;
 use axelstra_core::{coded, git, msg, paths};
 use std::collections::HashSet;
+use std::sync::Condvar;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -292,6 +293,8 @@ struct CloneJob {
     job: Job,
     cancelled: AtomicBool,
     status: Mutex<Status>,
+    /// signalled by `finish`, so a cancel waits for the end of the clone instead of looking again and again
+    ended: Condvar,
 }
 
 static CLONES: Mutex<Vec<(String, Arc<CloneJob>)>> = Mutex::new(Vec::new());
@@ -306,6 +309,7 @@ impl CloneJob {
         let mut s = self.status.lock_recover();
         f(&mut s);
         s.finished = Some(Instant::now());
+        self.ended.notify_all();
     }
 
     fn fail(&self, e: &anyhow::Error) {
@@ -333,6 +337,7 @@ fn cleanup(j: &CloneJob) {
         if done.is_ok() || !j.dest.exists() {
             return;
         }
+        // kept: bounded retry (20 x 150 ms) for a file the dying git or an antivirus still holds; no OS event for it
         std::thread::sleep(Duration::from_millis(150));
     }
 }
@@ -447,6 +452,7 @@ fn start_clone(reg: &Arc<Registry>, p: &Value) -> Result<Value> {
             job: Job::new()?,
             cancelled: AtomicBool::new(false),
             status: Mutex::new(Status { state: "running", ..Default::default() }),
+            ended: Condvar::new(),
         });
         let id = format!("clone-{}", CLONE_SEQ.fetch_add(1, Ordering::Relaxed));
         jobs.push((id.clone(), j.clone()));
@@ -558,10 +564,8 @@ fn clone_cancel(id: &str) -> Result<Value> {
     if j.running() {
         j.cancelled.store(true, Ordering::SeqCst);
         j.job.kill();
-        let end = Instant::now() + Duration::from_secs(10);
-        while j.running() && Instant::now() < end {
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        let g = j.status.lock_recover();
+        let _ = j.ended.wait_timeout_while(g, Duration::from_secs(10), |s| s.state == "running");
     }
     Ok(json!({"ok": true}))
 }
@@ -725,6 +729,29 @@ fn gh_repos(p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn finishing_a_clone_wakes_a_cancel_waiting_for_its_end() {
+        let j = Arc::new(CloneJob {
+            dest: PathBuf::new(),
+            created: false,
+            job: Job::new().unwrap(),
+            cancelled: AtomicBool::new(false),
+            status: Mutex::new(Status { state: "running", ..Default::default() }),
+            ended: Condvar::new(),
+        });
+        let j2 = j.clone();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            j2.finish(|s| s.state = "cancelled");
+        });
+        let at = Instant::now();
+        let g = j.status.lock_recover();
+        let _ = j.ended.wait_timeout_while(g, Duration::from_secs(30), |s| s.state == "running");
+        assert!(at.elapsed() < Duration::from_secs(10));
+        assert!(!j.running());
+        t.join().unwrap();
+    }
+
     use super::*;
 
     #[test]
