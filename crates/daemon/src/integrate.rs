@@ -154,6 +154,8 @@ pub fn integrate_with(p: &Project, wt: &git::Worktree, close_sessions: &dyn Fn()
     }
     // checked out in the main checkout (or another worktree): merge there, never touching a dirty one. Checked out
     // nowhere (the main checkout sits on another branch): move the ref without touching any checkout.
+    // a checkout done outside Axelstra (`git checkout`) is not an event we see: never trust the cached list here
+    git::forget_worktree_lists();
     let host = git::worktree_list(repo)?.into_iter().find(|w| w.branch.as_deref() == Some(default.as_str()));
     let how = match &host {
         Some(host) => {
@@ -198,7 +200,7 @@ fn failed(branch: &str, e: &anyhow::Error) -> anyhow::Error {
 }
 
 fn rev(repo: &Path, spec: &str) -> Result<String> {
-    git::must(repo, &["rev-parse", "--verify", "--quiet", spec])
+    Ok(git::must(repo, &["rev-parse", "--verify", "--quiet", spec])?.trim().to_string())
 }
 
 /// `git update-ref refs/heads/<default> <new> <old>`: fails with `integrate.default_moved` when the ref is no longer `old`.
@@ -237,7 +239,7 @@ fn advance_unchecked(repo: &Path, branch: &str, default: &str) -> Result<&'stati
         git::must(repo, &["-c", "core.longpaths=true", "worktree", "add", "--detach", "-q", &tmp.to_string_lossy(), &old])?;
         match git::merge(&tmp, branch, &format!("Merge {branch}")) {
             Ok(git::Merge::Clean) => {
-                swap(&git::head(&tmp)?)?;
+                swap(git::head(&tmp)?.trim())?;
                 Ok("merge")
             }
             Ok(git::Merge::Conflict) => Err(conflict(branch, default)),
