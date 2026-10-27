@@ -67,3 +67,19 @@ program or script whose real path is inside the session's cwd, worktree or proje
 (`ShellExecuteW` with the path as one argument, `open`/`xdg-open`, or the file itself on Unix), is closed to agents
 (`agent_forbidden`) and writes every run to the audit log. A path outside the project can only be shown in its folder;
 a remote (WSL/SSH) worktree only offers to copy the path. Anyone who clicks Run runs that program with their own permissions.
+
+## Limits of the agent role
+
+The daemon tells the app from an agent by the connecting process (inside a session's Job Object on Windows, descendant
+of the daemon on Unix), not by a secret. This is not a sandbox. Processes started outside the session's tree can still
+read the token file and act as the user: on Windows through WMI, COM or Task Scheduler (`schtasks`), on Linux through
+`systemd-run --user`, `at` or `cron`, and on macOS there is no tree check. A hostile agent that knows these techniques
+can call the methods that `agent_forbidden` withholds from agents. See `docs/s3-app-secret.md`.
+
+## Terminals started by the webview
+
+`session.spawn` from the webview is limited by the host to a known shell name (compared without directory or
+extension), and to `AXELSTRA_*` environment variables. It does not limit the shell's path or arguments: an agent
+terminal is a shell started with `-Command <line>` / `-c <line>`, so running arbitrary commands is how the feature works.
+A script injected into the webview could therefore run commands as the user. This is accepted by design; the barrier
+against it is the Content Security Policy above and the fixed set of allowed methods, not this check.

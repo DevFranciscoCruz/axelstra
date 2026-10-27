@@ -64,3 +64,19 @@ whose process knows the master token and tries the app-only calls; `computer_act
 A hostile agent can still use the OS directly (SendInput, reading files, `git`). The split protects the Axelstra
 control plane (what the daemon, the registry, hooks and the machine's screen do on the user's behalf), not the
 user's account. Real containment needs sandboxed sessions (restricted token / AppContainer / separate uid).
+
+### Known bypasses of the process-based role
+
+The role comes from which process holds the connection, so anything that starts a process outside the session's tree
+reads the token file and is classified as the user:
+
+- **Windows:** processes created through WMI (`Win32_Process.Create`, a child of `WmiPrvSE.exe`), COM activation
+  (`Shell.Application`, `explorer`) or Task Scheduler (`schtasks`) do not inherit the session's Job Object.
+- **Linux:** `systemd-run --user`, `at` and `cron` start processes that do not descend from the daemon.
+- **macOS:** no process-tree check at all (see above).
+
+An agent that knows one of these techniques gets user rights on the control plane, so every `agent_forbidden` guarantee
+(`computer.enable`, `hooks.install`, `project.add`, `backup.restore`, `files.path_action`, ...) is a speed bump against
+a confused or injected agent, not a barrier against a determined one. The CLI talks to the daemon directly, so the
+app host never sees those calls and cannot ask the user to confirm them; a confirmation dialog for CLI clients would
+need a daemon change and is not implemented. Containment of a hostile agent needs sandboxed sessions (see below).
