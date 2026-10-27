@@ -100,7 +100,7 @@ pub fn orphan_dirs(projects: &[Project], busy: &dyn Fn(&str) -> bool, dry: bool,
         let Some(root) = repo.parent().map(|r| r.join(".axelstra-wt")) else { continue };
         // a project git cannot list now (repo moved, git failing) makes the whole folder unsafe to judge
         let Ok(wts) = git::worktree_list(repo) else { return };
-        listed.extend(wts.iter().map(|w| crate::projects::norm_path(&w.path)));
+        listed.extend(wts.iter().map(|w| axelstra_core::paths::norm(&w.path)));
         if !roots.contains(&root) {
             roots.push(root);
         }
@@ -120,7 +120,7 @@ pub fn orphan_dirs(projects: &[Project], busy: &dyn Fn(&str) -> bool, dry: bool,
                 }
                 continue;
             }
-            if name.starts_with('.') || listed.contains(&crate::projects::norm_path(&ps)) || busy(&ps) {
+            if name.starts_with('.') || listed.contains(&axelstra_core::paths::norm(&ps)) || busy(&ps) {
                 continue;
             }
             // a `.git` file pointing at a folder that still exists: some repo (maybe another project) owns it
@@ -203,7 +203,7 @@ fn delete_file(path: &Path, kind: &str, why: &str, dry: bool, out: &mut Vec<Valu
 pub fn live_worktrees(projects: &[Project]) -> Option<Vec<String>> {
     let mut v = vec![];
     for p in projects {
-        v.extend(git::worktree_list(Path::new(&p.path)).ok()?.iter().map(|w| crate::projects::norm_path(&w.path)));
+        v.extend(git::worktree_list(Path::new(&p.path)).ok()?.iter().map(|w| axelstra_core::paths::norm(&w.path)));
     }
     Some(v)
 }
@@ -214,7 +214,7 @@ pub fn live_worktrees(projects: &[Project]) -> Option<Vec<String>> {
 /// (under `LEFTOVER_MIN_AGE_SECS`), files with no readable `Worktree:` header and reports of live worktrees stay.
 pub fn worktree_leftovers(data_dir: &Path, wts: Option<&[String]>, live_notes: &[String], dry: bool, out: &mut Vec<Value>) {
     let Some(wts) = wts else { return };
-    let live: Vec<String> = live_notes.iter().map(|n| crate::projects::norm_path(n)).collect();
+    let live: Vec<String> = live_notes.iter().map(|n| axelstra_core::paths::norm(n)).collect();
     let Ok(projects) = std::fs::read_dir(crate::notes::root(data_dir)) else { return };
     for pd in projects.flatten().filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false)) {
         for (dir, archived) in [(pd.path(), false), (pd.path().join("arquivo"), true)] {
@@ -224,12 +224,12 @@ pub fn worktree_leftovers(data_dir: &Path, wts: Option<&[String]>, live_notes: &
                 if !path.is_file() || path.extension().is_none_or(|x| x != "md") || !old_enough(e.metadata().ok()) {
                     continue;
                 }
-                if live.contains(&crate::projects::norm_path(&path.to_string_lossy())) {
+                if live.contains(&axelstra_core::paths::norm(&path.to_string_lossy())) {
                     continue;
                 }
                 let Ok(text) = crate::notes::read(&path) else { continue };
                 let Some(wt) = crate::notes::header_value(&text, "Worktree") else { continue };
-                let why = if wts.contains(&crate::projects::norm_path(wt)) {
+                let why = if wts.contains(&axelstra_core::paths::norm(wt)) {
                     if archived || crate::notes::summarize(&text).0 != "aberto" {
                         continue;
                     }
@@ -402,7 +402,7 @@ mod tests {
         let busy_dir = root.join("repo-busy");
         std::fs::create_dir_all(&busy_dir).unwrap();
         let busy_s = busy_dir.to_string_lossy().to_string();
-        let busy = |path: &str| crate::projects::norm_path(path) == crate::projects::norm_path(&busy_s);
+        let busy = |path: &str| axelstra_core::paths::norm(path) == axelstra_core::paths::norm(&busy_s);
         let mut out = vec![];
         orphan_dirs(std::slice::from_ref(&p), &busy, true, &mut out);
         assert!(out.iter().any(|o| o["kind"] == "orphan" && o["path"].as_str().unwrap().ends_with("repo-orphan")), "{out:?}");
@@ -483,7 +483,7 @@ mod tests {
         let folder_wt = dir.join("wt-folder");
         std::fs::create_dir_all(&folder_wt).unwrap();
         let wt_s = live_wt.to_string_lossy().to_string();
-        let wts = vec![crate::projects::norm_path(&wt_s)];
+        let wts = vec![axelstra_core::paths::norm(&wt_s)];
         let pd = dir.join("notes").join("proj");
         let gone = note(&pd, "Tarefa 1", "C:/no/such/wt-gone", true);
         let fresh = note(&pd, "Tarefa 2", "C:/no/such/wt-gone", true);

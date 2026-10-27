@@ -14,7 +14,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             });
             let token_ok = p.get("token").and_then(Value::as_str).is_some_and(|t| ct_eq(t, token));
             if agent_session.is_none() && !token_ok {
-                reg.hello_failed();
+                *c.delay = reg.hello_failed();
                 return Err(axelstra_core::coded!("rpc.bad_token", "bad token"));
             }
             reg.bad_hellos.store(0, Ordering::SeqCst);

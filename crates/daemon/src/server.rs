@@ -1,6 +1,7 @@
 use crate::proto::*;
 use crate::store::{read_json, write_atomic, write_json, LockRecover};
 use anyhow::Result;
+use axelstra_core::paths::{is_within, norm};
 use axelstra_core::pty::{Session, Spawn};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -457,9 +458,10 @@ impl Registry {
     }
 
     /// Throttle for token guessing: the n-th refusal in a row waits n * 50 ms (at most 1 s) before it is answered.
-    fn hello_failed(&self) {
+    /// Returns that wait; the connection sleeps it (`run_call`), so no thread of the blocking pool is held for it.
+    fn hello_failed(&self) -> Duration {
         let n = self.bad_hellos.fetch_add(1, Ordering::SeqCst).saturating_add(1);
-        std::thread::sleep(Duration::from_millis(u64::from(n.min(20)) * 50));
+        Duration::from_millis(u64::from(n.min(20)) * 50)
     }
 
     /// True when the agent in this session runs without permission prompts: whatever is typed and sent with Enter runs.
@@ -476,10 +478,9 @@ impl Registry {
 
     /// True while a session waiting to be restored (from the previous daemon run) belongs to this worktree.
     fn worktree_pending(&self, path: &str) -> bool {
-        let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
         let want = norm(path);
         self.pending.lock_recover().iter().any(|r| {
-            r["meta"]["worktree"].as_str().is_some_and(|w| norm(w) == want) || r["cwd"].as_str().is_some_and(|c| within(&norm(c), &want))
+            r["meta"]["worktree"].as_str().is_some_and(|w| norm(w) == want) || r["cwd"].as_str().is_some_and(|c| is_within(c, &want))
         })
     }
 
@@ -520,7 +521,6 @@ impl Registry {
 
     /// Sessions that are alive and have this worktree as worktree or cwd.
     fn live_in(&self, path: &str) -> Vec<(u32, Arc<Session>)> {
-        let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
         let want = norm(path);
         // one lock at a time (the rest of the daemon takes sessions before metas)
         let alive: Vec<(u32, Arc<Session>)> =
@@ -530,7 +530,7 @@ impl Registry {
         let by_meta: Vec<u32> = alive.iter().map(|(id, _)| *id).filter(in_meta).collect();
         drop(metas);
         let specs = self.specs.lock_recover();
-        let by_cwd = |id: &u32| specs.get(id).and_then(|sp| sp["cwd"].as_str()).map(|c| within(&norm(c), &want)).unwrap_or(false);
+        let by_cwd = |id: &u32| specs.get(id).and_then(|sp| sp["cwd"].as_str()).map(|c| is_within(c, &want)).unwrap_or(false);
         alive.into_iter().filter(|(id, _)| by_meta.contains(id) || by_cwd(id)).collect()
     }
 
@@ -553,7 +553,7 @@ impl Registry {
 
     /// Notes that a session left this worktree just now.
     fn note_activity(&self, path: &str) {
-        self.activity.lock_recover().insert(crate::projects::norm_path(path), Instant::now());
+        self.activity.lock_recover().insert(norm(path), Instant::now());
     }
 
     /// For a worktree the user made by hand: a session of any kind is open there, or one was a moment ago (or this
@@ -563,7 +563,7 @@ impl Registry {
         if self.started.elapsed() < quiet || !self.live_in(path).is_empty() {
             return true;
         }
-        self.activity.lock_recover().get(&crate::projects::norm_path(path)).is_some_and(|at| at.elapsed() < quiet)
+        self.activity.lock_recover().get(&norm(path)).is_some_and(|at| at.elapsed() < quiet)
     }
 
     /// When the janitor must look again without any event (see `janitor_wake`). Forgets activity notes that no longer
@@ -661,7 +661,6 @@ impl Registry {
     }
 
     fn worktree_busy(&self, path: &str) -> bool {
-        let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
         let want = norm(path);
         // a worktree a running flow plan still has to use (queued or running) is not finished, whatever its branch says
         let in_flow = self.flows.lock_recover().values().any(|t| {
@@ -694,7 +693,6 @@ impl Registry {
     /// True while a live session in this worktree is not idle (output in the last 5 s). A prompt waiting for
     /// input does not count: renaming the worktree is fine then.
     fn worktree_working(&self, path: &str) -> bool {
-        let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
         let want = norm(path);
         let working: Vec<u32> =
             self.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none() && s.idle_ms() < 5000).map(|(id, _)| *id).collect();
@@ -713,6 +711,13 @@ impl Registry {
             .iter()
             .find(|(id, m)| m["key"].as_str() == Some(key) && sessions.get(id).is_some_and(|s| s.try_wait().is_none()))
             .map(|(id, _)| *id)
+    }
+
+    /// The project's main agent: the live agent session marked `main` for that project id (the lowest id if several).
+    fn project_main(&self, project: &str) -> Option<u32> {
+        let sessions = self.sessions.lock_recover();
+        let metas = self.metas.lock_recover();
+        project_main_in(&sessions, &metas, project)
     }
 
     fn get(&self, id: u32) -> Option<Arc<Session>> {
@@ -801,6 +806,20 @@ fn watch_exit(reg: &Arc<Registry>, id: u32, s: Arc<Session>) {
         reg.pulse.bump();
         reg.janitor.bump();
     });
+}
+
+/// `Registry::project_main` for a caller that already holds the `sessions` and `metas` locks.
+fn project_main_in(sessions: &HashMap<u32, Arc<Session>>, metas: &HashMap<u32, Value>, project: &str) -> Option<u32> {
+    metas
+        .iter()
+        .filter(|(id, m)| {
+            m["kind"] == "agent"
+                && m["main"] == true
+                && m["project"].as_str() == Some(project)
+                && sessions.get(id).is_some_and(|s| s.try_wait().is_none())
+        })
+        .map(|(id, _)| *id)
+        .min()
 }
 
 /// A terminal size from a request: `as u16` would wrap 65537 to 1, and 0 is no size at all.
@@ -897,8 +916,6 @@ fn not_own_tree(method: &str) -> anyhow::Error {
     )
 }
 
-/// True when `path` is `root` or lies below it, comparing whole path components (`/a/wt-2` is not inside `/a/wt`).
-/// Both are already normalized (forward slashes, lowercase).
 /// False when a saved session points at folders that are all gone (a deleted worktree): it cannot be restored.
 /// A record with no folder at all (a plain shell) counts as alive.
 fn rec_alive(rec: &Value) -> bool {
@@ -943,10 +960,6 @@ fn rec_junk(rec: &Value) -> bool {
 /// Under test, the real data dir's files are never written (the same rule `serve_with_store` applies to the daemon).
 fn real_dir_under_test(saved: &std::path::Path) -> bool {
     saved.parent().is_some_and(|d| crate::proto::refuse_real_when_testing("", d).is_err())
-}
-
-fn within(path: &str, root: &str) -> bool {
-    std::path::Path::new(path).starts_with(root)
 }
 
 pub(crate) const SHELLS: [&str; 6] = ["auto", "pwsh", "powershell", "bash", "wsl", "cmd"];
@@ -1076,16 +1089,8 @@ fn sweep_soon(reg: &Arc<Registry>) {
 /// Tells the main agent of the project that `item` (a sweep result with an `integrate.*` code) was left for a human or
 /// for it. Typed into an agent, so it stays English.
 fn tell_main_not_integrated(reg: &Arc<Registry>, item: &Value) {
-    let Some(p) = crate::projects::load(&reg.store).into_iter().find(|p| item["project"].as_str() == Some(p.id.as_str())) else { return };
-    let main = crate::projects::norm_path(&p.path);
-    let target = {
-        let metas = reg.metas.lock_recover();
-        metas
-            .iter()
-            .find(|(_, m)| m["kind"] == "agent" && m["worktree"].as_str().is_some_and(|w| crate::projects::norm_path(w) == main))
-            .map(|(id, _)| *id)
-    };
-    let Some((id, s)) = target.and_then(|id| reg.get(id).map(|s| (id, s))) else { return };
+    let Some(project) = item["project"].as_str() else { return };
+    let Some((id, s)) = reg.project_main(project).and_then(|id| reg.get(id).map(|s| (id, s))) else { return };
     let text = crate::prompts::not_integrated(
         item["path"].as_str().unwrap_or_default(),
         item["branch"].as_str().unwrap_or_default(),
@@ -1134,6 +1139,16 @@ fn spawn_done_closer(reg: Arc<Registry>, id: u32) {
     });
 }
 
+/// The shortest quiet spell after which an ephemeral worker may be nudged and then closed. An agent in a long tool call,
+/// a slow network or a build that prints nothing is silent for a minute without being done; a plain command is not.
+pub(crate) fn reaper_min_idle_secs(agent: bool) -> u64 {
+    if agent {
+        120
+    } else {
+        3
+    }
+}
+
 fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: bool, idle_secs: u64, lines: usize) {
     std::thread::spawn(move || {
         let mut worked = false;
@@ -1153,7 +1168,8 @@ fn spawn_reaper(reg: Arc<Registry>, id: u32, parent: Option<u32>, idle_mode: boo
             if idle_mode && worked && idle >= idle_secs * 1000 {
                 // it said it waits for an answer (hook event, ask, escalate): not finished, keep it. The parent was told
                 // when the event came in.
-                if reg.wait_of(id, s.since_input_ms(), idle).is_some() {
+                // or that it only waits for CI or a deploy (`axelstra await`): quiet on purpose
+                if reg.wait_of(id, s.since_input_ms(), idle).is_some() || reg.awaiting_of(id, s.since_input_ms(), idle).is_some() {
                     worked = false;
                 } else if !nudged && reg.metas.lock_recover().get(&id).map(|m| m["kind"] == "agent").unwrap_or(false) {
                     // first quiet spell: ask the worker to report through the bus instead of scraping its screen
@@ -1748,6 +1764,7 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
     // terminal down with the daemon.
     let joined = tokio::task::spawn_blocking(move || {
         let mut after: Vec<Box<dyn FnOnce() + Send>> = Vec::new();
+        let mut delay = Duration::ZERO;
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut guard = st2.lock_recover();
             let c = &mut *guard;
@@ -1763,15 +1780,16 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
                 peer: c.peer,
                 token: &token2,
                 after: &mut after,
+                delay: &mut delay,
             })
         }))
         .unwrap_or_else(|_| {
             Err(axelstra_core::coded!("daemon.internal_error", "internal daemon error in {method} (see crash.log)", method = req.method))
         });
-        (req, res, after)
+        (req, res, after, delay)
     })
     .await;
-    let Ok((req, res, after)) = joined else { return };
+    let Ok((req, res, after, delay)) = joined else { return };
     // what an agent connection asked for is kept for the user to review
     let agent = st.lock_recover().agent;
     if let Some(me) = agent {
@@ -1793,6 +1811,9 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
             b
         }
     };
+    if !delay.is_zero() {
+        tokio::time::sleep(delay).await;
+    }
     let _ = tx.send(encode(JSON, body.to_string().as_bytes())).await;
     // deferred work (stream start) runs only after the reply is queued
     for f in after {
@@ -2201,6 +2222,8 @@ struct Ctx<'a> {
     peer: Option<u32>,
     token: &'a str,
     after: &'a mut Vec<Box<dyn FnOnce() + Send>>,
+    /// how long to hold the reply back (a refused `hello`)
+    delay: &'a mut Duration,
 }
 
 /// Whether `method` changes projects or worktrees, which makes the cached project list stale.
@@ -2277,6 +2300,45 @@ fn dispatch_call(c: &mut Ctx) -> Result<Value> {
         "agent" | "agents" | "codex" | "computer" | "settings" | "flow" | "app" | "hooks" | "ping" | "audit" | "notices" | "daemon"
         | "hello" | "backup" | "env" | "budget" | "workspace" | "host" => misc::call(c),
         _ => Err(unknown_method(&req.method)),
+    }
+}
+
+#[cfg(test)]
+mod project_main_tests {
+    use super::*;
+
+    #[test]
+    fn the_project_main_is_the_live_agent_marked_main_not_whoever_sits_in_the_checkout() {
+        let dir = std::env::temp_dir().join(format!("axl-reg-main-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let reg = Arc::new(Registry::new(dir.join("projects.json"), "p".into(), "t".into()));
+        let (prog, args): (&str, Vec<String>) =
+            if cfg!(windows) { ("cmd", vec!["/c".into(), "ping -n 30 127.0.0.1 >nul".into()]) } else { ("sleep", vec!["30".into()]) };
+        let sp = Spawn { program: prog.into(), args, cwd: None, env: vec![], cols: 80, rows: 24 };
+        let checkout = dir.to_string_lossy().to_string();
+        // an agent that happens to sit in the checkout but is not the main, then the main (in another folder)
+        let sitter = reg.spawn(&sp, None, Some(json!({"kind": "agent", "project": "p", "worktree": checkout}))).unwrap();
+        let main = reg.spawn(&sp, None, Some(json!({"kind": "agent", "project": "p", "main": true, "worktree": "/elsewhere"}))).unwrap();
+        let other = reg.spawn(&sp, None, Some(json!({"kind": "agent", "project": "q", "main": true}))).unwrap();
+        assert_eq!(reg.project_main("p"), Some(main));
+        assert_eq!(reg.project_main("q"), Some(other));
+        assert_eq!(reg.project_main("nope"), None);
+        // once it is gone there is none: the sitter is not promoted
+        reg.get(main).unwrap().kill();
+        let t = Instant::now();
+        while reg.project_main("p").is_some() {
+            assert!(t.elapsed() < Duration::from_secs(10), "main still counted live");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        for id in [sitter, other] {
+            reg.get(id).unwrap().kill();
+        }
+    }
+
+    #[test]
+    fn agents_get_a_long_quiet_spell_before_the_reaper_closes_them() {
+        assert_eq!(reaper_min_idle_secs(true), 120);
+        assert_eq!(reaper_min_idle_secs(false), 3);
     }
 }
 
@@ -2374,11 +2436,11 @@ mod registry_tests {
     use super::*;
 
     #[test]
-    fn within_compares_whole_path_components() {
-        assert!(within("c:/a/wt", "c:/a/wt"));
-        assert!(within("c:/a/wt/sub/dir", "c:/a/wt"));
-        assert!(!within("c:/a/wt-2", "c:/a/wt"));
-        assert!(!within("c:/a/wtx/sub", "c:/a/wt"));
+    fn is_within_compares_whole_path_components() {
+        assert!(is_within("c:/a/wt", "c:/a/wt"));
+        assert!(is_within("c:/a/wt/sub/dir", "c:/a/wt"));
+        assert!(!is_within("c:/a/wt-2", "c:/a/wt"));
+        assert!(!is_within("c:/a/wtx/sub", "c:/a/wt"));
     }
 
     #[test]

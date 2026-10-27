@@ -17,7 +17,7 @@ pub struct Project {
     /// command run in a terminal of every new worktree (e.g. `bun install`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup: Option<String>,
-    /// worktree path -> path of its parent worktree (both normalized with `norm_path`): worktrees of one theme are
+    /// worktree path -> path of its parent worktree (both normalized with `paths::norm`): worktrees of one theme are
     /// shown together under the parent. Entries of worktrees that no longer exist are harmless and ignored.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub parents: BTreeMap<String, String>,
@@ -27,20 +27,14 @@ pub struct Project {
     /// push the default branch after an automatic or manual integration; never on unless the user turned it on
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub push_after_integrate: bool,
-    /// worktrees the user made by hand (the "Novo worktree" modal), by `norm_path`: the janitor never removes an empty
+    /// worktrees the user made by hand (the "Novo worktree" modal), by `paths::norm`: the janitor never removes an empty
     /// one, and removes an integrated one only when nobody has worked in it for a while
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub manual: std::collections::BTreeSet<String>,
-    /// worktrees Axelstra's own flows made (`dispatch new`), by `norm_path`: only these (or one whose branch is really
+    /// worktrees Axelstra's own flows made (`dispatch new`), by `paths::norm`: only these (or one whose branch is really
     /// integrated) may be removed by the janitor. A worktree with neither mark counts as manual.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub auto: std::collections::BTreeSet<String>,
-}
-
-/// The form of a worktree path used as a key: the shared comparison key (forward slashes, no trailing slash, no
-/// verbatim `\\?\` prefix, lowercase only where the file system ignores case).
-pub fn norm_path(s: &str) -> String {
-    axelstra_core::paths::norm(s)
 }
 
 pub fn store_path() -> PathBuf {
@@ -410,7 +404,7 @@ pub fn set_manual(store: &Path, id: &str, path: &str) -> Result<()> {
     let _g = STORE_LOCK.lock_recover();
     let mut v = load_for_update(store)?;
     let p = v.iter_mut().find(|p| p.id == id).ok_or_else(|| coded!("project.unknown", "unknown project {id}", id = id))?;
-    p.manual.insert(norm_path(path));
+    p.manual.insert(axelstra_core::paths::norm(path));
     save(store, &v)
 }
 
@@ -419,7 +413,7 @@ pub fn set_auto(store: &Path, id: &str, path: &str) -> Result<()> {
     let _g = STORE_LOCK.lock_recover();
     let mut v = load_for_update(store)?;
     let p = v.iter_mut().find(|p| p.id == id).ok_or_else(|| coded!("project.unknown", "unknown project {id}", id = id))?;
-    let k = norm_path(path);
+    let k = axelstra_core::paths::norm(path);
     p.manual.remove(&k);
     p.auto.insert(k);
     save(store, &v)
@@ -435,7 +429,7 @@ pub fn migrate_marks(store: &Path) -> Result<()> {
     for p in v.iter_mut() {
         let Ok(list) = git::worktree_list(Path::new(&p.path)) else { continue };
         for w in list.into_iter().filter(|w| !w.is_main) {
-            let k = norm_path(&w.path);
+            let k = axelstra_core::paths::norm(&w.path);
             if !p.manual.contains(&k) && !p.auto.contains(&k) {
                 p.manual.insert(k);
                 changed = true;
@@ -450,10 +444,10 @@ pub fn migrate_marks(store: &Path) -> Result<()> {
 
 /// The non-main worktree `path` of project `p`, as git lists it.
 fn plain_worktree(p: &Project, path: &str) -> Result<git::Worktree> {
-    let want = norm_path(path);
+    let want = axelstra_core::paths::norm(path);
     let wt = git::worktree_list(Path::new(&p.path))?
         .into_iter()
-        .find(|w| norm_path(&w.path) == want)
+        .find(|w| axelstra_core::paths::norm(&w.path) == want)
         .ok_or_else(|| coded!("worktree.not_of_project", "not a worktree of this project"))?;
     if wt.is_main {
         return Err(coded!("worktree.main_in_group", "the main worktree cannot be part of a group"));
@@ -491,7 +485,7 @@ pub fn check_parent(p: &Project, path: Option<&str>, parent: &str) -> Result<()>
     })?;
     let Some(path) = path else { return Ok(()) };
     let me = plain_worktree(p, path)?;
-    let (me, par) = (norm_path(&me.path), norm_path(&par.path));
+    let (me, par) = (axelstra_core::paths::norm(&me.path), axelstra_core::paths::norm(&par.path));
     if me == par {
         return Err(coded!("worktree.group_self", "a worktree cannot be placed inside itself"));
     }
@@ -507,11 +501,11 @@ pub fn set_parent(store: &Path, id: &str, path: &str, parent: Option<&str>) -> R
     let _g = STORE_LOCK.lock_recover();
     let mut v = load_for_update(store)?;
     let p = v.iter_mut().find(|p| p.id == id).ok_or_else(|| coded!("project.unknown", "unknown project {id}", id = id))?;
-    let me = norm_path(&plain_worktree(p, path)?.path);
+    let me = axelstra_core::paths::norm(&plain_worktree(p, path)?.path);
     match parent.map(str::trim).filter(|s| !s.is_empty()) {
         Some(par) => {
             check_parent(p, Some(path), par)?;
-            let par = norm_path(&plain_worktree(p, par)?.path);
+            let par = axelstra_core::paths::norm(&plain_worktree(p, par)?.path);
             p.parents.insert(me, par);
         }
         None => {
@@ -526,7 +520,7 @@ pub fn forget_parent(store: &Path, id: &str, path: &str) -> Result<()> {
     let _g = STORE_LOCK.lock_recover();
     let mut v = load_for_update(store)?;
     let Some(p) = v.iter_mut().find(|p| p.id == id) else { return Ok(()) };
-    let gone = norm_path(path);
+    let gone = axelstra_core::paths::norm(path);
     let before = p.parents.len();
     p.parents.retain(|k, par| *k != gone && *par != gone);
     if p.parents.len() != before {
@@ -540,7 +534,7 @@ pub fn rename_parent(store: &Path, id: &str, old: &str, new: &str) -> Result<()>
     let _g = STORE_LOCK.lock_recover();
     let mut v = load_for_update(store)?;
     let Some(p) = v.iter_mut().find(|p| p.id == id) else { return Ok(()) };
-    let (old, new) = (norm_path(old), norm_path(new));
+    let (old, new) = (axelstra_core::paths::norm(old), axelstra_core::paths::norm(new));
     let moved: BTreeMap<String, String> = p
         .parents
         .iter()
@@ -556,12 +550,12 @@ pub fn rename_parent(store: &Path, id: &str, old: &str, new: &str) -> Result<()>
 /// The parent of each worktree as the UI wants it: worktree path -> parent path, both as git lists them.
 /// Pairs whose worktrees are gone are left out.
 pub fn parent_paths(p: &Project, worktrees: &[git::Worktree]) -> BTreeMap<String, String> {
-    let real: BTreeMap<String, &str> = worktrees.iter().filter(|w| !w.is_main).map(|w| (norm_path(&w.path), w.path.as_str())).collect();
+    let real: BTreeMap<String, &str> = worktrees.iter().filter(|w| !w.is_main).map(|w| (axelstra_core::paths::norm(&w.path), w.path.as_str())).collect();
     worktrees
         .iter()
         .filter(|w| !w.is_main)
         .filter_map(|w| {
-            let par = p.parents.get(&norm_path(&w.path))?;
+            let par = p.parents.get(&axelstra_core::paths::norm(&w.path))?;
             real.get(par).map(|r| (w.path.clone(), r.to_string()))
         })
         .collect()
@@ -874,7 +868,7 @@ mod parent_tests {
         let b = worktree_create(&p, "b").unwrap();
         set_parent(&store, "p", &b.path, Some(&a.path)).unwrap();
         let again = reload(&store);
-        assert_eq!(again.parents.get(&norm_path(&b.path)), Some(&norm_path(&a.path)));
+        assert_eq!(again.parents.get(&axelstra_core::paths::norm(&b.path)), Some(&axelstra_core::paths::norm(&a.path)));
         let all = git::worktree_list(Path::new(&p.path)).unwrap();
         assert_eq!(parent_paths(&again, &all).get(&b.path), Some(&a.path));
         set_parent(&store, "p", &b.path, None).unwrap();
@@ -924,7 +918,7 @@ mod parent_tests {
         let b = worktree_create(&p, "b").unwrap();
         set_parent(&store, "p", &b.path, Some(&a.path)).unwrap();
         rename_parent(&store, "p", &a.path, "C:/x/proj-z").unwrap();
-        assert_eq!(reload(&store).parents.get(&norm_path(&b.path)), Some(&norm_path("C:/x/proj-z")));
+        assert_eq!(reload(&store).parents.get(&axelstra_core::paths::norm(&b.path)), Some(&axelstra_core::paths::norm("C:/x/proj-z")));
         let _ = std::fs::remove_dir_all(&root);
     }
 

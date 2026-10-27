@@ -283,7 +283,7 @@ mod tests {
         let f = fx("mark");
         mark_run(&f.store, &f.p.id, Path::new(&f.p.path), &f.wt_root, "ui-7");
         let p = project(&f);
-        assert!(p.auto.contains(&projects::norm_path(&f.wt_root.join("ui-7-integ").to_string_lossy())));
+        assert!(p.auto.contains(&axelstra_core::paths::norm(&f.wt_root.join("ui-7-integ").to_string_lossy())));
         let dir = integ(&f, "ui-7");
         merge_task(&f, "ui-7", "a.txt", "a\n");
         // integrated by hand (the Integrar button): the janitor takes the leftover

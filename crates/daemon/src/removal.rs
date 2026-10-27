@@ -4,7 +4,8 @@
 //! registry: which worktrees are ours to remove, the removal itself, the queue of removals that stayed pending (a
 //! process outside our sessions still holds the folder) and the project's files in the data dir.
 
-use crate::projects::{norm_path, Project};
+use crate::projects::Project;
+use axelstra_core::paths::norm;
 use crate::store::{read_json, write_atomic, write_json, LockRecover};
 use anyhow::Result;
 use axelstra_core::git;
@@ -38,11 +39,11 @@ fn is_axelstra_dir(path: &str) -> bool {
 /// The worktrees of the project that a removal may take: listed by git, not the main checkout, inside `.axelstra-wt`.
 /// This is the only door to deleting a folder: nothing outside this list is ever removed.
 pub fn removable_worktrees(pr: &Project) -> Vec<git::Worktree> {
-    let main = norm_path(&pr.path);
+    let main = norm(&pr.path);
     git::worktree_list(Path::new(&pr.path))
         .unwrap_or_default()
         .into_iter()
-        .filter(|w| !w.is_main && norm_path(&w.path) != main && is_axelstra_dir(&w.path))
+        .filter(|w| !w.is_main && norm(&w.path) != main && is_axelstra_dir(&w.path))
         .collect()
 }
 
@@ -163,7 +164,7 @@ fn queue(store: &Path, items: Vec<Pending>) {
     let _g = QUEUE_LOCK.lock_recover();
     let mut q = load_queue(store);
     for i in items {
-        if !q.iter().any(|x| norm_path(&x.path) == norm_path(&i.path)) {
+        if !q.iter().any(|x| norm(&x.path) == norm(&i.path)) {
             q.push(i);
         }
     }
@@ -187,9 +188,9 @@ pub fn retry(store: &Path, close: &dyn Fn(&str) -> Vec<String>) -> (u32, u32) {
     for it in q {
         let repo = Path::new(&it.repo);
         // only a folder git still lists as a linked worktree under `.axelstra-wt`, or one that is already gone, is touched
-        let listed = git::worktree_list(repo).ok().and_then(|l| l.into_iter().find(|w| norm_path(&w.path) == norm_path(&it.path)));
+        let listed = git::worktree_list(repo).ok().and_then(|l| l.into_iter().find(|w| norm(&w.path) == norm(&it.path)));
         let safe = match &listed {
-            Some(w) => !w.is_main && is_axelstra_dir(&w.path) && norm_path(&it.path) != norm_path(&it.repo),
+            Some(w) => !w.is_main && is_axelstra_dir(&w.path) && norm(&it.path) != norm(&it.repo),
             None => !Path::new(&it.path).exists(),
         };
         if !safe {

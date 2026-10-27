@@ -48,13 +48,13 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "dispatch.meta" => {
             // titles and archive flags the dispatcher keeps per worktree (see `axelstra dispatch`)
             let f = reg.saved.with_file_name("dispatch.json");
+            // not `paths::norm`: the app keys dispatch.json by lowercase on every platform
             Ok(std::fs::read_to_string(f).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).unwrap_or_else(|| json!({})))
         }
         "worktree.status" => {
             // only paths the daemon knows; the list comes from the UI and git runs in each
             let list: Vec<String> =
                 p["paths"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
-            let norm = |s: &str| s.replace('\\', "/").to_ascii_lowercase();
             let out = tokio::task::block_in_place(|| {
                 let mut allowed = std::collections::HashSet::new();
                 for pr in crate::projects::load(&reg.store) {
@@ -178,6 +178,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let _ = crate::projects::rename_parent(&reg.store, &pr.id, path, &wt.path);
             // the dispatcher's notes (title, requests) are keyed by path: they follow the folder
             let f = reg.saved.with_file_name("dispatch.json");
+            // not `paths::norm`: the app keys dispatch.json by lowercase on every platform
             let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
             if let Some(mut meta) = std::fs::read_to_string(&f).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
                 if let Some(e) = meta.as_object_mut().and_then(|m| m.remove(&norm(path))) {
@@ -194,10 +195,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "dispatch.overlaps" => {
             let f = reg.saved.with_file_name("dispatch.json");
+            // not `paths::norm`: the app keys dispatch.json by lowercase on every platform
             Ok(tokio::task::block_in_place(|| crate::overlaps::overlaps(&reg.store, &f)))
         }
         "dispatch.overlap_files" => {
             let f = reg.saved.with_file_name("dispatch.json");
+            // not `paths::norm`: the app keys dispatch.json by lowercase on every platform
             Ok(tokio::task::block_in_place(|| crate::overlaps::overlap_files(&reg.store, &f)))
         }
         "worktree.rebase" => {
@@ -208,7 +211,6 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "ports.list" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
-            let norm = |s: &str| s.replace('\\', "/").to_ascii_lowercase();
             let key = norm(&wt.to_string_lossy());
             let ids: Vec<u32> = {
                 let metas = reg.metas.lock_recover();
@@ -242,7 +244,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let out = tokio::task::block_in_place(|| {
                 let wt = axelstra_core::git::worktree_list(std::path::Path::new(&pr.path))?
                     .into_iter()
-                    .find(|w| crate::projects::norm_path(&w.path) == crate::projects::norm_path(path))
+                    .find(|w| axelstra_core::paths::norm(&w.path) == axelstra_core::paths::norm(path))
                     .ok_or_else(|| axelstra_core::coded!("worktree.not_found", "not a worktree of this project"))?;
                 let branch = wt.branch.clone().unwrap_or_default();
                 if reg.worktree_busy(&wt.path) {
@@ -279,8 +281,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let path = p["path"].as_str().ok_or_else(|| missing("path"))?;
             // refuse before touching any session: the main worktree (or a stranger path) must keep its terminals
             let known = axelstra_core::git::worktree_list(std::path::Path::new(&pr.path))?;
-            let gone = crate::projects::norm_path(path);
-            let target = match known.iter().find(|w| crate::projects::norm_path(&w.path) == gone) {
+            let gone = axelstra_core::paths::norm(path);
+            let target = match known.iter().find(|w| axelstra_core::paths::norm(&w.path) == gone) {
                 None => return Err(axelstra_core::coded!("worktree.not_found", "not a worktree of this project")),
                 Some(w) if w.is_main => return Err(axelstra_core::coded!("worktree.remove_main", "cannot remove the main worktree")),
                 Some(w) => w,
@@ -319,7 +321,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 sessions
                     .iter()
                     .filter(|(id, _)| {
-                        metas.get(id).and_then(|m| m["worktree"].as_str()).is_some_and(|w| crate::projects::norm_path(w) == gone)
+                        metas.get(id).and_then(|m| m["worktree"].as_str()).is_some_and(|w| axelstra_core::paths::norm(w) == gone)
                     })
                     .map(|(_, s)| s.clone())
                     .collect()
@@ -350,7 +352,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
 /// worktree below it in the project's parent tree, or one where a session that `me` started works.
 fn agent_owns_worktree(reg: &Registry, me: u32, pr: &crate::projects::Project, gone: &str) -> bool {
     let metas = reg.metas.lock_recover();
-    let mine = metas.get(&me).and_then(|m| m["worktree"].as_str()).map(crate::projects::norm_path);
+    let mine = metas.get(&me).and_then(|m| m["worktree"].as_str()).map(axelstra_core::paths::norm);
     if mine.as_deref() == Some(gone) {
         return true;
     }
@@ -365,5 +367,5 @@ fn agent_owns_worktree(reg: &Registry, me: u32, pr: &crate::projects::Project, g
             }
         }
     }
-    metas.iter().any(|(id, m)| m["worktree"].as_str().is_some_and(|w| crate::projects::norm_path(w) == gone) && agent_drives(reg, me, *id))
+    metas.iter().any(|(id, m)| m["worktree"].as_str().is_some_and(|w| axelstra_core::paths::norm(w) == gone) && agent_drives(reg, me, *id))
 }

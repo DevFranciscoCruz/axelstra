@@ -17,13 +17,11 @@ impl Registry {
     fn owns(&self, pr: &Project, paths: &[String], id: u32, metas: &HashMap<u32, Value>) -> bool {
         let m = metas.get(&id);
         let by_meta = m.is_some_and(|m| m["project"].as_str() == Some(pr.id.as_str()));
-        let norm = crate::projects::norm_path;
         by_meta || m.and_then(|m| m["worktree"].as_str()).is_some_and(|w| paths.iter().any(|p| norm(p) == norm(w)))
     }
 
     /// Records saved for the next start (not running now) that belong to the project.
     fn pending_of_project(&self, pr: &Project, paths: &[String]) -> Vec<Value> {
-        let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
         let paths: Vec<String> = paths.iter().map(|p| norm(p)).collect();
         self.pending
             .lock_recover()
@@ -31,7 +29,7 @@ impl Registry {
             .filter(|r| {
                 r["meta"]["project"].as_str() == Some(pr.id.as_str())
                     || r["meta"]["worktree"].as_str().is_some_and(|w| paths.contains(&norm(w)))
-                    || r["cwd"].as_str().is_some_and(|c| paths.iter().any(|p| within(&norm(c), p)))
+                    || r["cwd"].as_str().is_some_and(|c| paths.iter().any(|p| is_within(c, p)))
             })
             .cloned()
             .collect()
@@ -85,7 +83,6 @@ impl Registry {
 
     /// Plans of running flows that use a worktree of the project.
     fn forget_project_flows(&self, paths: &[String]) {
-        let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase();
         let paths: Vec<String> = paths.iter().map(|p| norm(p)).collect();
         self.flows.lock_recover().retain(|_, t| {
             !t.as_array().is_some_and(|a| a.iter().any(|x| x["worktree"].as_str().is_some_and(|w| paths.contains(&norm(w)))))
@@ -114,7 +111,7 @@ impl Registry {
         for p in paths {
             crate::integrate::clear_attention(p);
             let _ = crate::integrate::done_mark(p, true);
-            self.activity.lock_recover().remove(&crate::projects::norm_path(p));
+            self.activity.lock_recover().remove(&axelstra_core::paths::norm(p));
         }
         crate::janitor::drop_events_of(&pr.id);
         self.forget_project_flows(paths);

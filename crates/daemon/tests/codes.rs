@@ -28,7 +28,9 @@ fn a_coded_error_keeps_its_code_and_params_through_the_wire() {
     let coded = axelstra_core::msg::find(&e).expect("code survives the wire");
     assert_eq!(coded.code, "worktree.unknown");
     assert_eq!(coded.params["path"], "nowhere/at/all");
-    // an error without a code stays plain
-    let plain = c.call("no.such.method", json!({})).unwrap_err();
-    assert!(axelstra_core::msg::find(&plain).is_none(), "{plain:#}");
+    // an unknown method is coded too, and its English text is what older callers look for
+    let unknown = c.call("no.such.method", json!({})).unwrap_err();
+    assert!(format!("{unknown:#}").contains("unknown method no.such.method"), "{unknown:#}");
+    let coded = axelstra_core::msg::find(&unknown).expect("unknown method has a code");
+    assert_eq!((coded.code.as_str(), coded.params["method"].as_str()), ("rpc.unknown_method", "no.such.method"));
 }

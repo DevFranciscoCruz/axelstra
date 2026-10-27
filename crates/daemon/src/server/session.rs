@@ -53,16 +53,14 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 let metas = reg.metas.lock_recover();
                 let live = |id: &u32| sessions.get(id).is_some_and(|s| s.try_wait().is_none());
                 let mut here = Vec::new();
-                let mut project_main = None;
-                for (id, o) in
-                    metas.iter().filter(|(id, o)| o["kind"] == "agent" && o["project"].as_str() == Some(project.as_str()) && live(id))
-                {
-                    if o["main"] == true {
-                        project_main = project_main.or(Some(*id));
-                    } else if axelstra_core::paths::norm(o["worktree"].as_str().unwrap_or_default()) == wt {
+                for (id, o) in metas.iter().filter(|(id, o)| {
+                    o["kind"] == "agent" && o["main"] != true && o["project"].as_str() == Some(project.as_str()) && live(id)
+                }) {
+                    if axelstra_core::paths::norm(o["worktree"].as_str().unwrap_or_default()) == wt {
                         here.push((*id, o["lead"] == true));
                     }
                 }
+                let project_main = project_main_in(&sessions, &metas, &project);
                 let worker = p["worker"].as_bool() == Some(true);
                 crate::notes::pick_role(&m, p["label"].as_str(), worker, &here, project_main, parent)
             };
@@ -150,7 +148,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 reg.bus.mark_reaped(id);
                 let parent = r.get("parent").and_then(Value::as_u64).map(|x| x as u32);
                 let idle_mode = r.get("mode").and_then(Value::as_str) == Some("idle");
-                let idle_secs = r.get("idle_secs").and_then(Value::as_u64).unwrap_or(20).max(3);
+                let idle_secs =
+                    r.get("idle_secs").and_then(Value::as_u64).unwrap_or(20).max(reaper_min_idle_secs(p["meta"]["kind"] == "agent"));
                 let lines = r.get("lines").and_then(Value::as_u64).unwrap_or(40).clamp(1, 400) as usize;
                 spawn_reaper(reg.clone(), id, parent, idle_mode, idle_secs, lines);
                 return Ok(json!({"id": id}));

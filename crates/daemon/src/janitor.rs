@@ -185,7 +185,7 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>) -> Res
             continue;
         }
         // safe by default: only a worktree marked `auto` (made by `dispatch new`) is automatic; no mark means manual
-        let auto = p.auto.contains(&projects::norm_path(&w.path)) && !p.manual.contains(&projects::norm_path(&w.path));
+        let auto = p.auto.contains(&axelstra_core::paths::norm(&w.path)) && !p.manual.contains(&axelstra_core::paths::norm(&w.path));
         // nothing is removed while a session is in it or was a moment ago; an auto worktree whose agent just said `done`
         // is the one exception (the report is the signal that the work is finished)
         if (env.touched)(&w.path) && !(auto && integrate::done_mark(&w.path, false).is_some()) {
@@ -691,7 +691,7 @@ mod tests {
         // migration marks it manual and changes nothing else
         projects::migrate_marks(&store).unwrap();
         let p2 = projects::find(&store, &p.id).unwrap();
-        assert!(p2.manual.contains(&projects::norm_path(&old.path)) && p2.auto.is_empty());
+        assert!(p2.manual.contains(&axelstra_core::paths::norm(&old.path)) && p2.auto.is_empty());
         let out = sweep(&store, &|_| false, false);
         assert!(out.iter().all(|o| o["removed"] != true), "{out:?}");
         assert!(Path::new(&old.path).exists() && Path::new(&hand.path).exists());
@@ -708,9 +708,9 @@ mod tests {
         // created after the migration: no mark yet, and the migration does not run again by itself
         let late = projects::worktree_create(&p, "late").unwrap();
         let p2 = projects::find(&store, &p.id).unwrap();
-        assert!(p2.auto.contains(&projects::norm_path(&auto.path)) && !p2.manual.contains(&projects::norm_path(&auto.path)));
-        assert!(p2.manual.contains(&projects::norm_path(&old.path)));
-        assert!(!p2.manual.contains(&projects::norm_path(&late.path)) && !p2.auto.contains(&projects::norm_path(&late.path)));
+        assert!(p2.auto.contains(&axelstra_core::paths::norm(&auto.path)) && !p2.manual.contains(&axelstra_core::paths::norm(&auto.path)));
+        assert!(p2.manual.contains(&axelstra_core::paths::norm(&old.path)));
+        assert!(!p2.manual.contains(&axelstra_core::paths::norm(&late.path)) && !p2.auto.contains(&axelstra_core::paths::norm(&late.path)));
         let _ = git::remove_tree(&root);
     }
 

@@ -24,7 +24,7 @@ static DONE: Mutex<Option<HashMap<String, (bool, Instant)>>> = Mutex::new(None);
 static ATTENTION: Mutex<Option<HashMap<String, Coded>>> = Mutex::new(None);
 
 fn key(path: &str) -> String {
-    projects::norm_path(path)
+    axelstra_core::paths::norm(path)
 }
 
 /// Remembers that a session reported in this worktree (`ok` is false for `--status failed|blocked`).
