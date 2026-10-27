@@ -165,13 +165,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             session()?;
             let id = sid()?;
             // only the agent itself says it waits
-            if c.agent.is_some_and(|me| me != id) {
-                return Err(axelstra_core::coded!(
-                    "rpc.agent_own_session",
-                    "{method} is only allowed for the agent's own session",
-                    method = req.method
-                ));
-            }
+            require_own(*c.agent, Some(u64::from(id)), &req.method)?;
             let wait = p["kind"].as_str().and_then(axelstra_core::waiting::WaitKind::parse).map(|kind| axelstra_core::waiting::Wait {
                 kind,
                 text: axelstra_core::waiting::clean_text(p["text"].as_str().unwrap_or_default()),
@@ -185,13 +179,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "session.await" => {
             session()?;
             let id = sid()?;
-            if c.agent.is_some_and(|me| me != id) {
-                return Err(axelstra_core::coded!(
-                    "rpc.agent_own_session",
-                    "{method} is only allowed for the agent's own session",
-                    method = req.method
-                ));
-            }
+            require_own(*c.agent, Some(u64::from(id)), &req.method)?;
             if p["clear"].as_bool() == Some(true) {
                 reg.awaits.clear(id);
             } else {

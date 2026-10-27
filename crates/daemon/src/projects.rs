@@ -550,7 +550,8 @@ pub fn rename_parent(store: &Path, id: &str, old: &str, new: &str) -> Result<()>
 /// The parent of each worktree as the UI wants it: worktree path -> parent path, both as git lists them.
 /// Pairs whose worktrees are gone are left out.
 pub fn parent_paths(p: &Project, worktrees: &[git::Worktree]) -> BTreeMap<String, String> {
-    let real: BTreeMap<String, &str> = worktrees.iter().filter(|w| !w.is_main).map(|w| (axelstra_core::paths::norm(&w.path), w.path.as_str())).collect();
+    let real: BTreeMap<String, &str> =
+        worktrees.iter().filter(|w| !w.is_main).map(|w| (axelstra_core::paths::norm(&w.path), w.path.as_str())).collect();
     worktrees
         .iter()
         .filter(|w| !w.is_main)

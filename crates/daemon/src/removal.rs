@@ -5,10 +5,10 @@
 //! process outside our sessions still holds the folder) and the project's files in the data dir.
 
 use crate::projects::Project;
-use axelstra_core::paths::norm;
 use crate::store::{read_json, write_atomic, write_json, LockRecover};
 use anyhow::Result;
 use axelstra_core::git;
+use axelstra_core::paths::norm;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};

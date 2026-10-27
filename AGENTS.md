@@ -5,8 +5,11 @@ Notes for coding agents and new contributors.
 ## Layout
 
 - `crates/core`, `crates/daemon`, `crates/cli`: engine (daemon, orchestrator, `axelstra` CLI).
-- `crates/daemon/src/server.rs` holds the connection loop, the registry and `dispatch`, which routes a method by its
+- `crates/daemon/src/server.rs` holds the connection loop and `dispatch`, which routes a method by its
   prefix to `crates/daemon/src/server/{session,worktrees,files,vcs,containers,orchestration,messaging,misc}.rs`.
+  The registry (`Registry`, `Pulse`, the save of `sessions.json`) is `server/registry.rs`, the background loops (reapers,
+  scheduler, janitor, session monitor, stall watchdog) are `server/loops.rs`, the saved terminal history is
+  `server/history.rs`. Everything typed into an agent's terminal is in `crates/daemon/src/prompts.rs`.
   A new method goes into the file of its domain; a new prefix also needs a line in the `dispatch` match.
 - `app/src-tauri`: Tauri host (Rust). `app/src`: frontend (TypeScript, built with `npm`). Its state is split into
   `app/src/store/{ui,layout,sessions,notify,tabs,git,overlay}.ts` (re-exported by `app/src/store.ts`); `api.ts` is the only
