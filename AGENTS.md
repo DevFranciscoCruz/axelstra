@@ -68,7 +68,7 @@ worker prompt) and the axelstration skill tell agents to use it instead of stopp
 `PROTO` in `crates/daemon/src/proto.rs` is the app <-> daemon contract version. A daemon outlives
 app updates, and the app only restarts a daemon older than `PROTO`. Bump it (and add the new method
 to the doc comment above it) whenever the app starts calling a daemon method an old daemon lacks.
-Do not bump it for changes an old daemon already tolerates. Current: 26 (files.resolve_path, files.path_action), before that 25 (project.remove_preview and `mode` in project.remove), before that 24 (files.resolve_html), before that 23 (project.discover, project.add_discovered, project.clone, project.clone_status, project.clone_cancel,
+Do not bump it for changes an old daemon already tolerates. Current: 27 (events `kanban.changed {project}`, `orch.changed {run, project}`, `automations.changed` on the watch stream; no new method), before that 26 (files.resolve_path, files.path_action), before that 25 (project.remove_preview and `mode` in project.remove), before that 24 (files.resolve_html), before that 23 (project.discover, project.add_discovered, project.clone, project.clone_status, project.clone_cancel,
 project.init, gh.repos, wsl_distros/ssh_hosts in host.info, notices.take, audit.list, backup.export,
 backup.restore, orch.trust_info, env.tools, janitor.events, workspace.export, workspace.import_preview,
 workspace.import, host.info, host.browse, stalled in session.list, stall_minutes, and the watch-stream events janitor.events, triggers.events, budget.events, dispatch.changed).
