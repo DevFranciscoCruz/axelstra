@@ -105,6 +105,39 @@ struct Registry {
     /// the last sessions that ended on their own and left the registry (`retire`): a leaf lock. `session.status` still
     /// answers for them, so `axelstra wait`, flows and the orchestrator get their exit code after the row is gone
     exited: Mutex<std::collections::VecDeque<Exited>>,
+    /// the janitor's time constants (tests shorten them)
+    timing: JanitorTiming,
+}
+
+/// How long the janitor waits for things that become true with time, not with an event.
+#[derive(Clone, Copy)]
+struct JanitorTiming {
+    /// a hand-made worktree must have had no session for this long (`janitor::MANUAL_QUIET_SECS`)
+    quiet: Duration,
+    /// kicks closer together than this make one sweep
+    gap: Duration,
+    /// the slow tick: a PR merged on GitHub raises no local event
+    slow: Duration,
+}
+
+impl Default for JanitorTiming {
+    fn default() -> Self {
+        JanitorTiming {
+            quiet: Duration::from_secs(crate::janitor::MANUAL_QUIET_SECS),
+            gap: Duration::from_secs(60),
+            slow: Duration::from_secs(30 * 60),
+        }
+    }
+}
+
+/// How long the janitor sleeps when no event wakes it: until the earliest moment a worktree stops counting as touched
+/// (the daemon being too new to know, or a session that left `elapsed` ago), never longer than the slow tick.
+fn janitor_wake(t: &JanitorTiming, started: Duration, left: impl Iterator<Item = Duration>) -> Duration {
+    std::iter::once(started)
+        .chain(left)
+        .filter_map(|elapsed| t.quiet.checked_sub(elapsed).filter(|d| !d.is_zero()))
+        .min()
+        .map_or(t.slow, |d| (d + Duration::from_millis(20)).min(t.slow))
 }
 
 /// How many ended sessions `Registry::exited` remembers.
@@ -324,6 +357,7 @@ impl Registry {
             started: Instant::now(),
             closed: Default::default(),
             exited: Default::default(),
+            timing: Default::default(),
         }
     }
 
@@ -430,11 +464,19 @@ impl Registry {
     /// For a worktree the user made by hand: a session of any kind is open there, or one was a moment ago (or this
     /// daemon is too new to know).
     fn worktree_touched(&self, path: &str) -> bool {
-        const QUIET: Duration = Duration::from_secs(crate::janitor::MANUAL_QUIET_SECS);
-        if self.started.elapsed() < QUIET || !self.live_in(path).is_empty() {
+        let quiet = self.timing.quiet;
+        if self.started.elapsed() < quiet || !self.live_in(path).is_empty() {
             return true;
         }
-        self.activity.lock_recover().get(&crate::projects::norm_path(path)).is_some_and(|at| at.elapsed() < QUIET)
+        self.activity.lock_recover().get(&crate::projects::norm_path(path)).is_some_and(|at| at.elapsed() < quiet)
+    }
+
+    /// When the janitor must look again without any event (see `janitor_wake`). Forgets activity notes that no longer
+    /// matter.
+    fn next_janitor_wake(&self) -> Duration {
+        let mut activity = self.activity.lock_recover();
+        activity.retain(|_, at| at.elapsed() < self.timing.quiet);
+        janitor_wake(&self.timing, self.started.elapsed(), activity.values().map(Instant::elapsed))
     }
 
     /// Closes every session of this worktree (agents, shells, whatever they started: the whole process tree dies) and
@@ -1197,7 +1239,9 @@ fn spawn_data_watch(reg: Arc<Registry>) {
 
 /// Removes the worktrees whose work is merged (see `janitor`) when something may have made one removable: at start,
 /// when a session ends (its worktree is no longer busy), after a merge, a `done`, a finished flow or orchestration.
-/// Kicks that come close together make one sweep, at most one a minute. `janitor.off` turns it off.
+/// Kicks that come close together make one sweep, at most one a minute. Besides the events there is one timer: the
+/// earliest moment a hand-made worktree stops counting as touched (`MANUAL_QUIET_SECS` after its last session left),
+/// and a slow tick (30 min) for what raises no local event, like a PR merged on GitHub. `janitor.off` turns it off.
 /// Wakes the janitor again after the backoff delay of attempt `attempts` (one waiting timer at a time).
 fn queue_janitor_retry(reg: &Arc<Registry>, attempts: u32) {
     if RETRY_QUEUED.swap(true, Ordering::SeqCst) {
@@ -1213,14 +1257,15 @@ fn queue_janitor_retry(reg: &Arc<Registry>, attempts: u32) {
 }
 
 fn spawn_janitor(reg: Arc<Registry>) {
-    const GAP: Duration = Duration::from_secs(60);
+    let gap = reg.timing.gap;
     std::thread::spawn(move || {
         let mut seen = 0;
         let mut last: Option<Instant> = None;
         let mut attempts = 0u32;
         loop {
-            seen = reg.janitor.wait(seen, None);
-            if let Some(left) = last.map(|l| GAP.saturating_sub(l.elapsed())).filter(|d| !d.is_zero()) {
+            // events wake it; the timer is the next moment something becomes removable by time alone, or the slow tick
+            seen = reg.janitor.wait(seen, Some(reg.next_janitor_wake()));
+            if let Some(left) = last.map(|l| gap.saturating_sub(l.elapsed())).filter(|d| !d.is_zero()) {
                 // the kicks of the next minute are folded into this sweep
                 std::thread::sleep(left);
                 seen = reg.janitor.now();
@@ -2140,6 +2185,58 @@ mod registry_tests {
         assert!(within("c:/a/wt/sub/dir", "c:/a/wt"));
         assert!(!within("c:/a/wt-2", "c:/a/wt"));
         assert!(!within("c:/a/wtx/sub", "c:/a/wt"));
+    }
+
+    #[test]
+    fn the_janitor_timer_is_the_next_moment_a_worktree_stops_being_touched_or_the_slow_tick() {
+        let t = JanitorTiming { quiet: Duration::from_secs(600), gap: Duration::ZERO, slow: Duration::from_secs(1800) };
+        let ms = |n| Duration::from_millis(n);
+        // a daemon older than the quiet spell and no recent activity: only the slow tick
+        assert_eq!(janitor_wake(&t, Duration::from_secs(700), std::iter::empty()), t.slow);
+        // a fresh daemon: when it stops being too new to know
+        assert_eq!(janitor_wake(&t, Duration::from_secs(100), std::iter::empty()), Duration::from_secs(500) + ms(20));
+        // the session that left last decides, the older ones do not
+        let left = [Duration::from_secs(550), Duration::from_secs(10), Duration::from_secs(900)];
+        assert_eq!(janitor_wake(&t, Duration::from_secs(700), left.into_iter()), Duration::from_secs(50) + ms(20));
+        // a slow tick shorter than the spell wins
+        let short = JanitorTiming { slow: Duration::from_secs(30), ..t };
+        assert_eq!(janitor_wake(&short, Duration::from_secs(1), std::iter::empty()), Duration::from_secs(30));
+    }
+
+    /// A worktree made by hand whose branch is merged goes once it has been quiet for the quiet spell, with no event at
+    /// all in between: the janitor's own timer looks again.
+    #[test]
+    fn the_janitor_looks_again_after_the_quiet_spell_without_any_event() {
+        let root = std::env::temp_dir().join(format!("axl-reg-jtimer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let repo = root.join("proj");
+        std::fs::create_dir_all(&repo).unwrap();
+        let g = |dir: &std::path::Path, args: &[&str]| assert!(axelstra_core::git::run(dir, args).unwrap().ok, "git {args:?}");
+        let commit = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"];
+        g(&repo, &["init", "-q", "-b", "main"]);
+        g(&repo, &commit);
+        let store = root.join("projects.json");
+        let p = crate::projects::add(&store, &repo.to_string_lossy()).unwrap();
+        let wt = crate::projects::worktree_create(&p, "mine").unwrap();
+        g(std::path::Path::new(&wt.path), &commit);
+        g(&repo, &["merge", "-q", "--ff-only", "ax/mine"]);
+        crate::projects::set_manual(&store, &p.id, &wt.path).unwrap();
+        // the registry (and so the daemon's age) starts after the setup, with a short quiet spell
+        let mut r = Registry::new(store, "p".into(), "t".into());
+        r.timing = JanitorTiming { quiet: Duration::from_secs(3), gap: Duration::ZERO, slow: Duration::from_secs(3600) };
+        let reg = Arc::new(r);
+        reg.janitor.bump();
+        spawn_janitor(reg.clone());
+        std::thread::sleep(Duration::from_millis(1000));
+        assert!(std::path::Path::new(&wt.path).exists(), "removed while the daemon was still too new to know");
+        let t = Instant::now();
+        while std::path::Path::new(&wt.path).exists() {
+            assert!(t.elapsed() < Duration::from_secs(30), "the janitor never looked again");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        reg.closing.store(true, Ordering::SeqCst);
+        axelstra_core::git::purge_trash(std::path::Path::new(&wt.path).parent().unwrap());
+        let _ = axelstra_core::git::remove_tree(&root);
     }
 
     fn temp_registry(tag: &str) -> Arc<Registry> {

@@ -101,8 +101,11 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   the request into subtasks, start workers in its own worktree (`axelstra agent . --report-to $AXELSTRA_SESSION`, they
   show as `Tarefa N` under `main`), not edit code or run heavy builds itself (only integrate commits and run the final
   `axelstra lock verify`), and `done` with commits, verified and not verified. Even a trivial request goes to one worker.
-- The janitor (`crates/daemon/src/janitor.rs`) sweeps every 10 minutes and a few seconds after each `done` or
-  `git.merge` (`sweep_soon` in `server.rs`). A worktree goes when its `ax/*` branch tip is inside the default branch or
+- The janitor (`crates/daemon/src/janitor.rs`) is woken by events (daemon start, a session ending, a few seconds after each
+  `done` or `git.merge` via `sweep_soon` in `server.rs`, a finished flow or run, a retry backoff) and by one timer: the
+  earliest moment a hand-made worktree stops counting as touched (`MANUAL_QUIET_SECS` after the daemon started or after
+  its last session left; `Registry::next_janitor_wake`, `JanitorTiming`), plus a slow tick of 30 min for what raises no
+  local event (a PR merged on GitHub). No fixed tight poll; kicks closer than a minute make one sweep. A worktree goes when its `ax/*` branch tip is inside the default branch or
   inside another live `ax/*` branch (or its PR was merged), it has no changes, and no session works in it. A session
   that reported with `done` and is quiet for 10 s is not busy. Removals are queued as events (`janitor.events`) that
   the app shows as a toast and a notification-center entry.
