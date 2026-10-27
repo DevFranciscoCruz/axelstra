@@ -52,8 +52,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let agent = reg.metas.lock_recover().get(&to).map(|m| m["kind"] == "agent").unwrap_or(false);
             if agent && !quiet {
                 let label = from
-                    .map(|f| reg.labels.lock_recover().get(&f).cloned().unwrap_or_else(|| format!("sessão {f}")))
-                    .unwrap_or_else(|| "o utilizador".into());
+                    .map(|f| reg.labels.lock_recover().get(&f).cloned().unwrap_or_else(|| crate::prompts::session_name(f)))
+                    .unwrap_or_else(|| crate::prompts::USER_SENDER.into());
                 reg.deliver_untrusted(to, target.clone(), &crate::msgbus::notice(&m, &label));
             }
             Ok(json!({"id": m.id}))

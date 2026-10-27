@@ -100,7 +100,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let Some(lead) = lead.filter(|_| !dry) else { return Ok(json!({"text": text, "sent": false})) };
             let target = reg.get(lead).ok_or_else(no_lead)?;
             let m = reg.bus.send(None, lead, "message", &text, None, None);
-            reg.deliver_untrusted(lead, target, &crate::msgbus::notice(&m, "o utilizador (comentário de review)"));
+            reg.deliver_untrusted(lead, target, &crate::msgbus::notice(&m, crate::prompts::REVIEW_SENDER));
             Ok(json!({"text": text, "sent": true, "session": lead, "message": m.id}))
         }
         m => anyhow::bail!("unknown method {m}"),

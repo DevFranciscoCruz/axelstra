@@ -29,6 +29,7 @@ pub mod pathopen;
 pub mod pipesec;
 pub mod ports;
 pub mod projects;
+pub mod prompts;
 pub mod proto;
 pub mod publish;
 pub mod rebase;
