@@ -190,8 +190,11 @@ impl Shared {
     }
 }
 
+/// Milliseconds on a monotonic clock since the first call, plus one so that 0 stays free as a "never" marker. Wall-clock
+/// jumps (NTP, resume from sleep, daylight saving) must not change idle or stall decisions.
 fn now_ms() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64 + 1
 }
 
 /// A cheap, owned handle on a session's output and activity. It holds no registry lock and no session lock: clone
