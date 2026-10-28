@@ -418,6 +418,7 @@ impl Registry {
         let mut pending = read_json::<Vec<Value>>(&saved).ok().flatten().unwrap_or_default();
         prune_dead_pending(&saved, &mut pending);
         let audit = crate::audit::Audit::new(Some(saved.with_file_name("audit.log")));
+        let governor = Arc::new(crate::governor::Governor::new(crate::governor::Config::from_settings(&read_settings(&saved))));
         Registry {
             next: AtomicU32::new(0),
             sessions: Default::default(),
@@ -463,7 +464,7 @@ impl Registry {
             save_written: Mutex::new((0, None)),
             save_gen: AtomicU64::new(0),
             settings: Default::default(),
-            governor: Arc::new(crate::governor::Governor::new(crate::governor::Config::from_settings(&read_settings(&saved)))),
+            governor,
         }
     }
 
