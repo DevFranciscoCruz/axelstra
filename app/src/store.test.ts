@@ -351,11 +351,11 @@ describe("friendlyError", () => {
     const { friendlyError } = await load();
     expect(friendlyError("something odd")).toBe("something odd");
   });
-  it("cuts a long original at 160 characters", async () => {
+  it("cuts a long original at 600 characters", async () => {
     const { friendlyError } = await load();
-    const out = friendlyError("not a git repository " + "x".repeat(300));
+    const out = friendlyError("not a git repository " + "x".repeat(700));
     expect(out).toContain("…)");
-    expect(out.length).toBeLessThan(260);
+    expect(out.length).toBeLessThan(760);
   });
 });
 

@@ -73,6 +73,7 @@ vi.mock("@xterm/addon-search", () => ({
     clearDecorations() {}
     findNext() {}
     findPrevious() {}
+    onDidChangeResults() {}
   },
 }));
 vi.mock("@xterm/addon-webgl", () => ({

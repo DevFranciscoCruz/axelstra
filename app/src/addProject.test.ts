@@ -266,7 +266,7 @@ describe("clonar repositório", () => {
     type(input("ap-clone-parent"), "/home/me/code");
     const inputs = [...document.querySelectorAll<HTMLInputElement>("form input")];
     expect(inputs.find((i) => i.value === "repo")).toBeTruthy();
-    type(document.querySelector<HTMLInputElement>("input[placeholder='o ramo por omissão']")!, "dev");
+    type(document.querySelector<HTMLInputElement>("input[placeholder='o branch por omissão']")!, "dev");
     type(document.querySelector<HTMLInputElement>("input[placeholder='tudo']")!, "1");
     fireEvent.click(document.querySelector<HTMLElement>("[data-ap-primary]")!);
     await settle();
