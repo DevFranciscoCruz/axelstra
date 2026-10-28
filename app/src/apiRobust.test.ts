@@ -125,7 +125,10 @@ describe("call", () => {
     state.gated.set("worktree.overview", []);
     let out: unknown;
     let err: unknown;
-    void call("worktree.overview").then((r) => (out = r), (e) => (err = e));
+    void call("worktree.overview").then(
+      (r) => (out = r),
+      (e) => (err = e),
+    );
     await vi.advanceTimersByTimeAsync(SLOW_NOTICE_MS - 100);
     expect(slowMethods()).toEqual([]);
     await vi.advanceTimersByTimeAsync(200);
@@ -145,7 +148,9 @@ describe("call", () => {
     state.gated.set("session.list", []);
     const p = call("session.list").catch((e: any) => e);
     await vi.advanceTimersByTimeAsync(1_000);
-    state.gated.get("session.list")![0]!.reject({ message: "closed", code: "rpc.connection_closed", params: { method: "session.list" } });
+    state.gated
+      .get("session.list")![0]!
+      .reject({ message: "closed", code: "rpc.connection_closed", params: { method: "session.list" } });
     const e = (await p) as AppError;
     expect(e).toBeInstanceOf(AppError);
     expect(e.code).toBe("rpc.connection_closed");
