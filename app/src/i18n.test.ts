@@ -14,6 +14,8 @@ import { enS } from "./strings.en";
 import { ptW } from "./strings.welcome";
 import { enW } from "./strings.welcome.en";
 import { ptWS } from "./strings.workspace";
+import { ptPF } from "./strings.perf";
+import { enPF } from "./strings.perf.en";
 import { enWS } from "./strings.workspace.en";
 import { ptU } from "./strings.ui";
 import { enU } from "./strings.ui.en";
@@ -78,6 +80,7 @@ const pairs: Pair[] = [
   ["R", ptR, enR],
   ["W", ptW, enW],
   ["WS", ptWS, enWS],
+  ["PF", ptPF, enPF],
   ["L", ptL, enL],
   ["U", ptU, enU],
   ["AP", ptAP, enAP],

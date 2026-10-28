@@ -34,6 +34,7 @@ import { useBootstrap } from "./useBootstrap";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
+import { ScanxHint } from "./ScanxHint";
 import { VersionSkew } from "./VersionSkew";
 import { PanelIcon } from "./PanelIcon";
 import { CloseConfirm } from "./CloseConfirm";
@@ -546,6 +547,7 @@ export function App() {
     <ContextMenu />
     <ErrorToast>
       <UpdateToast />
+      <ScanxHint />
       <VersionSkew />
     </ErrorToast>
     </>

@@ -22,6 +22,7 @@ import { BudgetsSection } from "./BudgetsSection";
 import { setBudgetRows } from "./budgetStore";
 import { AboutSection } from "./About";
 import { HooksSection } from "./HooksSection";
+import { PerformanceSection } from "./PerformanceSection";
 import { WorkspaceSection } from "./WorkspaceSection";
 import { HostsSection } from "./HostsSection";
 import { Modal } from "./Modal";
@@ -364,6 +365,7 @@ export function Settings() {
               <WorkspaceSection />
 
               <HooksSection />
+              <PerformanceSection />
 
               <Diagnostics />
             </>
