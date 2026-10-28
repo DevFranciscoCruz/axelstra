@@ -5,7 +5,7 @@ export function ProjectIcon(props: { id: string; name: string; url?: string | nu
   const [broken, setBroken] = createSignal(false);
   // a logo file inside the repo wins over the host avatar
   const [repoLogo] = createResource(() => props.id, projectLogo);
-  const src = () => repoLogo() ?? props.url;
+  const src = () => (repoLogo.state === "ready" ? repoLogo() : null) ?? props.url;
   return (
     <Show when={src() && !broken()} fallback={<span class="picon letter">{props.name.slice(0, 1).toUpperCase()}</span>}>
       <img class="picon" src={src()!} alt="" onError={() => setBroken(true)} />

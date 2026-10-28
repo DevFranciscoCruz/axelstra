@@ -8,6 +8,7 @@ import { AppError, toAppError } from "./appError";
 import { apiContext } from "./apiContext";
 import { hostOf, norm } from "./paths";
 import { coded } from "./msg";
+import { createLogoLoader, type LogoAnswer } from "./logo";
 
 /** Mirrors the Rust `meta` of a session (crates/daemon). `blank`, `interrupted` and `lost_workers` are set on entries of `session.pending`. */
 export type SessionMeta = {
@@ -55,7 +56,11 @@ export const MEDIUM_TIMEOUT_MS = 130_000;
 export const SLOW_TIMEOUT_MS = 10 * 60_000 + 10_000;
 const SLOW = /^(git\.(push|pr|suggest|commit|suggest_pr|merge|checks)|gh\.(list|comments|send_comment)|worktree\.(create|from_pr|sweep)|project\.(add|remove|init|clone)|orch\.start|agent\.search|automation\.run|diagnostics)/;
 const MEDIUM = /^(git\.|gh\.|docker\.|pm\.|orch\.|worktree\.|project\.|dispatch\.|ports\.|agent\.|fs\.|files\.)/;
-export const timeoutFor = (method: string) => (SLOW.test(method) ? SLOW_TIMEOUT_MS : MEDIUM.test(method) ? MEDIUM_TIMEOUT_MS : CALL_TIMEOUT_MS);
+/** Cosmetic reads (the daemon answers `project.logo` within 5 s by itself): a short wait, the caller falls back silently. */
+export const COSMETIC_TIMEOUT_MS = 6_000;
+const COSMETIC = /^project\.logo$/;
+export const timeoutFor = (method: string) =>
+  COSMETIC.test(method) ? COSMETIC_TIMEOUT_MS : SLOW.test(method) ? SLOW_TIMEOUT_MS : MEDIUM.test(method) ? MEDIUM_TIMEOUT_MS : CALL_TIMEOUT_MS;
 
 /** How long the liveness check after a late call waits for `ping` (it goes on a quick connection, see `Lanes`). */
 export const PING_WAIT_MS = 5_000;
@@ -606,7 +611,8 @@ const nativePick = <T>(method: string, cmd: string, title: string) => invoke<T>(
 /** Native folder dialog on the Rust side, then `project.add` with the chosen folder; null when cancelled.
  *  The webview never supplies the path (`project.add` is not in the host's allow-list). */
 export const pickAndAddProject = (title: string) => nativePick<Project | null>("project.add", "project_add_pick", title);
-export const projectLogo = (id: string) => call<{ data_url: string | null }>("project.logo", { id }).then((r) => r.data_url);
+/** The logo of a project's repo or null: cosmetic, so it never rejects (see logo.ts); `project.logo` has a short client timeout. */
+export const projectLogo = createLogoLoader((id) => call<LogoAnswer>("project.logo", { id }));
 /** per-project integration settings; send only what changed */
 export const setProjectIntegrate = (id: string, s: { auto?: boolean; push?: boolean }) => call("project.integrate", { id, ...s });
 export type IntegrateResult = {
