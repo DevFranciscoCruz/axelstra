@@ -61,7 +61,10 @@ struct Plan {
 
 /// Every reason a session must not be put to sleep, as a coded error. Reads only; IO happens outside the registry locks.
 fn check(reg: &Arc<Registry>, id: u32) -> Result<Plan> {
-    let s = reg.get(id).filter(|s| s.try_wait().is_none()).ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = id))?;
+    let s = reg
+        .get(id)
+        .filter(|s| s.try_wait().is_none())
+        .ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = id))?;
     let (meta, spec) = (reg.metas.lock_recover().get(&id).cloned().unwrap_or(Value::Null), reg.specs.lock_recover().get(&id).cloned());
     if meta["kind"] != "agent" {
         return Err(axelstra_core::coded!("hibernate.not_agent", "only agent sessions can be hibernated"));
@@ -70,7 +73,13 @@ fn check(reg: &Arc<Registry>, id: u32) -> Result<Plan> {
         return Err(axelstra_core::coded!("hibernate.main", "the project's main session is never hibernated"));
     }
     let agent = meta["agent"].as_str().unwrap_or_default().to_string();
-    let no_resume = || axelstra_core::coded!("hibernate.no_resume", "{agent} cannot resume this conversation: no support for it or no saved conversation yet", agent = agent.clone());
+    let no_resume = || {
+        axelstra_core::coded!(
+            "hibernate.no_resume",
+            "{agent} cannot resume this conversation: no support for it or no saved conversation yet",
+            agent = agent.clone()
+        )
+    };
     if !axelstra_core::agents::get(&agent).is_some_and(|a| a.resume.is_some()) {
         return Err(no_resume());
     }
@@ -78,7 +87,12 @@ fn check(reg: &Arc<Registry>, id: u32) -> Result<Plan> {
     if input < hib::quiet_ms() || reg.hib.events(id).1 < hib::quiet_ms() {
         return Err(axelstra_core::coded!("hibernate.recent", "it got input or news in the last seconds"));
     }
-    if idle < hib::quiet_ms() || reg.hints.state_of(id).is_some_and(|(st, age)| st == axelstra_core::waiting::HintState::Working && age < axelstra_core::waiting::HINT_TTL_MS) {
+    if idle < hib::quiet_ms()
+        || reg
+            .hints
+            .state_of(id)
+            .is_some_and(|(st, age)| st == axelstra_core::waiting::HintState::Working && age < axelstra_core::waiting::HINT_TTL_MS)
+    {
         return Err(axelstra_core::coded!("hibernate.working", "the agent is working"));
     }
     if reg.wait_of(id, input, idle).is_some() {
@@ -90,10 +104,17 @@ fn check(reg: &Arc<Registry>, id: u32) -> Result<Plan> {
     if agent != "claude" {
         let wt = axelstra_core::paths::norm(meta["worktree"].as_str().unwrap_or_default());
         let clash = reg.metas.lock_recover().iter().any(|(i, m)| {
-            *i != id && m["kind"] == "agent" && m["agent"].as_str() == Some(agent.as_str()) && axelstra_core::paths::norm(m["worktree"].as_str().unwrap_or_default()) == wt
+            *i != id
+                && m["kind"] == "agent"
+                && m["agent"].as_str() == Some(agent.as_str())
+                && axelstra_core::paths::norm(m["worktree"].as_str().unwrap_or_default()) == wt
         });
         if clash {
-            return Err(axelstra_core::coded!("hibernate.ambiguous", "another {agent} session shares this folder: resuming could pick the wrong conversation", agent = agent.clone()));
+            return Err(axelstra_core::coded!(
+                "hibernate.ambiguous",
+                "another {agent} session shares this folder: resuming could pick the wrong conversation",
+                agent = agent.clone()
+            ));
         }
     }
     let resume = resume_id(reg, &meta, &spec);
@@ -234,10 +255,20 @@ fn start_wake(reg: &Arc<Registry>, id: u32) {
     );
     let resume = resume_id(reg, &meta, &spec);
     let spawned = (|| -> Result<()> {
-        let w = hib::wake_command(&spec, &meta, resume.as_deref())
-            .map_err(|_| axelstra_core::coded!("hibernate.no_resume", "{agent} cannot resume this conversation: no support for it or no saved conversation yet", agent = meta["agent"].as_str().unwrap_or_default().to_string()))?;
+        let w = hib::wake_command(&spec, &meta, resume.as_deref()).map_err(|_| {
+            axelstra_core::coded!(
+                "hibernate.no_resume",
+                "{agent} cannot resume this conversation: no support for it or no saved conversation yet",
+                agent = meta["agent"].as_str().unwrap_or_default().to_string()
+            )
+        })?;
         if let Some(cwd) = w.cwd.as_deref().filter(|c| !std::path::Path::new(c).is_dir()) {
-            return Err(axelstra_core::coded!("session.cwd_missing", "folder {path} does not exist: {program} was not started", path = cwd.to_string(), program = w.program.clone()));
+            return Err(axelstra_core::coded!(
+                "session.cwd_missing",
+                "folder {path} does not exist: {program} was not started",
+                path = cwd.to_string(),
+                program = w.program.clone()
+            ));
         }
         let sp = Spawn { program: w.program, args: w.args, cwd: w.cwd.map(Into::into), env: w.env, cols: w.cols, rows: w.rows };
         reg.spawn_as(id, &sp, None, None)?;
@@ -289,7 +320,11 @@ fn settle(reg: Arc<Registry>, id: u32) {
             return;
         };
         if let Some(code) = s.try_wait() {
-            let why = if code == hib::RESUME_FAILED_EXIT { "the agent could not resume the conversation".to_string() } else { format!("the process ended with code {code}") };
+            let why = if code == hib::RESUME_FAILED_EXIT {
+                "the agent could not resume the conversation".to_string()
+            } else {
+                format!("the process ended with code {code}")
+            };
             fail_wake(&reg, id, Some(code), &why);
             return;
         }
@@ -343,7 +378,9 @@ fn fail_wake(reg: &Arc<Registry>, id: u32, code: Option<i32>, detail: &str) {
         reg.forget_session(id);
         reg.persist();
     }
-    reg.broadcast_event(json!({"event": "session.wake_failed", "id": id, "code": c.code, "params": c.params_json(), "error": c.to_string()}));
+    reg.broadcast_event(
+        json!({"event": "session.wake_failed", "id": id, "code": c.code, "params": c.params_json(), "error": c.to_string()}),
+    );
     if let Some(p) = parent {
         let text = crate::prompts::wake_failed_report(&label, &c.to_string());
         if wake_if_sleeping(reg, p, &text) {
@@ -432,7 +469,9 @@ fn has_live_child(reg: &Registry, id: u32) -> bool {
     let sessions = reg.sessions.lock_recover();
     let metas = reg.metas.lock_recover();
     metas.iter().any(|(c, m)| {
-        m["parent"].as_u64() == Some(u64::from(id)) && sessions.get(c).is_some_and(|s| s.try_wait().is_none()) && reg.bus.finished(*c).is_none()
+        m["parent"].as_u64() == Some(u64::from(id))
+            && sessions.get(c).is_some_and(|s| s.try_wait().is_none())
+            && reg.bus.finished(*c).is_none()
     })
 }
 
@@ -505,7 +544,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         _ => {
             let state = |reg: &Arc<Registry>| {
                 if reg.hib.is_waking(id).is_some() || (reg.get(id).is_some() && !reg.hib.is_sleeping(id)) {
-                    if reg.hib.is_waking(id).is_some() { "waking" } else { "awake" }
+                    if reg.hib.is_waking(id).is_some() {
+                        "waking"
+                    } else {
+                        "awake"
+                    }
                 } else if reg.hib.queued(id) {
                     "queued"
                 } else {

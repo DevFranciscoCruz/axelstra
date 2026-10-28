@@ -99,9 +99,47 @@ pub fn valid_resume_id(id: &str) -> bool {
 /// Conservative: a false positive only postpones hibernation.
 pub fn busy_process(name: &str) -> bool {
     const BUSY: &[&str] = &[
-        "axelstra", "cargo", "rustc", "cc", "gcc", "clang", "link", "cl", "msbuild", "npm", "npx", "pnpm", "yarn", "bun", "tsc", "vite",
-        "webpack", "jest", "vitest", "pytest", "python", "python3", "go", "gradle", "mvn", "make", "cmake", "ninja", "dotnet", "docker",
-        "git", "ssh", "curl", "wget", "bash", "sh", "zsh", "dash", "fish", "powershell", "pwsh",
+        "axelstra",
+        "cargo",
+        "rustc",
+        "cc",
+        "gcc",
+        "clang",
+        "link",
+        "cl",
+        "msbuild",
+        "npm",
+        "npx",
+        "pnpm",
+        "yarn",
+        "bun",
+        "tsc",
+        "vite",
+        "webpack",
+        "jest",
+        "vitest",
+        "pytest",
+        "python",
+        "python3",
+        "go",
+        "gradle",
+        "mvn",
+        "make",
+        "cmake",
+        "ninja",
+        "dotnet",
+        "docker",
+        "git",
+        "ssh",
+        "curl",
+        "wget",
+        "bash",
+        "sh",
+        "zsh",
+        "dash",
+        "fish",
+        "powershell",
+        "pwsh",
     ];
     BUSY.contains(&name)
 }
@@ -230,7 +268,8 @@ fn agent_line(agent: &str, resume: Option<&str>, orig: &str) -> Result<String, C
 /// would hide it).
 pub fn wake_command(spec: &Value, meta: &Value, resume: Option<&str>) -> Result<Wake, Cannot> {
     let program = spec["program"].as_str().ok_or(Cannot::NoLine)?.to_string();
-    let args: Vec<String> = spec["args"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+    let args: Vec<String> =
+        spec["args"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
     let ps = is_ps(&program);
     let at = args
         .iter()
@@ -467,7 +506,10 @@ mod tests {
         assert!(validate(&json!({}), &json!({"idle_minutes": 0})).is_none());
         assert!(validate(&json!({}), &json!({"idle_minutes": 5000})).is_none());
         assert!(validate(&json!({}), &json!({"nope": 1})).is_none());
-        assert_eq!(validate(&json!({"hibernate": {"idle_minutes": 7}}), &json!({"enabled": false})).unwrap(), json!({"enabled": false, "idle_minutes": 7}));
+        assert_eq!(
+            validate(&json!({"hibernate": {"idle_minutes": 7}}), &json!({"enabled": false})).unwrap(),
+            json!({"enabled": false, "idle_minutes": 7})
+        );
     }
 
     #[test]
@@ -504,7 +546,9 @@ mod tests {
     fn claude_wake_line_resumes_the_conversation_and_flags_failure() {
         let orig = "claude --settings 'C:/d/hooks.json' --append-system-prompt 'be short' --session-id 0f8fad5b-d9cb-469f-a165-70867728950e; exec x";
         let meta = json!({"agent": "claude", "parent": 4, "worktree": "C:/w"});
-        let sh = wake_command(&spec(&["-l", "-c", &format!("{orig}; exec 'sh' -l")], "sh"), &meta, Some("0f8fad5b-d9cb-469f-a165-70867728950e")).unwrap();
+        let sh =
+            wake_command(&spec(&["-l", "-c", &format!("{orig}; exec 'sh' -l")], "sh"), &meta, Some("0f8fad5b-d9cb-469f-a165-70867728950e"))
+                .unwrap();
         assert_eq!(sh.args[..2], ["-l", "-c"]);
         let cmd = &sh.args[2];
         assert!(cmd.starts_with("claude --settings 'C:/d/hooks.json' --append-system-prompt 'be short' --resume '0f8f"), "{cmd}");
@@ -513,7 +557,8 @@ mod tests {
         assert!(sh.env.contains(&("AXELSTRA_PARENT".into(), "4".into())));
         assert!(sh.env.contains(&("AXELSTRA_KEY".into(), "k".into())));
         assert_eq!((sh.cols, sh.rows), (100, 40));
-        let ps = wake_command(&spec(&["-NoExit", "-Command", "claude --session-id abcdef12"], "powershell"), &meta, Some("abcdef12")).unwrap();
+        let ps =
+            wake_command(&spec(&["-NoExit", "-Command", "claude --session-id abcdef12"], "powershell"), &meta, Some("abcdef12")).unwrap();
         assert_eq!(ps.args[..2], ["-NoExit", "-Command"]);
         assert_eq!(ps.args[2], "claude --resume 'abcdef12'; if (!$?) { exit 97 }");
     }

@@ -541,7 +541,14 @@ impl Registry {
         let Some(pid) = self.metas.lock_recover().get(&id).and_then(|m| m["parent"].as_u64()).map(|p| p as u32) else { return };
         // a hibernated parent wakes for it: the message waits in its inbox and is typed once it is back
         if self.hib.is_sleeping(pid) {
-            let m = self.bus.send(Some(id), pid, "message", &crate::prompts::waiting_report(wait.kind == axelstra_core::waiting::WaitKind::Permission, &wait.text), None, None);
+            let m = self.bus.send(
+                Some(id),
+                pid,
+                "message",
+                &crate::prompts::waiting_report(wait.kind == axelstra_core::waiting::WaitKind::Permission, &wait.text),
+                None,
+                None,
+            );
             let _ = m;
             if let Some(me) = self.me.get().and_then(std::sync::Weak::upgrade) {
                 hibernate::wake(&me, pid);

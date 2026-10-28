@@ -49,7 +49,13 @@ fn start_at(root: &Path, tag: &str) -> (Client, String) {
     let token = "h".repeat(32);
     let (p, t, s) = (pipe.clone(), token.clone(), root.join("projects.json"));
     std::thread::spawn(move || {
-        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap().block_on(server::serve_with_store(p, t, s)).unwrap();
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(server::serve_with_store(p, t, s))
+            .unwrap();
     });
     common::wait_ready(&pipe, &token);
     (Client::connect(&pipe, &token).unwrap(), pipe)
@@ -74,7 +80,8 @@ fn key(n: u32) -> String {
 fn conversation(cwd: &Path, id: &str) {
     let dir = env().join(".claude").join("projects").join(axelstra_daemon::agentlog::claude_dir_name(&cwd.to_string_lossy()));
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join(format!("{id}.jsonl")), "{\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n").unwrap();
+    std::fs::write(dir.join(format!("{id}.jsonl")), "{\"message\":{\"id\":\"m1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n")
+        .unwrap();
 }
 
 /// A claude-like agent: a shell that runs the stand-in, started the way the app starts one.
@@ -181,16 +188,23 @@ fn what_is_not_resumable_or_not_idle_is_refused() {
     let wt = root.join("wt");
     std::fs::create_dir_all(&wt).unwrap();
     let (mut c, pipe) = start_at(&root, "refuse");
-    let (sp, sa) = if cfg!(windows) { ("cmd", json!(["/c", "echo TOK[%AXELSTRA_AGENT_TOKEN%] & ping -n 60 127.0.0.1 >nul"])) } else { ("sh", json!(["-c", "echo TOK[$AXELSTRA_AGENT_TOKEN]; sleep 60"])) };
+    let (sp, sa) = if cfg!(windows) {
+        ("cmd", json!(["/c", "echo TOK[%AXELSTRA_AGENT_TOKEN%] & ping -n 60 127.0.0.1 >nul"]))
+    } else {
+        ("sh", json!(["-c", "echo TOK[$AXELSTRA_AGENT_TOKEN]; sleep 60"]))
+    };
     let tokshell = c.call("session.spawn", json!({"program": sp, "args": sa})).unwrap()["id"].as_u64().unwrap();
     // an agent without resume support
     let aider = agent(&mut c, &wt, &key(3), json!({"agent": "aider"}), json!({}));
     // a claude with no conversation on disk
     let fresh = {
         let (prog, args) = if cfg!(windows) { ("cmd", vec!["/q".to_string()]) } else { ("sh", vec![]) };
-        c.call("session.spawn", json!({"program": prog, "args": args, "cwd": wt.to_string_lossy(), "label": "fresh",
-            "meta": {"kind": "agent", "agent": "claude", "project": "p", "worktree": wt.to_string_lossy(), "key": key(4)}}))
-            .unwrap()["id"]
+        c.call(
+            "session.spawn",
+            json!({"program": prog, "args": args, "cwd": wt.to_string_lossy(), "label": "fresh",
+            "meta": {"kind": "agent", "agent": "claude", "project": "p", "worktree": wt.to_string_lossy(), "key": key(4)}}),
+        )
+        .unwrap()["id"]
             .as_u64()
             .unwrap()
     };
@@ -240,7 +254,8 @@ fn a_done_that_races_a_hibernation_always_wakes_the_lead() {
             let _ = hibernate(&mut a, lead);
         });
         let t2 = std::thread::spawn(move || {
-            b.call("msg.send", json!({"from": worker, "to": lead, "text": format!("report-{round}"), "kind": "done", "quiet": true})).unwrap();
+            b.call("msg.send", json!({"from": worker, "to": lead, "text": format!("report-{round}"), "kind": "done", "quiet": true}))
+                .unwrap();
         });
         t1.join().unwrap();
         t2.join().unwrap();

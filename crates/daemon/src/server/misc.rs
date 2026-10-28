@@ -118,7 +118,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             // `{enabled?, idle_minutes?}`: the keys present change, the rest stays
             if let Some(h) = p.get("hibernate") {
                 saved["hibernate"] = crate::hibernate::validate(&saved, h).ok_or_else(|| {
-                    axelstra_core::coded!("settings.bad_hibernate", "hibernate takes enabled (true or false) and idle_minutes (a whole number from 1 to 1440)")
+                    axelstra_core::coded!(
+                        "settings.bad_hibernate",
+                        "hibernate takes enabled (true or false) and idle_minutes (a whole number from 1 to 1440)"
+                    )
                 })?;
             }
             // replaces the whole budgets setting; null removes it
