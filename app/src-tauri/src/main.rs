@@ -283,6 +283,8 @@ const ALLOWED_METHODS: &[&str] = &[
     "worktree.overview",
     "worktree.sweep",
     "worktree.integrate",
+    "integrate.undo",
+    "orch.cancel",
     "project.integrate",
     "janitor.events",
     "budget.status",

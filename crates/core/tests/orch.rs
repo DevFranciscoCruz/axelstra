@@ -56,6 +56,7 @@ impl Env {
             wt_root: self.root.join("wt"),
             agent_override: Some(fake_agent(self)),
             poll_ms: 100,
+            cancel: None,
             runner: None,
         };
         if self.trusted {
@@ -194,6 +195,7 @@ body
         wt_root: e.root.join("wt"),
         agent_override: None,
         poll_ms: 100,
+        cancel: None,
         runner: None,
     };
     assert!(orch::run(&o).is_err());
@@ -275,6 +277,7 @@ fn run_opts(e: &Env, name: &str) -> Options {
         wt_root: e.root.join("wt"),
         agent_override: None,
         poll_ms: 100,
+        cancel: None,
         runner: None,
     }
 }

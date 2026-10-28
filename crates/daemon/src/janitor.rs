@@ -216,7 +216,7 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>, waitin
                     ))
                 };
                 match result {
-                    Ok(integrate::Outcome::Integrated { into, how, pushed, removed, push_error, closed }) => {
+                    Ok(integrate::Outcome::Integrated { into, how, pushed, removed, push_error, closed, .. }) => {
                         integrate::clear_attention(&w.path);
                         if removed {
                             gone.push(branch.clone());

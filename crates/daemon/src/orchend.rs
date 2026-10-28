@@ -104,7 +104,7 @@ pub fn finish(p: &Project, name: &str, end: &End, close: &dyn Fn(&str) -> Vec<St
         return;
     }
     match integrate::integrate_with(p, w, &|| close(&w.path)) {
-        Ok(integrate::Outcome::Integrated { into, how, pushed, removed, push_error, closed }) => {
+        Ok(integrate::Outcome::Integrated { into, how, pushed, removed, push_error, closed, .. }) => {
             integrate::clear_attention(&w.path);
             let mut ev = removed_event(p, &w.path, &integ_branch, &into, &format!("integrated into {into} ({how})"), &closed);
             ev["kind"] = json!("integrated");
@@ -132,7 +132,11 @@ fn now_ms() -> u64 {
 /// The `End` a finished report describes.
 pub fn end_of(r: &Result<axelstra_core::orch::Report, anyhow::Error>) -> End {
     match r {
-        Ok(r) => End { clean: r.failed.is_empty() && r.needs_review.is_empty() && r.blocked.is_empty(), holds: !r.needs_review.is_empty() },
+        // a stopped run never integrates by itself, even if every card it got to had merged: the user decides
+        Ok(r) => End {
+            clean: !r.cancelled && r.failed.is_empty() && r.needs_review.is_empty() && r.blocked.is_empty(),
+            holds: !r.needs_review.is_empty(),
+        },
         Err(_) => End { clean: false, holds: false },
     }
 }

@@ -20,6 +20,8 @@ pub(super) struct Registry {
     pub(super) agent_tokens: Mutex<HashMap<String, u32>>,
     /// latest orchestration run per project id
     pub(super) runs: Mutex<HashMap<String, Value>>,
+    /// stop switch of the run that is going, per project id (`orch.cancel`)
+    pub(super) run_cancels: Mutex<HashMap<String, axelstra_core::orch::Cancel>>,
     /// serializes read-modify-write of automations.json (UI saves vs the scheduler)
     pub(super) auto_lock: Mutex<()>,
     /// running `axelstra flow` plans: flow id -> [{id, worktree, state}] (what the sidebar shows as queued/running/done)
@@ -416,6 +418,7 @@ impl Registry {
             token,
             agent_tokens: Default::default(),
             runs: Default::default(),
+            run_cancels: Default::default(),
             auto_lock: Default::default(),
             flows: Default::default(),
             plist: Default::default(),

@@ -73,6 +73,7 @@ fn agents_run_in_daemon_sessions_and_get_cleaned_up() {
         wt_root: root.join("wt"),
         agent_override: Some(agent),
         poll_ms: 3_600_000, // an hour: the run advances on exit/result events, not on the backoff
+        cancel: None,
         runner: Some(Arc::new(DaemonRunner::connect(&pipe, &token).unwrap())),
     })
     .unwrap();

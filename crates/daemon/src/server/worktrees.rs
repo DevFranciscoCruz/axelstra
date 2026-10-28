@@ -264,9 +264,26 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 crate::integrate::Outcome::Nothing => {
                     json!({"integrated": false, "into": "", "how": "none", "removed": false, "pushed": null})
                 }
-                crate::integrate::Outcome::Integrated { into, how, pushed, removed, push_error, closed } => {
+                crate::integrate::Outcome::Integrated {
+                    into,
+                    how,
+                    pushed,
+                    removed,
+                    push_error,
+                    closed,
+                    prev_tip,
+                    new_tip,
+                    branch,
+                    branch_tip,
+                } => {
                     let mut v =
                         json!({"integrated": true, "into": into, "how": how, "removed": removed, "pushed": pushed, "closed": closed});
+                    // additive: what `integrate.undo` takes back
+                    v["default_branch"] = json!(into);
+                    v["prev_tip"] = json!(prev_tip);
+                    v["new_tip"] = json!(new_tip);
+                    v["branch"] = json!(branch);
+                    v["branch_tip"] = json!(branch_tip);
                     if let Some(c) = push_error {
                         v["push_code"] = json!(c.code);
                         v["push_params"] = c.params_json();
@@ -275,6 +292,24 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     v
                 }
             })
+        }
+        // takes back a `worktree.integrate` (app only): the default branch goes back to where it was, the branch and its
+        // worktree come back; refused when the default branch moved, was pushed or its checkout has changes
+        "integrate.undo" => {
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
+            let s = |k: &str| p[k].as_str().map(String::from).ok_or_else(|| missing(k));
+            let args = crate::integrate::UndoArgs {
+                default_branch: s("default_branch")?,
+                prev_tip: s("prev_tip")?,
+                new_tip: s("new_tip")?,
+                branch: s("branch")?,
+                branch_tip: s("branch_tip")?,
+            };
+            let done = tokio::task::block_in_place(|| crate::integrate::undo(&pr, &args))?;
+            forget_project_list(reg);
+            reg.projects_changed();
+            reg.janitor.bump();
+            Ok(json!({"branch_restored": done.branch_restored, "worktree": done.worktree}))
         }
         "worktree.remove" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;

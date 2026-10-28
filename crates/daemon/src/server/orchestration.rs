@@ -88,10 +88,13 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 }
                 runs.insert(pr.id.clone(), started.clone());
             }
+            let cancel = axelstra_core::orch::Cancel::new();
+            reg.run_cancels.lock_recover().insert(pr.id.clone(), cancel.clone());
             reg.orch_changed(&name, &pr.id);
             ensure_kanban_watch(reg, &pr.id, std::path::Path::new(&pr.path));
             // a failure before the run thread exists gives the claim back
             let release = |e: anyhow::Error| {
+                reg.run_cancels.lock_recover().remove(&pr.id);
                 reg.runs.lock_recover().insert(pr.id.clone(), run_error(&name, &e));
                 reg.orch_changed(&name, &pr.id);
                 e
@@ -118,6 +121,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     max_concurrency: max,
                     agent_override: agent,
                     poll_ms: 500,
+                    cancel: Some(cancel),
                     runner: Some(Arc::new(runner)),
                 };
                 // the UI sets this only after the user confirmed the acceptance commands
@@ -134,10 +138,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 let v = match res {
                     Ok(r) => json!({"state": "done", "name": n2, "integ_branch": r.integ_branch,
                         "integ_wt": r.integ_wt, "merged": r.merged, "failed": r.failed,
-                        "needs_review": r.needs_review, "blocked": r.blocked,
+                        "needs_review": r.needs_review, "blocked": r.blocked, "cancelled": r.cancelled,
                         "reason_codes": r.reason_codes.iter().map(|(id, c)| (id.clone(), c.fields())).collect::<serde_json::Map<_, _>>()}),
                     Err(e) => run_error(&n2, &e),
                 };
+                reg2.run_cancels.lock_recover().remove(&pid);
                 reg2.runs.lock_recover().insert(pid.clone(), v);
                 reg2.orch_changed(&n2, &pid);
                 reg2.kanban_changed(&pid);
@@ -176,6 +181,32 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 reg.orch_changed(&name, &pr.id);
             }
             Ok(json!({}))
+        }
+        // stops the run of the project: its thread wakes at once, kills the workers' sessions, puts the unfinished cards back
+        // to todo and ends through the usual cleanup (`orchend::finish`: work already merged is kept, never integrated)
+        "orch.cancel" => {
+            // by project id, or by the name of the run (`orch.status` `name`) when only that is at hand
+            let by_run = p["run"].as_str().and_then(|run| {
+                reg.runs
+                    .lock_recover()
+                    .iter()
+                    .find(|(_, r)| r["name"].as_str() == Some(run) && r["state"] == "running")
+                    .map(|(k, _)| k.clone())
+            });
+            let pr = crate::projects::find(&reg.store, p["project"].as_str().map(String::from).or(by_run).unwrap_or_default().as_str())?;
+            let cancel = reg.run_cancels.lock_recover().get(&pr.id).cloned();
+            let (Some(cancel), Some(name)) = (
+                cancel,
+                reg.runs.lock_recover().get(&pr.id).filter(|r| r["state"] == "running").and_then(|r| r["name"].as_str().map(String::from)),
+            ) else {
+                return Err(axelstra_core::coded!("orch.not_running", "no orchestration is running for this project"));
+            };
+            cancel.cancel();
+            if let Some(r) = reg.runs.lock_recover().get_mut(&pr.id) {
+                r["cancelling"] = json!(true);
+            }
+            reg.orch_changed(&name, &pr.id);
+            Ok(json!({"run": name}))
         }
         "orch.status" => {
             let id = p["project"].as_str().unwrap_or_default();

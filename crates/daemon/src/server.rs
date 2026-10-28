@@ -84,6 +84,8 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         | "triggers.events"
         | "worktree.rebase"
         | "worktree.integrate"
+        | "integrate.undo"
+        | "orch.cancel"
         | "project.integrate"
         | "project.discover"
         | "project.add_discovered"
@@ -765,6 +767,7 @@ struct Ctx<'a> {
 /// Whether `method` changes projects or worktrees, which makes the cached project list stale.
 fn changes_projects(method: &str) -> bool {
     (method.starts_with("worktree.") && !matches!(method, "worktree.status" | "worktree.overview"))
+        || method == "integrate.undo"
         || (method.starts_with("project.")
             && !matches!(
                 method,
@@ -820,7 +823,7 @@ fn dispatch_call(c: &mut Ctx) -> Result<Value> {
     }
     match req.method.split('.').next().unwrap_or_default() {
         "session" => session::call(c),
-        "worktree" | "project" | "pm" | "janitor" | "dispatch" | "ports" => worktrees::call(c),
+        "worktree" | "project" | "pm" | "janitor" | "dispatch" | "ports" | "integrate" => worktrees::call(c),
         "fs" | "files" | "watch" | "open" => files::call(c),
         "git" | "gh" => vcs::call(c),
         "triggers" => triggers::call(c),

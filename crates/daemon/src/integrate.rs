@@ -76,6 +76,8 @@ pub fn auto_on(p: &Project) -> bool {
     p.auto_integrate.unwrap_or(true)
 }
 
+// one value per integration, never stored in bulk: boxing would only churn every match on it
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, PartialEq)]
 pub enum Outcome {
     /// The branch had no commits the default branch lacks: nothing to merge.
@@ -91,7 +93,30 @@ pub enum Outcome {
         push_error: Option<Coded>,
         /// labels of the sessions closed so the folder could go
         closed: Vec<String>,
+        /// what `undo` needs: the default branch before and after, and the integrated branch and its tip
+        prev_tip: String,
+        new_tip: String,
+        branch: String,
+        branch_tip: String,
     },
+}
+
+/// What `undo` is given: the numbers an `Integrated` outcome reported.
+pub struct UndoArgs {
+    pub default_branch: String,
+    pub prev_tip: String,
+    pub new_tip: String,
+    pub branch: String,
+    pub branch_tip: String,
+}
+
+/// What `undo` did.
+#[derive(Debug, PartialEq)]
+pub struct Undone {
+    /// the integrated branch exists again (it had been removed)
+    pub branch_restored: bool,
+    /// the path of the worktree put back, when one could be
+    pub worktree: Option<String>,
 }
 
 /// Commits on `branch` that `default` lacks.
@@ -156,6 +181,8 @@ pub fn integrate_with(p: &Project, wt: &git::Worktree, close_sessions: &dyn Fn()
     // nowhere (the main checkout sits on another branch): move the ref without touching any checkout.
     // a checkout done outside Axelstra (`git checkout`) is not an event we see: never trust the cached list here
     git::forget_worktree_lists();
+    let prev_tip = rev(repo, &format!("refs/heads/{default}")).map_err(|e| failed(&branch, &e))?;
+    let branch_tip = rev(repo, &format!("refs/heads/{branch}")).map_err(|e| failed(&branch, &e))?;
     let host = git::worktree_list(repo)?.into_iter().find(|w| w.branch.as_deref() == Some(default.as_str()));
     let how = match &host {
         Some(host) => {
@@ -177,6 +204,7 @@ pub fn integrate_with(p: &Project, wt: &git::Worktree, close_sessions: &dyn Fn()
         None => advance_unchecked(repo, &branch, &default)?,
     };
     let host_dir = host.as_ref().map(|h| Path::new(&h.path)).unwrap_or(repo);
+    let new_tip = rev(repo, &format!("refs/heads/{default}")).map_err(|e| failed(&branch, &e))?;
     let (pushed, push_error) = if p.push_after_integrate {
         match push(host_dir, &default) {
             Ok(()) => (Some(true), None),
@@ -188,7 +216,96 @@ pub fn integrate_with(p: &Project, wt: &git::Worktree, close_sessions: &dyn Fn()
     // its commits are in the default branch now; a failure here only leaves the worktree for the next sweep
     let closed = close_sessions();
     let removed = projects::worktree_remove_strict(p, &wt.path).is_ok();
-    Ok(Outcome::Integrated { into: default, how, pushed, removed, push_error, closed })
+    Ok(Outcome::Integrated { into: default, how, pushed, removed, push_error, closed, prev_tip, new_tip, branch, branch_tip })
+}
+
+fn hex_oid(s: &str) -> bool {
+    matches!(s.len(), 40 | 64) && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Takes back an integration made by `integrate_with`, as long as nothing was built on it: the default branch is still at
+/// `new_tip`, no remote default branch has it (it was not pushed) and its checkout, if any, has no changes. The ref goes
+/// back to `prev_tip` with a compare-and-swap; a checkout of the default branch is reset to it (it was clean), and when
+/// the default branch is checked out nowhere no checkout is touched. If the integrated branch was removed it is recreated
+/// at `branch_tip` (an `ax/*` one also gets its worktree back when the folder is free). Nothing is lost: `branch_tip` is
+/// reachable from `new_tip` until the ref moves, and the branch is made again before it does.
+pub fn undo(p: &Project, a: &UndoArgs) -> Result<Undone> {
+    let repo = Path::new(&p.path);
+    let (default, branch) = (a.default_branch.as_str(), a.branch.as_str());
+    let bad = || coded!("integrate.undo_invalid", "the integration to undo is not valid");
+    if ![&a.prev_tip, &a.new_tip, &a.branch_tip].iter().all(|s| hex_oid(s)) || !crate::janitor::integrable_branch(branch) {
+        return Err(bad());
+    }
+    let valid_name = |n: &str| !n.starts_with('-') && git::run(repo, &["check-ref-format", "--branch", n]).map(|o| o.ok).unwrap_or(false);
+    if !valid_name(default) || !valid_name(branch) || default == branch {
+        return Err(bad());
+    }
+    let default_ref = format!("refs/heads/{default}");
+    let branch_ref = format!("refs/heads/{branch}");
+    if rev(repo, &default_ref).ok().as_deref() != Some(a.new_tip.as_str()) {
+        return Err(coded!("integrate.undo_moved", "{into} changed after the integration, so it cannot be undone safely", into = default));
+    }
+    if !git::run(repo, &["merge-base", "--is-ancestor", &a.prev_tip, &a.new_tip]).map(|o| o.ok).unwrap_or(false) {
+        return Err(bad());
+    }
+    let remote_has = git::run(repo, &["for-each-ref", "--format=%(refname)", "--contains", &a.new_tip, "refs/remotes"])
+        .map(|o| {
+            // refs/remotes/<remote>/<default>
+            o.ok && o
+                .stdout
+                .lines()
+                .any(|l| l.trim().strip_prefix("refs/remotes/").and_then(|r| r.split_once('/')).is_some_and(|(_, b)| b == default))
+        })
+        .unwrap_or(true);
+    if remote_has {
+        return Err(coded!("integrate.undo_pushed", "{into} was already pushed, so the integration cannot be undone", into = default));
+    }
+    git::forget_worktree_lists();
+    let host = git::worktree_list(repo)?.into_iter().find(|w| w.branch.as_deref() == Some(default));
+    if let Some(h) = &host {
+        if tracked_dirty(Path::new(&h.path)) {
+            return Err(coded!("integrate.default_dirty", "{into} has uncommitted changes in its checkout", into = default));
+        }
+    }
+    // the branch comes back first: if that fails nothing has moved
+    let existing = rev(repo, &branch_ref).ok();
+    let mut branch_restored = false;
+    if existing.is_none() {
+        if !git::run(repo, &["cat-file", "-e", &format!("{}^{{commit}}", a.branch_tip)]).map(|o| o.ok).unwrap_or(false) {
+            return Err(bad());
+        }
+        git::must(repo, &["update-ref", &branch_ref, &a.branch_tip, ""])?;
+        branch_restored = true;
+    }
+    if let Err(e) = cas_ref(repo, default, branch, &a.prev_tip, &a.new_tip) {
+        if branch_restored {
+            let _ = git::run(repo, &["update-ref", "-d", &branch_ref, &a.branch_tip]);
+        }
+        return Err(e);
+    }
+    if let Some(h) = &host {
+        // the ref moved under a clean checkout: bring its index and files along
+        if let Err(e) = git::must(Path::new(&h.path), &["reset", "--hard", "--quiet", &a.prev_tip]) {
+            let _ = git::run(repo, &["update-ref", &default_ref, &a.new_tip, &a.prev_tip]);
+            if branch_restored {
+                let _ = git::run(repo, &["update-ref", "-d", &branch_ref, &a.branch_tip]);
+            }
+            return Err(failed(branch, &e));
+        }
+    }
+    let worktree = if branch_restored && branch.starts_with("ax/") {
+        match projects::worktree_attach(p, branch) {
+            Ok(w) => Some(w.path),
+            Err(e) => {
+                eprintln!("undo of {branch}: no worktree put back: {e:#}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    git::forget_worktree_lists();
+    Ok(Undone { branch_restored, worktree })
 }
 
 fn conflict(branch: &str, into: &str) -> anyhow::Error {

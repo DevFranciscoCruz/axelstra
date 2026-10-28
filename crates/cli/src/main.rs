@@ -516,6 +516,7 @@ fn main() -> Result<()> {
                 wt_root,
                 agent_override: if agent.is_empty() { None } else { Some(agent) },
                 poll_ms: 500,
+                cancel: None,
                 runner: if daemon { Some(std::sync::Arc::new(axelstra_daemon::runner::DaemonRunner::connect_default()?)) } else { None },
             };
             let r = if trust_acceptance { startconfirm::run(&opts, confirm_bypass.as_deref())? } else { orch::run(&opts)? };

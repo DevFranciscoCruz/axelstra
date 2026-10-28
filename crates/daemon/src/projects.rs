@@ -323,6 +323,28 @@ pub(crate) fn create_at(p: &Project, name: &str, base: &str, copy_env: bool) -> 
     Ok((wt, report))
 }
 
+/// A worktree for the existing branch `ax/<name>` (the undo of an integration puts one back), in the folder
+/// `worktree_create` would have used. Fails when the folder exists or the branch is checked out somewhere else.
+pub(crate) fn worktree_attach(p: &Project, branch: &str) -> Result<git::Worktree> {
+    let n = slug(branch.strip_prefix("ax/").unwrap_or(branch));
+    if n.is_empty() {
+        return Err(coded!("worktree.name_empty", "worktree name is empty"));
+    }
+    let repo = Path::new(&p.path);
+    let dir = wt_dir(p, &n)?;
+    if dir.exists() {
+        return Err(coded!("worktree.dir_exists", "{path} already exists", path = dir.display()));
+    }
+    std::fs::create_dir_all(dir.parent().unwrap())?;
+    git::forget_worktree_lists();
+    git::must(repo, &["-c", "core.longpaths=true", "worktree", "add", &dir.to_string_lossy(), branch])?;
+    git::forget_worktree_lists();
+    git::worktree_list(repo)?
+        .into_iter()
+        .find(|w| Path::new(&w.path).file_name() == dir.file_name())
+        .ok_or_else(|| coded!("worktree.not_listed", "worktree created but not listed"))
+}
+
 /// Renames a worktree: its folder and its branch move together to `ax/<name>`. Not for the main worktree, not while
 /// an agent or terminal in it is busy (`busy`, known to the caller), and never over something that exists.
 /// Returns the renamed worktree.

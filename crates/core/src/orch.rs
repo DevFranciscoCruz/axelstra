@@ -29,6 +29,40 @@ pub struct Options {
     pub poll_ms: u64,
     /// None = headless child processes.
     pub runner: Option<Arc<dyn Runner>>,
+    /// Lets the caller stop the run from another thread (`Cancel::cancel`); `None` = cannot be stopped.
+    pub cancel: Option<Cancel>,
+}
+
+/// A stop request for a run, shared between the run's thread and whoever may stop it. Cancelling wakes the run's loop at
+/// once (no polling): it kills the running agents, puts the cards that did not finish back to `todo` and ends.
+#[derive(Clone, Default)]
+pub struct Cancel(Arc<CancelInner>);
+
+#[derive(Default)]
+struct CancelInner {
+    flag: std::sync::atomic::AtomicBool,
+    wake: std::sync::Mutex<Option<Wake>>,
+}
+
+impl Cancel {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.0.flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(w) = crate::sync::LockRecover::lock_recover(&self.0.wake).as_ref() {
+            w.bump();
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.flag.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn attach(&self, w: &Wake) {
+        *crate::sync::LockRecover::lock_recover(&self.0.wake) = Some(w.clone());
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +141,8 @@ pub struct Report {
     pub reason_codes: std::collections::BTreeMap<String, Coded>,
     pub integ_branch: String,
     pub integ_wt: PathBuf,
+    /// The run was stopped with `Cancel`: the cards that had not finished are in `blocked` and back to `todo`.
+    pub cancelled: bool,
     /// Problems that did not stop the run (a log line that could not be written, a card status that could not be
     /// saved, a task whose merge step failed). Empty on a clean run.
     pub errors: Vec<String>,
@@ -254,9 +290,30 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
     // Everything the loop waits for bumps this: a task process exiting, `result.json` appearing, and nothing else. The
     // count is read before the state is looked at, so a bump during the look makes the wait return at once.
     let wake = Wake::new();
+    if let Some(c) = &o.cancel {
+        c.attach(&wake);
+    }
+    let mut cancelled = false;
     let mut idle_backoff = Duration::from_millis(25);
     loop {
         let seen = wake.now();
+        // read after `seen`: a cancel landing after this look bumps the wake and the wait below returns at once
+        if o.cancel.as_ref().is_some_and(Cancel::is_cancelled) {
+            cancelled = true;
+            for t in tasks.values_mut() {
+                if let Some(mut live) = t.live.take() {
+                    live.handle.kill();
+                    // an interrupted attempt starts from nothing next time: its worktree and branch go
+                    drop(live._watch);
+                    let _ = git::worktree_remove(&repo, &live.wt);
+                    let _ = git::branch_delete(&repo, &live.branch);
+                }
+                if matches!(t.st, St::Running | St::Ready) {
+                    t.st = St::Blocked;
+                }
+            }
+            break;
+        }
         let before: Vec<_> = tasks.values().map(|t| (t.card.meta.id.clone(), t.st, t.attempts)).collect();
         // 1. promote Blocked -> Ready once every dependency is Merged
         let merged_ids: Vec<String> = tasks.values().filter(|t| t.st == St::Merged).map(|t| t.card.meta.id.clone()).collect();
@@ -443,6 +500,7 @@ fn run_with(o: &Options, trust: &Trust) -> Result<Report> {
         reason_codes,
         integ_branch,
         integ_wt,
+        cancelled,
         errors,
     })
 }
