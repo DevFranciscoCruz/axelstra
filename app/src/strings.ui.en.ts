@@ -8,6 +8,7 @@ export const enU: Widen<typeof ptU> = {
     part: (name: string) => `This part (${name}) hit an error.`,
     terminalsKeep: "Terminals keep running.",
     copyDiag: "Copy diagnostics",
+    copyDiagFailed: "Could not copy",
     reload: "Reload",
   },
   loading: {

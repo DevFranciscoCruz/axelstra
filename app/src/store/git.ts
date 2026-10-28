@@ -22,6 +22,10 @@ import { refreshSessions, selectedWorktree } from "./sessions";
 import { keepSame, projectTerse } from "./ui";
 
 export const [projects, setProjects] = createSignal<Project[]>([]);
+/** true once the first `listProjects` answered (ok or not): until then an empty list means "not known yet", not "first run" */
+export const [projectsLoaded, setProjectsLoaded] = createSignal(false);
+/** the last `listProjects` failed (daemon down or silent): an empty list then says nothing about the user's projects */
+export const [projectsFailed, setProjectsFailed] = createSignal(false);
 
 const POLL_PROJECTS = "poll:projects";
 const POLL_CHANGES = "poll:changes";
@@ -114,8 +118,12 @@ export const refreshProjects = async () => {
     setProjects((prev) => keepSame(prev, list, (p) => p.id));
     void refreshWtStatus(list);
     void refreshPrs(list);
+    setProjectsFailed(false);
+    setProjectsLoaded(true);
     clearError(POLL_PROJECTS);
   } catch (e) {
+    setProjectsFailed(true);
+    setProjectsLoaded(true);
     setError(errorText(e), POLL_PROJECTS);
   }
 };

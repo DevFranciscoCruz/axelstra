@@ -1,8 +1,8 @@
-import { createSignal, untrack } from "solid-js";
+import { Show, createSignal, untrack } from "solid-js";
 import { hasIcon } from "./Icon";
 import { agentLabel } from "./agentLabel";
 import { Modal } from "./Modal";
-import { agentKeys, projectAgent, setDefaultAgent } from "./store";
+import { agentKeys, agentsLoaded, projectAgent, setDefaultAgent } from "./store";
 import { S } from "./strings";
 import { Button, Field, Select } from "./ui";
 
@@ -11,7 +11,10 @@ export function AgentPickerModal(props: { project: string | undefined; done: (ag
   const [choice, setChoice] = createSignal(
     untrack(() => projectAgent(props.project)),
   ); /* the picker opens once per project */
+  const none = () => agentsLoaded() && agentKeys().length === 0;
+  const ready = () => agentsLoaded() && !none();
   const go = () => {
+    if (!ready()) return;
     setDefaultAgent(choice());
     props.done(choice());
   };
@@ -19,6 +22,17 @@ export function AgentPickerModal(props: { project: string | undefined; done: (ag
     <Modal label={S.app.newAgent} onClose={() => props.done(null)}>
       <div class="m-heading">{S.app.newAgent}</div>
       <div class="m-full" onKeyDown={(e) => e.key === "Enter" && (e.ctrlKey || e.metaKey) && go()}>
+        <Show when={none()}>
+          <p class="text-sm text-muted-foreground" role="status">
+            {S.app.pickerNone}
+          </p>
+        </Show>
+        <Show when={!agentsLoaded()}>
+          <p class="text-sm text-muted-foreground" role="status" aria-busy="true">
+            {S.loading}
+          </p>
+        </Show>
+        <Show when={ready()}>
         <Field label={S.app.agent} full>
           <Select
             value={choice()}
@@ -32,10 +46,11 @@ export function AgentPickerModal(props: { project: string | undefined; done: (ag
             onChange={setChoice}
           />
         </Field>
+        </Show>
       </div>
       <div class="m-actions">
         <Button onClick={() => props.done(null)}>{S.cancel}</Button>
-        <Button variant="default" onClick={go} ref={(el) => queueMicrotask(() => el.focus())}>
+        <Button variant="default" disabled={!ready()} onClick={go} ref={(el) => queueMicrotask(() => el.focus())}>
           {S.app.open}
         </Button>
       </div>

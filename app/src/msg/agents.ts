@@ -76,7 +76,7 @@ export const pt = {
   "workspace.bad_mode": "O modo tem de ser merge ou replace, não {m}.",
   "workspace.bad_conflicts": "Os conflitos têm de ser keep ou overwrite, não {m}.",
   "worktree.pr_env_not_copied":
-    "{count} ficheiro(s) ignorado(s) do .worktreeinclude ({files}) NÃO foram copiados para o worktree desta pull request, porque o código dela não é de confiança. Copia-os à mão se precisares deles.",
+    "{count} ficheiro(s) ignorado(s) do .worktreeinclude ({files}) NÃO foram copiados para o worktree deste PR, porque o código dele não é de confiança. Copia-os à mão se precisares deles.",
 } as const satisfies Record<string, string>;
 
 export const en: Widen<typeof pt> = {
@@ -217,5 +217,5 @@ export const ptBR: Widen<typeof pt> = {
   "workspace.bad_mode": "O modo precisa ser merge ou replace, não {m}.",
   "workspace.bad_conflicts": "Os conflitos precisam ser keep ou overwrite, não {m}.",
   "worktree.pr_env_not_copied":
-    "{count} arquivo(s) ignorado(s) do .worktreeinclude ({files}) NÃO foram copiados para o worktree desta pull request, porque o código dela não é confiável. Copie-os à mão se precisar deles.",
+    "{count} arquivo(s) ignorado(s) do .worktreeinclude ({files}) NÃO foram copiados para o worktree deste PR, porque o código dele não é confiável. Copie-os à mão se precisar deles.",
 };

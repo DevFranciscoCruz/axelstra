@@ -90,7 +90,7 @@ export function useBootstrap() {
             .catch(() => setInstalledAgents(null));
           const bits: string[] = [];
           if (m.includes("git")) bits.push(S.app.noGit);
-          if (m.includes("claude") && m.includes("codex")) bits.push(S.app.noAgents);
+          if (m.includes("claude") && m.includes("codex") && m.includes("gemini")) bits.push(S.app.noAgents);
           if (bits.length) showNotice(S.app.missing(bits));
         })
         .catch(() => setInstalledAgents(null)),

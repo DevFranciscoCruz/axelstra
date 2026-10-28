@@ -30,6 +30,7 @@ export const pt = {
   // orch: the orchestrator and its runs
   "orch.already_running": "Já há uma orquestração em curso neste projeto.",
   "orch.no_run": "Não há nenhuma orquestração para repetir.",
+  "orch.not_running": "Não há nenhuma orquestração em curso neste projeto.",
   "orch.panicked": "O orquestrador falhou de forma inesperada.\n({detail})",
   "orch.bad_run_name": "Nome de execução inválido: {name}. Usa letras, números, «.», «_» ou «-».",
   "orch.no_todo": "Não há cartões com o estado todo em {path}.",
@@ -55,7 +56,7 @@ export const pt = {
   "orch.spawn_failed": "Não foi possível iniciar o agente.\n({detail})",
   "orch.merge_conflict": "Conflito de merge.",
   "orch.kept":
-    "{branch} ficou guardada: a execução não concluiu todos os cartões e a branch tem trabalho. Revê-a e integra-a.",
+    "{branch} ficou guardado: a execução não concluiu todos os cartões e o branch tem trabalho. Revê-o e integra-o.",
   "orch.acceptance_timeout": "A aceitação excedeu o limite de {secs} s.",
   "orch.acceptance_failed": "A aceitação falhou.",
   "orch.acceptance_error": "Não foi possível executar a aceitação.\n({detail})",
@@ -86,6 +87,7 @@ export const en: Widen<typeof pt> = {
   "automation.bad_time": "The time must be HH:MM; got {time}.",
   "orch.already_running": "An orchestration is already running for this project.",
   "orch.no_run": "There is no orchestration run to retry.",
+  "orch.not_running": "No orchestration is running for this project.",
   "orch.panicked": "The orchestrator crashed unexpectedly.\n({detail})",
   "orch.bad_run_name": "Invalid run name: {name}. Use letters, digits, '.', '_' or '-'.",
   "orch.no_todo": "There are no cards with status todo in {path}.",
@@ -142,6 +144,7 @@ export const ptBR: Widen<typeof pt> = {
   "automation.bad_time": "O horário precisa estar no formato HH:MM; recebido {time}.",
   "orch.already_running": "Já existe uma orquestração em andamento neste projeto.",
   "orch.no_run": "Não há nenhuma orquestração para tentar de novo.",
+  "orch.not_running": "Não há nenhuma orquestração em andamento neste projeto.",
   "orch.panicked": "O orquestrador falhou inesperadamente.\n({detail})",
   "orch.bad_run_name": "Nome de execução inválido: {name}. Use letras, números, «.», «_» ou «-».",
   "orch.no_todo": "Não há cartões com status todo em {path}.",
@@ -167,7 +170,7 @@ export const ptBR: Widen<typeof pt> = {
   "orch.spawn_failed": "Não foi possível iniciar o agente.\n({detail})",
   "orch.merge_conflict": "Conflito de merge.",
   "orch.kept":
-    "{branch} foi mantida: a execução não concluiu todos os cartões e a branch tem trabalho. Revise-a e integre-a.",
+    "{branch} foi mantido: a execução não concluiu todos os cartões e o branch tem trabalho. Revise-o e integre-o.",
   "orch.acceptance_timeout": "A aceitação passou do limite de {secs} s.",
   "orch.acceptance_failed": "A aceitação falhou.",
   "orch.acceptance_error": "Não foi possível executar a aceitação.\n({detail})",

@@ -5,6 +5,14 @@ import type { ptW } from "./strings.welcome";
 export const ptBRW: Widen<typeof ptW> = {
   title: "Bem-vindo ao Axelstra",
   flow: "Adicione um projeto, crie um worktree e abra um agente.",
+  stepsTitle: "Como funciona",
+  steps: [
+    "Adicione uma pasta com um repositório git.",
+    "Crie um worktree: cada tarefa tem seu próprio branch e sua própria pasta.",
+    "Abra um agente (Claude, Codex…) nesse worktree e trabalhe em paralelo.",
+  ],
+  offlineTitle: "Sem conexão com o daemon",
+  offlineFlow: "Seus projetos estão salvos; não aparecem porque o daemon não está respondendo. Tente conectar de novo ou reinicie-o.",
   add: "Adicionar projeto",
   pickTitle: "Escolha um worktree",
   pickFlow: (project?: string) =>

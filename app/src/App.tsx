@@ -14,7 +14,8 @@ import { DiffView } from "./DiffView";
 import { Sidebar } from "./Sidebar";
 import { WorktreeReports } from "./WorktreeReports";
 import { Palette } from "./Palette";
-import { Welcome } from "./Welcome";
+import { DaemonOffline, Welcome } from "./Welcome";
+import { Loading } from "./Loading";
 import { ContextMenu } from "./ContextMenu";
 import { Automations } from "./Automations";
 import { Dispatcher } from "./Dispatcher";
@@ -25,6 +26,7 @@ import { S } from "./strings";
 import { startDrag } from "./dragResize";
 import { LEFT, RIGHT, resizeTo } from "./layout";
 import { K } from "./keyboard";
+import { commandById } from "./commands";
 import { buildPaletteActions } from "./paletteActions";
 import { AgentPickerModal } from "./AgentPickerModal";
 import { SplitPane } from "./SplitPane";
@@ -109,6 +111,9 @@ import {
   rightW,
   setLeftW,
   setRightW,
+  projectsLoaded,
+  projectsFailed,
+  retryDaemon,
 } from "./store";
 
 export function App() {
@@ -391,7 +396,19 @@ export function App() {
                   <PanelIcon side="left" on={false} />
                 </Button>
               </Show>
-              <Show when={projects()[0]} fallback={<Welcome onAddProject={() => setShowAddProject(true)} />}>
+              <Show
+                when={projects()[0]}
+                fallback={
+                  <Switch fallback={<Welcome onAddProject={() => setShowAddProject(true)} />}>
+                    <Match when={!projectsLoaded()}>
+                      <Loading onRetry={() => void retryDaemon()} />
+                    </Match>
+                    <Match when={projectsFailed()}>
+                      <DaemonOffline />
+                    </Match>
+                  </Switch>
+                }
+              >
                 {(p) => (
                   <Welcome
                     onAddProject={() => setShowAddProject(true)}
@@ -429,19 +446,13 @@ export function App() {
               <MicIcon />
             </Button>
             <Button variant="icon" size="tool" class={cn("ml-1 self-center", splitSession() !== null && "text-foreground")} title={S.app.split} aria-label={S.app.split} onClick={() => void toggleSplit()}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-                <path d="M5.5 3v10M10.5 3v10" />
-              </svg>
+              <Icon name="split" size={16} />
             </Button>
             <Button variant="icon" size="tool" class="ml-1 self-center" title={S.app.newAgentOf(projectAgent(current()?.project.id))} aria-label={S.app.newAgentOf(projectAgent(current()?.project.id))} onClick={newAgent}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 1.5c.4 3.4 1.6 4.6 5 5-3.4.4-4.6 1.6-5 5-.4-3.4-1.6-4.6-5-5 3.4-.4 4.6-1.6 5-5z" />
-              </svg>
+              <Icon name="sparkleSolid" size={16} />
             </Button>
             <Button variant="icon" size="tool" class="ml-1 self-center" title={S.app.newTerminal} aria-label={S.app.newTerminal} onClick={newTerminal}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-                <path d="M8 3.5v9M3.5 8h9" />
-              </svg>
+              <Icon name="plus" size={16} />
             </Button>
             <Show when={!showRightPanel() && !narrow()}>
               <Button variant="icon" size="tool" class="ml-1 self-center" title={K(S.app.showRight)} aria-label={K(S.app.showRight)} onClick={toggleRightPanel}>
@@ -464,10 +475,12 @@ export function App() {
                       <Button variant="default" onClick={() => void newAgent()}>
                         <Icon name="sparkle" size={12} inline /> {S.app.openAgent}
                       </Button>
-                      <Button onClick={() => void newTerminal()}>+ Terminal</Button>
+                      <Button onClick={() => void newTerminal()}>
+                        <Icon name="plus" size={12} inline /> {S.app.newTerminal}
+                      </Button>
                     </div>
                     <div class="hints">
-                      <kbd>{K("Ctrl+K")}</kbd> {S.app.hintPalette} · <kbd>{K("?")}</kbd> {S.app.hintShortcuts} · <kbd>{K("Ctrl+B")}</kbd> {S.app.hintProjects} · <kbd>{K("Ctrl+Shift+B")}</kbd> {S.app.hintRight}
+                      <kbd>{K(commandById("palette")?.keys ?? "Ctrl+K")}</kbd> {S.app.hintPalette} · <kbd>{K(commandById("shortcuts")?.keys ?? "?")}</kbd> {S.app.hintShortcuts} · <kbd>{K(commandById("toggleSidebar")?.keys ?? "Ctrl+B")}</kbd> {S.app.hintProjects} · <kbd>{K(commandById("toggleRight")?.keys ?? "Ctrl+Shift+B")}</kbd> {S.app.hintRight}
                     </div>
                   </div>
                 }

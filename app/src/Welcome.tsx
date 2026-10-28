@@ -4,6 +4,9 @@ import { Button } from "./ui";
 import { Icon } from "./Icon";
 import { K } from "./keyboard";
 import { commandById } from "./commands";
+import { S } from "./strings";
+import { restartDaemonFlow } from "./daemonActions";
+import { retryDaemon } from "./store";
 import { W } from "./strings.welcome";
 import logo from "./assets/logo.png";
 
@@ -20,6 +23,31 @@ type Wt = { path: string; branch: string | null; is_main: boolean };
 const Kbd = (props: { children: string }) => (
   <kbd class="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-xs text-foreground">{props.children}</kbd>
 );
+
+/** The project list could not be read (daemon down or silent): says so, instead of showing the first-run welcome to someone who has projects. */
+export function DaemonOffline() {
+  return (
+    <section
+      class="mx-auto flex h-full w-full max-w-[420px] flex-col items-center justify-center gap-5 p-8 text-center"
+      aria-labelledby="offline-title"
+      role="alert"
+    >
+      <img src={logo} alt="" class="size-14" />
+      <div class="flex flex-col gap-2">
+        <h1 id="offline-title" class="text-2xl font-semibold text-foreground">
+          {W.offlineTitle}
+        </h1>
+        <p class="text-base text-muted-foreground">{W.offlineFlow}</p>
+      </div>
+      <div class="flex flex-wrap items-center justify-center gap-2">
+        <Button variant="default" onClick={() => void retryDaemon()}>
+          {S.toast.retryNow}
+        </Button>
+        <Button onClick={() => void restartDaemonFlow(undefined, retryDaemon)}>{S.restartDaemon}</Button>
+      </div>
+    </section>
+  );
+}
 
 /**
  * The main area with nothing open. Without `worktrees`: no project yet, one button to add it.
@@ -94,6 +122,12 @@ export function Welcome(props: {
       </p>
       <Show when={!props.worktrees}>
         <div class="text-left text-sm text-muted-foreground">
+          <div class="mb-1 font-semibold text-foreground">{W.stepsTitle}</div>
+          <ol class="mb-3 flex list-decimal flex-col gap-1 pl-5">
+            <For each={W.steps}>
+              {(step, i) => <li classList={{ "font-medium text-foreground": i() === 0 }}>{step}</li>}
+            </For>
+          </ol>
           <div class="mb-1 font-semibold text-foreground">{W.needs}</div>
           <ul class="flex flex-col gap-1">
             <For each={needs}>

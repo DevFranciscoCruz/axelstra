@@ -30,7 +30,7 @@ const FRIENDLY: [RegExp, keyof typeof L.friendly][] = [
 const TOOL_ENGLISH =
   /^\s*(fatal|error|warning|hint|remote|gh|docker|git)\b[:\s]|error response from daemon|\bgit\b.*\b(failed|exited)\b|\bdocker\b.*\b(failed|exited)\b|\bgh\b.*\b(failed|exited)\b/i;
 
-const clip = (m: string) => (m.length > 160 ? m.slice(0, 160) + "…" : m);
+const clip = (m: string) => (m.length > 600 ? m.slice(0, 600) + "…" : m);
 
 /** the message in the UI language when it is a known failure, with the original in brackets; an unknown message from git, gh or
  *  docker gets a line in the UI language in front, so it never shows raw English alone in a Portuguese UI; anything else is left as it is */

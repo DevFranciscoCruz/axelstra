@@ -7,17 +7,20 @@ export const pt = {
   "integrate.dirty":
     "O worktree de {branch} tem alterações por guardar. Guarda-as (commit) ou descarta-as e tenta outra vez.",
   "integrate.untrusted":
-    "{branch} traz código de um pull request ou não é uma branch do Axelstra: nunca é integrada sozinha. Revê-a e junta-a à mão.",
+    "{branch} traz código de um PR ou não é um branch do Axelstra: nunca é integrado sozinho. Revê-o e junta-o à mão.",
   "integrate.default_dirty":
-    "O checkout principal do projeto tem alterações por guardar (ou uma junção a meio), por isso {into} não pode ser atualizada. Limpa-o e tenta outra vez.",
+    "O checkout principal do projeto tem alterações por guardar (ou uma junção a meio), por isso {into} não pode ser atualizado. Limpa-o e tenta outra vez.",
   "integrate.default_moved": "{into} mudou enquanto {branch} era integrada; nada foi alterado. Tenta outra vez.",
   "integrate.not_ok":
     "O agente de {branch} reportou falha ou bloqueio, por isso o trabalho não foi integrado. Abre o main do worktree para ver o motivo.",
   "integrate.busy": "Ainda há um agente a trabalhar no worktree de {branch}. Espera que acabe e tenta outra vez.",
   "integrate.failed": "O git falhou ao integrar {branch}: {detail}",
   "integrate.push_failed":
-    "{into} foi atualizada, mas o push falhou: {detail}. Não há mais nada a desfazer; faz o push à mão quando puderes.",
-  "integrate.not_agent_branch": "{branch} não é uma branch ax/*: só essas são integradas automaticamente.",
+    "{into} foi atualizado, mas o envio falhou: {detail}. Não há mais nada a desfazer; envia à mão quando puderes.",
+  "integrate.not_agent_branch": "{branch} não é um branch ax/*: só essas são integradas automaticamente.",
+  "integrate.undo_invalid": "Esta integração não pode ser desfeita: os dados já não correspondem.",
+  "integrate.undo_moved": "{into} mudou depois da integração, por isso não se pode desfazer em segurança.",
+  "integrate.undo_pushed": "{into} já foi enviado, por isso a integração não se pode desfazer.",
 } as const satisfies Record<string, string>;
 
 export const en: Widen<typeof pt> = {
@@ -36,16 +39,19 @@ export const en: Widen<typeof pt> = {
   "integrate.push_failed":
     "{into} was updated, but the push failed: {detail}. There is nothing else to undo; push it by hand when you can.",
   "integrate.not_agent_branch": "{branch} is not an ax/* branch: only those are integrated automatically.",
+  "integrate.undo_invalid": "This integration cannot be undone: the data no longer matches.",
+  "integrate.undo_moved": "{into} changed after the integration, so it cannot be undone safely.",
+  "integrate.undo_pushed": "{into} was already pushed, so the integration cannot be undone.",
 };
 
 /** Brazilian wording: written out in full, not a fallback to pt-PT. */
 export const ptBR: Widen<typeof pt> = {
   "integrate.conflict":
-    "Integrar {branch} em {into} gera conflitos; nada foi alterado. Abra o main do worktree e peça para ele mesclar {into} na branch e resolver os conflitos.",
+    "Integrar {branch} em {into} gera conflitos; nada foi alterado. Abra o main do worktree e peça para ele mesclar {into} no branch e resolver os conflitos.",
   "integrate.dirty":
     "O worktree de {branch} tem alterações não commitadas. Faça o commit ou descarte-as e tente novamente.",
   "integrate.untrusted":
-    "{branch} traz código de um pull request ou não é uma branch do Axelstra: ela nunca é integrada sozinha. Revise e mescle manualmente.",
+    "{branch} traz código de um PR ou não é um branch do Axelstra: ele nunca é integrado sozinho. Revise e mescle manualmente.",
   "integrate.default_dirty":
     "O checkout principal do projeto tem alterações não commitadas (ou uma mesclagem em andamento), então {into} não pode ser atualizada. Limpe-o e tente novamente.",
   "integrate.default_moved": "{into} mudou enquanto {branch} era integrada; nada foi alterado. Tente novamente.",
@@ -54,6 +60,9 @@ export const ptBR: Widen<typeof pt> = {
   "integrate.busy": "Ainda há um agente trabalhando no worktree de {branch}. Espere ele terminar e tente novamente.",
   "integrate.failed": "O git falhou ao integrar {branch}: {detail}",
   "integrate.push_failed":
-    "{into} foi atualizada, mas o push falhou: {detail}. Não há mais nada a desfazer; faça o push manualmente quando puder.",
-  "integrate.not_agent_branch": "{branch} não é uma branch ax/*: só essas são integradas automaticamente.",
+    "{into} foi atualizado, mas o envio falhou: {detail}. Não há mais nada a desfazer; envie manualmente quando puder.",
+  "integrate.not_agent_branch": "{branch} não é um branch ax/*: só essas são integradas automaticamente.",
+  "integrate.undo_invalid": "Esta integração não pode ser desfeita: os dados já não correspondem.",
+  "integrate.undo_moved": "{into} mudou depois da integração, então não dá para desfazer com segurança.",
+  "integrate.undo_pushed": "{into} já foi enviado, então a integração não pode ser desfeita.",
 };

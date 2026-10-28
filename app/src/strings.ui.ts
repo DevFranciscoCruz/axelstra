@@ -9,6 +9,7 @@ export const ptU = {
     part: (name: string) => `Esta parte (${name}) encontrou um erro.`,
     terminalsKeep: "Os terminais continuam a correr.",
     copyDiag: "Copiar diagnóstico",
+    copyDiagFailed: "Não foi possível copiar",
     reload: "Recarregar",
   },
   loading: {

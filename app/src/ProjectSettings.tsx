@@ -6,6 +6,7 @@ import { TriggerSettings } from "./TriggerSettings";
 import { projects, refreshProjects, setError } from "./store";
 import { Button, CheckboxField, Field, Textarea } from "./ui";
 import { P } from "./strings.panels";
+import { K } from "./keyboard";
 
 /** why a file is left out of the next worktree: the daemon's message in the UI language, else its English text */
 const skipReason = (s: EnvSkip & { reason_code?: string; reason_params?: Record<string, string> }) =>
@@ -70,7 +71,7 @@ export function ProjectSettings(props: { projectId: string; onClose: () => void 
         />
       </Field>
       <div class="auto-note">
-        {P.projectSettings.setupNote}
+        {K(P.projectSettings.setupNote)}
       </div>
 
       <CheckboxField checked={auto()} onChange={(v) => void toggle("auto", v)}>

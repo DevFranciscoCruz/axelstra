@@ -51,7 +51,7 @@ export const ptBRAP: Widen<typeof ptAP> = {
   folderName: "Nome da pasta",
   folderNameHint: "Sugerido a partir do endereço.",
   branch: "Branch (opcional)",
-  branchPh: "a branch padrão",
+  branchPh: "o branch padrão",
   depth: "Profundidade (opcional)",
   depthPh: "tudo",
   depthHint: "Um número, como 1, para um clone raso e rápido.",

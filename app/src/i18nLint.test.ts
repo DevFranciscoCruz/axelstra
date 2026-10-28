@@ -101,3 +101,45 @@ describe("the language changes live", () => {
     expect(S.settings).toBe("Configurações");
   });
 });
+
+describe("glossary (see the comment at the top of strings.ts)", () => {
+  const raw = import.meta.glob<string>(["./strings*.ts", "./msg/*.ts", "!./**/*.test.ts", "!./msg/index.ts"], {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  });
+  const literals = (src: string) => src.match(/"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g) ?? [];
+  /** the texts of one layer: strings*.ts files are one layer each (by name); msg files hold pt, en and ptBR in one file */
+  const layerTexts = (layer: "pt" | "ptBR"): [string, string][] => {
+    const out: [string, string][] = [];
+    for (const [f, src] of Object.entries(raw)) {
+      const msg = f.startsWith("./msg/");
+      const code = src.split("\n").filter((l) => !isComment(l)).join("\n");
+      if (msg) {
+        const en = code.search(/export const en\b/);
+        const br = code.search(/export const ptBR\b/);
+        if (en < 0 || br < 0) continue;
+        const part = layer === "pt" ? code.slice(0, en) : code.slice(br);
+        for (const t of literals(part)) out.push([f, t]);
+      } else if (layer === "ptBR" ? f.includes(".ptbr.") : !/\.(en|ptbr)\.ts$/.test(f)) {
+        for (const t of literals(code)) out.push([f, t]);
+      }
+    }
+    return out;
+  };
+  const scan = (layer: "pt" | "ptBR", re: RegExp) =>
+    layerTexts(layer)
+      .filter(([, t]) => re.test(t))
+      .map(([f, t]) => `${f}: ${t.slice(0, 90)}`);
+
+  it("pt-PT texts use the glossary: enviar (not push), PR (not pull request), host, o branch", () => {
+    expect(scan("pt", /\bpush\b|pull request|anfitri|\bramo\b|\b(?:a|uma|na|da|esta|nesta|essa|dessa) branch\b/i)).toEqual(
+      [],
+    );
+  });
+  it("pt-BR texts keep the glossary and avoid pt-PT wording", () => {
+    expect(
+      scan("ptBR", /\bpush\b|pull request|anfitri|\bramo\b|\b(?:a|uma|na|da|esta|nesta|essa|dessa) branch\b|\becrã\b|ficheiro|\ba correr\b/i),
+    ).toEqual([]);
+  });
+});

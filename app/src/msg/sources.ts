@@ -6,7 +6,7 @@ export const pt = {
   "project.clone_url_empty": "O endereço do repositório está vazio.",
   "project.clone_url_invalid":
     "{url} não é um endereço que o git possa clonar. Usa https://, ssh:// ou git@servidor:caminho.",
-  "project.clone_branch_invalid": "{branch} não é um nome de ramo válido.",
+  "project.clone_branch_invalid": "{branch} não é um nome de branch válido.",
   "project.clone_depth_invalid": "A profundidade tem de ser um número inteiro de 1 a 1000000.",
   "project.clone_dest_relative": "{path} não é um caminho absoluto.",
   "project.clone_dest_exists": "{path} já existe e não está vazia.",

@@ -20,7 +20,7 @@ export const ptAP = {
     clone: "Um repositório git a partir de um endereço.",
     github: "Um dos teus repositórios no GitHub.",
     new: "Uma pasta nova com git iniciado.",
-    remote: "Uma pasta num anfitrião WSL ou SSH.",
+    remote: "Uma pasta num host WSL ou SSH.",
     discover: "Repositórios que já tens no disco.",
   },
   busy: "A trabalhar…",
@@ -54,8 +54,8 @@ export const ptAP = {
   } as Record<UrlProblem, string>,
   folderName: "Nome da pasta",
   folderNameHint: "Sugerido a partir do endereço.",
-  branch: "Ramo (opcional)",
-  branchPh: "o ramo por omissão",
+  branch: "Branch (opcional)",
+  branchPh: "o branch por omissão",
   depth: "Profundidade (opcional)",
   depthPh: "tudo",
   depthHint: "Um número, como 1, para um clone superficial e rápido.",
@@ -123,9 +123,9 @@ export const ptAP = {
 
   // remote suggestions
   suggestWsl: "Distros WSL detetadas",
-  suggestSsh: "Anfitriões do ~/.ssh/config",
+  suggestSsh: "Hosts do ~/.ssh/config",
   suggestUse: (spec: string) => `Usar ${spec}`,
-  suggestNote: "Clica para preencher a especificação do novo anfitrião.",
+  suggestNote: "Clica para preencher a especificação do novo host.",
 };
 
 export const AP = dict<typeof ptAP>(ptAP, enAP, ptBRAP);

@@ -63,7 +63,7 @@ describe("handleJanitorEvents", () => {
     expect(pushNotification).toHaveBeenNthCalledWith(2, {
       kind: "merged",
       worktree: "/wt/ax/b",
-      text: "worktree vazio b removido",
+      text: "Worktree vazio b removido",
     });
   });
   it("attention shows the coded text as a warning keyed by path and code", () => {

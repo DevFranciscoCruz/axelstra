@@ -13,11 +13,14 @@ export const AGENTS: Record<string, string> = { claude: "claude", codex: "codex"
 export const canonAgent = (a: string) => (a === "chatgpt" ? "codex" : a);
 /** names of the agents the pickers list: only the agent CLIs found on the PATH (empty until the daemon answers) */
 export const [agentKeys, setAgentKeys] = createSignal<string[]>([]);
+/** the daemon answered (or failed to) about the installed agents: before that an empty `agentKeys` means "not known yet" */
+export const [agentsLoaded, setAgentsLoaded] = createSignal(false);
 /** `ids` are the daemon's ids of the installed agents; without the list, the two built-ins */
 export const setInstalledAgents = (ids: string[] | null) => {
   const keys = ids ?? ["claude", "codex"];
   for (const k of keys) AGENTS[k] ??= k;
   setAgentKeys(keys);
+  setAgentsLoaded(true);
   // the saved default may not be installed here
   if (keys.length && !keys.includes(agent())) setAgentSig(keys[0]);
 };

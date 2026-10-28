@@ -4,6 +4,14 @@ import type { ptW } from "./strings.welcome";
 export const enW: Widen<typeof ptW> = {
   title: "Welcome to Axelstra",
   flow: "Add a project, create a worktree and open an agent.",
+  stepsTitle: "How it works",
+  steps: [
+    "Add a folder with a git repository.",
+    "Create a worktree: each task gets its own branch and its own folder.",
+    "Open an agent (Claude, Codex…) in that worktree and work in parallel.",
+  ],
+  offlineTitle: "No connection to the daemon",
+  offlineFlow: "Your projects are saved; they are not shown because the daemon is not answering. Try connecting again or restart it.",
   add: "Add project",
   pickTitle: "Pick a worktree",
   pickFlow: (project?: string) =>

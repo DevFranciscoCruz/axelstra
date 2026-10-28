@@ -1,10 +1,11 @@
-import { ErrorBoundary, Show, untrack, type JSX } from "solid-js";
+import { ErrorBoundary, Show, createSignal, onCleanup, untrack, type JSX } from "solid-js";
 import { copyDiagnostics, logFrontendError } from "./api";
 import { errorText } from "./appError";
 import { formatError } from "./errorHooks";
 import { Button } from "./ui";
 import { S } from "./strings";
 import { U } from "./strings.ui";
+import { P } from "./strings.panels";
 
 /** What a section shows instead of itself when it threw while rendering: the rest of the app (terminals included) keeps running. */
 export function Fallback(props: { name: string; error: unknown; reset: () => void; whole?: boolean }) {
@@ -14,6 +15,19 @@ export function Fallback(props: { name: string; error: unknown; reset: () => voi
       console.debug("logFrontendError", e),
     );
   });
+  const [copy, setCopy] = createSignal<"idle" | "ok" | "failed">("idle");
+  let reset: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(reset));
+  const copyDiag = () =>
+    void copyDiagnostics().then(
+      () => flash("ok"),
+      (e) => (console.debug("copyDiagnostics", e), flash("failed")),
+    );
+  const flash = (s: "ok" | "failed") => {
+    setCopy(s);
+    clearTimeout(reset);
+    reset = setTimeout(() => setCopy("idle"), 2000);
+  };
   return (
     <div class="placeholder" classList={{ whole: props.whole }} role="alert">
       <div>
@@ -24,8 +38,8 @@ export function Fallback(props: { name: string; error: unknown; reset: () => voi
         <Button variant="default" onClick={props.reset}>
           {S.retry}
         </Button>
-        <Button onClick={() => void copyDiagnostics().catch((e) => console.debug("copyDiagnostics", e))}>
-          {U.boundary.copyDiag}
+        <Button onClick={copyDiag} aria-live="polite">
+          {copy() === "ok" ? P.confirm.copied : copy() === "failed" ? U.boundary.copyDiagFailed : U.boundary.copyDiag}
         </Button>
         <Show when={props.whole}>
           <Button onClick={() => location.reload()}>{U.boundary.reload}</Button>

@@ -5,6 +5,14 @@ import { ptBRW } from "./strings.welcome.ptbr";
 export const ptW = {
   title: "Bem-vindo ao Axelstra",
   flow: "Adiciona um projeto, cria um worktree e abre um agente.",
+  stepsTitle: "Como funciona",
+  steps: [
+    "Adiciona uma pasta com um repositório git.",
+    "Cria um worktree: cada tarefa tem o seu branch e a sua pasta.",
+    "Abre um agente (Claude, Codex…) nesse worktree e trabalha em paralelo.",
+  ],
+  offlineTitle: "Sem ligação ao daemon",
+  offlineFlow: "Os teus projetos estão guardados; não aparecem porque o daemon não responde. Tenta ligar de novo ou reinicia-o.",
   add: "Adicionar projeto",
   pickTitle: "Escolhe um worktree",
   pickFlow: (project?: string) =>

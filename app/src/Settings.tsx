@@ -1,5 +1,6 @@
 import { For, JSX, Show, createResource, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { K } from "./keyboard";
 import {
   NotifyMode,
   SettingsPatch,
@@ -284,7 +285,7 @@ export function Settings() {
                 />
               </Section>
 
-              <Section title={S.terminal} note={S.terminalNote}>
+              <Section title={S.terminal} note={K(S.terminalNote)}>
                 <Choices
                   label={S.termTheme}
                   value={termPrefs().theme}
