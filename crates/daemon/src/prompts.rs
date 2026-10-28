@@ -36,6 +36,11 @@ pub fn waiting_report(permission: bool, text: &str) -> String {
     format!("{what} from the user and is stopped, waiting: {text}")
 }
 
+/// What the parent is told when a child that was hibernated could not be brought back.
+pub fn wake_failed_report(label: &str, error: &str) -> String {
+    format!("[axelstra] {label} was hibernated and could not be resumed, so it is gone: {error}. Its worktree keeps what it had done; start the task again if it is unfinished.")
+}
+
 /// Typed into a worker that went quiet without reporting: report through the bus instead of leaving a silent screen.
 pub const IDLE_NUDGE: &str = "[axelstra] you stopped without reporting. If you finished, run `axelstra done \"<report>\"` with the result (what changed, what failed, what is left). If you are blocked or have a question, run `axelstra escalate \"<reason>\"`.";
 

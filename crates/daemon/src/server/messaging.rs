@@ -16,9 +16,20 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             if !["message", "ask", "reply", "done", "escalate"].contains(&kind) {
                 return Err(axelstra_core::coded!("msg.unknown_kind", "unknown message kind {kind}", kind = kind));
             }
-            let target = reg.get(to).ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = to))?;
+            // news for a hibernated session wakes it (and stops a hibernation under way): the message waits in its inbox
+            // and is typed once the agent is back
+            reg.hib.touch(to);
+            let sleeping = reg.hib.is_sleeping(to);
+            let target = if sleeping {
+                None
+            } else {
+                Some(reg.get(to).ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = to))?)
+            };
             let text = p["text"].as_str().unwrap_or_default();
             let m = reg.bus.send(from, to, kind, text, p["reply_to"].as_u64(), p["thread"].as_str().map(String::from));
+            if sleeping {
+                hibernate::wake(reg, to);
+            }
             // `axelstra ask` and `axelstra wait` sleep until the watch stream speaks. The session monitor only speaks when
             // its summary of a session moved (unread count, escalated, finished...), and a reply that lands in the same
             // tick as another change of that summary (the asker read its inbox meanwhile) leaves it as it was: the
@@ -55,11 +66,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             // agents get a one-line notice; a worker with a reaper reports through it instead
             let quiet = p["quiet"].as_bool() == Some(true) || (kind == "done" && from.map(|f| reg.bus.is_reaped(f)).unwrap_or(false));
             let agent = reg.metas.lock_recover().get(&to).map(|m| m["kind"] == "agent").unwrap_or(false);
-            if agent && !quiet {
+            if let (true, false, Some(target)) = (agent, quiet, target) {
                 let label = from
                     .map(|f| reg.labels.lock_recover().get(&f).cloned().unwrap_or_else(|| crate::prompts::session_name(f)))
                     .unwrap_or_else(|| crate::prompts::USER_SENDER.into());
-                reg.deliver_untrusted(to, target.clone(), &crate::msgbus::notice(&m, &label));
+                reg.deliver_untrusted(to, target, &crate::msgbus::notice(&m, &label));
             }
             Ok(json!({"id": m.id}))
         }

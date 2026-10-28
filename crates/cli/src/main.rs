@@ -25,7 +25,7 @@ enum Cmd {
     /// Relay a client on stdin/stdout to this machine's daemon (what `--host` runs over ssh/wsl; not for typing)
     #[command(hide = true)]
     Bridge,
-    /// List sessions: id, label, state (working/idle/done), worktree
+    /// List sessions: id, label, state (working/idle/hibernated/done), worktree
     Ls {
         #[arg(long)]
         json: bool,
@@ -37,6 +37,14 @@ enum Cmd {
     },
     /// Kill a session
     Kill { id: u32 },
+    /// Hibernate an idle agent session: its processes end and its row stays; any message to it, or opening it, wakes it
+    Hibernate { id: u32 },
+    /// Wake a hibernated session (waits until it is back with --wait)
+    Wake {
+        id: u32,
+        #[arg(long)]
+        wait: bool,
+    },
     /// Register a git repo as a project
     AddProject { path: PathBuf },
     /// Set the command run in each new worktree of a project (empty clears it)
@@ -455,6 +463,8 @@ fn main() -> Result<()> {
         cmd @ (Cmd::Ls { .. }
         | Cmd::Spawn { .. }
         | Cmd::Kill { .. }
+        | Cmd::Hibernate { .. }
+        | Cmd::Wake { .. }
         | Cmd::Tail { .. }
         | Cmd::Send { .. }
         | Cmd::Say { .. }

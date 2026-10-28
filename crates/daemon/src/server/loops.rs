@@ -147,6 +147,10 @@ impl ReaperTask {
     /// Reports to the parent and removes the session.
     fn finish(self, reg: &Arc<Registry>) {
         let id = self.id;
+        // a hibernated parent comes back (and types what reached it) before the report is pasted into its terminal
+        if let Some(p) = self.parent {
+            hibernate::wake_wait(reg, p, true, Duration::from_secs(60));
+        }
         let Some(s) = reg.get(id) else { return };
         let code = s.try_wait();
         let done_msg = reg.bus.finished(id);

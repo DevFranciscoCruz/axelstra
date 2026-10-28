@@ -67,6 +67,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "orch.limits" => {
             if let Some(n) = p["max_workers"].as_u64() {
                 reg.bus.set_limit(n as usize);
+                // a wake waiting for a free worker slot looks again
+                reg.pulse.bump();
             }
             let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
             Ok(json!({"max_workers": reg.bus.limit(), "workers": reg.bus.live_workers(alive)}))

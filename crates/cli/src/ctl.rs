@@ -48,6 +48,14 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
         Cmd::Kill { id } => {
             c.call("session.kill", json!({"id": id}))?;
         }
+        Cmd::Hibernate { id } => {
+            let r = c.call("session.hibernate", json!({"id": id}))?;
+            println!("session {id} hibernated, about {} MB freed", r["hibernated"]["saved_mb"].as_u64().unwrap_or(0));
+        }
+        Cmd::Wake { id, wait } => {
+            let r = c.call("session.wake", json!({"id": id, "wait": wait}))?;
+            println!("session {id}: {}", r["state"].as_str().unwrap_or("waking"));
+        }
         Cmd::Spawn { cmd } => {
             let r = c.call("session.spawn", json!({"program": cmd[0], "args": &cmd[1..], "cwd": std::env::current_dir()?}))?;
             println!("{r}");
@@ -405,6 +413,10 @@ fn print_ls(v: &Value) {
         .map(|s| {
             let state = if s["running"] != json!(true) {
                 "done"
+            } else if s["hibernated"]["waking"] == json!(true) {
+                "waking"
+            } else if s["hibernated"].is_object() {
+                "hibernated"
             } else if s["idle_ms"].as_u64().unwrap_or(u64::MAX) < 3000 {
                 "working"
             } else {

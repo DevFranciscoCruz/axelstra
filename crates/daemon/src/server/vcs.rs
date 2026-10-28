@@ -106,6 +106,13 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let c = tokio::task::block_in_place(|| crate::gh::fetch_comment(&wt, n, id))?;
             let text = crate::gh::comment_task(n, &c);
             let Some(lead) = lead.filter(|_| !dry) else { return Ok(json!({"text": text, "sent": false})) };
+            // a hibernated lead wakes and is told when it is back
+            reg.hib.touch(lead);
+            if reg.hib.is_sleeping(lead) {
+                let m = reg.bus.send(None, lead, "message", &text, None, None);
+                hibernate::wake(reg, lead);
+                return Ok(json!({"text": text, "sent": true, "session": lead, "message": m.id}));
+            }
             let target = reg.get(lead).ok_or_else(no_lead)?;
             let m = reg.bus.send(None, lead, "message", &text, None, None);
             reg.deliver_untrusted(lead, target, &crate::msgbus::notice(&m, crate::prompts::REVIEW_SENDER));
@@ -122,7 +129,8 @@ fn no_lead() -> anyhow::Error {
 /// The running lead session (meta `lead: true`) of the worktree at `path`.
 fn find_lead(reg: &Registry, path: &str) -> Option<u32> {
     // one lock at a time, sessions before metas (the registry's order)
-    let alive: Vec<u32> = reg.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, _)| *id).collect();
+    let mut alive: Vec<u32> = reg.sessions.lock_recover().iter().filter(|(_, s)| s.try_wait().is_none()).map(|(id, _)| *id).collect();
+    alive.extend(reg.hib.sleepers().into_iter().map(|(id, _)| id));
     let metas = reg.metas.lock_recover();
     alive
         .into_iter()

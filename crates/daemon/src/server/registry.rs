@@ -93,6 +93,8 @@ pub(super) struct Registry {
     pub(super) save_gen: AtomicU64,
     /// settings.json as last read or written (the daemon is its only writer): a leaf lock. `settings_changed` drops it
     pub(super) settings: Mutex<Option<Value>>,
+    /// hibernated sessions, wake queue, event counters (see `hibernate.rs`): a leaf lock
+    pub(super) hib: crate::hibernate::Hib,
 }
 
 #[derive(Default)]
@@ -455,6 +457,7 @@ impl Registry {
             save_written: Mutex::new((0, None)),
             save_gen: AtomicU64::new(0),
             settings: Default::default(),
+            hib: Default::default(),
         }
     }
 
@@ -536,6 +539,15 @@ impl Registry {
     pub(super) fn tell_parent_waiting(&self, id: u32) {
         let Some(wait) = self.hints.take_untold(id) else { return };
         let Some(pid) = self.metas.lock_recover().get(&id).and_then(|m| m["parent"].as_u64()).map(|p| p as u32) else { return };
+        // a hibernated parent wakes for it: the message waits in its inbox and is typed once it is back
+        if self.hib.is_sleeping(pid) {
+            let m = self.bus.send(Some(id), pid, "message", &crate::prompts::waiting_report(wait.kind == axelstra_core::waiting::WaitKind::Permission, &wait.text), None, None);
+            let _ = m;
+            if let Some(me) = self.me.get().and_then(std::sync::Weak::upgrade) {
+                hibernate::wake(&me, pid);
+            }
+            return;
+        }
         let Some(ps) = self.get(pid) else { return };
         let label = self.labels.lock_recover().get(&id).cloned().unwrap_or_else(|| crate::prompts::session_name(id));
         let text = crate::prompts::waiting_report(wait.kind == axelstra_core::waiting::WaitKind::Permission, &wait.text);
@@ -578,6 +590,14 @@ impl Registry {
         kids <= 1
     }
 
+    /// A hibernated session belongs to this worktree: the worktree is not free to clean, the agent comes back into it.
+    pub(super) fn hibernated_in(&self, path: &str) -> bool {
+        let want = norm(path);
+        let ids: Vec<u32> = self.hib.sleepers().into_iter().map(|(i, _)| i).collect();
+        let metas = self.metas.lock_recover();
+        ids.iter().any(|i| metas.get(i).and_then(|m| m["worktree"].as_str()).is_some_and(|w| norm(w) == want))
+    }
+
     /// Notes that a session left this worktree just now.
     pub(super) fn note_activity(&self, path: &str) {
         self.activity.lock_recover().insert(norm(path), Instant::now());
@@ -587,7 +607,7 @@ impl Registry {
     /// daemon is too new to know).
     pub(super) fn worktree_touched(&self, path: &str) -> bool {
         let quiet = self.timing.quiet;
-        if self.started.elapsed() < quiet || !self.live_in(path).is_empty() {
+        if self.started.elapsed() < quiet || !self.live_in(path).is_empty() || self.hibernated_in(path) {
             return true;
         }
         self.activity.lock_recover().get(&norm(path)).is_some_and(|at| at.elapsed() < quiet)
@@ -648,6 +668,7 @@ impl Registry {
             self.drop_sid_of(&spec);
         }
         self.bus.forget(id);
+        self.hib.forget(id);
         was
     }
 
@@ -700,7 +721,7 @@ impl Registry {
                 })
                 .unwrap_or(false)
         });
-        in_flow || self.orch_active(path) || self.live_in(path).iter().any(|(id, s)| !self.releasable(*id, s))
+        in_flow || self.orch_active(path) || self.hibernated_in(path) || self.live_in(path).iter().any(|(id, s)| !self.releasable(*id, s))
     }
 
     /// True while an orchestrator run of this project is going and `path` is one of its worktrees (`<name>-integ`,
@@ -753,8 +774,14 @@ impl Registry {
 
     /// Starts a session and records its label and UI metadata.
     pub(super) fn spawn(self: &Arc<Self>, s: &Spawn, label: Option<&str>, meta: Option<Value>) -> Result<u32> {
-        // the session learns its own id, so a CLI run inside it can name it as the parent of a worker
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
+        self.spawn_as(id, s, label, meta)
+    }
+
+    /// `spawn` under an id the caller chose: a hibernated session wakes under the id it had.
+    pub(super) fn spawn_as(self: &Arc<Self>, id: u32, s: &Spawn, label: Option<&str>, meta: Option<Value>) -> Result<u32> {
+        // the session learns its own id, so a CLI run inside it can name it as the parent of a worker
+        self.agent_tokens.lock_recover().retain(|_, v| *v != id);
         let mut s = s.clone();
         s.env.push(("AXELSTRA_SESSION".into(), id.to_string()));
         // the session's own credential: it identifies the connection as an agent, which cannot do the app-only calls
@@ -809,6 +836,10 @@ pub(super) fn watch_exit(reg: &Arc<Registry>, id: u32, s: Arc<Session>) {
         std::thread::sleep(Duration::from_millis(150));
         s.end_stream();
         let Some(reg) = reg.upgrade() else { return };
+        // put to sleep (or already woken under the same id): this process ending is not the session ending
+        if hibernate::superseded(&reg, id, &s) {
+            return;
+        }
         if let Some(w) = reg.metas.lock_recover().get(&id).and_then(|m| m["worktree"].as_str().map(String::from)) {
             reg.note_activity(&w);
         }

@@ -56,9 +56,16 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
     let sid = || -> Result<u32> { p.get("id").and_then(Value::as_u64).and_then(|x| u32::try_from(x).ok()).ok_or_else(|| missing("id")) };
     let session = || -> Result<Arc<Session>> {
         let id = sid()?;
-        reg.get(id).ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = id))
+        reg.get(id).ok_or_else(|| {
+            if reg.hib.is_sleeping(id) || reg.hib.is_waking(id).is_some() {
+                axelstra_core::coded!("hibernate.sleeping", "session {id} is hibernated: wake it with `axelstra wake {id}`", id = id)
+            } else {
+                axelstra_core::coded!("session.not_found", "no such session {id}", id = id)
+            }
+        })
     };
     match req.method.as_str() {
+        "session.hibernate" | "session.wake" => hibernate::call(c),
         "session.spawn" => {
             // idempotent: a restore that races another one (or a retry) must not start the same conversation twice
             if let Some(id) = p["meta"]["key"].as_str().and_then(|k| reg.live_by_key(k)) {
@@ -166,6 +173,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let mut spec = p.clone();
             spec["id"] = Value::Null;
             spec.as_object_mut().map(|o| o.remove("reap"));
+            // a hibernated worker or lead is reaped again when it wakes
+            reg.hib.note_reap(id, p["reap"].clone());
             // restoring brings back the name and the file; the goal text stays out of sessions.json
             spec.as_object_mut().map(|o| o.remove("goal"));
             if let Some(l) = &label {
@@ -238,6 +247,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "session.subscribe" => {
             let id = sid()?;
+            // opening a hibernated tab wakes it; the stream starts once its process exists
+            if reg.hib.is_sleeping(id) {
+                tokio::task::block_in_place(|| hibernate::wake_wait(reg, id, false, Duration::from_secs(20)));
+            }
             let s = session()?;
             own_tree(id)?;
             if let Some(old) = subs.remove(&id) {
@@ -321,9 +334,14 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({}))
         }
         "session.status" => {
+            // hibernated: not ended, there is only no process now
+            if sid().is_ok_and(|id| reg.hib.is_sleeping(id)) {
+                return Ok(json!({"running": true, "code": null, "hibernated": true}));
+            }
             // one that ended on its own already left the registry: its code is still answered (`gone`)
             if let Some((code, finished)) = sid().ok().filter(|id| reg.get(*id).is_none()).and_then(|id| reg.exited_of(id)) {
-                return Ok(json!({"running": false, "code": code, "gone": true, "finished": finished}));
+                let wake_error = sid().ok().and_then(|id| reg.hib.failed(id));
+                return Ok(json!({"running": false, "code": code, "gone": true, "finished": finished, "wake_error": wake_error}));
             }
             let code = session()?.try_wait();
             Ok(json!({"running": code.is_none(), "code": code}))
@@ -380,6 +398,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 reg.drop_sid_of(&spec);
             }
             reg.bus.forget(id);
+            reg.hib.forget(id);
             reg.persist();
             Ok(json!({}))
         }
@@ -439,6 +458,16 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({}))
         }
         "session.kill" => {
+            // a hibernated session has no process: closing its tab drops the row and what was kept for it
+            if sid().is_ok_and(|id| reg.hib.is_sleeping(id)) {
+                let id = sid()?;
+                own_tree(id)?;
+                reg.forget_session(id);
+                reg.persist();
+                reg.pulse.bump();
+                reg.broadcast("session.changed");
+                return Ok(json!({}));
+            }
             let s = session()?;
             let id = sid()?;
             own_tree(id)?;

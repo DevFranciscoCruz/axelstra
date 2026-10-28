@@ -13,6 +13,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 mod containers;
 mod files;
+mod hibernate;
 mod history;
 mod loops;
 mod messaging;
@@ -61,11 +62,13 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         // they list the file system outside any worktree
         "host.info" | "host.browse" => true,
         // notifications, the stall watchdog, installs and the shell are what keeps the user informed and safe
-        "settings.set" => ["budgets", "hosts", "notify_mode", "notify_sound", "stall_minutes", "auto_install", "shell"]
+        "settings.set" => ["budgets", "hosts", "notify_mode", "notify_sound", "stall_minutes", "auto_install", "shell", "hibernate"]
             .iter()
             .any(|k| p.get(*k).is_some()),
         // the saved sessions are the user's to drop, and an agent must not stop the daemon or switch the clean-up off
         "daemon.shutdown" | "session.pending_clear" => true,
+        // hibernating and waking are the user's; an agent only asks to `await` for itself
+        "session.hibernate" | "session.wake" => true,
         "janitor.auto" => p.get("on").is_some(),
         "project.add"
         | "project.remove"
@@ -299,6 +302,10 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     reg.janitor.bump();
     spawn_janitor(reg.clone());
     spawn_stall_watchdog(reg.clone());
+    // sessions hibernated when the previous daemon stopped stay hibernated; the waker and the policy sleep until an event
+    hibernate::adopt(&reg);
+    hibernate::spawn_waker(reg.clone());
+    hibernate::spawn_policy(reg.clone());
     triggers::spawn_loop(reg.clone());
     spawn_idle_exit(reg.clone());
     accept_loop(&pipe, reg, token).await
@@ -713,7 +720,15 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
         let (reg, tx, who) = (reg.clone(), tx.clone(), who.clone());
         tokio::spawn(async move {
             while let Some((id, data)) = in_rx.recv().await {
-                let Some(s) = reg.get(id) else { continue };
+                let Some(s) = reg.get(id) else {
+                    // typing into a hibernated tab wakes it; the keys cannot reach a process that does not exist yet
+                    if reg.hib.is_sleeping(id) {
+                        hibernate::wake(&reg, id);
+                        let ev = json!({"event": "session.input_dropped", "id": id});
+                        let _ = tx.send(encode(EVENT, ev.to_string().as_bytes())).await;
+                    }
+                    continue;
+                };
                 let me = who.load(Ordering::SeqCst);
                 // an agent types only into itself and the sessions it started: keys are how a prompt gets approved
                 let allowed = me == 0 || agent_drives(&reg, (me - 1) as u32, id);
@@ -844,6 +859,7 @@ fn session_list(reg: &Registry) -> Vec<Value> {
         })
         .collect();
     v.sort_by_key(|x| x["id"].as_u64());
+    hibernate::decorate(reg, &mut v);
     v
 }
 

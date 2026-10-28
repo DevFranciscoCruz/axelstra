@@ -16,6 +16,11 @@ pub const DEFAULT_IDLE_MINUTES: u64 = 30;
 pub const MAX_IDLE_MINUTES: u64 = 24 * 60;
 /// A session that produced output, got input or an event in the last seconds is at the start of (or in) a turn.
 pub const QUIET_MS: u64 = 20_000;
+
+/// `QUIET_MS`, or what `AXELSTRA_HIBERNATE_QUIET_MS` says (tests shorten it).
+pub fn quiet_ms() -> u64 {
+    std::env::var("AXELSTRA_HIBERNATE_QUIET_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(QUIET_MS)
+}
 /// Exit code of the wake line when the agent could not resume.
 pub const RESUME_FAILED_EXIT: i32 = 97;
 /// The longest a woken session is given to settle (print its banner and go quiet) before its inbox notice is typed.
@@ -33,7 +38,9 @@ pub struct Policy {
 pub fn policy(settings: &Value) -> Policy {
     let h = &settings["hibernate"];
     let minutes = h["idle_minutes"].as_u64().map_or(DEFAULT_IDLE_MINUTES, |m| m.clamp(1, MAX_IDLE_MINUTES));
-    Policy { enabled: h["enabled"].as_bool().unwrap_or(true), idle_ms: minutes * 60_000 }
+    // `AXELSTRA_HIBERNATE_IDLE_MS` replaces the minutes (tests)
+    let idle_ms = std::env::var("AXELSTRA_HIBERNATE_IDLE_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(minutes * 60_000);
+    Policy { enabled: h["enabled"].as_bool().unwrap_or(true), idle_ms }
 }
 
 /// The value `settings.get` reports.
@@ -94,7 +101,7 @@ pub fn busy_process(name: &str) -> bool {
     const BUSY: &[&str] = &[
         "axelstra", "cargo", "rustc", "cc", "gcc", "clang", "link", "cl", "msbuild", "npm", "npx", "pnpm", "yarn", "bun", "tsc", "vite",
         "webpack", "jest", "vitest", "pytest", "python", "python3", "go", "gradle", "mvn", "make", "cmake", "ninja", "dotnet", "docker",
-        "git", "ssh", "curl", "wget", "sleep", "bash", "sh", "zsh", "dash", "fish", "cmd", "powershell", "pwsh", "ping", "tail", "watch",
+        "git", "ssh", "curl", "wget", "bash", "sh", "zsh", "dash", "fish", "powershell", "pwsh",
     ];
     BUSY.contains(&name)
 }

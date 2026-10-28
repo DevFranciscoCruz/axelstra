@@ -594,6 +594,11 @@ export const dispatchOverlapFiles = () => callBg<OverlapFiles>("dispatch.overlap
 export const worktreeRename = (path: string, name: string) => call<{ path?: string }>("worktree.rename", { path, name });
 
 export const killSession = (id: number) => (cancelNudge(id), call("session.kill", { id }));
+
+/** Ends the process tree of an idle agent and keeps its row (state `hibernated` in `session.list`). Refused with a coded error when it is busy or cannot resume. */
+export const hibernateSession = (id: number) => call<{ id: number; hibernated: { since: number; saved_mb: number } }>("session.hibernate", { id });
+/** Brings a hibernated session back; `wait` answers once it is back. `state`: awake, waking or queued (no free worker slot). */
+export const wakeSession = (id: number, wait = false) => call<{ id: number; state: "awake" | "waking" | "queued" }>("session.wake", { id, wait });
 export const removeSession = (id: number) => (cancelNudge(id), call("session.remove", { id }));
 export const resizeSession = (id: number, cols: number, rows: number) =>
   call("session.resize", { id, cols, rows });
