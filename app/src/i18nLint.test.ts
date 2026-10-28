@@ -114,7 +114,10 @@ describe("glossary (see the comment at the top of strings.ts)", () => {
     const out: [string, string][] = [];
     for (const [f, src] of Object.entries(raw)) {
       const msg = f.startsWith("./msg/");
-      const code = src.split("\n").filter((l) => !isComment(l)).join("\n");
+      const code = src
+        .split("\n")
+        .filter((l) => !isComment(l))
+        .join("\n");
       if (msg) {
         const en = code.search(/export const en\b/);
         const br = code.search(/export const ptBR\b/);
@@ -133,13 +136,16 @@ describe("glossary (see the comment at the top of strings.ts)", () => {
       .map(([f, t]) => `${f}: ${t.slice(0, 90)}`);
 
   it("pt-PT texts use the glossary: enviar (not push), PR (not pull request), host, o branch", () => {
-    expect(scan("pt", /\bpush\b|pull request|anfitri|\bramo\b|\b(?:a|uma|na|da|esta|nesta|essa|dessa) branch\b/i)).toEqual(
-      [],
-    );
+    expect(
+      scan("pt", /\bpush\b|pull request|anfitri|\bramo\b|\b(?:a|uma|na|da|esta|nesta|essa|dessa) branch\b/i),
+    ).toEqual([]);
   });
   it("pt-BR texts keep the glossary and avoid pt-PT wording", () => {
     expect(
-      scan("ptBR", /\bpush\b|pull request|anfitri|\bramo\b|\b(?:a|uma|na|da|esta|nesta|essa|dessa) branch\b|\becrã\b|ficheiro|\ba correr\b/i),
+      scan(
+        "ptBR",
+        /\bpush\b|pull request|anfitri|\bramo\b|\b(?:a|uma|na|da|esta|nesta|essa|dessa) branch\b|\becrã\b|ficheiro|\ba correr\b/i,
+      ),
     ).toEqual([]);
   });
 });

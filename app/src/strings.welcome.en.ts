@@ -11,7 +11,8 @@ export const enW: Widen<typeof ptW> = {
     "Open an agent (Claude, Codex…) in that worktree and work in parallel.",
   ],
   offlineTitle: "No connection to the daemon",
-  offlineFlow: "Your projects are saved; they are not shown because the daemon is not answering. Try connecting again or restart it.",
+  offlineFlow:
+    "Your projects are saved; they are not shown because the daemon is not answering. Try connecting again or restart it.",
   add: "Add project",
   pickTitle: "Pick a worktree",
   pickFlow: (project?: string) =>

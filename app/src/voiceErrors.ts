@@ -20,6 +20,7 @@ export const transcribeErrorText = (e: unknown): string => {
 export const downloadErrorText = (e: unknown): string => {
   const raw = String(e);
   if (/does not match the expected hash/i.test(raw)) return L.voice.downloadCorrupt;
-  if (/no space|disk full|os error (28|112)|access is denied|permission denied|read-only/i.test(raw)) return L.voice.downloadDisk;
+  if (/no space|disk full|os error (28|112)|access is denied|permission denied|read-only/i.test(raw))
+    return L.voice.downloadDisk;
   return L.voice.downloadFailed;
 };

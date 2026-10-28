@@ -10,8 +10,7 @@ export const pt = {
   "host.spec_chars":
     "Especificação do host inválida: não pode ter espaços, caracteres de controlo nem caracteres não ASCII.",
   "host.bad_distro": "Nome de distro WSL inválido: {distro}.",
-  "host.spec_unknown":
-    "Especificação do host desconhecida: {spec}. Usa wsl:<distro> ou ssh:[utilizador@]host[:porta].",
+  "host.spec_unknown": "Especificação do host desconhecida: {spec}. Usa wsl:<distro> ou ssh:[utilizador@]host[:porta].",
   "host.bad_user": "Utilizador ssh inválido: {u}.",
   "host.unterminated_bracket": "Falta o ']' em {hostport}.",
   "host.bad_ipv6": "Endereço IPv6 inválido: {addr}.",

@@ -12,7 +12,8 @@ export const ptW = {
     "Abre um agente (Claude, Codex…) nesse worktree e trabalha em paralelo.",
   ],
   offlineTitle: "Sem ligação ao daemon",
-  offlineFlow: "Os teus projetos estão guardados; não aparecem porque o daemon não responde. Tenta ligar de novo ou reinicia-o.",
+  offlineFlow:
+    "Os teus projetos estão guardados; não aparecem porque o daemon não responde. Tenta ligar de novo ou reinicia-o.",
   add: "Adicionar projeto",
   pickTitle: "Escolhe um worktree",
   pickFlow: (project?: string) =>

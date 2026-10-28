@@ -208,7 +208,7 @@ export const enS: Widen<typeof ptS> = {
     split: "Split: view two terminals side by side",
     newTerminal: "New terminal",
     showRight: "Show right panel (Ctrl+Shift+B)",
-    noTerminals: "No terminals in this worktree.",
+    noTerminals: "Nothing open in this worktree: open an agent or a terminal.",
     openAgent: "Open agent",
     hintPalette: "palette",
     hintShortcuts: "shortcuts",

@@ -12,7 +12,8 @@ export const ptBRW: Widen<typeof ptW> = {
     "Abra um agente (Claude, Codex…) nesse worktree e trabalhe em paralelo.",
   ],
   offlineTitle: "Sem conexão com o daemon",
-  offlineFlow: "Seus projetos estão salvos; não aparecem porque o daemon não está respondendo. Tente conectar de novo ou reinicie-o.",
+  offlineFlow:
+    "Seus projetos estão salvos; não aparecem porque o daemon não está respondendo. Tente conectar de novo ou reinicie-o.",
   add: "Adicionar projeto",
   pickTitle: "Escolha um worktree",
   pickFlow: (project?: string) =>

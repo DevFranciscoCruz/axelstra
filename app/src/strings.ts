@@ -205,7 +205,7 @@ export const ptS = {
     split: "Dividir: ver dois terminais lado a lado",
     newTerminal: "Novo terminal",
     showRight: "Mostrar painel direito (Ctrl+Shift+B)",
-    noTerminals: "Sem terminais neste worktree.",
+    noTerminals: "Nada aberto neste worktree: abre um agente ou um terminal.",
     openAgent: "Abrir agente",
     hintPalette: "paleta",
     hintShortcuts: "atalhos",

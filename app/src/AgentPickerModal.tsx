@@ -1,6 +1,7 @@
 import { Show, createSignal, untrack } from "solid-js";
 import { hasIcon } from "./Icon";
 import { agentLabel } from "./agentLabel";
+import { EmptyState } from "./EmptyState";
 import { Modal } from "./Modal";
 import { agentKeys, agentsLoaded, projectAgent, setDefaultAgent } from "./store";
 import { S } from "./strings";
@@ -23,9 +24,7 @@ export function AgentPickerModal(props: { project: string | undefined; done: (ag
       <div class="m-heading">{S.app.newAgent}</div>
       <div class="m-full" onKeyDown={(e) => e.key === "Enter" && (e.ctrlKey || e.metaKey) && go()}>
         <Show when={none()}>
-          <p class="text-sm text-muted-foreground" role="status">
-            {S.app.pickerNone}
-          </p>
+          <EmptyState title={S.app.pickerNone} />
         </Show>
         <Show when={!agentsLoaded()}>
           <p class="text-sm text-muted-foreground" role="status" aria-busy="true">
@@ -33,19 +32,19 @@ export function AgentPickerModal(props: { project: string | undefined; done: (ag
           </p>
         </Show>
         <Show when={ready()}>
-        <Field label={S.app.agent} full>
-          <Select
-            value={choice()}
-            label={S.app.agent}
-            options={agentKeys().map((a) => ({
-              value: a,
-              label: agentLabel(a),
-              desc: S.agentDescs[a],
-              icon: hasIcon(a) ? a : undefined,
-            }))}
-            onChange={setChoice}
-          />
-        </Field>
+          <Field label={S.app.agent} full>
+            <Select
+              value={choice()}
+              label={S.app.agent}
+              options={agentKeys().map((a) => ({
+                value: a,
+                label: agentLabel(a),
+                desc: S.agentDescs[a],
+                icon: hasIcon(a) ? a : undefined,
+              }))}
+              onChange={setChoice}
+            />
+          </Field>
         </Show>
       </div>
       <div class="m-actions">
