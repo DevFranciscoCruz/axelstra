@@ -130,6 +130,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     ));
                 }
             }
+            // the flag stays in the meta so a hibernated worker counts against the limit again when it wakes
+            if is_worker {
+                meta.get_or_insert_with(|| json!({}))["worker"] = json!(true);
+            }
             if let Some(par) = parent {
                 let m = meta.get_or_insert_with(|| json!({}));
                 m["parent"] = json!(par);
@@ -335,7 +339,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "session.status" => {
             // hibernated: not ended, there is only no process now
-            if sid().is_ok_and(|id| reg.hib.is_sleeping(id)) {
+            if sid().is_ok_and(|id| reg.hib.is_sleeping(id) || (reg.hib.is_waking(id).is_some() && reg.get(id).is_none())) {
                 return Ok(json!({"running": true, "code": null, "hibernated": true}));
             }
             // one that ended on its own already left the registry: its code is still answered (`gone`)

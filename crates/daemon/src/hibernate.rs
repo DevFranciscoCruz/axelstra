@@ -360,6 +360,13 @@ impl Hib {
         v
     }
 
+    /// Sessions being woken, with the moment each started.
+    pub fn wakings(&self) -> Vec<(u32, u64)> {
+        let mut v: Vec<_> = self.0.lock_recover().waking.iter().map(|(i, t)| (*i, *t)).collect();
+        v.sort_by_key(|x| x.0);
+        v
+    }
+
     pub fn is_waking(&self, id: u32) -> Option<u64> {
         self.0.lock_recover().waking.get(&id).copied()
     }

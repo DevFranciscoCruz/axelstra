@@ -63,12 +63,60 @@ or the limit (`--for-min`, default and cap `AWAIT_CAP_MS` 2 h); then the watchdo
 (`rpc.agent_own_session`). No PROTO bump: the app only reads an additive field. `NEVER_WAIT_RULE` (typed into every lead and
 worker prompt) and the axelstration skill tell agents to use it instead of stopping silently.
 
+## Hibernation
+
+An agent session that really waits can be hibernated: the daemon ends its process tree and keeps the row. Pure parts
+(setting, deadline, wake command, `Hib` bookkeeping) are in `crates/daemon/src/hibernate.rs`; the methods, the waker, the
+policy thread and the list rows are in `server/hibernate.rs`.
+
+- **State.** `Hib` (one leaf lock on `Registry`) holds the sleepers, the wake queue, the sessions being woken, an event counter
+  per id and the coded error of a failed wake. A sleeper has no `Session` but keeps its id, label, `metas` row, saved spec
+  (`specs`, so `sessions.json`) and bus state (inbox, parent, worker flag), so everything that names the id still finds it.
+  `session.list` carries `hibernated: {since, saved_mb, waking, queued}` (`null` when awake; `running` stays `true`: it did not
+  end) and the sleepers appear as rows. `session.status` answers `{running: true, hibernated: true}`. Events on the watch
+  stream: `session.hibernated {id}`, `session.woke {id}`, `session.wake_failed {id, code, params, error}`.
+- **Methods** (app only, both in `agent_forbidden`): `session.hibernate {id}` (idempotent, refuses with a coded `hibernate.*`
+  error) and `session.wake {id, wait?}` (`state`: awake, waking, queued). `settings.get/set` carry `hibernate: {enabled (default
+  true), idle_minutes (default 30, 1..1440)}`.
+- **Never hibernated** (`check`): not an agent, the project main, no resume (claude needs a conversation with replies on disk,
+  found through `sid/<key>.json`, `meta.resume` or the key; codex and gemini resume "the latest of the folder", so another
+  session of the same agent in that folder refuses), input or news in the last `QUIET_MS` (20 s), output in the last 20 s,
+  the hook said `working`, a wait is pending (permission, `ask`), or a process below the shell is a command, build, lock or hook
+  (`hibernate::busy_process`, names from `procs::names_of`).
+- **Race.** Every event about a session (`msg.send` to it, a wake, a gh comment for the lead, a hint-wait of its child) calls
+  `Hib::touch(id)` BEFORE it looks the session up. `hibernate` reads the counter first, checks and saves with no lock held, then
+  commits under the `sessions` lock: the session leaves `sessions` and enters the sleepers only if the counter did not move;
+  otherwise it stays awake (`hibernate.event`). After the commit an event finds a sleeper and wakes it, its message already in
+  the bus inbox. The old process' watcher (`watch_exit`) asks `hibernate::superseded` and does not retire the row.
+- **Waking** is by event only: `msg.send` to it (done of a child, reply, ask, message), the reaper report of a child
+  (`ReaperTask::finish` wakes the parent and waits for it to settle), `session.subscribe`, typing into it (`INPUT`; the keys are
+  lost and `session.input_dropped` says so), `session.wake`. One waker thread serves a FIFO queue and sleeps on the pulse; a
+  worker needs a free slot (`bus.limit()`), a lead or plain agent does not, and a sleeper is not in `live_workers`. A freed
+  slot, a limit change or a new ask is a pulse. The wake spawns `wake_command` under the SAME id (`Registry::spawn_as`): the
+  agent's shell with `claude --resume <id>` (flags `--settings`, `--append-system-prompt`, `--permission-mode`, `--model` copied
+  verbatim from the original line), `codex resume --last` or `gemini --resume latest`, ending `|| exit 97` (`-NoExit` shells:
+  `if (!$?) { exit 97 }`), so a failed resume is seen at once instead of falling back to a fresh start. The saved terminal is
+  seeded, the worker flag and the reaper are armed again, then `settle` waits (a computed deadline: banner printed and 2.5 s
+  quiet, 4 s at least, 90 s at most) and types the notices of the unread inbox. Only then does `hibernated` go back to `null`.
+  If the process exits before that, or the spawn fails, the session is retired as exited with `wake_error`
+  (`hibernate.wake_failed`), the parent is told and the watch stream gets `session.wake_failed`; it never stays hibernated.
+- **Policy.** One thread (`spawn_policy`) computes ONE deadline per session (`hibernate::due_in`): it triggers when the session
+  is awaiting (`axelstra await`), or is a lead with a live child, or reported `done` and was not retired, and has been quiet
+  (no output, no input, no event) for `idle_minutes`. It sleeps on the pulse until the earliest deadline; state changes are
+  pulses. A refused attempt backs off with `janitor::retry_delay`. No periodic tick. Tests shorten the timings with
+  `AXELSTRA_HIBERNATE_QUIET_MS` and `AXELSTRA_HIBERNATE_IDLE_MS`.
+- **Restart.** A sleeper's spec has `meta.hibernated`; `adopt` (at start) moves such records out of `pending` into new sleepers
+  (new ids, lead/worker roles kept, parent and inbox lost like all bus state), so the app does not restore them.
+- **Janitor.** `worktree_busy`/`worktree_touched` count a sleeper in the worktree, so its worktree is not cleaned.
+- **Not done on purpose.** Triggers (CI fix) still see a worktree with only a sleeper as having no agent. The "focused tab" is
+  approximated by recent input/subscribe events; the app does not tell the daemon which tab is focused.
+
 ## Bumping PROTO
 
 `PROTO` in `crates/daemon/src/proto.rs` is the app <-> daemon contract version. A daemon outlives
 app updates, and the app only restarts a daemon older than `PROTO`. Bump it (and add the new method
 to the doc comment above it) whenever the app starts calling a daemon method an old daemon lacks.
-Do not bump it for changes an old daemon already tolerates. Current: 30 (`orch.cancel {project}`: stops the run, the thread wakes by event, kills the workers' sessions, the unfinished cards go back to `todo`, `orchend::finish` never integrates a cancelled run (`orch.kept` when it left work); `integrate.undo {project, default_branch, prev_tip, new_tip, branch, branch_tip}`: takes back a `worktree.integrate` by compare-and-swap, only while the default branch is still at `new_tip`, not pushed and its checkout clean; both app only), before that 29 (`gh.pr_refresh`; events `pr.changed {worktree, number, state, ci}`, `usage.changed`, `limits.changed`, `resources.changed` now emitted), before that 28 (events `clone.changed {id}` and `docker.changed {}` on the watch stream, the latter from a lazy `docker events` child; no new method), before that 27 (events `kanban.changed {project}`, `orch.changed {run, project}`, `automations.changed` on the watch stream; no new method), before that 26 (files.resolve_path, files.path_action), before that 25 (project.remove_preview and `mode` in project.remove), before that 24 (files.resolve_html), before that 23 (project.discover, project.add_discovered, project.clone, project.clone_status, project.clone_cancel,
+Do not bump it for changes an old daemon already tolerates. Current: 31 (`session.hibernate {id}`, `session.wake {id, wait?}`, `hibernated` in session.list, `hibernate` in settings, events `session.hibernated`/`session.woke`/`session.wake_failed`; app only), before that 30 (`orch.cancel {project}`: stops the run, the thread wakes by event, kills the workers' sessions, the unfinished cards go back to `todo`, `orchend::finish` never integrates a cancelled run (`orch.kept` when it left work); `integrate.undo {project, default_branch, prev_tip, new_tip, branch, branch_tip}`: takes back a `worktree.integrate` by compare-and-swap, only while the default branch is still at `new_tip`, not pushed and its checkout clean; both app only), before that 29 (`gh.pr_refresh`; events `pr.changed {worktree, number, state, ci}`, `usage.changed`, `limits.changed`, `resources.changed` now emitted), before that 28 (events `clone.changed {id}` and `docker.changed {}` on the watch stream, the latter from a lazy `docker events` child; no new method), before that 27 (events `kanban.changed {project}`, `orch.changed {run, project}`, `automations.changed` on the watch stream; no new method), before that 26 (files.resolve_path, files.path_action), before that 25 (project.remove_preview and `mode` in project.remove), before that 24 (files.resolve_html), before that 23 (project.discover, project.add_discovered, project.clone, project.clone_status, project.clone_cancel,
 project.init, gh.repos, wsl_distros/ssh_hosts in host.info, notices.take, audit.list, backup.export,
 backup.restore, orch.trust_info, env.tools, janitor.events, workspace.export, workspace.import_preview,
 workspace.import, host.info, host.browse, stalled in session.list, stall_minutes, and the watch-stream events janitor.events, triggers.events, budget.events, dispatch.changed).

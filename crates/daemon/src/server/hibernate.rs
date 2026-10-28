@@ -406,17 +406,24 @@ pub(super) fn decorate(reg: &Registry, rows: &mut Vec<Value>) {
             None => Value::Null,
         };
     }
-    let sleepers = reg.hib.sleepers();
+    // a session between its sleep and its process (or just woken, process not yet in the list) keeps a row, so a
+    // frontend never sees it vanish
+    let known: std::collections::HashSet<u64> = rows.iter().filter_map(|r| r["id"].as_u64()).collect();
+    let mut sleepers: Vec<(u32, hib::Sleeper, bool)> = reg.hib.sleepers().into_iter().map(|(i, s)| (i, s, false)).collect();
+    for (id, since) in reg.hib.wakings() {
+        sleepers.push((id, hib::Sleeper { since, saved_bytes: 0 }, true));
+    }
+    sleepers.retain(|(id, _, _)| !known.contains(&u64::from(*id)));
     if sleepers.is_empty() {
         return;
     }
-    for (id, sl) in sleepers {
+    for (id, sl, waking) in sleepers {
         let (label, meta) = (reg.labels.lock_recover().get(&id).cloned(), reg.metas.lock_recover().get(&id).cloned());
         // `running` stays true: the session did not end, and a frontend that reads false as "exited" must not close its tab
         rows.push(json!({"id": id, "running": true, "idle_ms": now_ms().saturating_sub(sl.since), "waiting": false, "wait": null,
             "awaiting": null, "stalled": false, "stall": null, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id),
             "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta,
-            "hibernated": {"since": sl.since, "saved_mb": mb(sl.saved_bytes), "waking": false, "queued": reg.hib.queued(id)}}));
+            "hibernated": {"since": sl.since, "saved_mb": mb(sl.saved_bytes), "waking": waking, "queued": reg.hib.queued(id)}}));
     }
     rows.sort_by_key(|x| x["id"].as_u64());
 }

@@ -19,14 +19,17 @@ fn env() -> &'static PathBuf {
         if cfg!(windows) {
             std::fs::write(
                 bin.join("claude.cmd"),
-                "@echo off\r\necho FAKE-CLAUDE %*\r\necho %* | findstr /C:\"badbad\" >nul && exit /b 1\r\nping -n 600 127.0.0.1 >nul\r\n",
+                "@echo off\r\necho FAKE-CLAUDE %*\r\necho %* | findstr /C:\"badbad\" >nul && exit /b 1\r\nfindstr /N \"^\"\r\n",
             )
             .unwrap();
         } else {
             let f = bin.join("claude");
-            std::fs::write(&f, "#!/bin/sh\necho FAKE-CLAUDE \"$@\"\ncase \"$*\" in *badbad*) exit 1;; esac\nexec sleep 600\n").unwrap();
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::write(&f, "#!/bin/sh\necho FAKE-CLAUDE \"$@\"\ncase \"$*\" in *badbad*) exit 1;; esac\nexec cat\n").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
         }
         std::env::set_var("USERPROFILE", &home);
         std::env::set_var("HOME", &home);
@@ -163,7 +166,8 @@ fn hibernate_and_wake_keep_resume_id_inbox_and_role() {
         (s.contains("--resume") && s.contains("hello-from-test")).then_some(s)
     });
     assert!(out.contains(&k), "resumes the conversation it had: {out}");
-    assert!(!out.contains("--session-id"), "{out}");
+    // (the dimmed history above still shows the first start)
+    assert!(out.rsplit("fim do histórico").next().is_some_and(|t| !t.contains("--session-id")), "{out}");
     let back = row(&mut c, lead).unwrap();
     assert_eq!((back["meta"]["lead"].clone(), back["meta"]["key"].clone()), (json!(true), json!(k)));
     assert_eq!(back["unread"], 1, "the message is still in the inbox");
@@ -324,7 +328,7 @@ fn a_resume_that_fails_ends_the_session_with_a_coded_error() {
     c.call("session.wake", json!({"id": id})).unwrap();
     // it never stays hibernated: the row leaves, `status` says why
     until("row gone", || row(&mut c, id).is_none().then_some(()));
-    let st = c.call("session.status", json!({"id": id})).unwrap();
+    let st = until("session ended", || c.call("session.status", json!({"id": id})).ok().filter(|s| s["running"] == false));
     assert_eq!(st["running"], false, "{st}");
     assert_eq!(st["wake_error"]["code"], "hibernate.wake_failed", "{st}");
 }
@@ -335,8 +339,11 @@ fn an_awaiting_agent_hibernates_by_itself_after_the_configured_quiet_time() {
     let wt = root.join("wt");
     std::fs::create_dir_all(&wt).unwrap();
     let mut c = start(&root, "policy");
+    // another worktree: the first agent of one is its lead, and a lead with a live child hibernates for that reason
+    let wt2 = root.join("wt2");
+    std::fs::create_dir_all(&wt2).unwrap();
     let id = agent(&mut c, &wt, &key(60), json!({}), json!({}));
-    let calm = agent(&mut c, &wt, &key(61), json!({}), json!({}));
+    let calm = agent(&mut c, &wt2, &key(61), json!({}), json!({}));
     ready(&mut c, id);
     c.call("session.await", json!({"id": id, "reason": "CI #1"})).unwrap();
     until("hibernated by the policy", || row(&mut c, id).filter(|r| r["hibernated"].is_object()).map(|_| ()));
