@@ -25,6 +25,7 @@ purpose and fix the new lints in the same change.
 - `check-tauri-config.mjs`: fails when the CSP or the capabilities drift from what `SECURITY.md` says (no `style-src-attr 'unsafe-inline'`).
 - `check-format.mjs`: prettier on the files this branch added or changed (or that are already formatted); `prettier --write` them.
 - `check-i18n-static.mjs`: finds dictionary texts copied into module-level constants (part of `check.mjs`).
+- Scan exclusions (indexer flags, opt-in Defender exclusion of `.axelstra-wt`): not a script; see `docs/SCANX-api.md` and `docs/SCANX-design.md`.
 - `write-latest-json.mjs`: builds the updater manifest (`latest.json`) in the release workflow.
 - `prepare-sidecar.sh` / `prepare-sidecar.ps1`: build the daemon binary and place it as the Tauri sidecar.
 - `build-installer.ps1`: **Windows only.** One command for the NSIS installer in steps (sidecar, frontend, bundle),
