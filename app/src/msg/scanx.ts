@@ -9,7 +9,8 @@ export const pt = {
   "scanx.powershell_failed": "Não foi possível executar o PowerShell: {detail}",
   "scanx.elevation_cancelled": "O pedido de administrador foi cancelado. Nada foi alterado.",
   "scanx.elevation_failed": "Não foi possível iniciar o PowerShell como administrador: {detail}",
-  "scanx.defender_blocked": "O Defender recusou a alteração (Proteção contra Adulteração ou política da organização): {detail}",
+  "scanx.defender_blocked":
+    "O Defender recusou a alteração (Proteção contra Adulteração ou política da organização): {detail}",
   "scanx.defender_failed": "O Defender não respondeu: {detail}",
   "scanx.busy": "Outra alteração do Defender está à espera do pedido de administrador.",
 } as const satisfies Record<string, string>;
@@ -35,7 +36,8 @@ export const ptBR: Widen<typeof pt> = {
   "scanx.powershell_failed": "Não foi possível executar o PowerShell: {detail}",
   "scanx.elevation_cancelled": "O pedido de administrador foi cancelado. Nada foi alterado.",
   "scanx.elevation_failed": "Não foi possível iniciar o PowerShell como administrador: {detail}",
-  "scanx.defender_blocked": "O Defender recusou a alteração (Proteção contra Violação ou política da organização): {detail}",
+  "scanx.defender_blocked":
+    "O Defender recusou a alteração (Proteção contra Violação ou política da organização): {detail}",
   "scanx.defender_failed": "O Defender não respondeu: {detail}",
   "scanx.busy": "Outra alteração do Defender está esperando o pedido de administrador.",
 };

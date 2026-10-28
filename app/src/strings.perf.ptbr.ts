@@ -12,13 +12,18 @@ export const ptBRPF: Widen<typeof ptPF> = {
   loading: "Lendo o estado…",
   loadingSlow: "A leitura está demorando. Atualize daqui a pouco.",
   unavailable: "Não foi possível ler o estado das exclusões.",
-  macos: "No macOS o Axelstra coloca um arquivo .metadata_never_index em .axelstra-wt, para o Spotlight ignorá-la. Não há mais nada a configurar.",
+  macos:
+    "No macOS o Axelstra coloca um arquivo .metadata_never_index em .axelstra-wt, para o Spotlight ignorá-la. Não há mais nada a configurar.",
   linux:
     "No Linux o Axelstra não altera nada. Se o tracker ou o baloo indexar os worktrees, exclua a pasta .axelstra-wt nas configurações do indexador.",
   noFolders: "Ainda não há pastas .axelstra-wt: elas aparecem quando você cria o primeiro worktree.",
   foldersLabel: "Pastas de worktrees",
   folderMissing: "a pasta ainda não existe",
-  indexable: { yes: "indexável pelo sistema", no: "fora do índice do sistema", unknown: "índice do sistema desconhecido" },
+  indexable: {
+    yes: "indexável pelo sistema",
+    no: "fora do índice do sistema",
+    unknown: "índice do sistema desconhecido",
+  },
   excluded: {
     yes: "excluída do Defender",
     recorded: "excluída do Defender (aplicado pelo Axelstra)",
@@ -38,7 +43,8 @@ export const ptBRPF: Widen<typeof ptPF> = {
   realtimeOn: "Verificação em tempo real ligada.",
   realtimeOff: "Verificação em tempo real desligada.",
   tamperOn: "A Proteção contra Violação está ligada: o Defender pode recusar a exclusão.",
-  unreadable: "Sem direitos de administrador o Axelstra não consegue ler as exclusões do Defender; só sabe as que ele mesmo aplicou.",
+  unreadable:
+    "Sem direitos de administrador o Axelstra não consegue ler as exclusões do Defender; só sabe as que ele mesmo aplicou.",
   consent: "Entendo o compromisso e quero excluir as pastas .axelstra-wt do Defender",
   uac: "O Windows vai pedir permissão de administrador (UAC). Nada é alterado antes de você aceitar.",
   apply: "Aplicar…",
@@ -46,7 +52,8 @@ export const ptBRPF: Widen<typeof ptPF> = {
   revertNote: "Reverter remove só as exclusões que o Axelstra aplicou, nunca as suas.",
   running: "Aguardando o pedido de administrador…",
   applied: (n: number, same: number) =>
-    `Exclusão aplicada a ${count(n, "pasta", "pastas")}` + (same ? ` (${count(same, "já estava excluída", "já estavam excluídas")})` : "."),
+    `Exclusão aplicada a ${count(n, "pasta", "pastas")}` +
+    (same ? ` (${count(same, "já estava excluída", "já estavam excluídas")})` : "."),
   appliedNone: "Nada a alterar: as pastas já estavam excluídas.",
   reverted: (n: number) => `Exclusão removida de ${count(n, "pasta", "pastas")}.`,
   revertedNone: "Nada a reverter.",
@@ -59,7 +66,8 @@ export const ptBRPF: Widen<typeof ptPF> = {
   diagProc: (name: string, cpu: number | null, rss: number | null) =>
     `${name}: ${cpu === null ? "—" : `${fmtFixed(cpu, 0)} % de um núcleo`} · ${rss === null ? "—" : `${fmtNumber(Math.round(rss / 1048576))} MB`}`,
   hintTitle: "Worktrees mais rápidos?",
-  hintSub: "O Defender está verificando a pasta dos worktrees em tempo real. Veja as opções em Configurações > Desempenho. Nada é alterado sem o seu clique.",
+  hintSub:
+    "O Defender está verificando a pasta dos worktrees em tempo real. Veja as opções em Configurações > Desempenho. Nada é alterado sem o seu clique.",
   hintOpen: "Ver opções",
   hintDismiss: "Não mostrar mais",
   hintLabel: "Sugestão de desempenho",

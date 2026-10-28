@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { ScanxFolder, ScanxStatus } from "./api";
 import { setLocale } from "./i18n";
-import { buttons, defenderLines, folderRows, hintVisible, jobMessage, platformNote, procLine, statusError } from "./scanxLogic";
+import {
+  buttons,
+  defenderLines,
+  folderRows,
+  hintVisible,
+  jobMessage,
+  platformNote,
+  procLine,
+  statusError,
+} from "./scanxLogic";
 import { PF } from "./strings.perf";
 
 afterEach(() => setLocale("pt-PT"));
@@ -37,14 +46,26 @@ describe("hintVisible", () => {
     expect(hintVisible(status({ hint: false }))).toBe(false);
     expect(hintVisible(status({ hint_dismissed: true }))).toBe(false);
     expect(hintVisible(status({ os: "linux" }))).toBe(false);
-    expect(hintVisible(status({ defender: { state: "inactive", realtime: null, tamper: null, exclusions_readable: false } }))).toBe(false);
+    expect(
+      hintVisible(
+        status({ defender: { state: "inactive", realtime: null, tamper: null, exclusions_readable: false } }),
+      ),
+    ).toBe(false);
     expect(hintVisible(null)).toBe(false);
   });
 });
 
 describe("folderRows", () => {
   it("merges projects that share a folder and labels each state", () => {
-    const rows = folderRows(status({ folders: [folder(), folder({ project: "p2", name: "other" }), folder({ path: "D:\\w", excluded: "yes", source: "recorded" })] }));
+    const rows = folderRows(
+      status({
+        folders: [
+          folder(),
+          folder({ project: "p2", name: "other" }),
+          folder({ path: "D:\\w", excluded: "yes", source: "recorded" }),
+        ],
+      }),
+    );
     expect(rows).toHaveLength(2);
     expect(rows[0].names).toEqual(["proj", "other"]);
     expect(rows[0].indexable).toBe(PF.indexable.no);
@@ -53,7 +74,12 @@ describe("folderRows", () => {
     expect(rows[1].excluded).toBe(PF.excluded.recorded);
   });
   it("marks a folder that does not exist and an unknown index (Linux)", () => {
-    const [r] = folderRows(status({ os: "linux", folders: [folder({ exists: false, indexable: null, excluded: "n/a", fs: null, drive: null })] }));
+    const [r] = folderRows(
+      status({
+        os: "linux",
+        folders: [folder({ exists: false, indexable: null, excluded: "n/a", fs: null, drive: null })],
+      }),
+    );
     expect(r.missing).toBe(true);
     expect(r.indexable).toBe(PF.indexable.unknown);
     expect(r.excluded).toBe(PF.excluded.na);
@@ -71,7 +97,10 @@ describe("defenderLines / platformNote", () => {
     expect(defenderLines(s)).toEqual([PF.defenderState.active, PF.realtimeOn, PF.tamperOn, PF.unreadable]);
   });
   it("says nothing about Defender off Windows and gives a neutral note", () => {
-    const s = status({ os: "macos", defender: { state: "n/a", realtime: null, tamper: null, exclusions_readable: false } });
+    const s = status({
+      os: "macos",
+      defender: { state: "n/a", realtime: null, tamper: null, exclusions_readable: false },
+    });
     expect(defenderLines(s)).toEqual([]);
     expect(platformNote(s)).toBe(PF.macos);
     expect(platformNote(status({ os: "linux" }))).toBe(PF.linux);
@@ -103,24 +132,39 @@ describe("jobMessage", () => {
   it("reads results and coded errors in the UI language", () => {
     expect(jobMessage(null)).toBeNull();
     expect(jobMessage({ op: "hint", ok: true })).toBeNull();
-    expect(jobMessage({ op: "apply", ok: true, changed: ["a"], unchanged: [] })).toEqual({ kind: "ok", text: PF.applied(1, 0) });
+    expect(jobMessage({ op: "apply", ok: true, changed: ["a"], unchanged: [] })).toEqual({
+      kind: "ok",
+      text: PF.applied(1, 0),
+    });
     expect(jobMessage({ op: "apply", ok: true, changed: [], unchanged: ["a"] })?.text).toBe(PF.appliedNone);
     expect(jobMessage({ op: "revert", ok: true, changed: ["a", "b"] })?.text).toBe(PF.reverted(2));
-    const e = jobMessage({ op: "revert", ok: false, error: "English", error_code: "scanx.elevation_cancelled", error_params: {} });
+    const e = jobMessage({
+      op: "revert",
+      ok: false,
+      error: "English",
+      error_code: "scanx.elevation_cancelled",
+      error_params: {},
+    });
     expect(e?.kind).toBe("err");
     expect(e?.text).toContain("pedido de administrador");
     setLocale("en");
-    expect(jobMessage({ op: "revert", ok: false, error: "x", error_code: "scanx.elevation_cancelled" })?.text).toContain("administrator prompt");
+    expect(
+      jobMessage({ op: "revert", ok: false, error: "x", error_code: "scanx.elevation_cancelled" })?.text,
+    ).toContain("administrator prompt");
   });
   it("falls back to the English text of an unknown code", () => {
-    expect(jobMessage({ op: "apply", ok: false, error: "boom", error_code: "scanx.nope" })?.text).toBe(PF.failed("boom"));
+    expect(jobMessage({ op: "apply", ok: false, error: "boom", error_code: "scanx.nope" })?.text).toBe(
+      PF.failed("boom"),
+    );
   });
 });
 
 describe("statusError / procLine", () => {
   it("only reports an error when the query failed", () => {
     expect(statusError(status())).toBeNull();
-    expect(statusError(status({ error: "x", error_code: "scanx.powershell_failed", error_params: { detail: "d" } }))).toContain("d");
+    expect(
+      statusError(status({ error: "x", error_code: "scanx.powershell_failed", error_params: { detail: "d" } })),
+    ).toContain("d");
   });
   it("formats cpu and memory, with a dash for a missing reading", () => {
     expect(procLine({ name: "MsMpEng", pid: 4, cpu: 64, rss: 685256704 })).toContain("MsMpEng: 64 % ");

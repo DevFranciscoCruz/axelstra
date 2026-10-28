@@ -1,7 +1,24 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { scanxDefenderApply, scanxDefenderRevert, scanxDiag, scanxStatus, type ScanxProc, type ScanxStatus } from "./api";
+import {
+  scanxDefenderApply,
+  scanxDefenderRevert,
+  scanxDiag,
+  scanxStatus,
+  type ScanxProc,
+  type ScanxStatus,
+} from "./api";
 import { createLive } from "./live";
-import { buttons, defenderLines, folderRows, jobMessage, perfFocus, platformNote, procLine, setPerfFocus, statusError } from "./scanxLogic";
+import {
+  buttons,
+  defenderLines,
+  folderRows,
+  jobMessage,
+  perfFocus,
+  platformNote,
+  procLine,
+  setPerfFocus,
+  statusError,
+} from "./scanxLogic";
 import { errorText } from "./settingsLogic";
 import { PF } from "./strings.perf";
 import { Button, CheckboxField } from "./ui";
@@ -31,8 +48,8 @@ export function PerformanceSection() {
   const loadDiag = () =>
     scanxDiag().then(
       (d) => {
-        setProcs(d.procs);
-        setDiagState(d.state);
+        setProcs(d?.procs ?? []);
+        setDiagState(d?.state ?? "ok");
         setDiagError("");
       },
       (e) => setDiagError(errorText(e)),
@@ -71,7 +88,7 @@ export function PerformanceSection() {
 
   const view = () => {
     const s = st();
-    return s && !s.loading ? s : null;
+    return s && !s.loading && Array.isArray(s.folders) ? s : null;
   };
   const running = () => busy() || view()?.job.running != null;
   const outcome = () => jobMessage(view()?.job.last);
@@ -82,8 +99,22 @@ export function PerformanceSection() {
         {PF.title}
       </h4>
       <p class="auto-note">{PF.intro}</p>
-      <Show when={!failed()} fallback={<div class="set-err" role="alert">{failed()}</div>}>
-        <Show when={view()} fallback={<p class="auto-note" role="status">{st()?.loading ? PF.loadingSlow : PF.loading}</p>}>
+      <Show
+        when={!failed()}
+        fallback={
+          <div class="set-err" role="alert">
+            {failed()}
+          </div>
+        }
+      >
+        <Show
+          when={view()}
+          fallback={
+            <p class="auto-note" role="status">
+              {st()?.loading ? PF.loadingSlow : PF.loading}
+            </p>
+          }
+        >
           {(s) => (
             <>
               <Show when={s().os === "windows"}>
@@ -136,7 +167,10 @@ export function PerformanceSection() {
                     {PF.apply}
                   </Button>
                   <Show when={buttons(s(), consent(), busy()).showRevert}>
-                    <Button disabled={buttons(s(), consent(), busy()).revertDisabled} onClick={() => void start("revert")}>
+                    <Button
+                      disabled={buttons(s(), consent(), busy()).revertDisabled}
+                      onClick={() => void start("revert")}
+                    >
                       {PF.revert}
                     </Button>
                   </Show>

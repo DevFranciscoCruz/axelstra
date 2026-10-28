@@ -12,7 +12,8 @@ export const enPF: Widen<typeof ptPF> = {
   loading: "Reading the state…",
   loadingSlow: "Reading is taking a while. Refresh in a moment.",
   unavailable: "Could not read the state of the exclusions.",
-  macos: "On macOS Axelstra puts a .metadata_never_index file in .axelstra-wt so Spotlight skips it. Nothing else to set up.",
+  macos:
+    "On macOS Axelstra puts a .metadata_never_index file in .axelstra-wt so Spotlight skips it. Nothing else to set up.",
   linux:
     "On Linux Axelstra changes nothing. If tracker or baloo indexes the worktrees, exclude the .axelstra-wt folder in the indexer settings.",
   noFolders: "There are no .axelstra-wt folders yet: they appear when you create the first worktree.",
@@ -38,7 +39,8 @@ export const enPF: Widen<typeof ptPF> = {
   realtimeOn: "Real-time scanning is on.",
   realtimeOff: "Real-time scanning is off.",
   tamperOn: "Tamper Protection is on: Defender may refuse the exclusion.",
-  unreadable: "Without administrator rights Axelstra cannot read Defender's exclusions; it only knows the ones it applied itself.",
+  unreadable:
+    "Without administrator rights Axelstra cannot read Defender's exclusions; it only knows the ones it applied itself.",
   consent: "I understand the trade-off and want to exclude the .axelstra-wt folders from Defender",
   uac: "Windows will ask for administrator permission (UAC). Nothing changes before you accept.",
   apply: "Apply…",
@@ -46,7 +48,8 @@ export const enPF: Widen<typeof ptPF> = {
   revertNote: "Revert removes only the exclusions Axelstra applied, never yours.",
   running: "Waiting for the administrator prompt…",
   applied: (n: number, same: number) =>
-    `Exclusion applied to ${count(n, "folder", "folders")}` + (same ? ` (${count(same, "was already excluded", "were already excluded")})` : "."),
+    `Exclusion applied to ${count(n, "folder", "folders")}` +
+    (same ? ` (${count(same, "was already excluded", "were already excluded")})` : "."),
   appliedNone: "Nothing to change: the folders were already excluded.",
   reverted: (n: number) => `Exclusion removed from ${count(n, "folder", "folders")}.`,
   revertedNone: "Nothing to revert.",
@@ -59,7 +62,8 @@ export const enPF: Widen<typeof ptPF> = {
   diagProc: (name: string, cpu: number | null, rss: number | null) =>
     `${name}: ${cpu === null ? "—" : `${fmtFixed(cpu, 0)} % of one core`} · ${rss === null ? "—" : `${fmtNumber(Math.round(rss / 1048576))} MB`}`,
   hintTitle: "Faster worktrees?",
-  hintSub: "Defender is scanning the worktrees folder in real time. See the options in Settings > Performance. Nothing changes without your click.",
+  hintSub:
+    "Defender is scanning the worktrees folder in real time. See the options in Settings > Performance. Nothing changes without your click.",
   hintOpen: "See options",
   hintDismiss: "Do not show again",
   hintLabel: "Performance suggestion",

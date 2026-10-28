@@ -28,7 +28,8 @@ const excludedText = (f: ScanxFolder): string => {
   if (f.excluded === "unknown") return PF.excluded.unknown;
   return PF.excluded.na;
 };
-const indexableText = (v: boolean | null): string => (v === null ? PF.indexable.unknown : v ? PF.indexable.yes : PF.indexable.no);
+const indexableText = (v: boolean | null): string =>
+  v === null ? PF.indexable.unknown : v ? PF.indexable.yes : PF.indexable.no;
 
 export const folderRows = (s: ScanxStatus): FolderRow[] => {
   const by = new Map<string, FolderRow>();
@@ -63,9 +64,16 @@ export const defenderLines = (s: ScanxStatus): string[] => {
 };
 
 /** Neutral note for the systems without a Defender; null on Windows. */
-export const platformNote = (s: ScanxStatus): string | null => (s.os === "macos" ? PF.macos : s.os === "linux" ? PF.linux : null);
+export const platformNote = (s: ScanxStatus): string | null =>
+  s.os === "macos" ? PF.macos : s.os === "linux" ? PF.linux : null;
 
-export type Buttons = { showControls: boolean; consentDisabled: boolean; applyDisabled: boolean; showRevert: boolean; revertDisabled: boolean };
+export type Buttons = {
+  showControls: boolean;
+  consentDisabled: boolean;
+  applyDisabled: boolean;
+  showRevert: boolean;
+  revertDisabled: boolean;
+};
 /** Which controls the panel offers: apply needs the consent checkbox and a free daemon; revert only when something was applied. */
 export const buttons = (s: ScanxStatus, consent: boolean, busy: boolean): Buttons => {
   const running = busy || s.job.running !== null;
