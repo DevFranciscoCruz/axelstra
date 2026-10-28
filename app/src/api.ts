@@ -92,12 +92,34 @@ const guard = <T>(method: string, p: Promise<T>): Promise<T> => {
   return Promise.race([p, late]).catch((e) => Promise.reject(toAppError(method, e))).finally(() => clearTimeout(timer));
 };
 
-export const call = <T = unknown>(method: string, params: Record<string, unknown> = {}) =>
-  guard(method, invoke<T>("daemon_call", { method, params }));
+/**
+ * Slow reads the daemon runs in lanes (`lanes.rs`): after its answer limit it replies exactly `{"loading": true}` while the
+ * work goes on. Keep this list equal to `lane_of`.
+ */
+const LANE = /^(project\.list|git\.(changes|log|show|diff|timeline)|worktree\.(status|overview)|dispatch\.overlap(s|_files)|ports\.list|fs\.(list|search|grep))$/;
+const isLoading = (r: unknown) =>
+  typeof r === "object" && r !== null && !Array.isArray(r) && Object.keys(r).length === 1 && (r as { loading?: unknown }).loading === true;
+
+/**
+ * Sends the call and, while a lane method answers `{loading: true}`, sends it again: an identical call joins the running
+ * work on the daemon. No timer: each repeat answers the previous one; `guard` ends the wait at the method's timeout and
+ * `live` then stops the repeats.
+ */
+const settled = async <T>(method: string, live: () => boolean, send: () => Promise<T>): Promise<T> => {
+  let r = await send();
+  while (LANE.test(method) && isLoading(r) && live()) r = await send();
+  return r;
+};
+
+const run = <T>(cmd: string, method: string, params: Record<string, unknown>) => {
+  let alive = true;
+  return guard(method, settled(method, () => alive, () => invoke<T>(cmd, { method, params }))).finally(() => (alive = false));
+};
+
+export const call = <T = unknown>(method: string, params: Record<string, unknown> = {}) => run<T>("daemon_call", method, params);
 
 /** same, on a second connection: for slow polling that must not hold up the interactive calls */
-export const callBg = <T = unknown>(method: string, params: Record<string, unknown> = {}) =>
-  guard(method, invoke<T>("daemon_call_bg", { method, params }));
+export const callBg = <T = unknown>(method: string, params: Record<string, unknown> = {}) => run<T>("daemon_call_bg", method, params);
 
 /** true when the running daemon is older than the app and lacks `method` */
 export const isUnknownMethod = (e: unknown) =>

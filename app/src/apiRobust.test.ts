@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   hang: false,
   hangMethods: new Set<string>(),
   fail: null as unknown,
+  loadingFor: new Map<string, number>(),
+  loadingDelay: 0,
   sessions: [] as any[],
   watchStarts: 0,
   channels: [] as any[],
@@ -48,6 +50,13 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (state.hang || state.hangMethods.has(args.method)) return new Promise(() => {});
     if (state.fail !== null) throw state.fail;
     calls.push({ method: args.method, params: args.params });
+    const left = state.loadingFor.get(args.method) ?? 0;
+    if (left > 0) {
+      state.loadingFor.set(args.method, left - 1);
+      if (state.loadingDelay) await new Promise((r) => setTimeout(r, state.loadingDelay));
+      return { loading: true };
+    }
+    if (args.method === "git.changes" || args.method === "git.push") return { files: [] };
     switch (args.method) {
       case "session.pending":
         return [...state.pending];
@@ -92,6 +101,8 @@ beforeEach(() => {
   state.hang = false;
   state.hangMethods.clear();
   state.fail = null;
+  state.loadingFor.clear();
+  state.loadingDelay = 0;
   state.sessions = [];
   state.watchStarts = 0;
   state.channels.length = 0;
@@ -149,6 +160,29 @@ describe("call", () => {
     expect(done).toBe(false);
     await vi.advanceTimersByTimeAsync(11 * 60_000 + PING_WAIT_MS);
     expect(await p).toBeInstanceOf(AppError);
+  });
+
+  it("re-issues a lane read that answers {loading: true} and returns the real data", async () => {
+    state.loadingFor.set("git.changes", 2);
+    expect(await call("git.changes", { worktree: "C:/a" })).toEqual({ files: [] });
+    expect(calls.filter((c) => c.method === "git.changes")).toHaveLength(3);
+  });
+
+  it("leaves {loading: true} alone for a method that is not a lane read", async () => {
+    state.loadingFor.set("git.push", 1);
+    expect(await call("git.push", {})).toEqual({ loading: true });
+  });
+
+  it("stops re-issuing once the call timed out", async () => {
+    vi.useFakeTimers();
+    state.loadingFor.set("git.changes", 1_000_000);
+    state.loadingDelay = 20_000;
+    const p = call("git.changes", {}).catch((e: any) => e);
+    await vi.advanceTimersByTimeAsync(timeoutFor("git.changes") + PING_WAIT_MS + 10);
+    expect(await p).toBeInstanceOf(AppError);
+    const n = calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(calls.length).toBeLessThanOrEqual(n + 1);
   });
 
   it("turns an object error into readable text, never [object Object]", async () => {

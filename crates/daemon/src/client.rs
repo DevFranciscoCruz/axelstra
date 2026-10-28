@@ -184,9 +184,14 @@ impl std::error::Error for CallTimeout {
 /// A timeout for `method` after `limit`: the English text and a coded error (`rpc.call_timeout {method, secs}`) the UI
 /// shows in its language, so the user sees which call was slow instead of a global "the daemon did not answer".
 fn call_timeout(method: &str, limit: Duration, text: String) -> CallTimeout {
-    let coded = axelstra_core::coded!("rpc.call_timeout", "{method} did not answer within {secs} s", method = method, secs = limit.as_secs().max(1))
-        .downcast::<axelstra_core::msg::Coded>()
-        .ok();
+    let coded = axelstra_core::coded!(
+        "rpc.call_timeout",
+        "{method} did not answer within {secs} s",
+        method = method,
+        secs = limit.as_secs().max(1)
+    )
+    .downcast::<axelstra_core::msg::Coded>()
+    .ok();
     CallTimeout(text, coded)
 }
 
@@ -677,7 +682,11 @@ impl Client {
     /// gives a `CallTimeout` error instead of freezing the caller. Streaming reads (`read`) are not bounded.
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value> {
         if self.broken {
-            return Err(anyhow::Error::new(call_timeout(method, Duration::ZERO, format!("{method}: the connection to the daemon timed out earlier; reconnect"))));
+            return Err(anyhow::Error::new(call_timeout(
+                method,
+                Duration::ZERO,
+                format!("{method}: the connection to the daemon timed out earlier; reconnect"),
+            )));
         }
         self.next += 1;
         let id = self.next;
