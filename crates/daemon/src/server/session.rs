@@ -1,5 +1,45 @@
 use super::*;
 
+/// What a terminal stream's forwarder waits on: output from the pump, the end of the stream, or a nudge to look at
+/// its stop flag and its connection.
+pub(super) enum Stream {
+    Data(Vec<u8>),
+    End,
+    Wake,
+}
+
+/// Chunks waiting between a stream's pump and its forwarder (the PTY side already drops output for a slow subscriber).
+const STREAM_QUEUE: usize = 4096;
+
+type StreamWaker = (Arc<AtomicBool>, std::sync::mpsc::SyncSender<Stream>);
+
+/// Running terminal streams: the stop flag and the channel that wakes the forwarder.
+fn streams() -> &'static Mutex<Vec<StreamWaker>> {
+    static W: std::sync::OnceLock<Mutex<Vec<StreamWaker>>> = std::sync::OnceLock::new();
+    W.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+pub(super) fn register_stream(stop: &Arc<AtomicBool>, tx: &std::sync::mpsc::SyncSender<Stream>) {
+    streams().lock_recover().push((stop.clone(), tx.clone()));
+}
+
+pub(super) fn unregister_stream(stop: &Arc<AtomicBool>) {
+    streams().lock_recover().retain(|(s, _)| !Arc::ptr_eq(s, stop));
+}
+
+/// How many terminal streams are forwarding (tests: a dead client's stream must leave this by itself).
+pub(super) fn live_streams() -> usize {
+    streams().lock_recover().len()
+}
+
+/// Call after a stop flag was set or a connection's writer ended: every forwarder looks at its flag and its
+/// connection and ends if the client is gone. A full queue means it has chunks to read and checks on its way.
+pub(super) fn wake_streams() {
+    for (_, tx) in streams().lock_recover().iter() {
+        let _ = tx.try_send(Stream::Wake);
+    }
+}
+
 pub(super) fn call(c: &mut Ctx) -> Result<Value> {
     let req = c.req;
     let (p, reg, tx) = (c.p, c.reg, c.tx);
@@ -202,6 +242,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             own_tree(id)?;
             if let Some(old) = subs.remove(&id) {
                 old.store(true, Ordering::SeqCst);
+                wake_streams();
             }
             let stop = Arc::new(AtomicBool::new(false));
             subs.insert(id, stop.clone());
@@ -209,38 +250,56 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let tx = tx.clone();
             // plain thread: the PTY side is blocking std channels
             after.push(Box::new(move || {
+                // The PTY's receiver cannot be woken from outside, so a pump thread owns it (it holds no `tx`) and the
+                // forwarder waits on a local channel that `wake_streams` can also post to. A dead client (stop flag set,
+                // or the connection's writer gone so `tx` is closed) wakes the forwarder at once: it drops `tx` and ends,
+                // with no heartbeat. The pump only lingers until the session prints or ends, then sees the closed channel.
+                let (ltx, lrx) = std::sync::mpsc::sync_channel::<Stream>(STREAM_QUEUE);
+                register_stream(&stop, &ltx);
                 std::thread::spawn(move || {
-                    if !snap.is_empty() {
-                        let _ = tx.blocking_send(session_frame(OUTPUT, id, &snap));
+                    // blocks until the session prints or its stream ends (`watch_exit` ends it when the program
+                    // is gone, even if ConPTY keeps the pipe open)
+                    loop {
+                        match rx.recv() {
+                            Ok(d) => {
+                                if ltx.send(Stream::Data(d)).is_err() {
+                                    return;
+                                }
+                            }
+                            Err(_) => {
+                                let _ = ltx.send(Stream::End);
+                                return;
+                            }
+                        }
+                    }
+                });
+                std::thread::spawn(move || {
+                    let gone = || stop.load(Ordering::SeqCst) || tx.is_closed();
+                    if !snap.is_empty() && tx.blocking_send(session_frame(OUTPUT, id, &snap)).is_err() {
+                        unregister_stream(&stop);
+                        return;
                     }
                     loop {
-                        if stop.load(Ordering::SeqCst) {
+                        if gone() {
+                            unregister_stream(&stop);
                             return;
                         }
-                        // blocks until the session prints or its stream ends (`watch_exit` ends it when the program
-                        // is gone, even if ConPTY keeps the pipe open); the 5 s wake-up is the heartbeat below
-                        match rx.recv_timeout(STREAM_HEARTBEAT) {
-                            Ok(d) => {
+                        match lrx.recv() {
+                            Ok(Stream::Data(d)) => {
                                 if tx.blocking_send(session_frame(OUTPUT, id, &d)).is_err() {
+                                    unregister_stream(&stop);
                                     return;
                                 }
                             }
-                            Err(RecvTimeoutError::Timeout) => {
-                                // an empty frame every 5 quiet seconds: a client that stopped listening (its tab closed) wakes up,
-                                // sees it is detached and hangs up, instead of staying blocked until this session prints again
-                                if tx.blocking_send(session_frame(OUTPUT, id, &[])).is_err() {
-                                    return;
-                                }
-                                if s.try_wait().is_some() {
-                                    while let Ok(d) = rx.recv_timeout(Duration::from_millis(150)) {
-                                        let _ = tx.blocking_send(session_frame(OUTPUT, id, &d));
-                                    }
-                                    break;
-                                }
+                            Ok(Stream::Wake) => {}
+                            Ok(Stream::End) => break,
+                            Err(_) => {
+                                unregister_stream(&stop);
+                                return;
                             }
-                            Err(RecvTimeoutError::Disconnected) => break,
                         }
                     }
+                    unregister_stream(&stop);
                     // the stream only ends once the program is gone (`watch_exit`), so the OS exit signal is already there
                     s.wait_exit();
                     let code = s.try_wait();
@@ -253,6 +312,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "session.unsubscribe" => {
             if let Some(stop) = subs.remove(&sid()?) {
                 stop.store(true, Ordering::SeqCst);
+                wake_streams();
             }
             Ok(json!({}))
         }
@@ -305,6 +365,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             own_tree(id)?;
             if let Some(stop) = subs.remove(&id) {
                 stop.store(true, Ordering::SeqCst);
+                wake_streams();
             }
             if let Some(s) = reg.sessions.lock_recover().remove(&id) {
                 s.kill();

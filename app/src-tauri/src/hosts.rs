@@ -832,31 +832,40 @@ pub fn load() {
 
 /// Connects a host at startup and again whenever it is lost, with a growing wait (a refused login waits longer).
 fn keep(h: Arc<Remote>) {
-    let _ = std::thread::Builder::new().name(format!("host-keeper-{}", h.def.id)).spawn(move || loop {
-        if get(&h.def.id).is_none_or(|x| !Arc::ptr_eq(&x, &h)) {
-            return;
-        }
-        let i = lock(&h.info);
-        let retry = matches!(i.state, St::Idle | St::Lost | St::Auth);
-        if retry && Instant::now() >= i.next_try {
-            drop(i);
-            let _ = h.connect_now();
-            // a connect that failed has pushed `next_try` out; one that worked changed the state: look again
+    let _ = std::thread::Builder::new().name(format!("host-keeper-{}", h.def.id)).spawn(move || {
+        // consecutive rounds where a connect left the host due again without changing anything (it should not happen:
+        // `connect_now` either reaches Ok or `mark_lost` pushes `next_try` out); drives the backoff below
+        let mut stuck = 0u32;
+        loop {
+            if get(&h.def.id).is_none_or(|x| !Arc::ptr_eq(&x, &h)) {
+                return;
+            }
             let i = lock(&h.info);
-            if !matches!(i.state, St::Idle | St::Lost | St::Auth) || Instant::now() < i.next_try {
+            let retry = matches!(i.state, St::Idle | St::Lost | St::Auth);
+            if retry && Instant::now() >= i.next_try {
+                drop(i);
+                let _ = h.connect_now();
+                // a connect that failed has pushed `next_try` out; one that worked changed the state: look again
+                let i = lock(&h.info);
+                if !matches!(i.state, St::Idle | St::Lost | St::Auth) || Instant::now() < i.next_try {
+                    stuck = 0;
+                    continue;
+                }
+                // still due after a connect (no progress): wait on the condvar with a backoff that grows with each such
+                // round (1 s up to 30 s) instead of spinning; a state change or the host being removed wakes it at once
+                let wait = Duration::from_secs(1 << stuck.min(5)).min(Duration::from_secs(30));
+                stuck = stuck.saturating_add(1);
+                drop(h.wake.wait_timeout(i, wait));
                 continue;
             }
-            // still due (the gate was busy): do not spin on it
-            drop(i);
-            std::thread::sleep(Duration::from_secs(1));
-            continue;
-        }
-        // asleep until the next try is due, or (connected, connecting) until the state changes or the host is removed
-        if retry {
-            let left = i.next_try.saturating_duration_since(Instant::now());
-            drop(h.wake.wait_timeout(i, left));
-        } else {
-            drop(h.wake.wait(i));
+            stuck = 0;
+            // asleep until the next try is due, or (connected, connecting) until the state changes or the host is removed
+            if retry {
+                let left = i.next_try.saturating_duration_since(Instant::now());
+                drop(h.wake.wait_timeout(i, left));
+            } else {
+                drop(h.wake.wait(i));
+            }
         }
     });
 }

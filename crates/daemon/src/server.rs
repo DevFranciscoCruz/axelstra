@@ -7,7 +7,6 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -41,8 +40,6 @@ static INSTANCE: std::sync::LazyLock<u64> = std::sync::LazyLock::new(|| {
 /// down (they block) instead of growing the daemon's memory.
 type Tx = mpsc::Sender<Vec<u8>>;
 const OUT_QUEUE: usize = 1024;
-/// How long a terminal stream waits for output before it sends an empty frame (see `session.subscribe`).
-const STREAM_HEARTBEAT: Duration = Duration::from_secs(5);
 
 /// A terminal size from a request: `as u16` would wrap 65537 to 1, and 0 is no size at all.
 fn term_dim(v: &Value, default: u16) -> u16 {
@@ -82,6 +79,7 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         | "backup.export"
         | "backup.restore"
         | "gh.send_comment"
+        | "gh.pr_refresh"
         | "triggers.set"
         | "triggers.events"
         | "worktree.rebase"
@@ -569,6 +567,12 @@ fn write_input(s: &Session, data: &[u8]) -> bool {
     }
 }
 
+/// Terminal streams currently forwarding output to a client (tests only; a dead client's stream leaves by itself).
+#[doc(hidden)]
+pub fn live_streams() -> usize {
+    session::live_streams()
+}
+
 async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Registry>, token: String, peer: Option<origin::Peer>) {
     reg.clients.fetch_add(1, Ordering::SeqCst);
     reg.pulse.bump();
@@ -581,6 +585,9 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
                 break;
             }
         }
+        drop(rx);
+        // the writer is gone: `rx` drops, every `tx` reports closed, and the streams of this connection (idle or not) end
+        session::wake_streams();
     });
 
     let st = Arc::new(Mutex::new(ConnState { peer, ..Default::default() }));
@@ -670,8 +677,9 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
         for stop in st.lock_recover().subs.values() {
             stop.store(true, Ordering::SeqCst);
         }
-    });
         crate::watcher::wake_stopped();
+        session::wake_streams();
+    });
 }
 
 /// Lets a watching client hear when the state of any session changed (started, exited, went quiet, escalated, got a
@@ -1079,19 +1087,22 @@ mod registry_tests {
     }
 
     #[test]
-    fn the_janitor_timer_is_the_next_moment_a_worktree_stops_being_touched_or_the_slow_tick() {
+    fn the_janitor_timer_is_the_next_moment_a_worktree_stops_being_touched_or_the_remote_deadline_when_one_waits() {
         let t = JanitorTiming { quiet: Duration::from_secs(600), gap: Duration::ZERO, slow: Duration::from_secs(1800) };
         let ms = |n| Duration::from_millis(n);
-        // a daemon older than the quiet spell and no recent activity: only the slow tick
-        assert_eq!(janitor_wake(&t, Duration::from_secs(700), std::iter::empty()), t.slow);
+        // a daemon older than the quiet spell and no recent activity: nothing waits, so no timer at all
+        assert_eq!(janitor_wake(&t, Duration::from_secs(700), std::iter::empty(), false), None);
+        // a worktree waits for its PR to be merged on GitHub: the one remote deadline
+        assert_eq!(janitor_wake(&t, Duration::from_secs(700), std::iter::empty(), true), Some(t.slow));
         // a fresh daemon: when it stops being too new to know
-        assert_eq!(janitor_wake(&t, Duration::from_secs(100), std::iter::empty()), Duration::from_secs(500) + ms(20));
+        assert_eq!(janitor_wake(&t, Duration::from_secs(100), std::iter::empty(), false), Some(Duration::from_secs(500) + ms(20)));
         // the session that left last decides, the older ones do not
         let left = [Duration::from_secs(550), Duration::from_secs(10), Duration::from_secs(900)];
-        assert_eq!(janitor_wake(&t, Duration::from_secs(700), left.into_iter()), Duration::from_secs(50) + ms(20));
-        // a slow tick shorter than the spell wins
+        assert_eq!(janitor_wake(&t, Duration::from_secs(700), left.into_iter(), true), Some(Duration::from_secs(50) + ms(20)));
+        // a remote deadline shorter than the spell wins
         let short = JanitorTiming { slow: Duration::from_secs(30), ..t };
-        assert_eq!(janitor_wake(&short, Duration::from_secs(1), std::iter::empty()), Duration::from_secs(30));
+        assert_eq!(janitor_wake(&short, Duration::from_secs(1), std::iter::empty(), true), Some(Duration::from_secs(30)));
+        assert_eq!(janitor_wake(&short, Duration::from_secs(1), std::iter::empty(), false), Some(Duration::from_secs(599) + ms(20)));
     }
 
     /// A worktree made by hand whose branch is merged goes once it has been quiet for the quiet spell, with no event at

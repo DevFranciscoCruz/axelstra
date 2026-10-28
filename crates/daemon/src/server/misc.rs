@@ -329,7 +329,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 s.kill();
             }
             std::thread::spawn(|| {
-                // kept: lets the reply to this call reach the client before the process ends (no flush event exists)
+                // kept on purpose, bounded (one 300 ms wait, once, at shutdown): the reply is queued by `run_call` only after
+                // this handler returns and written by the connection's writer task, which signals nothing when `write_all`
+                // is done (the queue's capacity frees when the frame is taken, before it is written), so there is no
+                // event to wait on; the process must not end before the reply reaches the client
                 std::thread::sleep(std::time::Duration::from_millis(300));
                 std::process::exit(0);
             });
