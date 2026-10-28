@@ -1,4 +1,5 @@
 import { createLive } from "./live";
+import { coalesced } from "./requestGate";
 import { askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { getSettings, detectPackageManagers, createWorktree, launchDefaultAgent, listSessions, setProjectSetup, dispatchOverlapFiles, worktreeRename } from "./api";
@@ -109,7 +110,8 @@ export function Sidebar() {
   const runningIn = (path: string) => sessionsOf(path).filter((s) => s.running).length;
   // worktrees that edit some of the same files (the daemon answers; until it can, the badge simply stays hidden)
   const [overlaps, setOverlaps] = createSignal<OverlapFiles | null>(null);
-  const pollOverlaps = () => dispatchOverlapFiles().then(setOverlaps, () => setOverlaps(null));
+  // the slowest read of the sidebar (git diff over every worktree): one at a time, at most one per 3 s, none while the window is hidden
+  const pollOverlaps = coalesced<unknown>(() => (document.hidden ? Promise.resolve() : dispatchOverlapFiles().then(setOverlaps, () => setOverlaps(null))), 3000);
   void pollOverlaps();
   // who edits what changes with the files, the worktrees and the dispatcher's plan
   const overlapLive = createLive(pollOverlaps, ["fs.changed", "projects.changed", "dispatch.changed"]);
