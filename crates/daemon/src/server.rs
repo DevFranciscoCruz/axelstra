@@ -495,7 +495,9 @@ async fn run_lane(
     token: &str,
 ) -> Result<Value> {
     let (req2, reg2, tx2, st2, token2) = (req.clone(), reg.clone(), tx.clone(), st.clone(), token.to_string());
-    let key = format!("{}|{}", req.method, req.params);
+    // The registry and the project generation are part of the key: `flights` is process-wide, so without them a call
+    // would join another daemon's run (tests host several), or a run that started before a project/worktree change.
+    let key = format!("{:p}|{}|{}|{}", Arc::as_ptr(reg), reg.wt_gen.load(Ordering::SeqCst), req.method, req.params);
     let mut work = tokio::spawn(crate::lanes::single_flight(key, move || async move {
         let _permit = crate::lanes::gate(lane).acquire().await;
         let method = req2.method.clone();

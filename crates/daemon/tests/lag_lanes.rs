@@ -93,3 +93,41 @@ fn identical_calls_in_flight_share_one_run() {
     eprintln!("LAG-NUMBERS executions={:?}", runs);
     assert!(runs.windows(2).all(|w| w[0] == w[1]), "five identical calls ran separately: {runs:?}");
 }
+
+#[test]
+fn project_list_right_after_project_add_lists_it_even_beside_another_daemon_and_in_flight_lists() {
+    let (pa, ta, _ra) = start("plist-a");
+    let (pb, tb, rb) = start("plist-b");
+    // daemon A keeps asking for its (empty) list: its runs must never answer daemon B
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let s2 = stop.clone();
+    let hammer = std::thread::spawn(move || {
+        let mut a = Client::connect(&pa, &ta).unwrap();
+        while !s2.load(std::sync::atomic::Ordering::SeqCst) {
+            a.call("project.list", json!({})).unwrap();
+        }
+    });
+    let mut b = Client::connect(&pb, &tb).unwrap();
+    let mut b2 = Client::connect(&pb, &tb).unwrap();
+    for n in 0..6 {
+        let repo = rb.join(format!("r{n}"));
+        std::fs::create_dir_all(&repo).unwrap();
+        sh(&repo, &["init", "-q", "-b", "main"]);
+        sh(&repo, &["config", "user.email", "t@t"]);
+        sh(&repo, &["config", "user.name", "t"]);
+        std::fs::write(repo.join("a.txt"), "x").unwrap();
+        sh(&repo, &["add", "a.txt"]);
+        sh(&repo, &["commit", "-qm", "init"]);
+        // a list in flight on the same daemon while the project is added
+        let t = std::thread::spawn(move || {
+            let _ = b2.call("project.list", json!({}));
+            b2
+        });
+        b.call("project.add", json!({"path": &repo})).unwrap();
+        let l = b.call("project.list", json!({})).unwrap();
+        assert_eq!(l.as_array().map(|a| a.len()), Some(n + 1), "list right after add #{n}: {l}");
+        b2 = t.join().unwrap();
+    }
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    hammer.join().unwrap();
+}

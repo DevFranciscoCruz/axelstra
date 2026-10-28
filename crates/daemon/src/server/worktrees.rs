@@ -105,9 +105,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 });
             }
             let all = Value::Array(v);
-            *reg.plist_last.lock_recover() = Some(all.clone());
             // an answer computed while a project or worktree changed may predate the change: serve it, do not keep it
             if reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst) == gen {
+                *reg.plist_last.lock_recover() = Some(all.clone());
                 *reg.plist.lock_recover() = Some((std::time::Instant::now(), all.clone()));
             }
             Ok(all)

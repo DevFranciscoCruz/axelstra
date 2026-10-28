@@ -55,7 +55,10 @@ fn change_events_are_filtered_and_debounced() {
     std::thread::spawn(move || {
         while let Ok(f) = w.read() {
             if let Frame::Event(e) = f {
-                let _ = tx.send(e);
+                // daemon-wide broadcasts (usage.changed, ...) are not what this test counts
+                if e["event"] == "fs.changed" {
+                    let _ = tx.send(e);
+                }
             }
         }
     });
