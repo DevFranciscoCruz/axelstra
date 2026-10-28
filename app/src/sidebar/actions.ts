@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { ask } from "../Confirm";
 import { askRemoveProject } from "../RemoveProject";
 import { doneNotice } from "../removeProjectLogic";
-import { killSession, removeProject, removeSession, removeWorktree, worktreeRebase, worktreeSweep } from "../api";
+import { killSession, removeProject, removeSession, removeWorktree, worktreeRebase, worktreeStatus, worktreeSweep, type WtStatus } from "../api";
+import { errorText } from "../appError";
 import { rebaseBlocker, rebaseOutcome } from "../rebase";
 import { toast } from "../toasts";
 import { needsTypedName, removeRisks } from "../removeRisk";
@@ -23,6 +24,7 @@ import {
 } from "../store";
 
 const T = P.sidebar;
+const F = P.flows;
 
 /** The sidebar's actions on projects and worktrees: each one asks first when something would be lost, then refreshes the lists. */
 export function createSidebarActions() {
@@ -85,6 +87,8 @@ export function createSidebarActions() {
   const dropProject = async (id: string, name: string) => {
     const mode = await askRemoveProject(id, name);
     if (!mode) return;
+    // "all" closes sessions and deletes worktrees, which can take a while: say so at once
+    if (mode === "all") showNotice(F.removingProject(name));
     // the daemon is about to close this project's sessions and worktrees: leave a worktree of it before it goes
     const leaving = findWorktree(selectedWorktree())?.project.id === id;
     let result: Awaited<ReturnType<typeof removeProject>> | undefined;
@@ -103,29 +107,29 @@ export function createSidebarActions() {
 
   // worktrees being removed: a second click (or menu entry) while it runs is ignored
   const removing = new Set<string>();
-  const dropWorktree = async (projectId: string, path: string, name: string) => {
-    if (removing.has(norm(path))) return showNotice(T.removing(name));
-    // what would be lost, so the question is not a blind "are you sure"
-    const st = wtStatus()[norm(path)];
-    const live = sessionsOf(path).filter((x) => x.running).length;
-    const typed = needsTypedName(st);
-    const ok = await ask(T.removeAsk(name, T.removeLost(removeRisks(st, live)), typed), {
-      title: T.removeTitle,
-      kind: "danger",
-      ...(typed ? { typeToConfirm: name, okLabel: T.remove } : {}),
-    });
-    if (!ok || removing.has(norm(path))) return;
+  /** closes the sessions and removes the folder; a failure after the sessions are gone says so and offers "Tentar de novo" */
+  const removeNow = async (projectId: string, path: string, name: string) => {
     removing.add(norm(path));
     showNotice(T.removing(name));
     try {
       let gone = true;
       await run(async () => {
+        let closed = false;
         try {
           await closeSessions(path);
+          closed = true;
           await removeWorktree(projectId, path);
         } catch (e) {
           gone = false;
-          throw e;
+          // the folder stayed (held by a process, antivirus...): the sessions are already closed, so the error says that
+          if (!closed) throw e;
+          toast({
+            text: F.removeKept(name, errorText(e)),
+            kind: "error",
+            key: `remove:${path}`,
+            action: { label: F.retry, run: () => void removeAgain(projectId, path, name) },
+          });
+          return;
         }
         if (norm(selectedWorktree()) === norm(path)) selectWorktree(null);
       });
@@ -133,6 +137,27 @@ export function createSidebarActions() {
     } finally {
       removing.delete(norm(path));
     }
+  };
+  const removeAgain = async (projectId: string, path: string, name: string) => {
+    if (!removing.has(norm(path))) await removeNow(projectId, path, name);
+  };
+  const dropWorktree = async (projectId: string, path: string, name: string) => {
+    if (removing.has(norm(path))) return showNotice(T.removing(name));
+    // what would be lost, so the question is not a blind "are you sure"
+    let st: WtStatus | undefined = wtStatus()[norm(path)];
+    // the state may not have been read yet (startup, a worktree just created): read it now; if that fails, assume the worst
+    if (!st) st = await worktreeStatus([path]).then((l) => l[0], () => undefined);
+    const unknown = !st;
+    const live = sessionsOf(path).filter((x) => x.running).length;
+    const typed = unknown || needsTypedName(st);
+    const risks = unknown ? [F.statusUnknown, ...removeRisks(undefined, live)] : removeRisks(st, live);
+    const ok = await ask(T.removeAsk(name, T.removeLost(risks), typed), {
+      title: T.removeTitle,
+      kind: "danger",
+      ...(typed ? { typeToConfirm: name, okLabel: T.remove } : {}),
+    });
+    if (!ok || removing.has(norm(path))) return;
+    await removeNow(projectId, path, name);
   };
 
   // worktrees being rebased: a second click while it runs is ignored

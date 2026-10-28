@@ -1,7 +1,8 @@
 import { Show, createSignal } from "solid-js";
 import { Icon } from "../Icon";
 import { Button } from "../ui";
-import { integrateWorktree } from "../api";
+import { integrateUndo, integrateWorktree, type IntegrateResult } from "../api";
+import { ask } from "../Confirm";
 import { errorText } from "../appError";
 import { coded } from "../msg";
 import { toast } from "../toasts";
@@ -10,6 +11,10 @@ import { overview, refreshOverview, refreshProjects, refreshSessions, sessionsOf
 import { pendingOf, pendingState } from "../statusGroups";
 
 const T = P.sidebar.pending;
+const F = P.flows;
+
+/** how long the "Desfazer" toast of an integration stays (it also pauses while hovered or focused) */
+const UNDO_TTL_MS = 20000;
 
 /** The pending entry of a worktree that has no running agent: it is waiting to be integrated, never "active". */
 export const pendingFor = (projectId: string, path: string) =>
@@ -36,11 +41,44 @@ export function PendingIntegration(props: {
   };
   const tip = () => reason() || T.tip(p()?.ahead ?? 0, props.into);
 
+  const refreshAll = async () => {
+    await refreshOverview();
+    await refreshProjects();
+    await refreshSessions();
+  };
+
+  /** takes the integration back (the daemon refuses when the default branch moved or was pushed) */
+  const undo = async (r: IntegrateResult) => {
+    if (!r.default_branch || !r.prev_tip || !r.new_tip || !r.branch || !r.branch_tip) return;
+    try {
+      await integrateUndo({
+        project: props.projectId,
+        default_branch: r.default_branch,
+        prev_tip: r.prev_tip,
+        new_tip: r.new_tip,
+        branch: r.branch,
+        branch_tip: r.branch_tip,
+      });
+      toast({ text: F.integrateUndone(props.name), kind: "info", key: `integrate:${props.path}` });
+    } catch (e) {
+      toast({ text: F.integrateUndoFailed(props.name, errorText(e)), kind: "warn", key: `integrate:${props.path}`, sticky: true });
+    }
+    await refreshAll();
+  };
+
   const integrate = async () => {
     if (busy()) return;
+    const ok = await ask(F.integrateAsk(props.name, p()?.ahead ?? 0, props.into, !!p()?.dirty), {
+      title: F.integrateTitle,
+      kind: "warning",
+      okLabel: F.integrateOk,
+    });
+    if (!ok || busy()) return;
     setBusy(true);
     try {
       const r = await integrateWorktree(props.projectId, props.path);
+      const canUndo =
+        r.integrated && r.pushed !== true && !!(r.default_branch && r.prev_tip && r.new_tip && r.branch && r.branch_tip);
       toast({
         text: !r.integrated
           ? T.nothing(props.name)
@@ -49,15 +87,14 @@ export function PendingIntegration(props: {
             : T.done(props.name, r.into),
         kind: "info",
         key: `integrate:${props.path}`,
+        ...(canUndo ? { action: { label: F.undo, run: () => void undo(r) }, ttl: UNDO_TTL_MS } : {}),
       });
     } catch (e) {
       toast({ text: T.failed(props.name, errorText(e)), kind: "warn", key: `integrate:${props.path}`, sticky: true });
     } finally {
       setBusy(false);
     }
-    await refreshOverview();
-    await refreshProjects();
-    await refreshSessions();
+    await refreshAll();
   };
 
   return (
@@ -68,7 +105,7 @@ export function PendingIntegration(props: {
             <Icon name={state() === "attention" ? "warning" : "arrowUp"} size={12} />
             <strong>{state() === "attention" ? T.attentionLabel : T.label}</strong>
             <span class="wt-pending-meta">
-              {x().ahead} {x().dirty ? `· ${T.dirty}` : ""}
+              {F.ahead(x().ahead)} {x().dirty ? `· ${T.dirty}` : ""}
             </span>
           </div>
           <Show when={reason()}>
