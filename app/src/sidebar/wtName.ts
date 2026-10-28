@@ -9,8 +9,8 @@ export function wtNameProblem(raw: string, taken: string[]): WtNameProblem | nul
   const name = raw.trim();
   if (!name) return null;
   if (name.includes("..") || name.includes("@{")) return "dots";
-  // eslint-disable-next-line no-control-regex -- control characters are exactly what git refuses
   if (
+    // eslint-disable-next-line no-control-regex -- control characters are exactly what git refuses
     /[\s~^:?*[\\\x00-\x1f\x7f]/.test(name) ||
     /^[-./]/.test(name) ||
     /[/.]$/.test(name) ||
