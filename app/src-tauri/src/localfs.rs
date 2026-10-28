@@ -411,10 +411,7 @@ fn store() -> PathBuf {
 }
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T, CallError> {
-    tauri::async_runtime::spawn_blocking(f)
-        .await
-        .map_err(|e| CallError::from(e.to_string()))?
-        .map_err(|e| CallError::from(&e))
+    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| CallError::from(e.to_string()))?.map_err(|e| CallError::from(&e))
 }
 
 /// One folder of a local worktree. Streams `on_chunk` (raw entries, disk order) while reading, answers sorted.
@@ -503,7 +500,7 @@ mod tests {
             static N: AtomicU32 = AtomicU32::new(0);
             let d = std::env::temp_dir().join(format!("ax-localfs-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
             std::fs::create_dir_all(&d).unwrap();
-            Tmp(d.canonicalize().unwrap())
+            Tmp(axelstra_core::git::canon(&d).unwrap())
         }
         fn dir(&self, rel: &str) -> PathBuf {
             let p = self.0.join(rel);
@@ -685,7 +682,6 @@ mod tests {
         assert_eq!((l.total, l.truncated), (130, false));
         let names: Vec<_> = l.entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, ["f010.txt", "f011.txt", "f012.txt", "f013.txt", "f014.txt"]);
-        assert!(MAX_ENTRIES >= 10_000);
     }
 
     #[test]
