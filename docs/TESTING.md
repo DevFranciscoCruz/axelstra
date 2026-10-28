@@ -34,6 +34,10 @@ and `t<pid>-<n>.lock` files seen in the real data dir were made by the unit test
 before they were isolated (commit a3009b5, 2026-10-24). Since then the tests use a temp `AXELSTRA_DATA_DIR` and remove their
 own files (`Cleanup` in `lock.rs`). The old ones can be deleted by hand (`locks/[st]<digits>-<digits>.lock`).
 
+Memory-budget locks (`--mem-mb`) use `locks/NAME-mem-<unit>.lock` (unit = 512 MB of the budget); same rules: OS file locks, never
+deleted, tests use a temp data dir and `CleanupMem`. The admission step is pure (`buildenv::admit`, tested in `buildenv.rs`), and
+`buildenv` tests take env, PATH, free memory and cores as parameters, so none of them compiles or reads the real machine.
+
 ## Audit (every test or script that can reach the data dir or the pipe)
 
 | Where | What it reaches | Isolation |

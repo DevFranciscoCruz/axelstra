@@ -43,6 +43,17 @@ fallback today). Cargo reruns the script when either variable changes. Shallow c
 sets the sha from `github.sha`. Shown by `axelstra --version` / `-V`, `axelstra version --json` and Settings > About.
 Set them yourself only to reproduce a release build: `AXELSTRA_GIT_SHA=abc1234 AXELSTRA_BUILD_DATE=2026-01-31 cargo build`.
 
+## Build environment of sessions and `lock --mem-mb`
+
+Every session the daemon spawns gets `CARGO_BUILD_JOBS` (derived from cores and free memory when it starts), `RUSTC_WRAPPER`
+and `CARGO_INCREMENTAL=0` only if `sccache` is on PATH, and a shared package-manager download cache for JS. It never overrides
+a variable you already set. Edit `build` in `settings.json` (keys: `enabled`, `jobs`, `sccache` `auto`|`off`, `shared_target`,
+`shared_js_cache`, `lock_budget_mb`; details and the risks of `shared_target`, which is off, in AGENTS.md > Build cost).
+
+- `axelstra lock verify -- <cmd>`: with no flag, declares a memory need from the jobs and is admitted while the holders fit the budget.
+- `axelstra lock NAME --mem-mb 3000 -- <cmd>`: declares the need yourself. `--slots N`: plain count slots (the old behaviour).
+  The two flags exclude each other; keep one mode per name.
+
 ## tools/
 
 - `measure-build.mjs [--label L] [--jobs 2,default] [--steps check,test-build,relink] [--json F]`: wall time and peak memory (process-tree sum, sampled every 500 ms, so a floor) of `cargo check --workspace`, `cargo test --no-run` for core/daemon/cli, and a relink, each from an empty `CARGO_TARGET_DIR` under the temp dir so runs are comparable. Run it inside the lock: `axelstra lock verify -- node tools/measure-build.mjs --label base --jobs 2`.
