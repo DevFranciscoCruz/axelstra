@@ -164,6 +164,20 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   gone). The pump thread lingers until the next output because the pty `Receiver` cannot be woken.
 - **Peer and messages.** `origin_of` validates the peer by pid plus process start time (`Peer` in `origin.rs`). `msg.send`
   broadcasts `session.changed` itself, so `ask`/`wait` never depend on the monitor tuple.
+- **Daemon calls (`client.rs`, Tauri host, CLI).** A pending call ends only by event: the reply, the connection closing
+  (daemon gone, EOF, broken pipe, the `ssh`/`wsl.exe` child dying: coded `rpc.connection_closed {method}`; the client is then
+  `broken` and the caller reconnects), never by elapsed time. There is no per-method default limit any more
+  (`default_timeout` is gone). Liveness is state (process alive + pipe open); `ping`/`hello` only detect an outdated daemon
+  (`PROTO`/`SECURITY_MIN`), they never declare it dead. The one clock left is a high safety ceiling for a lost handle:
+  `client::ceiling()`, 600 s, `AXELSTRA_CALL_CEILING_SECS` to change it (min 1), also the bound of a blocked write and of the
+  app waiting for a reconnect or an outdated daemon's exit (`rpc.call_ceiling {method, secs}`, connection dropped). Limits kept
+  as policy, not watchdog: `Client::timeout` set by the caller (CLI `--timeout` flags, `list_host` of a remote host's sidebar
+  list, 8 s), `policy_limit` for cosmetic reads (`project.logo`), `hook.rs` (an agent hook must never hold the agent up), the
+  CLI's screen snapshot read (`recv_timeout` 1.5 s on a session that printed nothing), the app quitting (3 s on a daemon that
+  ignores `daemon.shutdown`), `connect_remote`'s connect budget (ssh/WSL start; `ssh` also has `ConnectTimeout` and
+  `ServerAlive*`, which close the stream when the link dies). Slow methods keep their lane (`is_slow`) and the method name in
+  `rpc.call_timeout`/`rpc.call_ceiling`/`rpc.connection_closed`. Tests: `crates/daemon/tests/client_events.rs` (gated fake
+  daemon: late reply succeeds, close mid-call fails at once, ceiling, explicit limit) and `remote.rs` (process killed).
 - **Sleeps kept on purpose.** The rest are bounded backoffs on external OS resources: AV/indexer rename locks (`fsops.rs`,
   `store.rs`), the git handle of a killed process (`git.rs`), cleanup in `sources.rs`, Windows `PeekRead` 1-10 ms (`client.rs`; the
   sync pipe has no readiness event), synthetic input settle (`computer.rs`), the runner trust menu (`runner.rs`), the docker events

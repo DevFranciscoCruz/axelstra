@@ -94,12 +94,14 @@ fn connect() -> Result<Client> {
         // A daemon from before an update keeps running (so terminals and agents survive it). One that
         // is too old for this app, or older than the oldest one with the current security fixes (it reports
         // no `security` at all before they existed), is replaced; its terminals come back through session restore.
-        wait_daemon_gone(c, &pipe, &token, Duration::from_secs(4));
+        wait_daemon_gone(c, &pipe, &token, None);
     }
     let mut child = start_daemon()?;
-    // no event announces a named pipe (or socket) appearing: bounded backoff, ended early by the daemon process dying
+    // no event announces a named pipe (or socket) appearing: bounded backoff between looks, for as long as the launched
+    // process lives (its death is the event that ends the wait). Only a process that lives and never opens the pipe
+    // reaches the safety ceiling.
     let mut nap = Duration::from_millis(10);
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + axelstra_daemon::client::ceiling();
     while Instant::now() < deadline {
         if let Ok(c) = Client::connect(&pipe, &token) {
             return Ok(c);
@@ -115,17 +117,20 @@ fn connect() -> Result<Client> {
 }
 
 /// After `daemon.shutdown`, waits for the daemon to be gone. The event is the daemon closing our connection when its
-/// process ends (a thread blocks on the read; `limit` only bounds a daemon that hangs). If something still answers on
-/// the pipe afterwards (another daemon took over), a bounded backoff looks again until `limit`.
-fn wait_daemon_gone(mut c: Client, pipe: &str, token: &str, limit: Duration) {
+/// process ends (a thread blocks on the read). `limit` is `None` when the app replaces an outdated daemon (it waits for
+/// that event, with the call ceiling as the safety net); `Some` only when the app is quitting and must not hang on a
+/// daemon that ignores the shutdown. If something still answers on the pipe afterwards (another daemon took over), a
+/// short bounded backoff looks again (the pipe has no readiness event).
+fn wait_daemon_gone(mut c: Client, pipe: &str, token: &str, limit: Option<Duration>) {
+    let limit = limit.unwrap_or_else(axelstra_daemon::client::ceiling);
     let _ = c.call("daemon.shutdown", json!({}));
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     std::thread::spawn(move || {
         while c.read().is_ok() {}
         let _ = tx.send(());
     });
-    let end = Instant::now() + limit;
     let _ = rx.recv_timeout(limit);
+    let end = Instant::now() + Duration::from_secs(4);
     let mut nap = Duration::from_millis(10);
     while Client::connect(pipe, token).is_ok() && Instant::now() < end {
         std::thread::sleep(nap);
@@ -419,13 +424,15 @@ fn check_call(method: &str, params: &Value) -> Result<(), CallError> {
 
 /// Only one caller restarts the daemon connection at a time; the others wait for it outside any slot lock.
 static RECONNECT: gate::Gate = gate::Gate::new();
-/// How long a caller waits for another one's reconnect before giving up.
-const RECONNECT_WAIT: Duration = Duration::from_secs(12);
+/// Callers wait for another one's reconnect until it ends (the gate wakes them); this only bounds a leader that is lost.
+fn reconnect_wait() -> Duration {
+    axelstra_daemon::client::ceiling()
+}
 
 /// Fills an empty `slot` with a live connection. The slot lock is never held while connecting or sleeping, so calls on
 /// other slots (and `slot` itself) are not stuck behind a restart that can take seconds.
 fn reconnect_into(slot: &Mutex<Option<Client>>) -> Result<()> {
-    let deadline = std::time::Instant::now() + RECONNECT_WAIT;
+    let deadline = std::time::Instant::now() + reconnect_wait();
     loop {
         if slot.lock_recover().is_some() {
             return Ok(());
@@ -1075,7 +1082,7 @@ async fn app_quit(app: tauri::AppHandle, keep: Option<bool>) {
             if let Ok(token) = proto::load_or_create_token() {
                 let pipe = proto::pipe_name();
                 if let Ok(c) = Client::connect(&pipe, &token) {
-                    wait_daemon_gone(c, &pipe, &token, Duration::from_secs(3));
+                    wait_daemon_gone(c, &pipe, &token, Some(Duration::from_secs(3)));
                 }
             }
         })
