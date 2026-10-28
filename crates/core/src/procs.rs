@@ -132,6 +132,49 @@ pub fn kill_pids(pids: &HashSet<u32>) {
     }
 }
 
+/// Executable names (lowercase, no directory, no `.exe`) of those of `pids` that are running now. One table dump, so
+/// ask for all the pids of a tree together.
+pub fn names_of(pids: &HashSet<u32>) -> HashMap<u32, String> {
+    let clean = |n: &str| {
+        let n = n.rsplit(['/', '\\']).next().unwrap_or(n).to_ascii_lowercase();
+        n.strip_suffix(".exe").map(str::to_string).unwrap_or(n)
+    };
+    let mut out = HashMap::new();
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
+        let h = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if h == INVALID_HANDLE_VALUE {
+            return out;
+        }
+        let mut e: PROCESSENTRY32W = std::mem::zeroed();
+        e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut ok = Process32FirstW(h, &mut e);
+        while ok != 0 {
+            if pids.contains(&e.th32ProcessID) {
+                let len = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(e.szExeFile.len());
+                out.insert(e.th32ProcessID, clean(&String::from_utf16_lossy(&e.szExeFile[..len])));
+            }
+            ok = Process32NextW(h, &mut e);
+        }
+        CloseHandle(h);
+    }
+    #[cfg(unix)]
+    if let Ok(o) = std::process::Command::new("ps").args(["-A", "-o", "pid=,comm="]).output() {
+        for l in String::from_utf8_lossy(&o.stdout).lines() {
+            if let Some((pid, name)) = l.trim_start().split_once(char::is_whitespace) {
+                if let Ok(pid) = pid.parse::<u32>() {
+                    if pids.contains(&pid) {
+                        out.insert(pid, clean(name.trim()));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 fn descend(table: &[(u32, u32)], roots: &[u32]) -> HashSet<u32> {
     let mut kids: HashMap<u32, Vec<u32>> = HashMap::new();
     for &(pid, ppid) in table {

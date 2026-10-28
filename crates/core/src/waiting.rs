@@ -115,6 +115,13 @@ impl Hints {
         }
     }
 
+    /// The latest state the agent's hook reported and how long ago (ms); `None` when it never reported (no hooks).
+    pub fn state_of(&self, id: u32) -> Option<(HintState, u64)> {
+        let m = self.0.lock().ok()?;
+        let h = m.get(&id)?;
+        Some((h.state, h.at.elapsed().as_millis() as u64))
+    }
+
     /// What the session's hint says it waits for, if it still does, given how long it has been quiet (see `hint_waiting`).
     pub fn waiting(&self, id: u32, since_input_ms: u64, idle_ms: u64) -> Option<Wait> {
         let m = self.0.lock().ok()?;
