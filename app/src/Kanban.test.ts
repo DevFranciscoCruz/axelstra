@@ -33,6 +33,7 @@ vi.mock("./api", () => ({
   kanbanDelete: vi.fn(),
   orchStatus: vi.fn(async () => ({ state: "idle" })),
   orchRetry: vi.fn(),
+  orchCancel: vi.fn(),
   orchStart: vi.fn(async (...a: unknown[]) => {
     h.started.push(a);
     return { state: "running" };
@@ -49,6 +50,7 @@ vi.mock("./store", () => ({
   selectWorktree: vi.fn(),
   setError: vi.fn(),
   setShowKanban: vi.fn(),
+  setShowOrchestra: vi.fn(),
   showNotice: vi.fn(),
   toast: vi.fn(),
 }));
@@ -155,5 +157,33 @@ describe("Kanban follows the daemon (kanban.changed / orch.changed)", () => {
     emit("kanban.changed", { project: "p" });
     await settle();
     expect(list.mock.calls.length).toBe(before);
+  });
+});
+
+describe("Kanban run controls", () => {
+  it("sends the chosen parallelism, clamped to 1..8", async () => {
+    const r = render(() => createComponent(Kanban, { project: "p" }));
+    await settle();
+    const par = r.container.querySelector<HTMLInputElement>(".kpar input")!;
+    fireEvent.input(par, { target: { value: "20" } });
+    fireEvent.blur(par);
+    expect(par.value).toBe("8");
+    fireEvent.click(startButton(r.container));
+    await settle();
+    expect(h.started[0]).toEqual(["p", 8, false, undefined]);
+  });
+
+  it("a running run shows Stop, which asks and then cancels it", async () => {
+    const api = await import("./api");
+    vi.mocked(api.orchStatus).mockResolvedValue({ state: "running", name: "r1" });
+    const r = render(() => createComponent(Kanban, { project: "p" }));
+    await settle();
+    const stop = r.container.querySelector<HTMLButtonElement>(".kbar button:not(.primary)")!;
+    expect(stop).toBeTruthy();
+    fireEvent.click(stop);
+    await settle();
+    expect(h.asked).toHaveLength(1);
+    expect(api.orchCancel).toHaveBeenCalledWith("p");
+    vi.mocked(api.orchStatus).mockResolvedValue({ state: "idle" });
   });
 });

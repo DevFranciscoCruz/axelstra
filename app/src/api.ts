@@ -554,9 +554,24 @@ export const pickAndAddProject = (title: string) => nativePick<Project | null>("
 export const projectLogo = (id: string) => call<{ data_url: string | null }>("project.logo", { id }).then((r) => r.data_url);
 /** per-project integration settings; send only what changed */
 export const setProjectIntegrate = (id: string, s: { auto?: boolean; push?: boolean }) => call("project.integrate", { id, ...s });
-export type IntegrateResult = { integrated: boolean; into: string; how: "ff" | "merge" | "none"; removed: boolean; pushed: boolean | null };
+export type IntegrateResult = {
+  integrated: boolean;
+  into: string;
+  how: "ff" | "merge" | "none";
+  removed: boolean;
+  pushed: boolean | null;
+  /** what `integrateUndo` needs (only when `integrated`; absent from an old daemon) */
+  default_branch?: string;
+  prev_tip?: string;
+  new_tip?: string;
+  branch?: string;
+  branch_tip?: string;
+};
 /** integrates a worktree's branch into the default branch; fails with a coded error when it cannot */
 export const integrateWorktree = (project: string, path: string) => call<IntegrateResult>("worktree.integrate", { project, path });
+export type IntegrateUndoArgs = { project: string; default_branch: string; prev_tip: string; new_tip: string; branch: string; branch_tip: string };
+/** takes back an integration: refused (coded error) when the default branch moved, was pushed or its checkout has changes */
+export const integrateUndo = (args: IntegrateUndoArgs) => call<{ branch_restored: boolean; worktree: string | null }>("integrate.undo", args);
 export const setProjectSetup = (id: string, setup: string) => call("project.setup", { id, setup });
 export const detectPackageManagers = (id: string) => call<{ installed: string[]; suggested: string | null; package_json?: boolean }>("pm.detect", { id });
 export type DispatchMeta = Record<string, { title?: string; archived?: boolean; requests?: string[]; updated?: number }>;
@@ -699,6 +714,9 @@ export type OrchRun = {
   error_code?: string;
   error_params?: Record<string, string>;
   reason_codes?: Record<string, { code: string; params: Record<string, string> }>;
+  /** set while `orch.cancel` is taking effect, and on the final state of a run that was stopped */
+  cancelling?: boolean;
+  cancelled?: boolean;
 };
 /** `pin` (from orchTrustInfo) lets `bypass*` cards run, but only if the todo cards still hash to what the user confirmed */
 export const orchStart = (project: string, max = 3, trustAcceptance = false, pin?: string) =>
@@ -713,6 +731,8 @@ export const orchTrustInfo = (project: string) => callOr<OrchTrust | null>("orch
 export const orchRetry = (project: string, id: string, trustAcceptance = false) =>
   call("orch.retry", { project, id, trust_acceptance: trustAcceptance });
 export const orchStatus = (project: string) => call<OrchRun>("orch.status", { project });
+/** stops the project's run; `orch.changed` follows (the run's state carries `cancelling`, then `cancelled` once it ended) */
+export const orchCancel = (project: string) => call<{ run: string }>("orch.cancel", { project });
 
 export type Commit = {
   sha: string;

@@ -952,7 +952,7 @@ O branch tem de estar enviado para o remoto.`,
     stopTip: "Fecha os agentes desta execução e devolve os cartões por acabar a «Para fazer»",
     stopped: "A parar a execução…",
     parallel: "Em paralelo",
-    parallelTip: "Quantos agentes trabalham ao mesmo tempo nesta execução (1 a 64)",
+    parallelTip: "Quantos agentes trabalham ao mesmo tempo nesta execução (1 a 8)",
     viewOrch: "Ver na Orquestra",
     progress: (done: number, total: number) => `${done}/${total} cartões`,
     removeKept: (name: string, why: string) =>
@@ -961,7 +961,8 @@ O branch tem de estar enviado para o remoto.`,
     removingProject: (name: string) => `A remover o projeto "${name}"…`,
     wtFrom: (branch: string) => `Criado a partir de ${branch}.`,
     wtProblem: {
-      chars: "O nome não pode ter espaços nem os caracteres ~ ^ : ? * [ \\, nem começar por «-» ou «.», nem acabar em «/», «.» ou «.lock».",
+      chars:
+        "O nome não pode ter espaços nem os caracteres ~ ^ : ? * [ \\, nem começar por «-» ou «.», nem acabar em «/», «.» ou «.lock».",
       dots: "O nome não pode conter «..» nem «@{».",
       exists: "Já existe um worktree ou um branch com este nome.",
     },

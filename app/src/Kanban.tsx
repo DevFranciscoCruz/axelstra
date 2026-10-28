@@ -1,15 +1,23 @@
 import { Badge, Button, Field, Input, Select, Textarea } from "./ui";
+import "./flows.css";
 import { createLive } from "./live";
 import { Icon } from "./Icon";
 import { ask } from "./Confirm";
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { AgentInfo, Board, KCard, agentOptions, agentWarning, agentsList, OrchRun, gitPr, gitPush, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchRetry, orchStart, orchStatus, orchTrustInfo } from "./api";
+import { AgentInfo, Board, KCard, agentOptions, agentWarning, agentsList, OrchRun, gitPr, gitPush, kanbanDelete, kanbanList, kanbanMove, kanbanSave, orchCancel, orchRetry, orchStart, orchStatus, orchTrustInfo } from "./api";
+import { errorText } from "./appError";
 import { Modal } from "./Modal";
-import { refreshProjects, selectWorktree, setError, setShowKanban, toast } from "./store";
+import { refreshProjects, selectWorktree, setError, setShowKanban, setShowOrchestra, showNotice, toast } from "./store";
 import { COL_IDS, applyPlan, colAt, columnCards, edgeDelta, indexAt, keyStep, planMove, planStart, posOf, restorePayload, type DropPos } from "./kanbanLogic";
 import { S } from "./strings";
 import { P } from "./strings.panels";
 import { coded } from "./msg";
+
+const F = P.flows;
+/** the daemon runs 1 to 8 cards at the same time (orch.start clamps it) */
+const MAX_PARALLEL = 8;
+/** ids of the cards a run was started with, per project: the progress "2/5 cartões" survives closing and reopening the board */
+const runCards = new Map<string, string[]>();
 
 const COLS: { id: string; label: string }[] = COL_IDS.map((id) => ({ id, label: P.kanban.cols[id] }));
 
@@ -23,7 +31,8 @@ type Draft = { id?: string; title: string; body: string; status: string; depends
 
 export function Kanban(props: { project: string }) {
   const [board, setBoard] = createSignal<Board>({ cards: [], broken: [] });
-  const [err, setErr] = createSignal("");
+  const [parallel, setParallel] = createSignal("3");
+  const [stopping, setStopping] = createSignal(false);
   const [agents, setAgents] = createSignal<AgentInfo[]>([]);
   const [draft, setDraft] = createSignal<Draft | null>(null);
   const [drag, setDrag] = createSignal<Drag | null>(null);
@@ -53,11 +62,38 @@ export function Kanban(props: { project: string }) {
     const plan = planStart(n, trust, cmds);
     if (!(await ask(plan.message, { title: P.kanban.runTitle, kind: plan.warn ? "warning" : "info", ...(plan.bypass.length ? { typeToConfirm: "bypass", okLabel: P.kanban.runBypass } : {}) }))) return;
     try {
-      setRun(await orchStart(props.project, 3, plan.trustAcceptance, plan.pin));
+      runCards.set(props.project, inCol("todo").map((c) => c.meta.id));
+      setRun(await orchStart(props.project, parN(), plan.trustAcceptance, plan.pin));
       void refreshProjects();
     } catch (e) {
-      setErr(String(e));
+      setError(errorText(e));
     }
+  };
+  const parN = () => Math.min(MAX_PARALLEL, Math.max(1, parseInt(parallel(), 10) || 3));
+  /** cards of the current run that already reached "done", of those it started with */
+  const progress = () => {
+    const ids = runCards.get(props.project);
+    if (!ids?.length) return "";
+    const done = ids.filter((id) => board().cards.find((c) => c.meta.id === id)?.meta.status === "done").length;
+    return F.progress(done, ids.length);
+  };
+  const stopRun = async () => {
+    if (stopping()) return;
+    if (!(await ask(F.stopAsk, { title: F.stopTitle, kind: "warning", okLabel: F.stopRun }))) return;
+    setStopping(true);
+    try {
+      await orchCancel(props.project);
+      showNotice(F.stopped);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setStopping(false);
+      await pollRun();
+    }
+  };
+  const viewOrchestra = () => {
+    setShowKanban(false);
+    setShowOrchestra(true);
   };
 
   // only the newest answer counts: the poll and a manual reload can overlap
@@ -68,9 +104,8 @@ export function Kanban(props: { project: string }) {
       const b = await kanbanList(props.project);
       if (r !== reloadReq) return;
       setBoard(b);
-      setErr("");
     } catch (e) {
-      if (r === reloadReq) setErr(String(e));
+      if (r === reloadReq) setError(errorText(e));
     }
   };
   // agents move cards while the orchestrator runs: the daemon says so (`kanban.changed`, `orch.changed`); a board being edited
@@ -129,7 +164,7 @@ export function Kanban(props: { project: string }) {
       setDraft(null);
       await reload();
     } catch (e) {
-      setErr(String(e));
+      setError(errorText(e));
     }
   };
 
@@ -168,7 +203,7 @@ export function Kanban(props: { project: string }) {
       await kanbanMove(props.project, id, status);
       return true;
     } catch (x) {
-      setErr(String(x));
+      setError(errorText(x));
       return false;
     }
   };
@@ -190,7 +225,7 @@ export function Kanban(props: { project: string }) {
         }
       }
     } catch (x) {
-      setErr(String(x));
+      setError(errorText(x));
     }
     moving = false;
     await reload();
@@ -376,14 +411,14 @@ export function Kanban(props: { project: string }) {
     try {
       await fn();
     } catch (x) {
-      setErr(String(x));
+      setError(errorText(x));
     }
     await reload();
     await pollRun();
   };
   const openWt = (id: string) => {
     const wt = taskWt(id);
-    if (!wt) return setErr(P.kanban.unknownWt);
+    if (!wt) return setError(P.kanban.unknownWt);
     setShowKanban(false);
     void selectWorktree(wt);
   };
@@ -401,7 +436,7 @@ export function Kanban(props: { project: string }) {
       if (!wt) throw new Error(P.kanban.unknownWtShort);
       if (!(await ask(P.kanban.prAsk(c.meta.title || c.meta.id), { title: P.kanban.prTitle, kind: "warning" }))) return;
       await gitPush(wt);
-      setErr(P.kanban.prCreated(await gitPr(wt, c.meta.title || c.meta.id, c.body)));
+      showNotice(P.kanban.prCreated(await gitPr(wt, c.meta.title || c.meta.id, c.body)));
     });
 
   return (
@@ -409,6 +444,20 @@ export function Kanban(props: { project: string }) {
       <div class="kbar">
         <span class="ktitle">{P.kanban.title}</span>
         <span class="grow" />
+        <label class="kpar" title={F.parallelTip}>
+          {F.parallel}
+          <Input
+            class="w-14"
+            type="number"
+            min="1"
+            max={MAX_PARALLEL}
+            value={parallel()}
+            disabled={run().state === "running"}
+            aria-label={F.parallelTip}
+            onInput={(e) => setParallel(e.currentTarget.value)}
+            onBlur={() => setParallel(String(parN()))}
+          />
+        </label>
         <Button
           variant="default"
           class="primary"
@@ -418,14 +467,21 @@ export function Kanban(props: { project: string }) {
         >
           {run().state === "running" ? P.kanban.running : P.kanban.runTodo(inCol("todo").length)}
         </Button>
+        <Show when={run().state === "running"}>
+          <Button variant="destructive" title={F.stopTip} disabled={stopping() || run().cancelling} onClick={() => void stopRun()}>
+            {stopping() || run().cancelling ? F.stopping : F.stopRun}
+          </Button>
+        </Show>
       </div>
-      <Show when={err()}>
-        <div class="kerr">{err()}</div>
-      </Show>
       <Show when={run().state !== "idle"}>
         <div class="krun" classList={{ bad: run().state === "error" || (run().failed?.length ?? 0) > 0 }}>
           <Show when={run().state === "running"}>
             {P.kanban.runningBanner(run().name, run().integ_branch)}
+            <Show when={progress()}>
+              {" · "}
+              {progress()}
+            </Show>{" "}
+            <Button size="sm" onClick={viewOrchestra}>{F.viewOrch}</Button>
           </Show>
           <Show when={run().state === "done"}>
             {P.kanban.doneBanner(run().merged?.length ?? 0, run().integ_branch)}
@@ -474,7 +530,8 @@ export function Kanban(props: { project: string }) {
                       class={`kcard st-${col.id}`}
                       classList={{ dragging: drag()?.id === c.meta.id, "drop-before": dropBefore(col.id, c.meta.id), grabbed: drag()?.mode === "kbd" && drag()?.id === c.meta.id }}
                       data-id={c.meta.id}
-                      role="button"
+                      role="group"
+                      aria-label={c.meta.title || c.meta.id}
                       tabindex="0"
                       aria-describedby="kanban-grab-hint"
                       onPointerDown={(e) => onDown(e, c)}

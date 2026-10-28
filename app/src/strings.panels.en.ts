@@ -946,7 +946,7 @@ The branch has to be pushed to the remote.`,
     stopTip: "Closes this run's agents and puts the unfinished cards back to “To do”",
     stopped: "Stopping the run…",
     parallel: "In parallel",
-    parallelTip: "How many agents work at the same time in this run (1 to 64)",
+    parallelTip: "How many agents work at the same time in this run (1 to 8)",
     viewOrch: "View in Orchestra",
     progress: (done: number, total: number) => `${done}/${total} cards`,
     removeKept: (name: string, why: string) =>
@@ -955,7 +955,8 @@ The branch has to be pushed to the remote.`,
     removingProject: (name: string) => `Removing project "${name}"…`,
     wtFrom: (branch: string) => `Created from ${branch}.`,
     wtProblem: {
-      chars: "The name cannot have spaces or the characters ~ ^ : ? * [ \, start with “-” or “.”, or end with “/”, “.” or “.lock”.",
+      chars:
+        "The name cannot have spaces or the characters ~ ^ : ? * [ \, start with “-” or “.”, or end with “/”, “.” or “.lock”.",
       dots: "The name cannot contain “..” or “@{”.",
       exists: "A worktree or branch with this name already exists.",
     },
