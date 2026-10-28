@@ -190,6 +190,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "hooks.status" => Ok(crate::hooks::status_for(p["agent"].as_str().unwrap_or("claude"))?),
         "hooks.install" => tokio::task::block_in_place(|| crate::hooks::install_for(p["agent"].as_str().unwrap_or("claude"))),
         "ping" => Ok(hello_info()),
+        // load tests only: stands in for a slow git call (`ms` of blocking work); `ran` counts real executions
+        "debug.slow" if std::env::var_os("AXELSTRA_TESTING").is_some() => {
+            static RAN: AtomicU64 = AtomicU64::new(0);
+            std::thread::sleep(Duration::from_millis(p["ms"].as_u64().unwrap_or(0).min(10_000)));
+            Ok(json!({"ran": RAN.fetch_add(1, Ordering::SeqCst) + 1}))
+        }
         // what the daemon recovered or lost on its own (a state file moved aside, restored from a backup): shown once
         "audit.list" => {
             let limit = p["limit"].as_u64().map_or(100, |n| n.clamp(1, 500) as usize);

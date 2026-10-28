@@ -76,30 +76,36 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             reap_orphans(reg);
             let gen = reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst);
             let ps = crate::projects::load(&reg.store);
-            let v: Vec<Value> = ps
-                .iter()
-                .map(|pr| {
-                    let repo = std::path::Path::new(&pr.path);
-                    let mut wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();
-                    wts.retain(|w| w.is_main || w.path.replace('\\', "/").contains("/.axelstra-wt/"));
-                    let ident = axelstra_core::git::identity(repo);
-                    let parents = crate::projects::parent_paths(pr, &wts);
-                    let wts: Vec<Value> = wts
-                        .into_iter()
-                        .map(|w| {
-                            let parent = parents.get(&w.path).cloned();
-                            let mut v = serde_json::to_value(w).unwrap_or_default();
-                            if let Some(par) = parent {
-                                v["parent"] = json!(par);
-                            }
-                            v
-                        })
-                        .collect();
-                    json!({"id": pr.id, "name": ident.display_name, "path": pr.path, "worktrees": wts, "git": axelstra_core::git::is_repo(repo),
-                           "setup": pr.setup, "default_branch": axelstra_core::git::default_branch(repo), "slug": ident.slug, "icon_url": ident.icon_url, "remote": ident.remote})
-                })
-                .collect();
+            // each project starts several git processes: a few projects at a time, not one after the other
+            let one = |pr: &crate::projects::Project| -> Value {
+                let repo = std::path::Path::new(&pr.path);
+                let mut wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();
+                wts.retain(|w| w.is_main || w.path.replace('\\', "/").contains("/.axelstra-wt/"));
+                let ident = axelstra_core::git::identity(repo);
+                let parents = crate::projects::parent_paths(pr, &wts);
+                let wts: Vec<Value> = wts
+                    .into_iter()
+                    .map(|w| {
+                        let parent = parents.get(&w.path).cloned();
+                        let mut v = serde_json::to_value(w).unwrap_or_default();
+                        if let Some(par) = parent {
+                            v["parent"] = json!(par);
+                        }
+                        v
+                    })
+                    .collect();
+                json!({"id": pr.id, "name": ident.display_name, "path": pr.path, "worktrees": wts, "git": axelstra_core::git::is_repo(repo),
+                       "setup": pr.setup, "default_branch": axelstra_core::git::default_branch(repo), "slug": ident.slug, "icon_url": ident.icon_url, "remote": ident.remote})
+            };
+            let mut v: Vec<Value> = Vec::with_capacity(ps.len());
+            for chunk in ps.chunks(4) {
+                std::thread::scope(|sc| {
+                    let hs: Vec<_> = chunk.iter().map(|pr| sc.spawn(|| one(pr))).collect();
+                    v.extend(hs.into_iter().filter_map(|h| h.join().ok()));
+                });
+            }
             let all = Value::Array(v);
+            *reg.plist_last.lock_recover() = Some(all.clone());
             // an answer computed while a project or worktree changed may predate the change: serve it, do not keep it
             if reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst) == gen {
                 *reg.plist.lock_recover() = Some((std::time::Instant::now(), all.clone()));

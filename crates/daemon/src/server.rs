@@ -238,7 +238,7 @@ fn read_settings(saved: &std::path::Path) -> Value {
     read_json(&saved.with_file_name("settings.json")).ok().flatten().unwrap_or_else(|| json!({}))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct Req {
     id: u64,
     method: String,
@@ -427,41 +427,140 @@ struct ConnState {
     subs: HashMap<u32, Arc<AtomicBool>>,
 }
 
-/// Runs one JSON call on the blocking pool and queues the reply (and then the deferred work) on `tx`.
-async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnState>>, token: &str) {
-    let t0 = std::time::Instant::now();
-    let (reg2, tx2, st2, token2) = (reg.clone(), tx.clone(), st.clone(), token.to_string());
-    // dispatch does blocking work (git, process spawns, files): it runs on the blocking pool, so the connection's
-    // reader (and with it every terminal's keystrokes) never waits for it. A bug in one handler must not take every
-    // terminal down with the daemon.
-    let joined = tokio::task::spawn_blocking(move || {
-        let mut after: Vec<Box<dyn FnOnce() + Send>> = Vec::new();
-        let mut delay = Duration::ZERO;
-        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut guard = st2.lock_recover();
+/// The result of one dispatch, the deferred work it queued and the delay before its reply.
+type Dispatched = (Result<Value>, Vec<Box<dyn FnOnce() + Send>>, Duration);
+
+/// Runs `dispatch` for one call. A `lane` call (a slow read) works on a snapshot of the connection state instead of
+/// holding its lock, so it neither blocks nor is blocked by the ordered calls of the same connection.
+fn run_dispatch(req: &Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnState>>, token: &str, lane: bool) -> Dispatched {
+    let mut after: Vec<Box<dyn FnOnce() + Send>> = Vec::new();
+    let mut delay = Duration::ZERO;
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if lane {
+            let (mut subs, mut authed, mut cli, mut agent, peer) = {
+                let g = st.lock_recover();
+                (HashMap::new(), g.authed, g.cli, g.agent, g.peer)
+            };
+            dispatch(&mut Ctx {
+                req,
+                p: &req.params,
+                reg,
+                tx,
+                subs: &mut subs,
+                authed: &mut authed,
+                cli: &mut cli,
+                agent: &mut agent,
+                peer,
+                token,
+                after: &mut after,
+                delay: &mut delay,
+            })
+        } else {
+            let mut guard = st.lock_recover();
             let c = &mut *guard;
             dispatch(&mut Ctx {
-                req: &req,
+                req,
                 p: &req.params,
-                reg: &reg2,
-                tx: &tx2,
+                reg,
+                tx,
                 subs: &mut c.subs,
                 authed: &mut c.authed,
                 cli: &mut c.cli,
                 agent: &mut c.agent,
                 peer: c.peer,
-                token: &token2,
+                token,
                 after: &mut after,
                 delay: &mut delay,
             })
-        }))
-        .unwrap_or_else(|_| {
-            Err(axelstra_core::coded!("daemon.internal_error", "internal daemon error in {method} (see crash.log)", method = req.method))
-        });
-        (req, res, after, delay)
-    })
-    .await;
-    let Ok((req, res, after, delay)) = joined else { return };
+        }
+    }))
+    .unwrap_or_else(|_| {
+        Err(axelstra_core::coded!("daemon.internal_error", "internal daemon error in {method} (see crash.log)", method = req.method))
+    });
+    (res, after, delay)
+}
+
+fn internal_error(method: &str) -> anyhow::Error {
+    axelstra_core::coded!("daemon.internal_error", "internal daemon error in {method} (see crash.log)", method = method)
+}
+
+/// A slow read: bounded by its lane's gate, shared with identical calls in flight, and answered with `{"loading": true}`
+/// (or the last project list) when it outlasts `answer_limit`; the work then goes on and a repeat joins it.
+async fn run_lane(
+    req: &Arc<Req>,
+    lane: crate::lanes::Lane,
+    reg: &Arc<Registry>,
+    tx: &Tx,
+    st: &Arc<Mutex<ConnState>>,
+    token: &str,
+) -> Result<Value> {
+    let (req2, reg2, tx2, st2, token2) = (req.clone(), reg.clone(), tx.clone(), st.clone(), token.to_string());
+    let key = format!("{}|{}", req.method, req.params);
+    let mut work = tokio::spawn(crate::lanes::single_flight(key, move || async move {
+        let _permit = crate::lanes::gate(lane).acquire().await;
+        let method = req2.method.clone();
+        tokio::task::spawn_blocking(move || run_dispatch(&req2, &reg2, &tx2, &st2, &token2, true).0)
+            .await
+            .unwrap_or_else(|_| Err(internal_error(&method)))
+    }));
+    match tokio::time::timeout(crate::lanes::answer_limit(lane), &mut work).await {
+        Ok(joined) => joined.unwrap_or_else(|_| Err(internal_error(&req.method))),
+        Err(_) => {
+            if req.method == "project.list" {
+                let last = reg.plist_last.lock_recover().clone();
+                if let Some(v) = last {
+                    return Ok(v);
+                }
+                return work.await.unwrap_or_else(|_| Err(internal_error(&req.method)));
+            }
+            Ok(json!({"loading": true}))
+        }
+    }
+}
+
+/// The reply fields of a failed call: `error`, and the additive `code` and `params` of a coded one.
+fn error_fields(e: &anyhow::Error) -> Value {
+    let mut b = json!({"error": format!("{e:#}")});
+    // additive: an old frontend keeps showing `error`, a new one translates `code` with `params`
+    if let Some(c) = axelstra_core::msg::find(e) {
+        b["code"] = json!(c.code);
+        b["params"] = c.params_json();
+    }
+    b
+}
+
+fn reply_body(id: u64, out: Result<Value, Value>) -> Value {
+    match out {
+        Ok(v) => json!({"id": id, "result": v}),
+        Err(mut e) => {
+            e["id"] = json!(id);
+            e
+        }
+    }
+}
+
+/// Runs one JSON call and queues the reply (and then the deferred work) on `tx`. Ordered calls run on the blocking pool;
+/// slow reads go through `run_lane`.
+async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnState>>, token: &str) {
+    let t0 = std::time::Instant::now();
+    let lane = crate::lanes::lane_of(&req.method).filter(|_| st.lock_recover().authed);
+    let (req, res, after, delay) = if let Some(l) = lane {
+        let req = Arc::new(req);
+        let res = run_lane(&req, l, reg, tx, st, token).await;
+        (req, res, Vec::new(), Duration::ZERO)
+    } else {
+        let (reg2, tx2, st2, token2) = (reg.clone(), tx.clone(), st.clone(), token.to_string());
+        // dispatch does blocking work (git, process spawns, files): it runs on the blocking pool, so the connection's
+        // reader (and with it every terminal's keystrokes) never waits for it. A bug in one handler must not take every
+        // terminal down with the daemon.
+        let joined = tokio::task::spawn_blocking(move || {
+            let (res, after, delay) = run_dispatch(&req, &reg2, &tx2, &st2, &token2, false);
+            (req, res, after, delay)
+        })
+        .await;
+        let Ok((req, res, after, delay)) = joined else { return };
+        (Arc::new(req), res, after, delay)
+    };
     // what an agent connection asked for is kept for the user to review
     let agent = st.lock_recover().agent;
     if let Some(me) = agent {
@@ -471,18 +570,7 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
     if !matches!(req.method.as_str(), "ask" | "msg.ask" | "session.wait" | "hello") {
         crate::lag::note(&format!("daemon {}", req.method), t0.elapsed(), 30);
     }
-    let body = match res {
-        Ok(v) => json!({"id": req.id, "result": v}),
-        Err(e) => {
-            let mut b = json!({"id": req.id, "error": format!("{e:#}")});
-            // additive: an old frontend keeps showing `error`, a new one translates `code` with `params`
-            if let Some(c) = axelstra_core::msg::find(&e) {
-                b["code"] = json!(c.code);
-                b["params"] = c.params_json();
-            }
-            b
-        }
-    };
+    let body = reply_body(req.id, res.map_err(|e| error_fields(&e)));
     if !delay.is_zero() {
         tokio::time::sleep(delay).await;
     }
@@ -600,7 +688,13 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
         let (reg, tx, st, token) = (reg.clone(), tx.clone(), st.clone(), token.clone());
         tokio::spawn(async move {
             while let Some(req) = call_rx.recv().await {
-                run_call(req, &reg, &tx, &st, &token).await;
+                if crate::lanes::lane_of(&req.method).is_some() {
+                    // a slow read does not hold up the calls queued behind it
+                    let (reg, tx, st, token) = (reg.clone(), tx.clone(), st.clone(), token.clone());
+                    tokio::spawn(async move { run_call(req, &reg, &tx, &st, &token).await });
+                } else {
+                    run_call(req, &reg, &tx, &st, &token).await;
+                }
             }
         })
     };
@@ -831,7 +925,7 @@ fn dispatch_call(c: &mut Ctx) -> Result<Value> {
         "orch" | "kanban" | "automation" => orchestration::call(c),
         "msg" | "notes" => messaging::call(c),
         "agent" | "agents" | "codex" | "computer" | "settings" | "flow" | "app" | "hooks" | "ping" | "audit" | "notices" | "daemon"
-        | "hello" | "backup" | "env" | "budget" | "workspace" | "host" => misc::call(c),
+        | "hello" | "backup" | "env" | "budget" | "workspace" | "host" | "debug" => misc::call(c),
         _ => Err(unknown_method(&req.method)),
     }
 }

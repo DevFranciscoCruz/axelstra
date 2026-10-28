@@ -28,6 +28,8 @@ pub(super) struct Registry {
     pub(super) flows: Mutex<HashMap<String, Value>>,
     /// project.list answer reused for a few seconds (it starts several git processes per project)
     pub(super) plist: Mutex<Option<(std::time::Instant, Value)>>,
+    /// the last project.list answer, whatever its age: served when a fresh one takes too long
+    pub(super) plist_last: Mutex<Option<Value>>,
     /// spawn requests of live sessions, kept on disk so a daemon restart can bring them back
     pub(super) specs: Mutex<HashMap<u32, Value>>,
     /// sessions of the previous daemon run, waiting for the UI to restore (or discard) them
@@ -422,6 +424,7 @@ impl Registry {
             auto_lock: Default::default(),
             flows: Default::default(),
             plist: Default::default(),
+            plist_last: Default::default(),
             specs: Default::default(),
             pending: Mutex::new(pending),
             saved,

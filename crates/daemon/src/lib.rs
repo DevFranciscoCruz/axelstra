@@ -19,6 +19,7 @@ pub mod integrate;
 pub mod janitor;
 pub mod kanban;
 pub mod lag;
+pub mod lanes;
 pub mod msgbus;
 pub mod notes;
 pub mod orchend;
