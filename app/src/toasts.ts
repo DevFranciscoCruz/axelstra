@@ -47,6 +47,17 @@ const arm = (id: number, ms: number) => {
   timers.set(id, { t: setTimeout(() => dismissToast(id), ms), left: ms, at: Date.now() });
 };
 
+/** over the limit, the oldest notice (it closes by itself anyway) goes first; an error or warning waiting to be read goes last */
+const evict = (list: Toast[], keep: number): Toast[] => {
+  const out = [...list];
+  while (out.length > MAX_TOASTS) {
+    const i = out.findIndex((x) => x.id !== keep && !x.sticky);
+    const [gone] = out.splice(i >= 0 ? i : 0, 1);
+    stop(gone.id);
+  }
+  return out;
+};
+
 export const dismissToast = (id: number) => {
   stop(id);
   setToasts((l) => (l.some((x) => x.id === id) ? l.filter((x) => x.id !== id) : l));
@@ -81,13 +92,13 @@ export const toast = (o: ToastInput): number => {
   const t: Toast = { id, key, kind, text: o.text, action: o.action, sticky, ttl };
   setToasts((l) => {
     const next = same ? l.map((x) => (x.id === id ? t : x)) : [...l, t];
-    for (const gone of next.slice(0, Math.max(0, next.length - MAX_TOASTS))) stop(gone.id);
-    return next.slice(-MAX_TOASTS);
+    return evict(next, id);
   });
   if (sticky) stop(id);
   else arm(id, ttl);
-  if (kind === "error" && o.record !== false)
-    pushNotification({ kind: "error", worktree: "", text: o.text.split("\n")[0] });
+  // a warning that stays (a conflict, a failed integration) leaves a trace too, in case newer toasts push it out
+  if ((kind === "error" || (kind === "warn" && sticky)) && o.record !== false)
+    pushNotification({ kind: kind === "error" ? "error" : "attention", worktree: "", text: o.text.split("\n")[0] });
   return id;
 };
 

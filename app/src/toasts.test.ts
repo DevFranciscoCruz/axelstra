@@ -62,6 +62,26 @@ describe("toasts", () => {
     expect(t.toasts()[0].text).toBe("e3");
   });
 
+  it("pushes out a plain notice before an unread error", async () => {
+    const t = await load();
+    t.toast({ text: "bad", kind: "error" });
+    t.toast({ text: "note", kind: "info" });
+    for (let i = 0; i < t.MAX_TOASTS - 1; i++) t.toast({ text: `e${i}`, kind: "error" });
+    expect(t.toasts()).toHaveLength(t.MAX_TOASTS);
+    expect(t.toasts().some((x) => x.text === "note")).toBe(false);
+    expect(t.toasts()[0].text).toBe("bad");
+  });
+
+  it("a sticky warning is also recorded in the notification center", async () => {
+    const t = await load();
+    const n = await import("./notifications");
+    const before = n.notifications().length;
+    t.toast({ text: "conflito", kind: "warn" });
+    t.toast({ text: "só aviso", kind: "warn", sticky: false });
+    expect(n.notifications().length).toBe(before + 1);
+    expect(n.notifications()[0].kind).toBe("attention");
+  });
+
   it("dismissPrefix and dismissKey close the matching ones", async () => {
     const t = await load();
     t.toast({ text: "a", kind: "error", key: "action:a" });

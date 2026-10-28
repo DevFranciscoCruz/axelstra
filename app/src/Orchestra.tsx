@@ -6,11 +6,13 @@ import { SessionInfo, SessionRes, killSession, removeSession, sessionResources, 
 import { ask } from "./Confirm";
 import { Modal } from "./Modal";
 import { Badge, Button, Input } from "./ui";
-import { dismissExited, openSession, refreshSessions, sessionState, sessions, setShowOrchestra } from "./store";
+import { dismissExited, openSession, refreshSessions, sessionState, sessions, setError, setShowOrchestra, showNotice } from "./store";
+import { errorText } from "./appError";
 import { fmtFixed } from "./i18n";
 
 const baseName = (p?: string) => (p ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
 const STATE = P.orchestra.state;
+const MAX_WORKERS = 64;
 
 /** coordinators and the workers they started, with their state: the picture behind /axelstration */
 export function Orchestra() {
@@ -65,17 +67,34 @@ export function Orchestra() {
   };
   const stop = async (s: SessionInfo) => {
     if (!(await ask(P.orchestra.stopAsk(s.label ?? P.orchestra.session(s.id)), { title: P.orchestra.stopTitle, kind: "warning", okLabel: P.orchestra.stop, cancelLabel: P.orchestra.cancel }))) return;
-    if (s.running) await killSession(s.id).catch(() => 0);
-    await removeSession(s.id).catch(() => 0);
-    dismissExited(s.id);
+    try {
+      if (s.running) await killSession(s.id);
+      await removeSession(s.id);
+      dismissExited(s.id);
+    } catch (e) {
+      // a stop that failed must not look like it worked: the row stays
+      setError(errorText(e));
+    }
     await refreshSessions();
   };
+  // Enter and the blur that follows it must apply once; a value outside 1..64 is clamped, an unchanged one is not sent
+  let applying = false;
   const applyMax = async () => {
-    const n = max();
-    if (n === null || n < 1) return;
-    await workerLimits(n).catch(() => 0);
-    setMax(null);
-    void refetch();
+    const raw = max();
+    if (raw === null || !Number.isFinite(raw) || applying) return;
+    const n = Math.min(MAX_WORKERS, Math.max(1, Math.round(raw)));
+    if (n === (limits()?.max_workers ?? null)) return void setMax(null);
+    applying = true;
+    try {
+      await workerLimits(n);
+      showNotice(P.flows.limitSet(n));
+      setMax(null);
+      void refetch();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      applying = false;
+    }
   };
 
   const Row = (props: { s: SessionInfo; depth: number }) => {
