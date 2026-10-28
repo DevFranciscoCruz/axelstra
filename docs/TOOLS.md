@@ -71,3 +71,22 @@ Set them yourself only to reproduce a release build: `AXELSTRA_GIT_SHA=abc1234 A
 - `deny.toml`: cargo-deny policy (advisories, licenses, bans, sources). CI runs `cargo deny check`. Locally:
   `cargo install cargo-deny --locked --version 0.20.2 && cargo deny check`.
 - `.github/dependabot.yml`: weekly updates for cargo, npm (`app/`) and GitHub Actions.
+
+## Dev/test profile (measured)
+
+`[profile.dev]` in the root `Cargo.toml` has `debug = "line-tables-only"` and `[profile.dev.package."*"]` has `debug = false`
+(`cargo test` uses the dev profile). Release is untouched. Measured with `tools/measure-build.mjs --jobs 2`, one run each, from an
+empty target dir, Windows MSVC, rustc 1.98.1:
+
+| step | before | after |
+|---|---|---|
+| `cargo test --no-run` (core, daemon, cli): time | 174.1 s | 91.9 s |
+| same: peak memory (process tree) | 2.06 GB | 1.18 GB |
+| same: target dir | 8.31 GB | 3.78 GB |
+| `cargo check --workspace`: time | 196.7 s | 225.9 s (noise: check emits no debuginfo; a shared machine) |
+| same: peak memory / target dir | 2.42 GB / 1.53 GB | 2.46 GB / 1.52 GB |
+
+Not applied: `split-debuginfo` (MSVC always writes a separate .pdb; the setting only matters on macOS/Linux, where the new
+default is already good), and `rust-lld`/`lld-link` as linker (it would change the link of the statically linked sherpa-onnx
+and is not safely optional across contributors' toolchains; not measured). Cost: a debugger shows no local variables in
+dependencies and no types in our crates; backtraces and panics keep file:line. Use `CARGO_PROFILE_DEV_DEBUG=2` to get full debuginfo for a session.
