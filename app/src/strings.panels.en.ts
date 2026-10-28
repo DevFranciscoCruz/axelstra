@@ -853,7 +853,7 @@ The branch has to be pushed to the remote.`,
     cooldown: "Pause between fixes (minutes)",
     perHour: "Maximum fixes per hour",
     limitsNote: (poll: number) =>
-      `Checks the CI of each worktree with a working agent every ${poll} s. A commit only triggers one fix.`,
+      `Checks the CI of each worktree with a working agent when something changes (git, window focus, a session ending) and, while the CI runs, every ${poll} s. A commit only triggers one fix.`,
     recent: "Recent fixes",
     none: "No task launched yet.",
     confirmTitle: "Turn on automatic CI fixing?",

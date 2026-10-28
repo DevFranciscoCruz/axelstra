@@ -61,7 +61,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let out = tokio::task::block_in_place(|| -> Result<Value> {
                 use crate::checks;
                 Ok(if req.method == "git.checks" {
-                    serde_json::to_value(checks::status(&wt))?
+                    let st = checks::status(&wt);
+                    // the daemon keeps this worktree's PR fresh from now on, and tells the other panels if it moved
+                    super::triggers::seen_by_app(reg, &wt, &st);
+                    serde_json::to_value(&st)?
                 } else {
                     json!({"output": checks::merge(&wt, p["auto"].as_bool().unwrap_or(false), p["delete_branch"].as_bool().unwrap_or(false))?})
                 })
@@ -70,6 +73,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 sweep_soon(reg);
             }
             out
+        }
+        // the window got focus: PRs that GitHub changed meanwhile raise no local event, so look at the stale ones once
+        "gh.pr_refresh" => {
+            crate::prwatch::WAKE.bump();
+            Ok(json!({}))
         }
         "gh.list" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;

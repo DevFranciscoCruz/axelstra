@@ -93,6 +93,7 @@ fn agent_role_cannot_use_app_only_calls() {
         ("triggers.events", json!({})),
         // it types text into other agents
         ("gh.send_comment", json!({"worktree": "x", "project": "x", "number": 1, "comment_id": 1})),
+        ("gh.pr_refresh", json!({})),
         ("budget.check", json!({})),
         ("budget.events", json!({})),
         ("settings.set", json!({"budgets": {}})),

@@ -31,6 +31,7 @@ pub mod ports;
 pub mod projects;
 pub mod prompts;
 pub mod proto;
+pub mod prwatch;
 pub mod publish;
 pub mod rebase;
 pub mod remote;

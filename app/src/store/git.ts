@@ -8,6 +8,7 @@ import {
   ghListBg,
   gitChanges,
   listProjects,
+  prRefresh,
   worktreeOverview,
   worktreeStatus,
 } from "../api";
@@ -38,9 +39,22 @@ export const refreshOverview = () =>
   );
 let overviewUsers = 0;
 let overviewLive: Live | undefined;
+let prLive: Live | undefined;
+/** the window got focus: the daemon looks once at the PRs it follows (GitHub changes raise no local event); `pr.changed` follows if one moved */
+const askPrRefresh = () => void Promise.resolve(prRefresh()).catch(() => undefined);
 /** call from a component that shows `overview`; returns the function that stops watching (the subscription ends with the last one) */
 export const watchOverview = () => {
   if (overviewUsers++ === 0) {
+    // a PR moved: the PR badges of the sidebar are read again (their 3 minute limit only protects gh from bursts)
+    prLive = createLive(
+      () => {
+        lastPrs = 0;
+        return refreshPrs(projects());
+      },
+      ["pr.changed"],
+      { onFocus: false },
+    );
+    if (typeof window !== "undefined") window.addEventListener("focus", askPrRefresh);
     // the counts move with worktrees, sessions, the dispatcher, the janitor and PRs: the daemon says so
     overviewLive = createLive(refreshOverview, [
       "projects.changed",
@@ -52,7 +66,11 @@ export const watchOverview = () => {
     overviewLive.now();
   }
   return () => {
-    if (--overviewUsers === 0) overviewLive?.stop();
+    if (--overviewUsers === 0) {
+      overviewLive?.stop();
+      prLive?.stop();
+      if (typeof window !== "undefined") window.removeEventListener("focus", askPrRefresh);
+    }
   };
 };
 

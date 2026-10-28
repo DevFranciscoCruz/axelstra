@@ -582,7 +582,9 @@ export type EnvPreview = { has_file: boolean; files: string[]; skipped: EnvSkip[
 export const projectEnvPreview = (project: string) => call<EnvPreview>("project.env_preview", { project });
 export type GhItem = { number: number; title: string; author: string; url: string; state: string; draft: boolean; branch: string; checks: string; review: string };
 export const ghList = (project: string, kind: "pr" | "issue") => call<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
-export const ghListBg = (project: string, kind: "pr" | "issue") => callBg<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
+/** the window got focus: the daemon looks once at the PRs it follows that GitHub may have changed (`pr.changed` if one did) */
+export const prRefresh = () => callBg<Record<string, never>>("gh.pr_refresh", {});
+export const ghListBg =(project: string, kind: "pr" | "issue") => callBg<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
 /** An inline review comment of a PR. Every text field was written by a reviewer: untrusted. */
 export type ReviewComment = { id: number; path: string; line: number; body: string; author: string; diff_hunk: string; created: string; url: string; in_reply_to: number; outdated: boolean; pr: number };
 /** A review as a whole (verdict plus its text); reviews without text are left out by the daemon. */

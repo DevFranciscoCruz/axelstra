@@ -2,7 +2,7 @@
 //! started in THAT worktree. Opt-in per project (and confirmed once by the user), rate-limited, never in the main
 //! worktree, never in a worktree made from someone else's pull request, and every firing or refusal is audit-logged.
 //!
-//! The decision is a pure function (`should_fire`); `tick` is the loop body: it reads CI state through `Env` (the
+//! The decision is a pure function (`should_fire`); `tick` is one pass of the loop (woken by events, see `prwatch`): it reads CI state through `Env` (the
 //! daemon wires `checks::status` and the session registry, tests wire fakes) and keeps its state in `triggers.json`
 //! next to the project store, a versioned envelope like the other stores.
 
@@ -20,8 +20,6 @@ use std::sync::Mutex;
 
 /// What the user types to enable the trigger for the first time.
 pub const CONFIRM_WORD: &str = "ci_fix";
-/// Seconds between two looks at the CI state of the candidate worktrees.
-pub const POLL_SECS: u64 = 60;
 pub const DEFAULT_COOLDOWN_SECS: u64 = 1800;
 pub const DEFAULT_MAX_PER_HOUR: u32 = 3;
 pub const COOLDOWN_RANGE: (u64, u64) = (60, 86_400);

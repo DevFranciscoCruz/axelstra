@@ -6,6 +6,7 @@ const daemon = vi.hoisted(() => ({
   sessions: [] as unknown[],
   projects: [] as unknown[],
   overview: 0,
+  ghList: 0,
   failSessions: null as unknown,
   failRename: false,
   subs: new Map<string, Set<() => void>>(),
@@ -31,7 +32,11 @@ vi.mock("./api", () => ({
     daemon.overview++;
     return [];
   },
-  ghListBg: async () => [],
+  ghListBg: async () => {
+    daemon.ghList++;
+    return [];
+  },
+  prRefresh: async () => ({}),
   gitChanges: async () => null,
   flowTasks: async () => [],
   callBg: async () => ({}),
@@ -68,6 +73,7 @@ beforeEach(() => {
   daemon.sessions = [];
   daemon.projects = [];
   daemon.overview = 0;
+  daemon.ghList = 0;
   daemon.subs.clear();
   daemon.failSessions = null;
   daemon.failRename = false;
@@ -263,6 +269,28 @@ describe("shared overview refresh (event driven)", () => {
     emit("projects.changed");
     await vi.advanceTimersByTimeAsync(60_000);
     expect(daemon.overview).toBe(mid + 1);
+  });
+});
+
+describe("pr.changed (event driven)", () => {
+  it("reads the PR badges again at once, past their 3 minute limit, and stops with the last watcher", async () => {
+    vi.useFakeTimers();
+    const s = await load();
+    s.setProjects([{ id: "p", name: "p", path: "C:/p", remote: true, worktrees: [] } as unknown as Project]);
+    const stop = s.watchOverview();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(daemon.ghList).toBe(0);
+    emit("pr.changed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(daemon.ghList).toBe(1);
+    emit("pr.changed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(daemon.ghList).toBe(2);
+    expect(vi.getTimerCount()).toBe(0);
+    stop();
+    emit("pr.changed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(daemon.ghList).toBe(2);
   });
 });
 

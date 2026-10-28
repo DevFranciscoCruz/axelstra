@@ -15,6 +15,7 @@ use axelstra_core::git;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -168,7 +169,16 @@ pub struct Env<'a> {
 /// How long a worktree the user made by hand must have had no session before the sweep may remove it.
 pub const MANUAL_QUIET_SECS: u64 = 10 * 60;
 
-fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>) -> Result<()> {
+/// Whether the last sweep left a worktree with work of its own that no branch holds yet: only then can something on
+/// GitHub (a PR merged there) make it removable with no local event, so only then does the janitor keep its one
+/// deadline (`JanitorTiming::slow`). With nothing waiting the janitor sleeps until an event.
+static AWAITING_REMOTE: AtomicBool = AtomicBool::new(false);
+
+pub fn awaiting_remote() -> bool {
+    AWAITING_REMOTE.load(Ordering::SeqCst)
+}
+
+fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>, waiting: &mut bool) -> Result<()> {
     let busy = env.busy;
     let repo = Path::new(&p.path);
     let default = git::default_branch(repo);
@@ -236,6 +246,7 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>) -> Res
             }
         }
         if dirty {
+            *waiting |= has_own_commits(repo, &branch);
             continue;
         }
         if !fetched {
@@ -253,6 +264,7 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>) -> Res
             .filter(|b| integrable_branch(b) && *b != branch && !gone.contains(b))
             .collect();
         let Some(why) = merged_reason_in(repo, &branch, &default, &others) else {
+            *waiting |= has_own_commits(repo, &branch);
             // nothing of its own and nothing to lose: an empty worktree nobody works in goes away after a few minutes
             // only an `auto` one: a manual or unmarked one may just be waiting for its first commit, and leaves only by
             // the user's button
@@ -323,10 +335,14 @@ pub fn sweep_with(store: &Path, env: &Env, dry: bool) -> Vec<Value> {
     let busy = env.busy;
     let mut out = vec![];
     let all = projects::load(store);
+    let mut waiting = false;
     for p in &all {
-        let _ = sweep_project(p, env, dry, &mut out);
+        let _ = sweep_project(p, env, dry, &mut out, &mut waiting);
         crate::cleanup::stale_branches(p, dry, &mut out);
         crate::cleanup::prune_entries(p, dry, &mut out);
+    }
+    if !dry {
+        AWAITING_REMOTE.store(waiting, Ordering::SeqCst);
     }
     crate::cleanup::orphan_dirs(&all, busy, dry, &mut out);
     if let Some(dir) = store.parent() {
@@ -382,6 +398,41 @@ mod tests {
         g(&["merge", "-q", "--ff-only", "ax/local"]);
         assert_eq!(merged_reason(&dir, "ax/local", "main").as_deref(), Some("already in local main"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The remote deadline exists only while a worktree with commits of its own waits to be integrated.
+    #[test]
+    fn the_janitor_waits_for_github_only_while_work_is_unintegrated() {
+        let root = std::env::temp_dir().join(format!("axl-await-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let root = git::canon(&root).unwrap();
+        let repo = root.join("proj");
+        std::fs::create_dir_all(&repo).unwrap();
+        let g = |dir: &Path, args: &[&str]| assert!(git::run(dir, args).unwrap().ok, "git {args:?}");
+        let commit = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"];
+        g(&repo, &["init", "-q", "-b", "main"]);
+        g(&repo, &commit);
+        let store = root.join("projects.json");
+        let p = projects::add(&store, &repo.to_string_lossy()).unwrap();
+        let env = Env { busy: &|_| false, close: &|_| vec![], touched: &|_| false };
+        let look = |p: &Project| {
+            let mut waiting = false;
+            sweep_project(p, &env, true, &mut vec![], &mut waiting).unwrap();
+            waiting
+        };
+        // nothing yet
+        assert!(!look(&p));
+        // a fresh worktree with no commit of its own is not work waiting for anything
+        let wt = projects::worktree_create(&p, "w").unwrap();
+        assert!(!look(&p));
+        // committed, not merged: waits (a PR could be merged on GitHub with no local event)
+        g(Path::new(&wt.path), &commit);
+        assert!(look(&p));
+        // merged: it is for removal now, nothing to wait for
+        g(&repo, &["merge", "-q", "--ff-only", "ax/w"]);
+        assert!(!look(&p));
+        let _ = git::remove_tree(&root);
     }
 
     #[test]

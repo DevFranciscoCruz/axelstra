@@ -859,7 +859,7 @@ O branch tem de estar enviado para o remoto.`,
     cooldown: "Pausa entre correções (minutos)",
     perHour: "Máximo de correções por hora",
     limitsNote: (poll: number) =>
-      `Verifica o CI de cada worktree com um agente a trabalhar a cada ${poll} s. Um commit só gera uma correção.`,
+      `Verifica o CI de cada worktree com um agente a trabalhar quando algo muda (git, foco da janela, fim de uma sessão) e, enquanto o CI corre, a cada ${poll} s. Um commit só gera uma correção.`,
     recent: "Últimas correções",
     none: "Ainda não lançou nenhuma tarefa.",
     confirmTitle: "Ligar a correção automática do CI?",
