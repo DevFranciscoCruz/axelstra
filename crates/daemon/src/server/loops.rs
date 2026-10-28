@@ -450,8 +450,12 @@ fn usage_kinds_of(ev: &notify::Event, roots: &[UsageRoot]) -> UsageKinds {
     }
     for p in &ev.paths {
         for r in roots {
-            if p.starts_with(&r.dir) && (!r.json_only || p.extension().is_some_and(|x| x == "json")) {
-                k.merge(r.kinds);
+            if !r.json_only || p.extension().is_some_and(|x| x == "json") {
+                // FSEvents (macOS) reports canonical paths (`/private/var/...` for `/var/...`), so a root spelled
+                // through a symlink only matches by its resolved form
+                if p.starts_with(&r.dir) || r.dir.canonicalize().is_ok_and(|c| p.starts_with(c)) {
+                    k.merge(r.kinds);
+                }
             }
         }
     }
