@@ -604,6 +604,43 @@ pub fn logo_data_url(repo: &Path) -> Option<String> {
     None
 }
 
+const LOGO_HIT_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+const LOGO_MISS_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+type LogoCache = std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, Option<String>)>>;
+
+fn logo_cache() -> &'static LogoCache {
+    static C: std::sync::OnceLock<LogoCache> = std::sync::OnceLock::new();
+    C.get_or_init(Default::default)
+}
+
+/// `logo_data_url` with a memory cache that also remembers "no logo" (shorter TTL), so the sidebar's repeated asks
+/// do not walk the disk each time.
+pub fn logo_cached(repo: &Path) -> Option<String> {
+    let key = axelstra_core::paths::norm(&repo.to_string_lossy());
+    {
+        let c = logo_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, v)) = c.get(&key) {
+            if at.elapsed() < if v.is_some() { LOGO_HIT_TTL } else { LOGO_MISS_TTL } {
+                return v.clone();
+            }
+        }
+    }
+    let v = logo_data_url(repo);
+    let mut c = logo_cache().lock().unwrap_or_else(|e| e.into_inner());
+    if c.len() > 256 {
+        c.clear();
+    }
+    c.insert(key, (std::time::Instant::now(), v.clone()));
+    v
+}
+
+/// Drops every cached logo answer (a repo's logo file changed; tests).
+#[doc(hidden)]
+pub fn forget_logos() {
+    logo_cache().lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
 #[cfg(test)]
 mod slug_tests {
     use super::slug;

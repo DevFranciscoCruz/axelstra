@@ -515,6 +515,10 @@ async fn run_lane(
                 }
                 return work.await.unwrap_or_else(|_| Err(internal_error(&req.method)));
             }
+            if req.method == "project.logo" {
+                // no logo for now: the caller shows its fallback, a repeat joins the run or hits the cache
+                return Ok(json!({"data_url": null, "loading": true}));
+            }
             Ok(json!({"loading": true}))
         }
     }
