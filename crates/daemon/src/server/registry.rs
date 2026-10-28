@@ -109,7 +109,8 @@ pub(super) struct JanitorTiming {
     pub(super) quiet: Duration,
     /// kicks closer together than this make one sweep
     pub(super) gap: Duration,
-    /// the slow tick: a PR merged on GitHub raises no local event
+    /// the one remote deadline, set only while a worktree waits to be integrated: a PR merged on GitHub raises no local
+    /// event (a fetch that brings the merge does: see `prwatch::RefWatch`)
     pub(super) slow: Duration,
 }
 
@@ -124,13 +125,19 @@ impl Default for JanitorTiming {
 }
 
 /// How long the janitor sleeps when no event wakes it: until the earliest moment a worktree stops counting as touched
-/// (the daemon being too new to know, or a session that left `elapsed` ago), never longer than the slow tick.
-pub(super) fn janitor_wake(t: &JanitorTiming, started: Duration, left: impl Iterator<Item = Duration>) -> Duration {
-    std::iter::once(started)
+/// (the daemon being too new to know, or a session that left `elapsed` ago), or, only while a worktree with work of its
+/// own waits to be integrated (`awaiting`: a PR merged on GitHub raises no local event), the one remote deadline `slow`.
+/// `None`: nothing is due, it sleeps until an event.
+pub(super) fn janitor_wake(t: &JanitorTiming, started: Duration, left: impl Iterator<Item = Duration>, awaiting: bool) -> Option<Duration> {
+    let quiet = std::iter::once(started)
         .chain(left)
         .filter_map(|elapsed| t.quiet.checked_sub(elapsed).filter(|d| !d.is_zero()))
         .min()
-        .map_or(t.slow, |d| (d + Duration::from_millis(20)).min(t.slow))
+        .map(|d| d + Duration::from_millis(20));
+    match (quiet, awaiting.then_some(t.slow)) {
+        (Some(q), Some(s)) => Some(q.min(s)),
+        (q, s) => q.or(s),
+    }
 }
 
 /// Whether a permission mode name (as an agent reports it) means no prompts.
@@ -197,6 +204,12 @@ impl Pulse {
     }
 }
 
+/// How a closed session without a label is named inside a coded message ("session {sessions} closed"): the word
+/// "session" belongs to the message text in each language, so the daemon adds only the number.
+pub(super) fn unnamed_label(id: u32) -> String {
+    format!("#{id}")
+}
+
 impl Registry {
     /// Sends `{"event": name}` to every watching connection. One that stopped reading misses it rather than block us.
     pub(super) fn broadcast(&self, name: &str) {
@@ -204,12 +217,6 @@ impl Registry {
     }
 
     /// Same, for an event that carries data (`session.exited`).
-/// How a closed session without a label is named inside a coded message ("session {sessions} closed"): the word
-/// "session" belongs to the message text in each language, so the daemon adds only the number.
-pub(super) fn unnamed_label(id: u32) -> String {
-    format!("#{id}")
-}
-
     pub(super) fn broadcast_event(&self, ev: Value) {
         let frame = encode(EVENT, ev.to_string().as_bytes());
         self.watchers.lock_recover().retain(|(stop, tx)| {
@@ -582,10 +589,10 @@ pub(super) fn unnamed_label(id: u32) -> String {
 
     /// When the janitor must look again without any event (see `janitor_wake`). Forgets activity notes that no longer
     /// matter.
-    pub(super) fn next_janitor_wake(&self) -> Duration {
+    pub(super) fn next_janitor_wake(&self) -> Option<Duration> {
         let mut activity = self.activity.lock_recover();
         activity.retain(|_, at| at.elapsed() < self.timing.quiet);
-        janitor_wake(&self.timing, self.started.elapsed(), activity.values().map(Instant::elapsed))
+        janitor_wake(&self.timing, self.started.elapsed(), activity.values().map(Instant::elapsed), crate::janitor::awaiting_remote())
     }
 
     /// Closes every session of this worktree (agents, shells, whatever they started: the whole process tree dies) and

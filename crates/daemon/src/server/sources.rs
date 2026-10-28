@@ -7,10 +7,10 @@ use axelstra_core::job::Job;
 use axelstra_core::msg::Coded;
 use axelstra_core::{coded, git, msg, paths};
 use std::collections::HashSet;
-use std::sync::Condvar;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Condvar;
 
 impl Registry {
     /// The clone `id` moved (progress, or its end): the app reads `project.clone_status` then instead of asking on a timer.

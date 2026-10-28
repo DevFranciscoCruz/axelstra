@@ -567,7 +567,9 @@ pub(super) fn spawn_data_watch(reg: Arc<Registry>) {
 /// when a session ends (its worktree is no longer busy), after a merge, a `done`, a finished flow or orchestration.
 /// Kicks that come close together make one sweep, at most one a minute. Besides the events there is one timer: the
 /// earliest moment a hand-made worktree stops counting as touched (`MANUAL_QUIET_SECS` after its last session left),
-/// and a slow tick (30 min) for what raises no local event, like a PR merged on GitHub. `janitor.off` turns it off.
+/// and, only while a worktree with its own commits waits to be integrated, one remote deadline (30 min) for what raises
+/// no local event, like a PR merged on GitHub (a fetch that brings the merge, and the PR watcher seeing a PR merged,
+/// wake it by event: `prwatch`). `janitor.off` turns it off.
 /// Wakes the janitor again after the backoff delay of attempt `attempts` (one waiting timer at a time).
 pub(super) fn queue_janitor_retry(reg: &Arc<Registry>, attempts: u32) {
     if RETRY_QUEUED.swap(true, Ordering::SeqCst) {
@@ -589,8 +591,9 @@ pub(super) fn spawn_janitor(reg: Arc<Registry>) {
         let mut last: Option<Instant> = None;
         let mut attempts = 0u32;
         loop {
-            // events wake it; the timer is the next moment something becomes removable by time alone, or the slow tick
-            seen = reg.janitor.wait(seen, Some(reg.next_janitor_wake()));
+            // events wake it; the timer is the next moment something becomes removable by time alone, or (only while a
+            // worktree waits for its PR to be merged on GitHub) the one remote deadline; with neither, no timer
+            seen = reg.janitor.wait(seen, reg.next_janitor_wake());
             if let Some(left) = last.map(|l| gap.saturating_sub(l.elapsed())).filter(|d| !d.is_zero()) {
                 // the kicks of the next minute are folded into this sweep
                 std::thread::sleep(left);

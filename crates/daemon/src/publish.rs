@@ -210,7 +210,9 @@ fn run_agent(prompt: &str) -> Result<String> {
     // stragglers of the finished tree must not keep the pipes open
     job.kill();
     // the pipes close with the child; a straggler holding them is not waited for
-    let join = |rx: Receiver<Vec<u8>>| String::from_utf8_lossy(&rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap_or_default()).into_owned();
+    let join = |rx: Receiver<Vec<u8>>| {
+        String::from_utf8_lossy(&rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap_or_default()).into_owned()
+    };
     let (out, err) = (join(out_rx), join(err_rx));
     if !status.success() {
         return Err(coded!("publish.agent_failed", "claude failed: {detail}", detail = cap_chars(err.trim(), 300)));
