@@ -887,7 +887,7 @@ export type BudgetEvent = { worktree: string; period: "daily" | "weekly"; level:
 export const budgetStatus = (worktrees: string[]) => callBg<{ budgets: BudgetRow[] }>("budget.status", { worktrees })
   .catch((e) => (isUnknownMethod(e) ? { budgets: [] as BudgetRow[] } : Promise.reject(e)))
   .then((r) => r.budgets ?? []);
-/** Evaluates the limits now (the daemon also does it every two minutes); the rows after the check. */
+/** Evaluates the limits now (the daemon also does it on usage and limit changes); the rows after the check. */
 export const budgetCheck = () => callOr<{ budgets: BudgetRow[] }>("budget.check", {}, { budgets: [] }).then((r) => r.budgets ?? []);
 /** Level crossings since the last call (take semantics); an older daemon has none. */
 export const budgetEvents = () => callOr<{ events: BudgetEvent[] }>("budget.events", {}, { events: [] }).then((r) => r.events ?? []);

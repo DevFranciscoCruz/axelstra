@@ -68,7 +68,7 @@ worker prompt) and the axelstration skill tell agents to use it instead of stopp
 `PROTO` in `crates/daemon/src/proto.rs` is the app <-> daemon contract version. A daemon outlives
 app updates, and the app only restarts a daemon older than `PROTO`. Bump it (and add the new method
 to the doc comment above it) whenever the app starts calling a daemon method an old daemon lacks.
-Do not bump it for changes an old daemon already tolerates. Current: 28 (events `clone.changed {id}` and `docker.changed {}` on the watch stream, the latter from a lazy `docker events` child; no new method), before that 27 (events `kanban.changed {project}`, `orch.changed {run, project}`, `automations.changed` on the watch stream; no new method), before that 26 (files.resolve_path, files.path_action), before that 25 (project.remove_preview and `mode` in project.remove), before that 24 (files.resolve_html), before that 23 (project.discover, project.add_discovered, project.clone, project.clone_status, project.clone_cancel,
+Do not bump it for changes an old daemon already tolerates. Current: 29 (`gh.pr_refresh`; events `pr.changed {worktree, number, state, ci}`, `usage.changed`, `limits.changed`, `resources.changed` now emitted), before that 28 (events `clone.changed {id}` and `docker.changed {}` on the watch stream, the latter from a lazy `docker events` child; no new method), before that 27 (events `kanban.changed {project}`, `orch.changed {run, project}`, `automations.changed` on the watch stream; no new method), before that 26 (files.resolve_path, files.path_action), before that 25 (project.remove_preview and `mode` in project.remove), before that 24 (files.resolve_html), before that 23 (project.discover, project.add_discovered, project.clone, project.clone_status, project.clone_cancel,
 project.init, gh.repos, wsl_distros/ssh_hosts in host.info, notices.take, audit.list, backup.export,
 backup.restore, orch.trust_info, env.tools, janitor.events, workspace.export, workspace.import_preview,
 workspace.import, host.info, host.browse, stalled in session.list, stall_minutes, and the watch-stream events janitor.events, triggers.events, budget.events, dispatch.changed).
@@ -110,10 +110,11 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   show as `Tarefa N` under `main`), not edit code or run heavy builds itself (only integrate commits and run the final
   `axelstra lock verify`), and `done` with commits, verified and not verified. Even a trivial request goes to one worker.
 - The janitor (`crates/daemon/src/janitor.rs`) is woken by events (daemon start, a session ending, a few seconds after each
-  `done` or `git.merge` via `sweep_soon` in `server.rs`, a finished flow or run, a retry backoff) and by one timer: the
+  `done` or `git.merge` via `sweep_soon` in `server.rs`, a finished flow or run, a retry backoff) and by timers: the
   earliest moment a hand-made worktree stops counting as touched (`MANUAL_QUIET_SECS` after the daemon started or after
-  its last session left; `Registry::next_janitor_wake`, `JanitorTiming`), plus a slow tick of 30 min for what raises no
-  local event (a PR merged on GitHub). No fixed tight poll; kicks closer than a minute make one sweep. A worktree goes when its `ax/*` branch tip is inside the default branch or
+  its last session left; `Registry::next_janitor_wake`, `JanitorTiming`), plus one remote deadline (30 min) that exists
+  only while the last sweep found a managed worktree with own commits not yet integrated (`janitor::awaiting_remote`; a
+  remote ref change bumps it). No slow tick and no fixed tight poll; kicks closer than a minute make one sweep. A worktree goes when its `ax/*` branch tip is inside the default branch or
   inside another live `ax/*` branch (or its PR was merged), it has no changes, and no session works in it. A session
   that reported with `done` and is quiet for 10 s is not busy. Removals are queued as events (`janitor.events`) that
   the app shows as a toast and a notification-center entry.
@@ -145,6 +146,30 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   both worktrees). Dirty worktrees never go. Old `orch/*` worktrees (no mark) are `manual` by `migrate_marks`: they
   leave only through real integration (`merged_reason`), never because they are empty. `worktree.sweep`, `stale_branches`
   and `project.remove` cover `orch/*` and `orch-task/*` under the same rules.
+
+## Events, not timers
+
+- **PR state and triggers.** The CI-fix trigger and PR state (`prwatch.rs`, `server/triggers.rs`) run on events, not a period: a
+  ref moving in a project repo (`RefWatch`: `.git`, `FETCH_HEAD`, `packed-refs`, `refs/**`), the janitor pulse (done, `git.merge`,
+  session exit, flow end), a change of the running-agent set, `gh.pr_refresh` (app window focus) and the app's own `git.checks`.
+  Each wake re-reads (gh) only PRs whose last look is older than 10 s (5 min for merged/closed). The only timer is ONE computed
+  deadline, the earliest due look: 60 s while an open PR's CI is pending, 15 min while open and settled, none otherwise. A PR that
+  differs from the last look broadcasts `pr.changed` (the first look is silent); one no longer open also bumps the janitor.
+  `gh.pr_refresh` is in `agent_forbidden`.
+- **Usage, limits, resources.** `server/loops.rs` `watch_usage` (notify on `status/`, `~/.claude/projects`, `~/.codex/sessions`,
+  `~/.gemini/tmp`, debounced) pushes `usage.changed`/`limits.changed` and wakes the budget loop (no 120 s timer).
+  `resources.changed` rides with `session.changed` (no OS event exists for process RSS/CPU or child process spawn).
+- **Threads.** Watcher threads sleep until an OS event, the debounce or `watcher::wake_stopped()`; any site that sets a watch stop
+  flag must call it. `session.subscribe` has no heartbeat: streams end via `session::wake_streams` (closed connection or writer
+  gone). The pump thread lingers until the next output because the pty `Receiver` cannot be woken.
+- **Peer and messages.** `origin_of` validates the peer by pid plus process start time (`Peer` in `origin.rs`). `msg.send`
+  broadcasts `session.changed` itself, so `ask`/`wait` never depend on the monitor tuple.
+- **Sleeps kept on purpose.** The rest are bounded backoffs on external OS resources: AV/indexer rename locks (`fsops.rs`,
+  `store.rs`), the git handle of a killed process (`git.rs`), cleanup in `sources.rs`, Windows `PeekRead` 1-10 ms (`client.rs`; the
+  sync pipe has no readiness event), synthetic input settle (`computer.rs`), the runner trust menu (`runner.rs`), the docker events
+  reattach backoff (`containers.rs`), the `daemon.shutdown` 300 ms flush (`misc.rs`; no ack exists), the pipe-appearance wait on
+  daemon start (Tauri `main.rs`; no OS event) and the diagnostics `try_wait` 300 ms. Debounces (`sweep_soon`, `SAVE_DEBOUNCE`,
+  `data_watch`, the budget 500 ms coalesce) are coalescing, not polling.
 
 ## Removing a project
 
