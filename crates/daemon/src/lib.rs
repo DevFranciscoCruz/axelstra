@@ -3,6 +3,7 @@ pub mod audit;
 pub mod automations;
 pub mod backup;
 pub mod budget;
+pub mod buildenv;
 pub mod changes;
 pub mod checks;
 pub mod cleanup;
