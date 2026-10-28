@@ -126,6 +126,19 @@ export const pt = {
   "store.empty_unmoved":
     "{path} estava inutilizável ({detail}). Não foi possível pô-lo de lado e o Axelstra arrancou sem esses dados.",
   "store.projects_unavailable": "Os projetos estão indisponíveis.\n({detail})",
+  // localfs: the explorer's local file access, served by the host without the daemon
+  "localfs.not_local": "Esta pasta não é local: {path}",
+  "localfs.outside_roots": "Fora dos projetos e worktrees registados: {path}",
+  "localfs.invalid_path": "Caminho inválido: {path}",
+  "localfs.reserved_name": "Nome reservado do Windows: {path}",
+  "localfs.permission_denied": "Sem permissão: {path}",
+  "localfs.not_found": "Não encontrado (apagado ou movido?): {path}",
+  "localfs.not_dir": "Não é uma pasta: {path}",
+  "localfs.too_big": "O ficheiro tem mais de {mb} MB.",
+  "localfs.cancelled": "Cancelado.",
+  "localfs.io_failed": "Não foi possível ler {path}.
+({detail})",
+  "localfs.invalid_action": "Ação desconhecida: {action}",
 } as const satisfies Record<string, string>;
 
 export const en: Widen<typeof pt> = {
@@ -242,6 +255,19 @@ export const en: Widen<typeof pt> = {
   "store.empty_unmoved":
     "{path} was unusable ({detail}). It could not be moved aside and Axelstra started without that data.",
   "store.projects_unavailable": "Projects are unavailable.\n({detail})",
+  // localfs: the explorer's local file access, served by the host without the daemon
+  "localfs.not_local": "This folder is not local: {path}",
+  "localfs.outside_roots": "Outside the registered projects and worktrees: {path}",
+  "localfs.invalid_path": "Invalid path: {path}",
+  "localfs.reserved_name": "Reserved Windows name: {path}",
+  "localfs.permission_denied": "Permission denied: {path}",
+  "localfs.not_found": "Not found (deleted or moved?): {path}",
+  "localfs.not_dir": "Not a folder: {path}",
+  "localfs.too_big": "The file is larger than {mb} MB.",
+  "localfs.cancelled": "Cancelled.",
+  "localfs.io_failed": "Could not read {path}.
+({detail})",
+  "localfs.invalid_action": "Unknown action: {action}",
 };
 
 /** Brazilian wording: written out in full, not a fallback to pt-PT. */
@@ -361,4 +387,17 @@ export const ptBR: Widen<typeof pt> = {
   "store.empty_unmoved":
     "{path} estava inutilizável ({detail}). Não foi possível separá-lo e o Axelstra iniciou sem esses dados.",
   "store.projects_unavailable": "Os projetos estão indisponíveis.\n({detail})",
+  // localfs: the explorer's local file access, served by the host without the daemon
+  "localfs.not_local": "Esta pasta não é local: {path}",
+  "localfs.outside_roots": "Fora dos projetos e worktrees registrados: {path}",
+  "localfs.invalid_path": "Caminho inválido: {path}",
+  "localfs.reserved_name": "Nome reservado do Windows: {path}",
+  "localfs.permission_denied": "Sem permissão: {path}",
+  "localfs.not_found": "Não encontrado (apagado ou movido?): {path}",
+  "localfs.not_dir": "Não é uma pasta: {path}",
+  "localfs.too_big": "O arquivo tem mais de {mb} MB.",
+  "localfs.cancelled": "Cancelado.",
+  "localfs.io_failed": "Não foi possível ler {path}.
+({detail})",
+  "localfs.invalid_action": "Ação desconhecida: {action}",
 };

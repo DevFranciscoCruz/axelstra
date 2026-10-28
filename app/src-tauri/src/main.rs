@@ -60,6 +60,7 @@ mod debugcrt;
 mod gate;
 mod gpu;
 mod hosts;
+mod localfs;
 mod logging;
 mod native;
 mod stats;
@@ -1486,6 +1487,12 @@ fn main() {
             clipboard_read,
             clipboard_write,
             open_html_file,
+            localfs::local_fs_list,
+            localfs::local_fs_cancel,
+            localfs::local_fs_stat,
+            localfs::local_fs_read,
+            localfs::local_fs_act,
+            localfs::local_fs_watch,
             notify_session,
             app_quit,
             diagnostics,
