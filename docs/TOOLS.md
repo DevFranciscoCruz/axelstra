@@ -64,5 +64,5 @@ Set them yourself only to reproduce a release build: `AXELSTRA_GIT_SHA=abc1234 A
 ## Dependencies and policy
 
 - `deny.toml`: cargo-deny policy (advisories, licenses, bans, sources). CI runs `cargo deny check`. Locally:
-  `cargo install cargo-deny --locked --version 0.18.3 && cargo deny check`.
+  `cargo install cargo-deny --locked --version 0.20.2 && cargo deny check`.
 - `.github/dependabot.yml`: weekly updates for cargo, npm (`app/`) and GitHub Actions.
