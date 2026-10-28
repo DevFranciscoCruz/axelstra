@@ -62,7 +62,7 @@ export function HostsSection() {
                   {R.remove}
                 </Button>
                 <Show when={h.error && h.state !== "ok"}>
-                  <p class="auto-note m-0 w-full break-words text-[var(--err)]">
+                  <p class="auto-note m-0 w-full break-words text-[var(--danger)]">
                     {coded(h.error_code, h.error_params, h.error ?? "")}
                   </p>
                 </Show>

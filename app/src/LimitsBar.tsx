@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
+import { Icon } from "./Icon";
 import { createLive } from "./live";
 import { ClaudeStatus, CodexLimits, CodexWindow, agentStatus, codexLimits } from "./api";
 import { activeSession, sessions } from "./store";
@@ -20,17 +21,8 @@ export const until = (secs: number) => {
 
 const kfmt = (n: number) => (n >= 1e6 ? `${fmtNumber(n / 1e6, { maximumFractionDigits: 1 })}M` : `${Math.round(n / 1e3)}k`);
 
-const svg = { width: 14, height: 14, viewBox: "0 0 16 16", fill: "currentColor" } as const;
-const ClaudeIcon = () => (
-  <svg {...svg} class="claude-ico">
-    <path d="M8 1l1.2 4.3L13.5 3l-2.3 4.2L15 8l-3.8.8 2.3 4.2-4.3-2.3L8 15l-1.2-4.3L2.5 13l2.3-4.2L1 8l3.8-.8L2.5 3l4.3 2.3z" />
-  </svg>
-);
-const CodexIcon = () => (
-  <svg {...svg} fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round">
-    <path d="M8 1.5l5.5 3.2v6.6L8 14.5l-5.5-3.2V4.7zM8 1.5v13M2.5 4.7l11 6.6M13.5 4.7l-11 6.6" />
-  </svg>
-);
+const ClaudeIcon = () => <Icon name="claudeMark" size={14} class="claude-ico" />;
+const CodexIcon = () => <Icon name="codexMark" size={14} />;
 
 const Meter = (p: { pct?: number; label: string; tip: string }) => (
   <Show when={p.pct !== undefined}>

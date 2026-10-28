@@ -45,7 +45,7 @@ export function FolderField(props: {
           {AP.folderBrowse}
         </Button>
       </div>
-      <div id={`${props.id}-msg`} class="auto-note text-[var(--err)]" role="alert">
+      <div id={`${props.id}-msg`} class="auto-note text-[var(--danger)]" role="alert">
         <Show when={props.error || note()}>{(m) => m()}</Show>
       </div>
     </div>

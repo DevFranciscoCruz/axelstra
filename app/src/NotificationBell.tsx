@@ -1,5 +1,6 @@
 import { lazyPair } from "./i18n";
 import { For, Show, createEffect, createSignal, on, onCleanup } from "solid-js";
+import { Icon } from "./Icon";
 import { moveIndex } from "./a11y";
 import { isTopModal, popModal, pushModal } from "./modalStack";
 import {
@@ -123,16 +124,7 @@ export function NotificationBell(props: { onJump: (e: NotifEntry) => void }) {
         aria-expanded={open()}
         onClick={() => (open() ? close() : show())}
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-          <path
-            d="M8 2.2a3.8 3.8 0 0 0-3.8 3.8c0 3-1.4 4-1.4 4h10.4s-1.4-1-1.4-4A3.8 3.8 0 0 0 8 2.2zM6.6 12.6a1.5 1.5 0 0 0 2.8 0"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.3"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
+        <Icon name="bell" size={16} />
         <Show when={unreadCount() > 0}>
           <span class="notif-badge" aria-hidden="true">
             {unreadCount() > 99 ? "99+" : unreadCount()}

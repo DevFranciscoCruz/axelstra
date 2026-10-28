@@ -12,7 +12,7 @@ const TONE: Record<HostState, string> = {
   idle: "text-muted-foreground",
   connecting: "text-[var(--warn)]",
   ok: "text-[var(--ok)]",
-  lost: "text-[var(--err)]",
+  lost: "text-[var(--danger)]",
   auth: "text-[var(--warn)]",
 };
 

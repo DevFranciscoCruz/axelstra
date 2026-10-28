@@ -29,7 +29,7 @@ export function CloneProgress() {
             </Show>
           </div>
           <Show when={j().state === "failed"}>
-            <div role="alert" class="text-[var(--err)]">
+            <div role="alert" class="text-[var(--danger)]">
               {AP.cloneFailed(j().error ?? "")}
             </div>
           </Show>

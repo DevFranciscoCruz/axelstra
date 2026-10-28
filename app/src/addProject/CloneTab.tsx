@@ -64,7 +64,7 @@ export function CloneTab() {
           onInput={(e) => setUrl(e.currentTarget.value)}
         />
       </Field>
-      <div id="ap-clone-url-msg" class="auto-note text-[var(--err)]" role="alert">
+      <div id="ap-clone-url-msg" class="auto-note text-[var(--danger)]" role="alert">
         {shown("url")}
       </div>
       <FolderField
@@ -89,7 +89,7 @@ export function CloneTab() {
           }}
         />
       </Field>
-      <div id="ap-clone-name-msg" class="auto-note text-[var(--err)]" role="alert">
+      <div id="ap-clone-name-msg" class="auto-note text-[var(--danger)]" role="alert">
         {shown("name")}
       </div>
       <div class="flex gap-2">
@@ -116,7 +116,7 @@ export function CloneTab() {
           />
         </Field>
       </div>
-      <div id="ap-clone-depth-msg" class="auto-note text-[var(--err)]" role="alert">
+      <div id="ap-clone-depth-msg" class="auto-note text-[var(--danger)]" role="alert">
         {shown("depth")}
       </div>
       <Show when={dest()}>

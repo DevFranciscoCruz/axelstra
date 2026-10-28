@@ -53,7 +53,7 @@ export function GithubTab() {
           </div>
         </Match>
         <Match when={data()?.failed}>
-          <div role="alert" class="flex flex-col gap-2 text-[var(--err)]">
+          <div role="alert" class="flex flex-col gap-2 text-[var(--danger)]">
             <span>{AP.ghFailed(data()!.failed!)}</span>
             <Retry onClick={() => void refetch()} />
           </div>

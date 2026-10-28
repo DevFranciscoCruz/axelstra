@@ -57,7 +57,7 @@ export function DiscoverTab() {
           </div>
         </Match>
         <Match when={items()?.failed}>
-          <div role="alert" class="text-[var(--err)]">
+          <div role="alert" class="text-[var(--danger)]">
             {items()!.failed}
           </div>
         </Match>

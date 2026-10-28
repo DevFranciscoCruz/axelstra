@@ -176,12 +176,7 @@ export async function toggleVoice() {
   }
 }
 
-export const MicIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="6" y="1.8" width="4" height="7.4" rx="2" />
-    <path d="M3.5 7.6a4.5 4.5 0 0 0 9 0M8 12.2v2" />
-  </svg>
-);
+export const MicIcon = () => <Icon name="mic" size={16} />;
 
 /** editable transcript above the terminal; Enter sends it with a newline, Esc discards */
 export const VoiceDraft = (props: { target: number | null }) => {

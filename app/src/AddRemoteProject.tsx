@@ -228,7 +228,7 @@ export function AddRemoteForm(props: { onClose: () => void; embedded?: boolean }
         <Show when={info()}>{(h) => <HostBadge host={h().id} />}</Show>
         <Show when={failure()}>
           {(f) => (
-            <div class="flex flex-col gap-1 rounded-md border border-[var(--err)] bg-[var(--err-bg)] p-2" role="alert">
+            <div class="flex flex-col gap-1 rounded-md border border-[var(--danger)] bg-[var(--err-bg)] p-2" role="alert">
               <span>{f().text}</span>
               <details class="text-xs text-muted-foreground">
                 <summary>{R.detail}</summary>
@@ -271,7 +271,7 @@ export function AddRemoteForm(props: { onClose: () => void; embedded?: boolean }
             }}
           />
         </Field>
-        <div id="rb-path-error" class="auto-note text-[var(--err)]" role="alert">
+        <div id="rb-path-error" class="auto-note text-[var(--danger)]" role="alert">
           {pathError()}
         </div>
 

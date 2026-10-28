@@ -27,8 +27,6 @@ const KEY = "axelstra.keepAwake";
 
 const fmt = (b: number) => (b >= 1024 ** 3 ? `${fmtFixed(b / 1024 ** 3, 2)} GB` : `${Math.round(b / 1024 ** 2)} MB`);
 
-const svg = { width: 14, height: 14, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", "stroke-width": 1.3, "stroke-linecap": "round", "stroke-linejoin": "round" } as const;
-
 let popSeq = 0;
 
 /** A status bar chip that opens a popover: a button (keyboard and screen readers), also opened by hovering or keyboard focus; closed by Escape, a click outside or leaving it. */

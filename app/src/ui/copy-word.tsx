@@ -1,4 +1,5 @@
 import { Show, createSignal, onCleanup } from "solid-js";
+import { Icon } from "../Icon";
 import { clipboardWrite } from "../api";
 import { P } from "../strings.panels";
 import { Button } from "./button";
@@ -27,37 +28,8 @@ export function CopyWord(props: { text: string }) {
         title={done() ? P.confirm.copied : P.confirm.copy}
         onClick={copy}
       >
-        <Show
-          when={done()}
-          fallback={
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.4"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
-              <path d="M10.5 5.5V3.5a1.5 1.5 0 0 0-1.5-1.5H3.5A1.5 1.5 0 0 0 2 3.5V9a1.5 1.5 0 0 0 1.5 1.5h2" />
-            </svg>
-          }
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <path d="m3 8.5 3.2 3.2L13 4.5" />
-          </svg>
+        <Show when={done()} fallback={<Icon name="copy" size={14} />}>
+          <Icon name="check" size={14} />
         </Show>
       </Button>
     </div>

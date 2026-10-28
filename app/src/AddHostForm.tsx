@@ -74,7 +74,7 @@ export function AddHostForm(props: {
           onInput={(e) => setSpec(e.currentTarget.value)}
         />
       </Field>
-      <div id="host-spec-error" class="auto-note text-[var(--err)]" role="alert">
+      <div id="host-spec-error" class="auto-note text-[var(--danger)]" role="alert">
         <Show when={touched() ? problem() : null}>{(m) => m()}</Show>
       </div>
       <div class="m-actions">

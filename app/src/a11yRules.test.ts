@@ -11,7 +11,7 @@ describe("openTags and contrast", () => {
   it("finds a tag whose attributes hold braces, quotes and a >", () => {
     const t = openTags(`<div a={() => x > 1} title="a>b" onClick={f}>hi</div>`, "div");
     expect(t).toHaveLength(1);
-    expect(t[0].open.endsWith('onClick={f}>')).toBe(true);
+    expect(t[0].open.endsWith("onClick={f}>")).toBe(true);
   });
   it("does not mistake <divider> for <div>", () => {
     expect(openTags("<divider x />", "div")).toHaveLength(0);
@@ -27,7 +27,8 @@ describe("clickable markup", () => {
     const bad: string[] = [];
     for (const [f, src] of Object.entries(sources)) {
       for (const tag of ["div", "span", "li"]) {
-        for (const t of openTags(src, tag)) if (/\sonClick=/.test(t.open) && !/\srole=|\{\.\.\.press\(/.test(t.open)) bad.push(`${f}:${t.line}`);
+        for (const t of openTags(src, tag))
+          if (/\sonClick=/.test(t.open) && !/\srole=|\{\.\.\.press\(/.test(t.open)) bad.push(`${f}:${t.line}`);
       }
     }
     expect(bad).toEqual([]);
@@ -66,7 +67,8 @@ describe("styles", () => {
   });
 
   it("light --muted is readable on the light surfaces", () => {
-    for (const bg of ["--bg", "--panel", "--s1", "--s2"]) expect(contrast(lightToken("--muted"), lightToken(bg)), bg).toBeGreaterThanOrEqual(4.5);
+    for (const bg of ["--bg", "--panel", "--s1", "--s2"])
+      expect(contrast(lightToken("--muted"), lightToken(bg)), bg).toBeGreaterThanOrEqual(4.5);
   });
 
   it("finished worktree rows do not fade with opacity", () => {
@@ -83,6 +85,78 @@ describe("styles", () => {
   });
 
   it("motion stops under prefers-reduced-motion for everything", () => {
-    expect(/@media \(prefers-reduced-motion: reduce\) \{\s*\*, \*::before, \*::after \{[^}]*animation-duration: 0\.001ms !important/.test(css)).toBe(true);
+    expect(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\*, \*::before, \*::after \{[^}]*animation-duration: 0\.001ms !important/.test(
+        css,
+      ),
+    ).toBe(true);
+  });
+});
+
+// the matrix: every text token on every surface it is drawn on, in both themes
+describe("contrast matrix", () => {
+  const dark = /:root \{([^}]*)\}/.exec(css)![1];
+  const lightBlock = /:root\[data-theme="light"\]\s*\{([^}]*)\}/.exec(css)![1];
+  const read = (block: string, into: Record<string, string>) => {
+    for (const m of block.matchAll(/(--[\w-]+):\s*(#[0-9a-fA-F]{6})\b/g)) into[m[1]] = m[2];
+    return into;
+  };
+  const themes: Record<string, Record<string, string>> = {
+    dark: read(dark, {}),
+    light: read(lightBlock, read(dark, {})),
+  };
+  const SURFACES = ["--bg", "--panel", "--s1", "--s2", "--s3"];
+  // pairs that are drawn together: [text, background, minimum]
+  const PAIRS: [string, string, number][] = [
+    ["--ok", "--ok-bg", 4.5],
+    ["--danger", "--err-bg", 4.5],
+    ["--err-fg", "--err-bg", 4.5],
+    ["--warn", "--warn-bg", 4.5],
+    ["--accent", "--accent-bg", 4.5],
+    ["--on-accent", "--accent", 4.5],
+    ["--on-accent", "--danger", 4.5],
+    ["--text", "--ok-bg", 4.5],
+    ["--text", "--warn-bg", 4.5],
+    ["--line-ctl", "--s3", 3],
+    ["--line-ctl", "--bg", 3],
+  ];
+  for (const theme of ["dark", "light"]) {
+    const t = themes[theme];
+    it(`${theme}: text tokens are at least 4.5:1 on every surface`, () => {
+      const bad: string[] = [];
+      for (const fg of ["--text", "--muted", "--accent", "--ok", "--warn", "--danger"]) {
+        for (const bg of SURFACES) {
+          const r = contrast(t[fg], t[bg]);
+          if (r < 4.5) bad.push(`${fg} on ${bg}: ${r.toFixed(2)}`);
+        }
+      }
+      expect(bad).toEqual([]);
+    });
+    it(`${theme}: status colours are at least 4.5:1 on the page, panel and dialog`, () => {
+      const bad: string[] = [];
+      for (const fg of ["--await", "--stall", "--orange", "--blue"]) {
+        for (const bg of ["--bg", "--panel", "--s3"]) {
+          const r = contrast(t[fg], t[bg]);
+          if (r < 4.5) bad.push(`${fg} on ${bg}: ${r.toFixed(2)}`);
+        }
+      }
+      expect(bad).toEqual([]);
+    });
+    it(`${theme}: tinted and control pairs`, () => {
+      const bad: string[] = [];
+      for (const [fg, bg, min] of PAIRS) {
+        const r = contrast(t[fg], t[bg]);
+        if (r < min) bad.push(`${fg} on ${bg}: ${r.toFixed(2)} < ${min}`);
+      }
+      expect(bad).toEqual([]);
+    });
+  }
+  it("no alias token is left: --err, --ok2 and --claude are gone", () => {
+    expect(/(^|\s)--(err|ok2|claude)\s*:/m.test(css)).toBe(false);
+    const src = import.meta.glob<string>(["./**/*.tsx", "./*.css"], { query: "?raw", import: "default", eager: true });
+    const bad = Object.entries(src)
+      .filter(([, t]) => /var\(--(err|ok2|claude)\)/.test(t))
+      .map(([f]) => f);
+    expect(bad).toEqual([]);
   });
 });

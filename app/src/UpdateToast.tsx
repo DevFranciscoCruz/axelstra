@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
+import { Icon } from "./Icon";
 import { Button } from "./ui";
 import { errorText } from "./appError";
 import { S } from "./strings";
@@ -85,9 +86,7 @@ export function UpdateToast() {
       {(i) => (
         <div class="update-toast flow" role="status" aria-label={S.update.available}>
           <div class="ut-head">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M8 2.5v8M4.8 7.6 8 10.8l3.2-3.2M3 13h10" />
-            </svg>
+            <Icon name="download" size={16} />
             <div>
               <p class="ut-title">{S.update.ready(i().version)}</p>
               <p class="ut-sub">{S.update.sub}</p>

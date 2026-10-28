@@ -47,23 +47,9 @@ const openPath = (path: string) =>
     setOpenFile(path);
   });
 
-const Folder = (props: { open: boolean }) => (
-  <svg class="ficon-svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
-    <Show when={props.open} fallback={<path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.4 1.5h5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" />}>
-      <path d="M2 11.5V4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.4 1.5h5A1.5 1.5 0 0 1 14 6v1.2M2.3 12.4l1.3-4.2a1 1 0 0 1 1-.7h9.2a.8.8 0 0 1 .8 1l-1.1 3.9a1.3 1.3 0 0 1-1.3.9H3.6a1.3 1.3 0 0 1-1.3-.9z" />
-    </Show>
-  </svg>
-);
-const FileGlyph = () => (
-  <svg class="ficon-svg" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
-    <path d="M4 2h5l3 3v8.5a.5.5 0 0 1-.5.5h-7.5a.5.5 0 0 1-.5-.5v-11A.5.5 0 0 1 4 2zM9 2v3h3" />
-  </svg>
-);
-const Chevron = (props: { open: boolean }) => (
-  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" class="transition-transform duration-100" style={{ transform: props.open ? "rotate(90deg)" : "none" }}>
-    <path d="M4.5 3l3 3-3 3" />
-  </svg>
-);
+const Folder = (props: { open: boolean }) => <Icon name={props.open ? "folderOpen" : "folderClosed"} size={16} class="ficon-svg" />;
+const FileGlyph = () => <Icon name="fileDoc" size={16} class="ficon-svg" />;
+const Chevron = (props: { open: boolean }) => <Icon name="chevRight" size={12} class={props.open ? "transition-transform duration-100 rotate-90" : "transition-transform duration-100"} />;
 
 /** name box shared by "new" and "rename" */
 function NameInput(props: { initial: string; depth: number; dir: boolean; onSubmit: (name: string) => void }) {
@@ -369,9 +355,7 @@ export function FilesPanel() {
         </strong>
         <span class="grow" />
         <Button variant="icon" size="icon" title={P.files.collapse} aria-label={P.files.collapse} onClick={() => setExpanded(new Set([""]))}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 5h10M5 8.5h6M7 12h2" />
-          </svg>
+          <Icon name="collapse" size={14} />
         </Button>
         <Button variant="icon" size="icon" title={P.files.refresh} aria-label={P.files.refresh} onClick={() => setGen(gen() + 1)}>
           <Icon name="refresh" />

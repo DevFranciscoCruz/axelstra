@@ -98,7 +98,7 @@ export function NewTab() {
           onInput={(e) => setName(e.currentTarget.value)}
         />
       </Field>
-      <div id="ap-new-name-msg" class="auto-note text-[var(--err)]" role="alert">
+      <div id="ap-new-name-msg" class="auto-note text-[var(--danger)]" role="alert">
         {shown("name")}
       </div>
       <Show when={parent().trim() && name().trim() && !problem()}>
@@ -118,7 +118,7 @@ export function NewTab() {
         </Show>
       </div>
       <Show when={failure()}>
-        <div role="alert" class="text-[var(--err)]">
+        <div role="alert" class="text-[var(--danger)]">
           {failure()}
         </div>
       </Show>

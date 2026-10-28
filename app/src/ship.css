@@ -12,7 +12,6 @@
 .ship-ci.pending { color: var(--warn); }
 .ship-title { padding: 0 10px 4px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ship-facts { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 6px; }
-.ship-facts .chip.bad { color: var(--danger); border-color: var(--danger); }
 .ship-checks { list-style: none; margin: 0; padding: 0 10px 6px; max-height: 180px; overflow: auto; }
 .ship-check { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: var(--fs-md); min-width: 0; }
 .ship-mark { flex: none; width: 14px; display: inline-flex; justify-content: center; }

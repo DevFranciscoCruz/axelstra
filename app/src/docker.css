@@ -11,12 +11,12 @@
 .dk-body { flex: 1; min-height: 0; overflow-y: auto; }
 .dk-err { margin: 8px 12px; padding: 6px 10px; border: 1px solid rgba(var(--danger-rgb), .45); border-radius: var(--r-md); color: var(--danger); font-size: var(--fs-md); white-space: pre-wrap; }
 .dk-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 40px 24px; text-align: center; max-width: 460px; margin: 0 auto; flex: 1; }
-.dk-code { font-family: "Cascadia Code", Consolas, monospace; font-size: var(--fs-md); color: var(--muted); word-break: break-word; }
-.mono { font-family: "Cascadia Code", Consolas, monospace; font-size: var(--fs-md); }
+.dk-code { font-family: var(--font-mono); font-size: var(--fs-md); color: var(--muted); word-break: break-word; }
+.mono { font-family: var(--font-mono); font-size: var(--fs-md); }
 .dk-compose { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .dk-list { outline: 2px solid transparent; }
 .dk-group + .dk-group { border-top: 1px solid var(--line); }
-.dk-ghead { display: flex; align-items: center; gap: 6px; padding: 5px 12px; background: var(--panel); position: sticky; top: 0; z-index: 1; }
+.dk-ghead { display: flex; align-items: center; gap: 6px; padding: 5px 12px; background: var(--panel); position: sticky; top: 0; z-index: var(--z-raised); }
 .dk-chev { display: inline-flex; transition: transform .1s; }
 .dk-chev.shut { transform: rotate(-90deg); }
 .dk-row { display: grid; grid-template-columns: 104px minmax(120px, 1fr) minmax(0, 1.1fr) 56px 76px 84px auto; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--line-2); cursor: default; min-height: 42px; }
@@ -25,7 +25,7 @@
 .dk-row.cur { background: var(--s1); }
 .dk-row.sel { background: var(--s2); }
 .dk-state { display: flex; align-items: center; gap: 7px; font-size: var(--fs-md); white-space: nowrap; }
-.dk-state .dot.warn, .chip .dot.warn { background: var(--warn); }
+.dk-state .dot.warn { background: var(--warn); }
 .dk-name { display: flex; flex-direction: column; min-width: 0; }
 .dk-name > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dk-ports { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
@@ -33,7 +33,6 @@
 .dk-num { font-size: var(--fs-md); color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .dk-acts { display: flex; gap: 1px; justify-content: flex-end; min-width: 24px; opacity: .5; }
 .dk-row:hover .dk-acts, .dk-row:focus-within .dk-acts, .dk-row.cur .dk-acts, .dk-acts.show { opacity: 1; }
-.dk .chip.warn { color: var(--warn); border-color: rgba(var(--warn-rgb), .4); }
 .dk-detail { width: min(46%, 520px); min-width: 340px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel); min-height: 0; }
 .dk-dhead { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .dk-dtitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -49,7 +48,7 @@
 .dk-val { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
 .dk-logs, .dk-term, .dk-files { display: flex; flex-direction: column; flex: 1; min-height: 0; padding-bottom: 6px; }
 .dk-logs > .auto-note, .dk-files > .auto-note { padding: 2px 12px; }
-.dk-pre { flex: 1; min-height: 120px; margin: 0; padding: 8px 12px; overflow: auto; background: var(--bg); font-family: "Cascadia Code", Consolas, monospace; font-size: var(--fs-md); line-height: 1.45; white-space: pre-wrap; word-break: break-all; }
+.dk-pre { flex: 1; min-height: 120px; margin: 0; padding: 8px 12px; overflow: auto; background: var(--bg); font-family: var(--font-mono); font-size: var(--fs-md); line-height: 1.45; white-space: pre-wrap; word-break: break-all; }
 .dk-termhost { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 .dk-flist { list-style: none; margin: 0; padding: 4px 6px; max-height: 40%; overflow-y: auto; border-bottom: 1px solid var(--line); }
 @media (max-width: 1100px) {.dk-row { grid-template-columns: 104px minmax(100px, 1fr) minmax(0, 1fr) auto; }

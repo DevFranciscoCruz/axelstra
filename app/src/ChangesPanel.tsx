@@ -252,7 +252,7 @@ export function ChangesPanel() {
               ])
             }
           >
-            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <Icon name="chevDown" size={12} />
           </Button>
         </div>
         <Show when={note()}>

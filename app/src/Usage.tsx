@@ -76,7 +76,7 @@ function WorktreeUsageList() {
   return (
     <Show when={rows().length}>
       <span class="wt-usage self-center">
-        <Button ref={btn} variant="link" size="bare" class={cn("cursor-default self-center px-2 text-xs hover:text-muted-foreground", level() === "over" && "text-[var(--err)]", level() === "warn" && "text-[var(--warn)]")} title={[wtUsageTip(list()), chipNote()].filter(Boolean).join("\n")} aria-label={[P.usage.perWtTotal(fmt(spentOf(total()))), chipNote()].filter(Boolean).join(". ")} aria-haspopup="dialog" aria-expanded={open()} onClick={() => setOpen(!open())}>
+        <Button ref={btn} variant="link" size="bare" class={cn("cursor-default self-center px-2 text-xs hover:text-muted-foreground", level() === "over" && "text-[var(--danger)]", level() === "warn" && "text-[var(--warn)]")} title={[wtUsageTip(list()), chipNote()].filter(Boolean).join("\n")} aria-label={[P.usage.perWtTotal(fmt(spentOf(total()))), chipNote()].filter(Boolean).join(". ")} aria-haspopup="dialog" aria-expanded={open()} onClick={() => setOpen(!open())}>
           Σ {fmt(spentOf(total()))}
         </Button>
         <Show when={open()}>
