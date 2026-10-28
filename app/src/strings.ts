@@ -1,11 +1,15 @@
-import { count, dict } from "./i18n";
+import { count, dict, fmtNumber } from "./i18n";
 import { enS } from "./strings.en";
 import { ptBRS } from "./strings.ptbr";
 /** UI texts of the settings screen and the terminal, in one place and in pt-PT (gestor, ligar, ficheiro, ecrã). */
 /**
  * Glossary (pt-PT). One word per thing, so the screens agree:
- *   worktree (m./f. as in "o worktree"), branch, commit, PR (not "pull request"), agente, worker (agente auxiliar),
- *   enviar (push) / obter (pull), integrar = merge ("integrado", not "merged"), descartar, remoto, daemon, terminal.
+ *   worktree (m./f. as in "o worktree"), branch (always masculine: "o branch"), commit, PR (not "pull request"), agente,
+ *   worker (agente auxiliar), enviar (push) / obter (pull) (never "fazer push"), integrar = merge of a worktree into the
+ *   default branch ("integrado", not "merged"); "merge" only for the merge of a PR on GitHub, descartar, remoto,
+ *   host (not "anfitrião"), daemon, terminal.
+ *   Roles: "agente principal" is the project's; "líder" is the first agent of a worktree; "worker" the helpers.
+ *   Never a bare "main" for an agent: "main" is only the name of a branch (the default one is "o branch principal").
  * Counts agree in number: use `plural(n, "worktree", "worktrees")`, never "worktree(s)" or a hand-made ternary.
  */
 export { plural, count } from "./i18n";
@@ -121,6 +125,7 @@ export const ptS = {
     removed: (n: number) => count(n, "worktree removida", "worktrees removidas"),
     noPorts: "Nenhuma porta de servidor aberta",
     shortcutsHint: "atalhos",
+    shortcutsTip: "Atalhos de teclado (?)",
   },
 
   notif: {
@@ -165,7 +170,8 @@ export const ptS = {
     computerTitle: "Controlo do ecrã",
     allow: "Permitir",
     noGit: "o git não está instalado ou não está no PATH (sem ele não há worktrees)",
-    noAgents: "nem o claude nem o codex foram encontrados (instala um deles para usar agentes)",
+    noAgents: "nenhum agente (claude, codex, gemini) foi encontrado (instala um deles para usar agentes)",
+    pickerNone: "Nenhum agente encontrado. Instala o Claude Code, o Codex ou o Gemini CLI e abre este diálogo outra vez.",
     missing: (bits: string[]) => `Falta configurar: ${bits.join("; ")}.`,
     restoreFailed: "Não foi possível restaurar as sessões: ",
     restoreFailedList: (names: string[]) => `não foi possível restaurar: ${names.join(", ")}`,
@@ -206,6 +212,10 @@ export const ptS = {
     hintProjects: "projetos",
     hintRight: "painel direito",
     closeSplit: "Fechar divisão",
+    tabList: "Todos os separadores",
+    tabMoveLeft: "Mover para a esquerda",
+    tabMoveRight: "Mover para a direita",
+    tabRename: "Mudar o nome",
     sectionProjects: "projetos",
     sectionTerminals: "terminais",
     sectionRight: "painel direito",
@@ -226,6 +236,8 @@ export const ptS = {
   paletteTitle: "Paleta de comandos",
   palettePlaceholder: "Ir para worktree ou executar ação…",
   paletteResults: "Resultados",
+  paletteWorktree: "worktree",
+  paletteCount: (n: number) => count(n, "resultado", "resultados"),
   paletteAction: "ação",
   paletteEmpty: "Nada encontrado",
   paletteNoMatch: (q: string) => `Nada corresponde a «${q}». Tenta outras palavras.`,
@@ -239,6 +251,14 @@ export const ptS = {
   findPrev: "Anterior",
   findNext: "Seguinte",
   findClose: "Fechar pesquisa",
+  findNone: "Sem resultados",
+  findCount: (i: number, n: number) => `${fmtNumber(i)} de ${fmtNumber(n)}`,
+  ctxCopy: "Copiar",
+  ctxPaste: "Colar",
+  ctxSelectAll: "Selecionar tudo",
+  ctxClear: "Limpar",
+  ctxFind: "Procurar…",
+  clipboardFail: "Não foi possível ler a área de transferência.",
   fileMissing: (p: string) => `O ficheiro ${p} não existe nesta worktree.`,
 
   // deletions: the notice names what went away; a failure names it too

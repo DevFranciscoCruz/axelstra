@@ -108,6 +108,13 @@ export function TerminalView(props: {
         term.clearSelection();
         return false;
       }
+      // the keyboard way to the context menu (xterm would type these keys into the shell)
+      if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+        e.preventDefault();
+        const r = host.getBoundingClientRect();
+        clip.menuAt(r.left + 24, r.top + 24, find.open);
+        return false;
+      }
       if (e.ctrlKey && !e.altKey && !e.shiftKey && k === "f") {
         e.preventDefault();
         find.open();
@@ -124,7 +131,8 @@ export function TerminalView(props: {
       }
       return true;
     });
-    host.addEventListener("contextmenu", clip.contextMenu);
+    const onContext = clip.contextMenu(find.open);
+    host.addEventListener("contextmenu", onContext);
 
     // files dropped from the OS: one shared webview listener for all terminals, each takes the drops over itself
     const unDrop = onTermDrop((p) => {
@@ -198,7 +206,7 @@ export function TerminalView(props: {
       batch.cancel();
       sizeSync.cancel();
       unDrop();
-      host.removeEventListener("contextmenu", clip.contextMenu);
+      host.removeEventListener("contextmenu", onContext);
       ro.disconnect();
       dpr?.removeEventListener("change", onDprChange);
       detach();
@@ -227,6 +235,9 @@ export function TerminalView(props: {
               }
             }}
           />
+          <span class="term-find-count" role="status" aria-live="polite" classList={{ none: find.results()?.count === 0 }}>
+            {find.results() === null ? "" : find.results()!.count === 0 ? S.findNone : find.results()!.index < 0 ? "" : S.findCount(find.results()!.index + 1, find.results()!.count)}
+          </span>
           <Button variant="ghost" size="icon" title={S.findPrev} aria-label={S.findPrev} onClick={() => find.run(true)}>
             <span class="flip">
               <Icon name="chevDown" />

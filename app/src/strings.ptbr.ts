@@ -1,4 +1,4 @@
-import { type Widen, count } from "./i18n";
+import { type Widen, count, fmtNumber } from "./i18n";
 import type { ptS } from "./strings";
 import { S } from "./strings";
 
@@ -123,6 +123,7 @@ export const ptBRS: Widen<typeof ptS> = {
     removed: (n: number) => count(n, "worktree removida", "worktrees removidas"),
     noPorts: "Nenhuma porta de servidor aberta",
     shortcutsHint: "atalhos",
+    shortcutsTip: "Atalhos do teclado (?)",
   },
 
   notif: {
@@ -168,7 +169,8 @@ export const ptBRS: Widen<typeof ptS> = {
     computerTitle: "Controle da tela",
     allow: "Permitir",
     noGit: "o git não está instalado ou não está no PATH (sem ele não há worktrees)",
-    noAgents: "nem o claude nem o codex foram encontrados (instale um deles para usar agentes)",
+    noAgents: "nenhum agente (claude, codex, gemini) foi encontrado (instale um deles para usar agentes)",
+    pickerNone: "Nenhum agente encontrado. Instale o Claude Code, o Codex ou o Gemini CLI e abra este diálogo de novo.",
     missing: (bits: string[]) => `Falta configurar: ${bits.join("; ")}.`,
     restoreFailed: "Não foi possível restaurar as sessões: ",
     restoreFailedList: (names: string[]) => `não foi possível restaurar: ${names.join(", ")}`,
@@ -211,6 +213,10 @@ export const ptBRS: Widen<typeof ptS> = {
     hintProjects: "projetos",
     hintRight: "painel direito",
     closeSplit: "Fechar divisão",
+    tabList: "Todas as abas",
+    tabMoveLeft: "Mover para a esquerda",
+    tabMoveRight: "Mover para a direita",
+    tabRename: "Renomear",
     sectionProjects: "projetos",
     sectionTerminals: "terminais",
     sectionRight: "painel direito",
@@ -230,6 +236,8 @@ export const ptBRS: Widen<typeof ptS> = {
   paletteTitle: "Paleta de comandos",
   palettePlaceholder: "Ir para um worktree ou executar uma ação…",
   paletteResults: "Resultados",
+  paletteWorktree: "worktree",
+  paletteCount: (n: number) => count(n, "resultado", "resultados"),
   paletteAction: "ação",
   paletteEmpty: "Nada encontrado",
   paletteNoMatch: (q: string) => `Nada corresponde a «${q}». Tente outras palavras.`,
@@ -242,6 +250,14 @@ export const ptBRS: Widen<typeof ptS> = {
   findPrev: "Anterior",
   findNext: "Próximo",
   findClose: "Fechar pesquisa",
+  findNone: "Nenhum resultado",
+  findCount: (i: number, n: number) => `${fmtNumber(i)} de ${fmtNumber(n)}`,
+  ctxCopy: "Copiar",
+  ctxPaste: "Colar",
+  ctxSelectAll: "Selecionar tudo",
+  ctxClear: "Limpar",
+  ctxFind: "Pesquisar…",
+  clipboardFail: "Não foi possível ler a área de transferência.",
   fileMissing: (p: string) => `O arquivo ${p} não existe neste worktree.`,
 
   fileDeleted: (n: string) => `Arquivo excluído: ${n}`,

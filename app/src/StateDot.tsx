@@ -22,7 +22,17 @@ export function StateDot(props: { state: DotState; tip?: string | null }) {
       title={label() || undefined}
     >
       {props.state === "none" ? null : (
-        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 8 8"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
           <path d={DOT_GLYPH[props.state]} />
         </svg>
       )}

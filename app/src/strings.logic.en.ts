@@ -120,6 +120,8 @@ export const enL: Widen<typeof ptL> = {
   awaitingTip: (reason: string, since: string, until: string | null) =>
     `Waiting for something external: ${reason} (${since})${until ? ` · expires ${until}` : ""}`,
   session: (id: number) => `Session ${id}`,
+  inWorktree: (name: string) => `in ${name}`,
+  sameFiles: (names: string) => `Edits the same files as: ${names}`,
   defaultAgent: "The agent",
   tabRenameFailed: "Could not save the tab name: ",
   unsavedFile: "This file has unsaved changes.",
@@ -206,12 +208,14 @@ export const enL: Widen<typeof ptL> = {
   },
 
   voice: {
-    denied: "Microphone access was denied. Allow it in the Windows privacy settings.",
+    denied: "Microphone access was denied. Allow it in the system privacy settings.",
     missing: "No microphone was found. Plug one in and try again.",
     busy: "The microphone is being used by another application.",
     failed: "Could not use the microphone. Try again.",
     noModel: "The dictation model is not available. Download it again.",
     transcribeFailed: "Transcription failed. Try dictating again.",
     downloadFailed: "Could not download the dictation model. Check your connection and try again.",
+    downloadCorrupt: "The downloaded dictation model is corrupted. Try downloading it again.",
+    downloadDisk: "Could not save the dictation model to disk. Check the free space and try again.",
   },
 };

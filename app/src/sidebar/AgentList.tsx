@@ -196,7 +196,9 @@ export function AgentList(props: {
                       <Icon name="file" size={12} />
                     </Button>
                   </Show>
-                  <span class="wt-agent-time">{a.running ? idleLabel(a.idle_ms) : T.ended}</span>
+                  <span class="wt-agent-time">
+                    {a.running ? (dotOfSession(a) === "working" ? "" : idleLabel(a.idle_ms)) : T.ended}
+                  </span>
                 </div>
               );
             }}

@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import { LEFT, RIGHT, fitPanel } from "../layout";
+import { LEFT, NARROW_BELOW, RIGHT, capLeft, fitPanel } from "../layout";
 import { readString, writeString } from "../persist";
 
 const load = readString;
@@ -42,9 +42,10 @@ if (typeof window !== "undefined") {
 }
 /** widths in use: what was saved, limited so the centre keeps a usable width */
 /** under this width the right panel is hidden by CSS (styles.css, `@media (max-width: 1000px)`): it takes no room */
-const RIGHT_HIDDEN_BELOW = 1000;
+const RIGHT_HIDDEN_BELOW = NARROW_BELOW;
 const rightTakes = () => (rightOn() && winW() > RIGHT_HIDDEN_BELOW ? rightRaw() : 0);
-export const leftW = () => fitPanel(leftRaw(), LEFT, rightTakes(), winW());
+/** the width of the project list as shown (also in a narrow window, where it is capped): grid column, handle and aria all read this */
+export const leftW = () => capLeft(fitPanel(leftRaw(), LEFT, rightTakes(), winW()), winW());
 export const rightW = () => fitPanel(rightRaw(), RIGHT, leftOn() ? leftW() : 0, winW());
 export const setLeftW = (w: number) => {
   const v = fitPanel(w, LEFT, rightTakes(), winW());

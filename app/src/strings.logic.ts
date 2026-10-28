@@ -99,7 +99,7 @@ export const ptL = {
     orchestra: { label: "Orquestração: agentes e workers", hint: "ferramenta" },
     dispatcher: { label: "Despachante", hint: "pedidos enviados a cada worktree" },
     addProject: { label: "Adicionar projeto", hint: "pasta local ou remota" },
-    addRemote: { label: "Adicionar projeto remoto", hint: "anfitrião SSH ou WSL" },
+    addRemote: { label: "Adicionar projeto remoto", hint: "host SSH ou WSL" },
     automations: { label: "Automatizações", hint: "agendamento" },
     computer: { label: "Controlo do ecrã pelos agentes", hint: "permissão" },
     restartDaemon: { label: "Reiniciar o daemon", hint: "fecha os terminais; os agentes retomam" },
@@ -123,6 +123,8 @@ export const ptL = {
   awaitingTip: (reason: string, since: string, until: string | null) =>
     `À espera de algo externo: ${reason} (${since})${until ? ` · expira ${until}` : ""}`,
   session: (id: number) => `Sessão ${id}`,
+  inWorktree: (name: string) => `em ${name}`,
+  sameFiles: (names: string) => `Edita os mesmos ficheiros que: ${names}`,
   defaultAgent: "O agente",
   tabRenameFailed: "Não foi possível guardar o nome do separador: ",
   unsavedFile: "Há alterações por guardar neste ficheiro.",
@@ -139,7 +141,7 @@ export const ptL = {
     remote: "Sem acesso ao remoto. Verifica a ligação à internet e o login no git/gh.",
     rejected: "O remoto recusou o envio porque tem commits novos. Obtém as alterações do remoto antes de enviar.",
     workerLimit: "Limite de agentes em simultâneo atingido. Espera que um termine ou aumenta com `axelstra limit`.",
-    noDaemon: "Sem ligação ao daemon. Vai tentar de novo; se persistir, reinicia o Axelstra.",
+    noDaemon: "Sem ligação ao daemon. O Axelstra vai tentar de novo; se persistir, reinicia-o.",
     daemonSilent: "O daemon não respondeu a tempo. Se persistir, reinicia o Axelstra.",
     oldDaemon: "O daemon em execução é antigo. Reinicia o Axelstra para o atualizar.",
     dockerDown: "O Docker não está a correr. Abre o Docker Desktop (ou inicia o serviço) e tenta de novo.",
@@ -206,7 +208,7 @@ export const ptL = {
     },
     janitor: (branch: string, into: string) => `worktree ${branch} removido (integrado em ${into})`,
     integrated: (branch: string, into: string) => `worktree ${branch} integrado em ${into} e removido`,
-    emptyRemoved: (branch: string) => `worktree vazio ${branch} removido`,
+    emptyRemoved: (branch: string) => `Worktree vazio ${branch} removido`,
   },
   restore: {
     restored: (n: number) => count(n, "sessão restaurada", "sessões restauradas"),
@@ -215,13 +217,15 @@ export const ptL = {
 
   // ---- voice dictation ----
   voice: {
-    denied: "O acesso ao microfone foi recusado. Permite-o nas definições de privacidade do Windows.",
+    denied: "O acesso ao microfone foi recusado. Permite-o nas definições de privacidade do sistema.",
     missing: "Não foi encontrado nenhum microfone. Liga um e tenta de novo.",
     busy: "O microfone está a ser usado por outra aplicação.",
     failed: "Não foi possível usar o microfone. Tenta de novo.",
     noModel: "O modelo de ditado não está disponível. Descarrega-o de novo.",
     transcribeFailed: "A transcrição falhou. Tenta ditar outra vez.",
     downloadFailed: "Não foi possível descarregar o modelo de ditado. Verifica a ligação e tenta de novo.",
+    downloadCorrupt: "O modelo de ditado descarregado está corrompido. Tenta descarregar de novo.",
+    downloadDisk: "Não foi possível guardar o modelo de ditado no disco. Verifica o espaço livre e tenta de novo.",
   },
 } as const;
 

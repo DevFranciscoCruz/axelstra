@@ -5,7 +5,8 @@ import { L } from "./strings.logic";
 import { ago } from "./time";
 
 /** What a status dot shows besides its colour: a shape, and the words for the tooltip and screen readers. */
-export type DotState = "working" | "idle" | "waiting" | "awaiting" | "stalled" | "done" | "attention" | "queued" | "running" | "none";
+export type DotState =
+  "working" | "idle" | "waiting" | "awaiting" | "stalled" | "done" | "attention" | "queued" | "running" | "none";
 
 export const DOT_LABEL: Record<DotState, string> = L.dot;
 
@@ -41,6 +42,29 @@ export const dotTip = (s: SessionInfo, now = Date.now()): string | null => {
   return L.awaitingTip(a.reason, ago((now - a.since) / 1000), a.until == null ? null : fmtDate(a.until));
 };
 
-/** State of a worktree row from what its agents are doing, most urgent first. */
-export const dotOfWorktree = (o: { queued: boolean; stalled?: boolean; awaiting?: boolean; waiting: boolean; working: boolean; needs: boolean; live: number }): DotState =>
-  o.queued ? "queued" : o.stalled ? "stalled" : o.waiting ? "waiting" : o.working ? "working" : o.awaiting ? "awaiting" : o.needs ? "attention" : o.live > 0 ? "idle" : "none";
+/** State of a worktree row from what its agents are doing, most urgent first: an agent that waits for the user comes
+ *  before everything (a diagnostic such as "stalled" must not hide a question); a queued worktree has no agent to wait. */
+export const dotOfWorktree = (o: {
+  queued: boolean;
+  stalled?: boolean;
+  awaiting?: boolean;
+  waiting: boolean;
+  working: boolean;
+  needs: boolean;
+  live: number;
+}): DotState =>
+  o.waiting
+    ? "waiting"
+    : o.queued
+      ? "queued"
+      : o.stalled
+        ? "stalled"
+        : o.working
+          ? "working"
+          : o.awaiting
+            ? "awaiting"
+            : o.needs
+              ? "attention"
+              : o.live > 0
+                ? "idle"
+                : "none";

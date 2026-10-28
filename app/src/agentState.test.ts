@@ -43,7 +43,7 @@ describe("status dots", () => {
     expect(dotOfWorktree({ ...base, live: 2, working: true, waiting: true })).toBe("waiting");
     expect(dotOfWorktree({ ...base, queued: true })).toBe("queued");
     expect(dotOfWorktree({ ...base, live: 2, stalled: true })).toBe("stalled");
-    expect(dotOfWorktree({ ...base, live: 2, working: true, waiting: true, stalled: true })).toBe("stalled");
+    expect(dotOfWorktree({ ...base, live: 2, working: true, waiting: true, stalled: true })).toBe("waiting");
   });
   it("an agent awaiting something external is its own state: not idle, working, stalled or red waiting", () => {
     const awaiting = { reason: "CI #3703", since: 1000, until: null };

@@ -3,7 +3,7 @@ import { Icon } from "../Icon";
 import { Badge, Button } from "../ui";
 import { StateDot } from "../StateDot";
 import { MenuItem, isMenuKey, showMenu, showMenuAt } from "../ContextMenu";
-import { dotOfWorktree } from "../agentState";
+import { dotOfSession, dotOfWorktree, dotTip } from "../agentState";
 import { worktreeSignals } from "../leadRole";
 import { P } from "../strings.panels";
 import {
@@ -61,6 +61,27 @@ export function WorktreeRow(props: {
   const queued = () => live() === 0 && flowState()[norm(w().path)] === "queued";
   const st = () => wtStatus()[norm(w().path)];
   const pr = () => prByBranch()[prKey(props.project.id, w().branch)];
+  const dot = () =>
+    dotOfWorktree({
+      queued: queued(),
+      stalled: signals().stalled,
+      awaiting: signals().awaiting,
+      waiting: waiting(),
+      working: working(),
+      needs: needs(),
+      live: live(),
+    });
+  // why the dot is what it is: the reason an agent awaits, or what a waiting agent asked
+  const dotWhy = () => {
+    const d = dot();
+    if (d !== "awaiting" && d !== "waiting") return null;
+    for (const s of sessionsOf(w().path)) {
+      if (dotOfSession(s) !== d) continue;
+      const why = d === "awaiting" ? dotTip(s) : s.wait?.text;
+      if (why) return why;
+    }
+    return null;
+  };
   const isActive = () => norm(selectedWorktree()) === norm(w().path);
   return (
     <>
@@ -114,25 +135,17 @@ export function WorktreeRow(props: {
           aria-current={isActive() ? "true" : undefined}
           onClick={props.onOpen}
         >
-          <StateDot
-            state={dotOfWorktree({
-              queued: queued(),
-              stalled: signals().stalled,
-              awaiting: signals().awaiting,
-              waiting: waiting(),
-              working: working(),
-              needs: needs(),
-              live: live(),
-            })}
-          />
-          <span class="name">{w().is_main ? mainBranch() : label()}</span>
+          <StateDot state={dot()} tip={dotWhy()} />
+          <span class="name" title={w().is_main ? mainBranch() : label()}>
+            {w().is_main ? mainBranch() : label()}
+          </span>
           <Show when={!w().is_main && props.topic?.title && props.topic.title !== label()}>
-            <span class="wt-topic" title={props.topic!.title}>
+            <span class="wt-topic wt-minor" title={props.topic!.title}>
               {props.topic!.title}
             </span>
           </Show>
           <Show when={props.topic?.archived}>
-            <Badge variant="quiet" title={T.archivedTip}>
+            <Badge variant="quiet" class="wt-minor" title={T.archivedTip}>
               {T.archived}
             </Badge>
           </Show>
@@ -142,7 +155,7 @@ export function WorktreeRow(props: {
             </span>
           </Show>
           <Show when={st()?.dirty}>
-            <Badge variant="quiet" title={T.dirtyTip(st()!.dirty)}>
+            <Badge variant="quiet" class="wt-minor" title={T.dirtyTip(st()!.dirty)}>
               <i class="size-1.5 flex-none rounded-full bg-current opacity-70" />
               {st()!.dirty}
             </Badge>
@@ -156,7 +169,7 @@ export function WorktreeRow(props: {
             )}
           </Show>
           <Show when={st()?.ahead || st()?.behind}>
-            <Badge variant="quiet" title={T.aheadBehind(st()!.ahead, st()!.behind)}>
+            <Badge variant="quiet" class="wt-minor" title={T.aheadBehind(st()!.ahead, st()!.behind)}>
               {st()!.ahead ? (
                 <span class="inline-flex items-center gap-px">
                   <Icon name="arrowUp" size={10} />

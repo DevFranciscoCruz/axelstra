@@ -1,7 +1,8 @@
-import { Show, createSignal, onCleanup } from "solid-js";
+import { Show, createSignal, onCleanup, onMount } from "solid-js";
+import { clampSplit, splitBounds, splitTo } from "./layout";
+import { createPersisted } from "./persist";
 import { startDrag } from "./dragResize";
 import { Icon } from "./Icon";
-import { splitTo } from "./layout";
 import { exitCodeOf, refreshSessions, sessionGone, setSplitSession, splitSession } from "./store";
 import { S } from "./strings";
 import { TerminalView } from "./TerminalView";
@@ -9,9 +10,27 @@ import { Button } from "./ui";
 
 /** The second terminal beside the active one: draggable and keyboard-resizable separator, a close button and the terminal itself. */
 export function SplitPane() {
-  const [frac, setFrac] = createSignal(0.5);
+  // the share of the right pane is remembered between splits; each pane keeps a usable width (layout.ts: MIN_SPLIT_PX)
+  const [saved, setSaved] = createPersisted<number>(
+    "axelstra.splitFrac",
+    (v): v is number => typeof v === "number" && v > 0 && v < 1,
+    0.5,
+  );
+  const [width, setWidth] = createSignal(0);
+  const frac = () => clampSplit(saved(), width());
+  const setFrac = (f: number) => setSaved(f);
   let stopDrag: (() => void) | undefined;
   onCleanup(() => stopDrag?.());
+  // the area is the parent of the separator: its width changes with the window and the side panels
+  let sep!: HTMLDivElement;
+  onMount(() => {
+    const area = sep.parentElement;
+    if (!area) return;
+    setWidth(area.getBoundingClientRect().width);
+    const ro = new ResizeObserver(() => setWidth(area.getBoundingClientRect().width));
+    ro.observe(area);
+    onCleanup(() => ro.disconnect());
+  });
   return (
     <>
       <div
@@ -20,11 +39,12 @@ export function SplitPane() {
         aria-orientation="vertical"
         aria-label={S.app.splitWidth}
         aria-valuenow={Math.round(frac() * 100)}
-        aria-valuemin={20}
-        aria-valuemax={80}
+        aria-valuemin={Math.round(splitBounds(width()).min * 100)}
+        aria-valuemax={Math.round(splitBounds(width()).max * 100)}
         tabindex="0"
+        ref={sep}
         onKeyDown={(e) => {
-          const to = splitTo(frac(), e.key);
+          const to = splitTo(frac(), e.key, width());
           if (to === null) return;
           e.preventDefault();
           setFrac(to);
@@ -33,7 +53,7 @@ export function SplitPane() {
           e.preventDefault();
           const area = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
           stopDrag?.();
-          stopDrag = startDrag((m) => setFrac(Math.min(0.8, Math.max(0.2, (area.right - m.clientX) / area.width))));
+          stopDrag = startDrag((m) => setFrac(clampSplit((area.right - m.clientX) / area.width, area.width)));
         }}
       />
       <div class="split-pane group/split" style={{ flex: `0 0 ${frac() * 100}%` }}>

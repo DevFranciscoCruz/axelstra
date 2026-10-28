@@ -122,6 +122,8 @@ export const ptBRL: Widen<typeof ptL> = {
   awaitingTip: (reason: string, since: string, until: string | null) =>
     `Aguardando algo externo: ${reason} (${since})${until ? ` · expira ${until}` : ""}`,
   session: (id: number) => `Sessão ${id}`,
+  inWorktree: (name: string) => `em ${name}`,
+  sameFiles: (names: string) => `Edita os mesmos arquivos que: ${names}`,
   defaultAgent: "O agente",
   tabRenameFailed: "Não foi possível salvar o nome da aba: ",
   unsavedFile: "Há alterações não salvas neste arquivo.",
@@ -205,7 +207,7 @@ export const ptBRL: Widen<typeof ptL> = {
     },
     janitor: (branch: string, into: string) => `worktree ${branch} removido (integrado em ${into})`,
     integrated: (branch: string, into: string) => `worktree ${branch} integrado em ${into} e removido`,
-    emptyRemoved: (branch: string) => `worktree vazio ${branch} removido`,
+    emptyRemoved: (branch: string) => `Worktree vazio ${branch} removido`,
   },
   restore: {
     restored: (n: number) => count(n, "sessão restaurada", "sessões restauradas"),
@@ -214,12 +216,14 @@ export const ptBRL: Widen<typeof ptL> = {
 
   // ---- voice dictation ----
   voice: {
-    denied: "O acesso ao microfone foi negado. Permita-o nas configurações de privacidade do Windows.",
+    denied: "O acesso ao microfone foi negado. Permita-o nas configurações de privacidade do sistema.",
     missing: "Nenhum microfone foi encontrado. Conecte um e tente novamente.",
     busy: "O microfone está sendo usado por outro aplicativo.",
     failed: "Não foi possível usar o microfone. Tente novamente.",
     noModel: "O modelo de ditado não está disponível. Baixe-o novamente.",
     transcribeFailed: "A transcrição falhou. Tente ditar outra vez.",
     downloadFailed: "Não foi possível baixar o modelo de ditado. Verifique a conexão e tente novamente.",
+    downloadCorrupt: "O modelo de ditado baixado está corrompido. Tente baixar de novo.",
+    downloadDisk: "Não foi possível salvar o modelo de ditado no disco. Verifique o espaço livre e tente novamente.",
   },
 };

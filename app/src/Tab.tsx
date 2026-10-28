@@ -12,6 +12,8 @@ export function Tab(props: {
   onClose?: () => void;
   closeLabel?: string;
   onRename?: () => void;
+  /** Alt+Left / Alt+Right on the focused tab: move it one place (the keyboard way to reorder) */
+  onMove?: (dir: -1 | 1) => void;
   title?: string;
   id?: string;
   class?: string;
@@ -51,6 +53,18 @@ export function Tab(props: {
               props.onClose();
             }}
             onKeyDown={(e: KeyboardEvent) => {
+              if (
+                e.altKey &&
+                !e.ctrlKey &&
+                !e.shiftKey &&
+                (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+                props.onMove
+              ) {
+                e.preventDefault();
+                e.stopPropagation();
+                props.onMove(e.key === "ArrowLeft" ? -1 : 1);
+                return;
+              }
               if (e.key === "F2" && props.onRename) {
                 e.preventDefault();
                 props.onRename();
@@ -67,7 +81,7 @@ export function Tab(props: {
         <Button
           variant="icon"
           size="bare"
-          class="invisible rounded-sm p-0.5 text-lg leading-none group-hover:visible group-focus-within:visible group-data-[active]:visible"
+          class="tab-close invisible rounded-sm p-0.5 text-lg leading-none group-hover:visible group-focus-within:visible group-data-[active]:visible"
           title={props.closeLabel ?? "Fechar"}
           aria-label={props.closeLabel ?? "Fechar"}
           // arrows, Home and End belong to the tabs, not to the close button

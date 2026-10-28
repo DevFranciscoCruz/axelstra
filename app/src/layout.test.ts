@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { LEFT, MIN_CENTER, RIGHT, fitPanel, resizeTo, splitTo } from "./layout";
+import {
+  LEFT,
+  MIN_CENTER,
+  RIGHT,
+  capLeft,
+  clampSplit,
+  fitPanel,
+  resizeTo,
+  splitBounds,
+  splitTo,
+  tabMoveTarget,
+} from "./layout";
 
 describe("fitPanel", () => {
   it("keeps a wide window as the user set it", () => {
@@ -44,5 +55,45 @@ describe("splitTo", () => {
     expect(splitTo(0.8, "ArrowLeft")).toBe(0.8);
     expect(splitTo(0.2, "ArrowRight")).toBe(0.2);
     expect(splitTo(0.5, "x")).toBeNull();
+  });
+});
+
+describe("capLeft", () => {
+  it("caps the list to 34% of a narrow window and leaves wide windows alone", () => {
+    expect(capLeft(480, 1000)).toBe(340);
+    expect(capLeft(480, 800)).toBe(272);
+    expect(capLeft(200, 800)).toBe(200);
+    expect(capLeft(480, 1001)).toBe(480);
+  });
+});
+
+describe("split bounds", () => {
+  it("keeps each pane at least 320px, and 0.5 when two panes do not fit", () => {
+    expect(splitBounds(1000).min).toBeCloseTo(0.32);
+    expect(splitBounds(1000).max).toBeCloseTo(0.68);
+    expect(splitBounds(540)).toEqual({ min: 0.5, max: 0.5 });
+    expect(splitBounds(3000).min).toBe(0.2);
+    expect(splitBounds(0)).toEqual({ min: 0.2, max: 0.8 });
+  });
+  it("clamps the share and the keyboard steps to them", () => {
+    expect(clampSplit(0.2, 1000)).toBe(0.32);
+    expect(clampSplit(0.9, 1000)).toBe(0.68);
+    expect(splitTo(0.5, "End", 1000)).toBe(0.32);
+    expect(splitTo(0.5, "Home", 1000)).toBe(0.68);
+    expect(splitTo(0.5, "ArrowLeft", 540)).toBe(0.5);
+  });
+});
+
+describe("tabMoveTarget", () => {
+  const ids = [1, 2, 3, 4];
+  it("moves a tab one place left or right", () => {
+    expect(tabMoveTarget(ids, 3, -1)).toBe(2);
+    expect(tabMoveTarget(ids, 2, 1)).toBe(4);
+    expect(tabMoveTarget(ids, 3, 1)).toBeNull();
+  });
+  it("refuses at the edges and for unknown tabs", () => {
+    expect(tabMoveTarget(ids, 1, -1)).toBeUndefined();
+    expect(tabMoveTarget(ids, 4, 1)).toBeUndefined();
+    expect(tabMoveTarget(ids, 9, 1)).toBeUndefined();
   });
 });

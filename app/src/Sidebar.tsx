@@ -15,7 +15,8 @@ import { NoteView } from "./NoteView";
 import { S } from "./strings";
 import { P } from "./strings.panels";
 import logo from "./assets/logo.png";
-import { Button } from "./ui";
+import "./sidetabs.css";
+import { Button, Input } from "./ui";
 import { Icon } from "./Icon";
 import { errorText } from "./appError";
 import { isMultiLine, runSetup } from "./setupRun";
@@ -72,6 +73,14 @@ export function Sidebar() {
     setNewAgent(v);
     setSavedAgent(v);
   };
+  // status dots stop animating while the window has no focus (css: html[data-blur])
+  const syncBlur = () => document.documentElement.toggleAttribute("data-blur", !document.hasFocus());
+  window.addEventListener("blur", syncBlur);
+  window.addEventListener("focus", syncBlur);
+  onCleanup(() => {
+    window.removeEventListener("blur", syncBlur);
+    window.removeEventListener("focus", syncBlur);
+  });
   const actions = createSidebarActions();
   const { run, cleanFinished, dropProject, dropWorktree } = actions;
 
@@ -266,6 +275,13 @@ export function Sidebar() {
     void dropWorktree(r.project, r.path, r.name);
   });
 
+  // project filter: by project name or by the branch of one of its worktrees
+  const [filter, setFilter] = createSignal("");
+  const shownProjects = createMemo(() => {
+    const q = filter().trim().toLowerCase();
+    if (!q) return projects();
+    return projects().filter((p) => p.name.toLowerCase().includes(q) || p.worktrees.some((w) => (w.branch ?? "").toLowerCase().includes(q)));
+  });
   const footerButton = "justify-start gap-1.5 rounded-md px-2.5 py-2 text-sm hover:bg-foreground/5";
   return (
     <aside class="sidebar">
@@ -277,8 +293,20 @@ export function Sidebar() {
         {T.addProject}
       </Button>
 
+      <Show when={projects().length > 3}>
+        <Input
+          type="search"
+          class="sidebar-filter"
+          placeholder={T.filterProjects}
+          aria-label={T.filterProjects}
+          value={filter()}
+          onInput={(e) => setFilter(e.currentTarget.value)}
+          onKeyDown={(e) => e.key === "Escape" && filter() && (e.stopPropagation(), setFilter(""))}
+        />
+      </Show>
       <div class="section">{T.projects}</div>
-      <For each={projects()}>
+      <div class="sidebar-list" role="group" aria-label={T.projects}>
+      <For each={shownProjects()}>
         {(p) => {
           // main first, then the tree of parents and children; the finished ones are listed apart
           const lay = createMemo(() => {
@@ -358,7 +386,11 @@ export function Sidebar() {
         }}
       </For>
 
-      <div class="grow" />
+      <Show when={filter().trim() && shownProjects().length === 0}>
+        <div class="empty">{T.noProjectMatch}</div>
+      </Show>
+      </div>
+      <div class="sidebar-foot">
       <Button variant="link" size="bare" class={footerButton} onClick={() => setShowAutomations(true)}>
         <Icon name="clock" size={13} /> {T.automations}
       </Button>
@@ -368,6 +400,7 @@ export function Sidebar() {
       <Button variant="link" size="bare" class={footerButton} onClick={() => setShowSettings(true)}>
         <Icon name="gear" size={13} /> {S.settings}
       </Button>
+      </div>
       <Show when={creating()}>
         {(pid) => (
           <CreateWorktree

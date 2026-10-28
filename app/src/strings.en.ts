@@ -1,4 +1,4 @@
-import { type Widen, count } from "./i18n";
+import { type Widen, count, fmtNumber } from "./i18n";
 import type { ptS } from "./strings";
 import { S } from "./strings";
 
@@ -125,6 +125,7 @@ export const enS: Widen<typeof ptS> = {
     removed: (n: number) => count(n, "worktree removed", "worktrees removed"),
     noPorts: "No server port open",
     shortcutsHint: "shortcuts",
+    shortcutsTip: "Keyboard shortcuts (?)",
   },
 
   notif: {
@@ -170,7 +171,8 @@ export const enS: Widen<typeof ptS> = {
     computerTitle: "Screen control",
     allow: "Allow",
     noGit: "git is not installed or not on PATH (without it there are no worktrees)",
-    noAgents: "neither claude nor codex was found (install one of them to use agents)",
+    noAgents: "no agent (claude, codex, gemini) was found (install one of them to use agents)",
+    pickerNone: "No agent found. Install Claude Code, Codex or the Gemini CLI and open this dialog again.",
     missing: (bits: string[]) => `Setup missing: ${bits.join("; ")}.`,
     restoreFailed: "Could not restore the sessions: ",
     restoreFailedList: (names: string[]) => `could not restore: ${names.join(", ")}`,
@@ -213,6 +215,10 @@ export const enS: Widen<typeof ptS> = {
     hintProjects: "projects",
     hintRight: "right panel",
     closeSplit: "Close split",
+    tabList: "All tabs",
+    tabMoveLeft: "Move left",
+    tabMoveRight: "Move right",
+    tabRename: "Rename",
     sectionProjects: "projects",
     sectionTerminals: "terminals",
     sectionRight: "right panel",
@@ -233,6 +239,8 @@ export const enS: Widen<typeof ptS> = {
   paletteTitle: "Command palette",
   palettePlaceholder: "Go to worktree or run action…",
   paletteResults: "Results",
+  paletteWorktree: "worktree",
+  paletteCount: (n: number) => count(n, "result", "results"),
   paletteAction: "action",
   paletteEmpty: "Nothing found",
   paletteNoMatch: (q: string) => `Nothing matches “${q}”. Try other words.`,
@@ -246,6 +254,14 @@ export const enS: Widen<typeof ptS> = {
   findPrev: "Previous",
   findNext: "Next",
   findClose: "Close search",
+  findNone: "No results",
+  findCount: (i: number, n: number) => `${fmtNumber(i)} of ${fmtNumber(n)}`,
+  ctxCopy: "Copy",
+  ctxPaste: "Paste",
+  ctxSelectAll: "Select all",
+  ctxClear: "Clear",
+  ctxFind: "Find…",
+  clipboardFail: "Could not read the clipboard.",
   fileMissing: (p: string) => `The file ${p} does not exist in this worktree.`,
 
   // deletions: the notice names what went away; a failure names it too
