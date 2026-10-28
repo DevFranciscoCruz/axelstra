@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createComponent, createSignal } from "solid-js";
 
-vi.mock("./store", () => ({ agentKeys: () => ["claude", "codex"] }));
+vi.mock("./store", () => ({ agentKeys: () => ["claude", "codex"], projects: () => [] }));
 vi.mock("./Icon", () => ({ hasIcon: () => false, Icon: () => null }));
 
 import { CreateWorktree } from "./sidebar/CreateWorktree";

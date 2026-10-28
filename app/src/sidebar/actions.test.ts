@@ -9,6 +9,9 @@ const h = vi.hoisted(() => ({
   notices: [] as string[],
   mode: "list" as "list" | "all" | null,
   inProject: false,
+  /** what worktree.status answers when the store has nothing yet (null: it fails) */
+  read: null as null | { path: string; dirty: number; ahead: number; upstream: boolean },
+  rmFails: false,
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -22,7 +25,14 @@ vi.mock("../RemoveProject", () => ({ askRemoveProject: vi.fn(async () => h.mode)
 vi.mock("../api", () => ({
   killSession: vi.fn(async (id: number) => void h.calls.push(`kill ${id}`)),
   removeSession: vi.fn(async (id: number) => void h.calls.push(`rmsession ${id}`)),
-  removeWorktree: vi.fn(async (_p: string, path: string) => void h.calls.push(`rmwt ${path}`)),
+  removeWorktree: vi.fn(async (_p: string, path: string) => {
+    if (h.rmFails) throw new Error("folder in use");
+    h.calls.push(`rmwt ${path}`);
+  }),
+  worktreeStatus: vi.fn(async () => {
+    if (!h.read) throw new Error("no status");
+    return [h.read];
+  }),
   removeProject: vi.fn(async (id: string, mode: string) => {
     h.calls.push(`rmproject ${id} ${mode}`);
     return { removed: true, sessions_closed: 2, worktrees_removed: 1, worktrees_pending: 0, branches_deleted: 1 };
@@ -40,7 +50,7 @@ vi.mock("../store", () => ({
   sessionsOf: () => h.sessions,
   setError: vi.fn(),
   showNotice: (m: string) => void h.notices.push(m),
-  wtStatus: () => ({ "/w/x": h.status }),
+  wtStatus: () => (h.status ? { "/w/x": h.status } : {}),
 }));
 
 import { createSidebarActions } from "./actions";
@@ -54,6 +64,8 @@ beforeEach(() => {
   h.notices.length = 0;
   h.mode = "list";
   h.inProject = false;
+  h.read = null;
+  h.rmFails = false;
 });
 
 describe("remove worktree flow", () => {
@@ -69,6 +81,29 @@ describe("remove worktree flow", () => {
     h.status = { dirty: 0, ahead: 0 };
     await createSidebarActions().dropWorktree("p", "/w/x", "feat-x");
     expect(h.asked[0].opts.typeToConfirm).toBeUndefined();
+  });
+
+  it("reads the state on demand when the store has none yet", async () => {
+    h.read = { path: "/w/x", dirty: 3, ahead: 0, upstream: true };
+    await createSidebarActions().dropWorktree("p", "/w/x", "feat-x");
+    expect(h.asked[0].opts).toMatchObject({ typeToConfirm: "feat-x" });
+  });
+
+  it("an unreadable state is treated as risky: typed name and a warning in the question", async () => {
+    await createSidebarActions().dropWorktree("p", "/w/x", "feat-x");
+    expect(h.asked[0].opts).toMatchObject({ kind: "danger", typeToConfirm: "feat-x" });
+    expect(h.asked[0].message).toContain("Não foi possível ler o estado");
+  });
+
+  it("a removal that fails after the sessions closed says so and offers to retry", async () => {
+    h.status = { dirty: 0, ahead: 0 };
+    h.rmFails = true;
+    h.sessions = [{ id: 7, running: true }];
+    const t = await import("../toasts");
+    await createSidebarActions().dropWorktree("p", "/w/x", "feat-x");
+    const err = t.toasts().find((x) => x.kind === "error");
+    expect(err?.text).toContain("feat-x");
+    expect(err?.action?.label).toBe("Tentar de novo");
   });
 
   it("declining removes nothing", async () => {

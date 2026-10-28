@@ -404,6 +404,7 @@ export function Sidebar() {
       <Show when={creating()}>
         {(pid) => (
           <CreateWorktree
+            projectId={pid()}
             name={projects().find((x) => x.id === pid())?.name ?? ""}
             newName={newName()}
             setNewName={setNewName}
