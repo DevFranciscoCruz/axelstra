@@ -956,7 +956,7 @@ The branch has to be pushed to the remote.`,
     wtFrom: (branch: string) => `Created from ${branch}.`,
     wtProblem: {
       chars:
-        "The name cannot have spaces or the characters ~ ^ : ? * [ \, start with “-” or “.”, or end with “/”, “.” or “.lock”.",
+        "The name cannot have spaces or the characters ~ ^ : ? * [ \\, start with “-” or “.”, or end with “/”, “.” or “.lock”.",
       dots: "The name cannot contain “..” or “@{”.",
       exists: "A worktree or branch with this name already exists.",
     },

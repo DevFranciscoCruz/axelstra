@@ -962,7 +962,7 @@ O branch precisa estar enviado ao remoto.`,
     wtFrom: (branch: string) => `Criado a partir de ${branch}.`,
     wtProblem: {
       chars:
-        "O nome não pode ter espaços nem os caracteres ~ ^ : ? * [ \, nem começar com «-» ou «.», nem terminar em «/», «.» ou «.lock».",
+        "O nome não pode ter espaços nem os caracteres ~ ^ : ? * [ \\, nem começar com «-» ou «.», nem terminar em «/», «.» ou «.lock».",
       dots: "O nome não pode conter «..» nem «@{».",
       exists: "Já existe um worktree ou um branch com esse nome.",
     },
