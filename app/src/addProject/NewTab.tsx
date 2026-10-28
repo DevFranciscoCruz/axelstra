@@ -1,4 +1,5 @@
-import { Show, createMemo, createSignal } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { markAddProjectForm } from "./dirty";
 import { projectInit } from "../api";
 import { AppError, errorText } from "../appError";
 import {
@@ -23,6 +24,8 @@ export function NewTab() {
   const [gitignore, setGitignore] = createSignal(false);
   const [commit, setCommit] = createSignal(true);
   const [touched, setTouched] = createSignal(false);
+  createEffect(() => markAddProjectForm("new", !!name().trim()));
+  onCleanup(() => markAddProjectForm("new", false));
   const [busy, setBusy] = createSignal(false);
   const [failure, setFailure] = createSignal("");
 

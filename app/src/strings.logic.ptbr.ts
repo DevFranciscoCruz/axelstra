@@ -67,7 +67,7 @@ export const ptBRL: Widen<typeof ptL> = {
   actionHint: "ação",
   lang: { title: "Idioma", note: "Muda na hora, sem reiniciar. Fica salvo nas configurações." },
   cmd: {
-    palette: { label: "Paleta de comandos" },
+    palette: { label: "Paleta de comandos (tudo o resto)" },
     settings: { label: "Configurações" },
     shortcuts: { label: "Atalhos de teclado" },
     contextMenu: { label: "Menu de contexto do elemento em foco" },

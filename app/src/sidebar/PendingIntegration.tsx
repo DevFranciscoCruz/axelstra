@@ -61,7 +61,12 @@ export function PendingIntegration(props: {
       });
       toast({ text: F.integrateUndone(props.name), kind: "info", key: `integrate:${props.path}` });
     } catch (e) {
-      toast({ text: F.integrateUndoFailed(props.name, errorText(e)), kind: "warn", key: `integrate:${props.path}`, sticky: true });
+      toast({
+        text: F.integrateUndoFailed(props.name, errorText(e)),
+        kind: "warn",
+        key: `integrate:${props.path}`,
+        sticky: true,
+      });
     }
     await refreshAll();
   };
@@ -78,7 +83,9 @@ export function PendingIntegration(props: {
     try {
       const r = await integrateWorktree(props.projectId, props.path);
       const canUndo =
-        r.integrated && r.pushed !== true && !!(r.default_branch && r.prev_tip && r.new_tip && r.branch && r.branch_tip);
+        r.integrated &&
+        r.pushed !== true &&
+        !!(r.default_branch && r.prev_tip && r.new_tip && r.branch && r.branch_tip);
       toast({
         text: !r.integrated
           ? T.nothing(props.name)

@@ -45,11 +45,11 @@ const RAW: Raw[] = [
   { id: "nextWaiting", keys: "Ctrl+J", group: "separadores" },
   { id: "rename", keys: "F2", group: "separadores" },
   { id: "termFind", keys: "Ctrl+F", group: "separadores", palette: false },
-  { id: "newAgent", group: "separadores" },
-  { id: "newTerminal", group: "separadores" },
+  { id: "newAgent", keys: "Ctrl+Shift+A", group: "separadores" },
+  { id: "newTerminal", keys: "Ctrl+Shift+`", group: "separadores" },
   { id: "split", group: "separadores" },
 
-  { id: "newWorktree", group: "worktree" },
+  { id: "newWorktree", keys: "Ctrl+Shift+N", group: "worktree" },
   { id: "removeWorktree", group: "worktree" },
 
   { id: "searchChats", keys: "Ctrl+Shift+F", group: "ferramentas" },

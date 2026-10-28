@@ -83,6 +83,8 @@ export const push = (e: NewEntry) => update((l) => addEntry(l, e, Date.now(), `$
 export const pushNotification = push;
 export const markAllRead = () => update((l) => (l.some((e) => !e.read) ? l.map((e) => (e.read ? e : { ...e, read: true })) : l));
 export const clearAll = () => update((l) => (l.length ? [] : l));
+/** puts back a list taken by `clearAll` (the "Desfazer" of the toast); entries that arrived meanwhile stay on top */
+export const restoreAll = (old: NotifEntry[]) => update((l) => [...l, ...old].sort((a, b) => b.at - a.at));
 
 /** Entries a PR state change deserves: CI turned failing or passing, or the PR got merged. `prev` null is the first
  *  read, which only sets the baseline. A different PR number is a new baseline too. */

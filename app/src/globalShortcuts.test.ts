@@ -44,14 +44,15 @@ const setup = async () => {
   const showTab = vi.fn((s: SessionInfo) => store.setActiveSession(s.id));
   const reopenClosed = vi.fn();
   store.setActiveSession(1);
-  const handle = createShortcutHandler({ tabs: () => tabs, showTab, reopenClosed });
+  const run = vi.fn((_id: string) => true);
+  const handle = createShortcutHandler({ tabs: () => tabs, showTab, reopenClosed, run });
   const press = (init: KeyboardEventInit, target?: Element) => {
     const e = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
     if (target) Object.defineProperty(e, "target", { value: target });
     handle(e);
     return e;
   };
-  return { store, voice, showTab, reopenClosed, press };
+  return { store, voice, showTab, reopenClosed, press, run };
 };
 
 beforeEach(() => vi.stubGlobal("localStorage", memory()));
@@ -103,6 +104,17 @@ describe("global shortcuts", () => {
     expect(reopenClosed).toHaveBeenCalledTimes(1);
     press({ key: "F", ctrlKey: true, shiftKey: true });
     expect(store.showAgentSearch()).toBe(true);
+  });
+
+  it("Ctrl+Shift+N / A / backtick create a worktree, agent and terminal", async () => {
+    const { press, run } = await setup();
+    press({ key: "N", ctrlKey: true, shiftKey: true });
+    press({ key: "A", ctrlKey: true, shiftKey: true });
+    press({ key: "~", code: "Backquote", ctrlKey: true, shiftKey: true });
+    expect(run.mock.calls.map((c) => c[0])).toEqual(["newWorktree", "newAgent", "newTerminal"]);
+    run.mockClear();
+    press({ key: "n", ctrlKey: true });
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("Ctrl+Shift+M toggles voice even from a text field", async () => {

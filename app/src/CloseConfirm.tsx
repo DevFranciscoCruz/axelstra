@@ -1,5 +1,6 @@
 import { S } from "./strings";
 import { U } from "./strings.ui";
+import { P } from "./strings.panels";
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -47,7 +48,7 @@ export function CloseConfirm() {
         <div class="m-actions">
           <Button onClick={() => setOpen(false)}>{S.cancel}</Button>
           <Button variant="default" ref={(el: HTMLButtonElement) => queueMicrotask(() => el.focus())} onClick={confirm}>
-            {S.close}
+            {P.flows.quit}
           </Button>
         </div>
       </Modal>

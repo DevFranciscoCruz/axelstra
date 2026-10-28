@@ -6,6 +6,7 @@ import { dispatchTopics, norm, projects, selectWorktree, sessionState, sessionsO
 import { Button } from "./ui";
 import { S } from "./strings";
 import { U } from "./strings.ui";
+import { P } from "./strings.panels";
 
 /** Live view of what the main session dispatched: one card per topic (worktree) with its latest requests. */
 export function Dispatcher() {
@@ -70,6 +71,9 @@ export function Dispatcher() {
                   <ol class="disp-reqs">
                     <For each={t.requests.slice(-3).reverse()}>{(r) => <li>{r}</li>}</For>
                   </ol>
+                  <Show when={t.requests.length > 3}>
+                    <div class="auto-note">{P.flows.moreRequests(t.requests.length - 3)}</div>
+                  </Show>
                 </Show>
               </div>
             );

@@ -285,7 +285,16 @@ export function App() {
     }
   };
 
-  useGlobalShortcuts({ tabs, showTab, reopenClosed });
+  useGlobalShortcuts({
+    tabs,
+    showTab,
+    reopenClosed,
+    run: (id) => {
+      const cmd = paletteActions().find((x) => x.id === id);
+      cmd?.run();
+      return !!cmd;
+    },
+  });
 
   // tab being renamed (double click); the palette starts it too
   const [renaming, setRenaming] = createSignal<number | null>(null);

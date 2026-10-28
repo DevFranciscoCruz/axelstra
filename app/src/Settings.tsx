@@ -150,7 +150,8 @@ export function Settings() {
   };
   const restoreBackup = async () => {
     // restoring replaces settings, projects and sessions: ask before even opening the folder dialog
-    if (!(await ask(P.flows.restoreAsk, { title: P.flows.restoreTitle, kind: "warning", okLabel: P.flows.restoreOk }))) return;
+    if (!(await ask(P.flows.restoreAsk, { title: P.flows.restoreTitle, kind: "warning", okLabel: P.flows.restoreOk })))
+      return;
     try {
       const r = await pickAndRestoreBackup(T.restorePath);
       if (r === undefined) return; // dialog cancelled
@@ -167,7 +168,10 @@ export function Settings() {
       .join(" · ");
   const cleanNow = async () => {
     // same operation as "Limpar" in the sidebar, which asks first: it closes sessions and removes worktrees of every project
-    if (!(await ask(P.flows.cleanNowAsk, { title: P.flows.cleanNowTitle, kind: "danger", okLabel: P.flows.cleanNowOk }))) return;
+    if (
+      !(await ask(P.flows.cleanNowAsk, { title: P.flows.cleanNowTitle, kind: "danger", okLabel: P.flows.cleanNowOk }))
+    )
+      return;
     try {
       const r = await worktreeSweepFull();
       setSwept(r.swept);

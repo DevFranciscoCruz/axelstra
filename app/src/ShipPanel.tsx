@@ -11,6 +11,7 @@ import { findWorktree, selectedWorktree, setError, showNotice } from "./store";
 import "./ship.css";
 import { createLive } from "./live";
 import { P } from "./strings.panels";
+import { errorText } from "./appError";
 
 /** last state read per worktree, so a change is noticed even after looking at another worktree in between */
 const lastSeen = new Map<string, ShipStatus>();
@@ -153,8 +154,8 @@ export function ShipPanel() {
       await gitMerge(path, auto, !auto && delBranch());
       setNote({ ok: true, text: auto ? P.ship.autoOn : P.ship.mergeDone });
     } catch (e) {
-      setNote({ ok: false, text: String(e) });
-      push({ kind: "error", worktree: path, text: P.ship.failedNote(auto, s.number, String(e).slice(0, 160)) });
+      // a failed merge is an error toast (sticky, also logged in the notification center), not a line in the panel
+      setError(P.ship.failedNote(auto, s.number, errorText(e)));
     } finally {
       setBusy(false);
       void load();

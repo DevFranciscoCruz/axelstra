@@ -7,6 +7,7 @@ import {
   NotifEntry,
   NotifKind,
   clearAll,
+  restoreAll,
   markAllRead,
   notifications,
   notificationsOpenRequest,
@@ -15,6 +16,8 @@ import {
 import { ago } from "./time";
 import { basename } from "./paths";
 import { S } from "./strings";
+import { P } from "./strings.panels";
+import { toast } from "./toasts";
 import "./notifications.css";
 import { Button, cn } from "./ui";
 
@@ -140,7 +143,16 @@ export function NotificationBell(props: { onJump: (e: NotifEntry) => void }) {
               size="sm"
               class="h-auto py-0.5"
               disabled={notifications().length === 0}
-              onClick={() => clearAll()}
+              onClick={() => {
+                const old = notifications();
+                clearAll();
+                toast({
+                  text: P.flows.clearAllText(old.length),
+                  kind: "info",
+                  key: "notif:clear",
+                  action: { label: P.flows.undo, run: () => restoreAll(old) },
+                });
+              }}
             >
               {S.notif.clearAll}
             </Button>

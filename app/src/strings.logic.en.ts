@@ -66,7 +66,7 @@ export const enL: Widen<typeof ptL> = {
   actionHint: "action",
   lang: { title: "Language", note: "Applies immediately, no restart. It is saved in the settings." },
   cmd: {
-    palette: { label: "Command palette" },
+    palette: { label: "Command palette (everything else)" },
     settings: { label: "Settings" },
     shortcuts: { label: "Keyboard shortcuts" },
     contextMenu: { label: "Context menu of the focused element" },

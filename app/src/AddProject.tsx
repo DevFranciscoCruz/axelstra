@@ -12,6 +12,7 @@ import { addProjectTab, setAddProjectTab, setShowAddProject } from "./store";
 import { S } from "./strings";
 import { AP } from "./strings.sources";
 import { Button, Tabs, TabsList, TabsTrigger } from "./ui";
+import { addProjectDirty } from "./addProject/dirty";
 
 /*
  * UX decision (Add project): ONE dialog with a vertical list of origins on the left and the form of the chosen origin on the
@@ -51,7 +52,7 @@ export function AddProject() {
   const primary = () => panel?.querySelector<HTMLButtonElement>("[data-ap-primary]:not(:disabled)")?.click();
 
   return (
-    <Modal label={AP.title} class="modal add-project" onClose={close}>
+    <Modal label={AP.title} class="modal add-project" dirty={addProjectDirty()} onClose={close}>
       <div class="auto-head">
         <strong>{AP.title}</strong>
         <span class="grow" />

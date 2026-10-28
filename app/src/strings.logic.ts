@@ -68,7 +68,7 @@ export const ptL = {
   actionHint: "ação",
   lang: { title: "Idioma", note: "Muda já, sem reiniciar. Fica guardado nas definições." },
   cmd: {
-    palette: { label: "Paleta de comandos" },
+    palette: { label: "Paleta de comandos (tudo o resto)" },
     settings: { label: "Definições" },
     shortcuts: { label: "Atalhos de teclado" },
     contextMenu: { label: "Menu de contexto do elemento focado" },

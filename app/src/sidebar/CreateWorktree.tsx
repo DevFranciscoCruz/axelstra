@@ -52,7 +52,12 @@ export function CreateWorktree(props: {
           ref={(el) => queueMicrotask(() => el.focus())}
         />
       </Field>
-      <div id="wt-new-msg" class="auto-note" classList={{ "text-[var(--danger)]": !!problem() }} role={problem() ? "alert" : undefined}>
+      <div
+        id="wt-new-msg"
+        class="auto-note"
+        classList={{ "text-[var(--danger)]": !!problem() }}
+        role={problem() ? "alert" : undefined}
+      >
         {problem() ? P.flows.wtProblem[problem()!] : P.flows.wtFrom(base())}
       </div>
       <Field label={U.createWorktree.agent} full>

@@ -2,7 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { ask } from "../Confirm";
 import { askRemoveProject } from "../RemoveProject";
 import { doneNotice } from "../removeProjectLogic";
-import { killSession, removeProject, removeSession, removeWorktree, worktreeRebase, worktreeStatus, worktreeSweep, type WtStatus } from "../api";
+import {
+  killSession,
+  removeProject,
+  removeSession,
+  removeWorktree,
+  worktreeRebase,
+  worktreeStatus,
+  worktreeSweep,
+  type WtStatus,
+} from "../api";
 import { errorText } from "../appError";
 import { rebaseBlocker, rebaseOutcome } from "../rebase";
 import { toast } from "../toasts";
@@ -146,7 +155,11 @@ export function createSidebarActions() {
     // what would be lost, so the question is not a blind "are you sure"
     let st: WtStatus | undefined = wtStatus()[norm(path)];
     // the state may not have been read yet (startup, a worktree just created): read it now; if that fails, assume the worst
-    if (!st) st = await worktreeStatus([path]).then((l) => l[0], () => undefined);
+    if (!st)
+      st = await worktreeStatus([path]).then(
+        (l) => l[0],
+        () => undefined,
+      );
     const unknown = !st;
     const live = sessionsOf(path).filter((x) => x.running).length;
     const typed = unknown || needsTypedName(st);

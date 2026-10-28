@@ -10,7 +10,13 @@ export function wtNameProblem(raw: string, taken: string[]): WtNameProblem | nul
   if (!name) return null;
   if (name.includes("..") || name.includes("@{")) return "dots";
   // eslint-disable-next-line no-control-regex -- control characters are exactly what git refuses
-  if (/[\s~^:?*[\\\x00-\x1f\x7f]/.test(name) || /^[-./]/.test(name) || /[/.]$/.test(name) || name.endsWith(".lock") || name === "@")
+  if (
+    /[\s~^:?*[\\\x00-\x1f\x7f]/.test(name) ||
+    /^[-./]/.test(name) ||
+    /[/.]$/.test(name) ||
+    name.endsWith(".lock") ||
+    name === "@"
+  )
     return "chars";
   const low = name.toLowerCase();
   if (taken.some((t) => t.toLowerCase() === low || t.toLowerCase() === `ax/${low}`)) return "exists";

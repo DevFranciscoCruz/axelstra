@@ -1,4 +1,5 @@
-import { Show, createMemo, createSignal } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
+import { markAddProjectForm } from "./dirty";
 import { AP } from "../strings.sources";
 import { Button, Field, Input } from "../ui";
 import { CloneProgress } from "./CloneProgress";
@@ -15,6 +16,8 @@ export function CloneTab() {
   const [branch, setBranch] = createSignal("");
   const [depth, setDepth] = createSignal("");
   const [touched, setTouched] = createSignal(false);
+  createEffect(() => markAddProjectForm("clone", !!url().trim() || edited()));
+  onCleanup(() => markAddProjectForm("clone", false));
 
   const folderName = () => (edited() ? name() : repoNameFromUrl(url()));
   const dest = () => (parent().trim() && folderName().trim() ? joinPath(parent(), folderName().trim()) : "");
