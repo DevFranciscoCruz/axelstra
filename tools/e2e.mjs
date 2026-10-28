@@ -483,7 +483,7 @@ ${dataDirReport()}`);
   // offers only https://, ssh:// and user@host:path, so a positive clone from a local bare repo (file://) is covered by the
   // daemon tests (crates/daemon/tests/sources.rs); here a failing ssh clone walks the whole job offline.
   problems.length = 0;
-  const dlg = (js) => page.evaluate(`(() => { const d = document.querySelector('[role=dialog]'); ${js} })()`);
+  const dlg = (js) => page.evaluate(`(() => { const d = document.querySelector('[role=dialog], [role=alertdialog]'); ${js} })()`);
   const key = async (k, vk) => {
     for (const type of ["keyDown", "keyUp"])
       await page.send("Input.dispatchKeyEvent", {
@@ -510,14 +510,14 @@ ${dataDirReport()}`);
     dlg("const b = d.querySelector('[data-ap-primary]'); if (!b || b.disabled) return false; b.click(); return true;");
   const alerts = () =>
     dlg("return [...d.querySelectorAll('[role=alert]')].map((e) => e.textContent.trim()).filter(Boolean).join(' | ');");
-  const closed = () => page.evaluate("!document.querySelector('[role=dialog]')");
+  const closed = () => page.evaluate("!document.querySelector('[role=dialog], [role=alertdialog]')");
   const openAdd = async () => {
     await until("the add button", () =>
       page.evaluate(
         "(() => { const b = [...document.querySelectorAll('button')].find((e) => /^[+] (Adicionar projeto|Add project)$/.test(e.innerText.trim())); if (!b) return false; b.click(); return true; })()",
       ),
     );
-    await until("the dialog", () => page.evaluate("!!document.querySelector('[role=dialog]')"));
+    await until("the dialog", () => page.evaluate("!!document.querySelector('[role=dialog], [role=alertdialog]')"));
   };
 
   await openAdd();
@@ -647,7 +647,7 @@ ${dataDirReport()}`);
       ),
     );
     await until("the remove dialog", () =>
-      page.evaluate("!!document.querySelector('[role=dialog] .rm-risk, [role=dialog] input[type=radio]')"),
+      page.evaluate("!!document.querySelector('[role=alertdialog] .rm-risk, [role=alertdialog] input[type=radio]')"),
     );
     // "Remover tudo" can only be chosen once the preview is in (the page ignores the click before)
     await until("the preview to load", async () => /e2e-dirty/.test(await dlg("return d.innerText;")), 15000);
