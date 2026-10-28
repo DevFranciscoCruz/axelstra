@@ -92,3 +92,16 @@ through a shell (`ShellExecuteW` with the path as one argument; `open`/`xdg-open
 methods are in `agent_forbidden`, and a run is written to `audit.log` (`files.run_path`). A remote (WSL/SSH) worktree's dialog only
 offers to copy the path. With `AXELSTRA_TEST_OPENER_LOG=<file>` the daemon appends `<action>\t<path>` to that file instead of doing
 anything (`crates/daemon/tests/path_open.rs`); tests must set it, never reveal or run anything real.
+
+## Cheaper builds and runs
+
+Machines with little memory should not compile in parallel at full width. Rules that apply to every heavy command:
+
+- Inside an Axelstra worktree run it as `axelstra lock verify -- <cmd>` (one at a time across sessions).
+- `CARGO_BUILD_JOBS`: `node scripts/check.mjs` derives it when it is not set and `CI` is not (`scripts/lib/jobs.mjs`:
+  `min(cores / 2, (free memory - 2 GB) / 1.5 GB)`, at least 1); an explicit value always wins. CI is never touched.
+- `node scripts/check.mjs --fast` is the loop while working: fmt, clippy (which type-checks the tests, nothing is linked) only on
+  the packages the branch touched and their dependents, tsc/eslint/vitest only when `app/` changed, no `cargo test`.
+  It is not the gate: CI and the push gate run the full mode, which is unchanged.
+- `node scripts/check.mjs --self-test` checks the pure helpers (jobs for a machine, affected packages) in milliseconds, no compile.
+- Numbers behind the settings (wall time, peak memory, per jobs value) come from `tools/measure-build.mjs`; see `docs/TOOLS.md`.

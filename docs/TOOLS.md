@@ -10,6 +10,8 @@ Helpers outside the Rust and TypeScript sources. Run everything from the repo ro
 | `node scripts/check.mjs --engine` | same, but the Rust steps cover only core, daemon and cli (no desktop toolkit needed) |
 | `node scripts/check.mjs --skip-rust` / `--skip-frontend` | run one half |
 | `--skip-fmt --skip-clippy --skip-test --skip-tsc --skip-vitest` | skip one step |
+| `node scripts/check.mjs --fast` | quick loop, not the gate: clippy only on touched packages + dependents, no `cargo test`, frontend steps only when `app/` changed (vitest `--changed`, eslint on changed files) |
+| `node scripts/check.mjs --self-test` | pure helpers only (`scripts/lib/jobs.mjs`, `scripts/lib/changed.mjs`), no compile |
 
 In an Axelstra worktree wrap it: `axelstra lock verify -- node scripts/check.mjs`.
 
@@ -27,8 +29,9 @@ purpose and fix the new lints in the same change.
 - `check-i18n-static.mjs`: finds dictionary texts copied into module-level constants (part of `check.mjs`).
 - `write-latest-json.mjs`: builds the updater manifest (`latest.json`) in the release workflow.
 - `prepare-sidecar.sh` / `prepare-sidecar.ps1`: build the daemon binary and place it as the Tauri sidecar.
+- `lib/jobs.mjs`: `jobsFor({cores, freeMemBytes, perJobBytes})`, the compile-job count for a machine; `check.mjs` sets `CARGO_BUILD_JOBS` from it when unset (never on CI). `node scripts/lib/jobs.mjs` prints today's value, `--self-test` tests it. `lib/changed.mjs`: which files and Rust packages a branch touched (for `--fast`).
 - `build-installer.ps1`: **Windows only.** One command for the NSIS installer in steps (sidecar, frontend, bundle),
-  printing time and peak memory per step. `-Version` overrides the version, `-Jobs` limits compile jobs.
+  printing time and peak memory per step. `-Version` overrides the version, `-Jobs` limits compile jobs (when omitted it is derived from the cores and the free memory, floor 2; an explicit value wins).
   It also sets `AXELSTRA_GIT_SHA` and `AXELSTRA_BUILD_DATE` (unless already set) so the sidecar and the app embed the same
   commit and date; the installer name does not change. Output: `target/release/bundle/nsis/Axelstra_<version>_x64-setup.exe`. Slow and heavy; do not run it for a code check.
 
@@ -41,6 +44,8 @@ sets the sha from `github.sha`. Shown by `axelstra --version` / `-V`, `axelstra 
 Set them yourself only to reproduce a release build: `AXELSTRA_GIT_SHA=abc1234 AXELSTRA_BUILD_DATE=2026-01-31 cargo build`.
 
 ## tools/
+
+- `measure-build.mjs [--label L] [--jobs 2,default] [--steps check,test-build,relink] [--json F]`: wall time and peak memory (process-tree sum, sampled every 500 ms, so a floor) of `cargo check --workspace`, `cargo test --no-run` for core/daemon/cli, and a relink, each from an empty `CARGO_TARGET_DIR` under the temp dir so runs are comparable. Run it inside the lock: `axelstra lock verify -- node tools/measure-build.mjs --label base --jobs 2`.
 
 - `fake-agent.sh` / `fake-agent.ps1`: stand-in for a coding agent in tests. Behaviour is keyed on `AXELSTRA_TASK`:
   writes `<id>.txt` in the cwd and `.axelstra/result.json` (`{"status":"done",...}`); task `a` and `conflict` both write
