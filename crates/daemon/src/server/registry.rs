@@ -93,6 +93,8 @@ pub(super) struct Registry {
     pub(super) save_gen: AtomicU64,
     /// settings.json as last read or written (the daemon is its only writer): a leaf lock. `settings_changed` drops it
     pub(super) settings: Mutex<Option<Value>>,
+    /// memory pressure (`crate::governor`); its thread starts with `server::governor::spawn`
+    pub(super) governor: Arc<crate::governor::Governor>,
 }
 
 #[derive(Default)]
@@ -226,6 +228,12 @@ impl Registry {
         self.watchers.lock_recover().retain(|(stop, tx)| {
             !stop.load(Ordering::SeqCst) && !matches!(tx.try_send(frame.clone()), Err(mpsc::error::TrySendError::Closed(_)))
         });
+    }
+
+    /// `resources.changed`, with the machine's memory level and free memory riding along (additive).
+    pub(super) fn broadcast_resources(&self) {
+        let (level, info) = self.governor.state();
+        self.broadcast_event(json!({"event": "resources.changed", "level": level.as_str(), "free_mb": info.free_mb}));
     }
 
     /// Tells the app there is something to take for its toasts and notification center (`janitor.events`,
@@ -455,6 +463,7 @@ impl Registry {
             save_written: Mutex::new((0, None)),
             save_gen: AtomicU64::new(0),
             settings: Default::default(),
+            governor: Arc::new(crate::governor::Governor::new(crate::governor::Config::from_settings(&read_settings(&saved)))),
         }
     }
 

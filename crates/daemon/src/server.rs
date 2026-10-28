@@ -13,6 +13,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 mod containers;
 mod files;
+mod governor;
 mod history;
 mod loops;
 mod messaging;
@@ -67,6 +68,8 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         // the saved sessions are the user's to drop, and an agent must not stop the daemon or switch the clean-up off
         "daemon.shutdown" | "session.pending_clear" => true,
         "janitor.auto" => p.get("on").is_some(),
+        // an agent must not switch the memory governor off or move its lines
+        "mem.config" => true,
         "project.add"
         | "project.remove"
         | "project.remove_preview"
@@ -291,6 +294,7 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     spawn_budget_loop(reg.clone());
     spawn_data_watch(reg.clone());
     spawn_session_monitor(reg.clone());
+    governor::spawn(&reg);
     // worktrees that exist now and carry no mark become manual, before the janitor may look at them
     if let Err(e) = crate::projects::migrate_marks(&reg.store) {
         eprintln!("janitor: mark migration failed: {e:#}");
@@ -623,6 +627,7 @@ fn reads_only(method: &str) -> bool {
                 | "agent.usage"
                 | "agent.worktree_usage"
                 | "budget.status"
+                | "mem.status"
                 | "hooks.status"
                 | "orch.limits"
                 | "orch.trust_info"
@@ -815,6 +820,8 @@ fn session_list(reg: &Registry) -> Vec<Value> {
     let stall_ms = reg.with_settings(crate::stall::threshold_ms);
     let stall_min = crate::stall::display_minutes(stall_ms);
     let busy = busy_parents(reg, &picked);
+    let (mem_level, mem) = reg.governor.state();
+    let (mem_level, mem_free) = (mem_level.as_str(), mem.free_mb);
     let mut v: Vec<Value> = picked
         .into_iter()
         .map(|(id, s, view, label, meta)| {
@@ -836,7 +843,7 @@ fn session_list(reg: &Registry) -> Vec<Value> {
                 );
                 json!({"minutes": stall_min, "code": c.code, "params": c.params_json(), "text": c.to_string()})
             });
-            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "wait": wait.map(|w| json!({"kind": w.kind.as_str(), "text": w.text})), "awaiting": awaiting.map(|a| json!({"reason": a.reason, "since": a.since, "until": a.until})), "stalled": stalled, "stall": stall, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
+            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "wait": wait.map(|w| json!({"kind": w.kind.as_str(), "text": w.text})), "awaiting": awaiting.map(|a| json!({"reason": a.reason, "since": a.since, "until": a.until})), "stalled": stalled, "stall": stall, "mem_level": mem_level, "mem_free_mb": mem_free, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
         })
         .collect();
     v.sort_by_key(|x| x["id"].as_u64());
@@ -923,6 +930,7 @@ fn dispatch_call(c: &mut Ctx) -> Result<Value> {
         "fs" | "files" | "watch" | "open" => files::call(c),
         "git" | "gh" => vcs::call(c),
         "triggers" => triggers::call(c),
+        "mem" => governor::call(c),
         "docker" => containers::call(c),
         "orch" | "kanban" | "automation" => orchestration::call(c),
         "msg" | "notes" => messaging::call(c),

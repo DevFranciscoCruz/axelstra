@@ -837,6 +837,29 @@ export const computerEnable = (on: boolean) => call<{ enabled: boolean }>("compu
 
 export type WorkerLimits = { max_workers: number; workers: number };
 export type SessionRes = { id: number; mem: number; cpu_100ns: number };
+/** Memory pressure of the machine (the daemon's resource governor); `memory.pressure` on the watch stream says when it moves. */
+export type MemLevel = "normal" | "high" | "critical";
+export type GovernorConfig = {
+  enabled: boolean;
+  admission: boolean;
+  auto_pause: boolean;
+  warn_only: boolean;
+  high_free_pct: number;
+  crit_free_pct: number;
+  high_free_mb: number;
+  crit_free_mb: number;
+};
+export type MemStatus = {
+  level: MemLevel;
+  free_mb: number;
+  total_mb: number;
+  commit_pct: number | null;
+  thresholds: Record<string, number>;
+  config: GovernorConfig;
+  sessions: { id: number; rss_mb: number }[];
+};
+export const memStatus = () => callBg<MemStatus>("mem.status");
+export const memConfig = (patch: Partial<GovernorConfig>) => call<{ config: GovernorConfig }>("mem.config", { patch });
 export const sessionResources = () => callBg<{ sessions: SessionRes[]; cores: number }>("session.resources");
 
 /** tasks of running `axelstra flow` plans: queued (waiting for its turn), running, done, failed, blocked */

@@ -701,7 +701,7 @@ pub(super) fn spawn_session_monitor(reg: Arc<Registry>) {
                 last = now;
                 reg.broadcast("session.changed");
                 // sessions started, ended or went quiet/working: what they cost in memory and tokens moved with them
-                reg.broadcast("resources.changed");
+                reg.broadcast_resources();
                 reg.budget_wake.notify_one();
                 save_histories_of(&reg, &settled);
             }

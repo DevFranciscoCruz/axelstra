@@ -289,6 +289,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         // used by the app updater: the installer cannot replace a running axelstra.exe.
         // Sessions die with the daemon (Job Objects), so the UI warns before calling this.
         "daemon.shutdown" => {
+            reg.governor.stop();
             // remember what was going on, so the next start can pick it up: agents that were working, and the
             // ephemeral workers that die with this daemon (they are not restored) per coordinator
             let live: Vec<(u32, bool)> = reg

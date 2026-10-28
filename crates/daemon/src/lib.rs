@@ -12,6 +12,7 @@ pub mod docker;
 pub mod envtools;
 pub mod fsops;
 pub mod gh;
+pub mod governor;
 pub mod hooks;
 pub mod hosts;
 pub mod htmlpath;

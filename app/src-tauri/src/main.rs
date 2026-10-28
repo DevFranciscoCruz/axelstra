@@ -344,6 +344,8 @@ const ALLOWED_METHODS: &[&str] = &[
     "session.rename",
     "session.resize",
     "session.resources",
+    "mem.status",
+    "mem.config",
     "session.screen",
     "session.spawn",
     "settings.get",
