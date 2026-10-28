@@ -17,7 +17,7 @@ You are the LEAD of this worktree: a dispatcher, not an implementer. You own the
 
 /// What a dispatched lead starts with: the request, who it is, how it finishes, and the rule against waiting silently.
 fn lead_prompt(request: &str) -> String {
-    format!("{request}{FOOTER} {}", axelstra_core::waiting::NEVER_WAIT_RULE)
+    format!("{request}{FOOTER} {} {}", axelstra_core::waiting::NEVER_WAIT_RULE, axelstra_daemon::prompts::BUILD_RULE)
 }
 
 /// A lead started by `dispatch` is ephemeral like a `--report-to` worker: it closes itself when it calls `axelstra done`
@@ -322,6 +322,7 @@ mod tests {
         assert!(p.contains("dispatcher, not an implementer"));
         assert!(p.contains("axelstra agent . --prompt") && p.contains("--report-to $AXELSTRA_SESSION"));
         assert!(p.contains("do NOT edit code") && p.contains("axelstra lock verify"));
+        assert!(p.contains("CARGO_BUILD_JOBS") && p.contains("cargo check"));
         assert!(p.contains("you never execute it alone"));
         assert!(p.contains("commits, what was verified, what was not verified"));
     }
