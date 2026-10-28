@@ -99,7 +99,8 @@ impl Default for Config {
     }
 }
 
-const KEYS: [&str; 8] = ["enabled", "admission", "auto_pause", "warn_only", "high_free_pct", "crit_free_pct", "high_free_mb", "crit_free_mb"];
+const KEYS: [&str; 8] =
+    ["enabled", "admission", "auto_pause", "warn_only", "high_free_pct", "crit_free_pct", "high_free_mb", "crit_free_mb"];
 const MAX_MB: u64 = 4 * 1024 * 1024;
 
 impl Config {
@@ -137,7 +138,9 @@ impl Config {
         let mut c = self.clone();
         for (k, v) in o {
             let flag = || v.as_bool().ok_or_else(|| bad(format!("{k} must be true or false")));
-            let num = |max: u64| v.as_u64().filter(|n| (1..=max).contains(n)).ok_or_else(|| bad(format!("{k} must be a whole number from 1 to {max}")));
+            let num = |max: u64| {
+                v.as_u64().filter(|n| (1..=max).contains(n)).ok_or_else(|| bad(format!("{k} must be a whole number from 1 to {max}")))
+            };
             match k.as_str() {
                 "enabled" => c.enabled = flag()?,
                 "admission" => c.admission = flag()?,

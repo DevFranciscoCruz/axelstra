@@ -36,7 +36,8 @@ impl PsiSource {
 
 /// `poll(2)` on two descriptors: `(psi_event, wake)`; `None` on error.
 fn poll2(psi: i32, wake: i32, ms: i32) -> Option<(bool, bool)> {
-    let mut fds = [libc::pollfd { fd: psi, events: libc::POLLPRI, revents: 0 }, libc::pollfd { fd: wake, events: libc::POLLIN, revents: 0 }];
+    let mut fds =
+        [libc::pollfd { fd: psi, events: libc::POLLPRI, revents: 0 }, libc::pollfd { fd: wake, events: libc::POLLIN, revents: 0 }];
     // SAFETY: `fds` is a valid array of two pollfd structs for the duration of the call, and the count passed is 2.
     let n = unsafe { libc::poll(fds.as_mut_ptr(), 2, ms) };
     if n < 0 {

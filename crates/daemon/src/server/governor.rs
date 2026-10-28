@@ -21,7 +21,12 @@ pub(super) fn notifier(reg: &Arc<Registry>) -> OnChange {
     let weak = Arc::downgrade(reg);
     Arc::new(move |ch: &Change| {
         let Some(reg) = weak.upgrade() else { return };
-        let top: Vec<Value> = session_rss(&reg).into_iter().take(TOP).filter(|(_, mb)| *mb > 0).map(|(id, mb)| json!({"session": id, "rss_mb": mb})).collect();
+        let top: Vec<Value> = session_rss(&reg)
+            .into_iter()
+            .take(TOP)
+            .filter(|(_, mb)| *mb > 0)
+            .map(|(id, mb)| json!({"session": id, "rss_mb": mb}))
+            .collect();
         reg.broadcast_event(json!({
             "event": "memory.pressure", "level": ch.to.as_str(), "from": ch.from.as_str(),
             "free_mb": ch.info.free_mb, "total_mb": ch.info.total_mb, "top": top,
@@ -109,7 +114,13 @@ mod tests {
             let v: Value = serde_json::from_slice(&f[5..]).unwrap();
             names.push((v["event"].as_str().unwrap().to_string(), v["level"].as_str().map(String::from)));
         }
-        assert_eq!(names, [("memory.pressure".to_string(), Some("critical".to_string())), ("resources.changed".to_string(), Some("critical".to_string()))]);
+        assert_eq!(
+            names,
+            [
+                ("memory.pressure".to_string(), Some("critical".to_string())),
+                ("resources.changed".to_string(), Some("critical".to_string()))
+            ]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

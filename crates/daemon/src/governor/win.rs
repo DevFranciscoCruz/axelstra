@@ -132,7 +132,8 @@ pub fn global_status() -> Option<MemInfo> {
         return None;
     }
     let mb = |b: u64| b / (1024 * 1024);
-    let commit_pct = (m.ullTotalPageFile > 0).then(|| (m.ullTotalPageFile.saturating_sub(m.ullAvailPageFile) * 100 / m.ullTotalPageFile).min(100) as u8);
+    let commit_pct =
+        (m.ullTotalPageFile > 0).then(|| (m.ullTotalPageFile.saturating_sub(m.ullAvailPageFile) * 100 / m.ullTotalPageFile).min(100) as u8);
     Some(MemInfo { total_mb: mb(m.ullTotalPhys), free_mb: mb(m.ullAvailPhys), commit_pct })
 }
 
