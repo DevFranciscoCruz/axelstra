@@ -22,14 +22,30 @@
   padding-top: 4px;
   border-top: 1px solid var(--line);
 }
-.sidebar-filter { flex: none; }
-.sidebar > .brand, .sidebar > .section, .sidebar > button { flex: none; }
+.sidebar-filter {
+  flex: none;
+}
+.sidebar > .brand,
+.sidebar > .section,
+.sidebar > button {
+  flex: none;
+}
 
 /* M1: the branch name keeps room; minor badges give way first, the row buttons show on hover, focus or the active row */
-.item.wt .name { min-width: 8ch; }
-.item.wt .wt-topic { min-width: 0; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item.wt .name {
+  min-width: 8ch;
+}
+.item.wt .wt-topic {
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 @container sidebar-list (max-width: 240px) {
-  .item.wt .wt-minor { display: none; }
+  .item.wt .wt-minor {
+    display: none;
+  }
   .item.wt:not(:hover):not(:focus-within):not(.active) .x {
     opacity: 0;
     width: 0;
@@ -42,8 +58,14 @@
 }
 
 /* M6: icon buttons of the sidebar and the tab close button reach 24x24 px through a hidden pseudo-element; the look is unchanged */
-.sidebar .x, .sidebar button.icon, .tab-close { position: relative; }
-.sidebar .x::after, .sidebar button.icon::after, .tab-close::after {
+.sidebar .x,
+.sidebar button.icon,
+.tab-close {
+  position: relative;
+}
+.sidebar .x::after,
+.sidebar button.icon::after,
+.tab-close::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -54,16 +76,36 @@
 }
 
 /* M3: bigger status dots and glyphs; B4: one animation per dot (the working glyph spins, it no longer pulses too) */
-.dot.glyph { width: 14px; height: 14px; }
-.dot.glyph svg { width: 10px; height: 10px; }
-.dot.glyph.work { animation: none; }
+.dot.glyph {
+  width: 14px;
+  height: 14px;
+}
+.dot.glyph svg {
+  width: 10px;
+  height: 10px;
+}
+.dot.glyph.work {
+  animation: none;
+}
 /* B4: nothing animates while the window has no focus */
-html[data-blur] .dot, html[data-blur] .dot svg { animation-play-state: paused; }
+html[data-blur] .dot,
+html[data-blur] .dot svg {
+  animation-play-state: paused;
+}
 
 /* A3: tab strip with an overflow cue on the sides that have more tabs */
-.tabstrip { position: relative; display: flex; min-width: 0; flex: 0 1 auto; }
-.tabstrip > [role="tablist"], .tabstrip > div { min-width: 0; }
-.tabstrip::before, .tabstrip::after {
+.tabstrip {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.tabstrip > [role="tablist"],
+.tabstrip > div {
+  min-width: 0;
+}
+.tabstrip::before,
+.tabstrip::after {
   content: "";
   position: absolute;
   top: 0;
@@ -72,8 +114,17 @@ html[data-blur] .dot, html[data-blur] .dot svg { animation-play-state: paused; }
   z-index: 2;
   pointer-events: none;
   opacity: 0;
-  transition: opacity .12s;
+  transition: opacity 0.12s;
 }
-.tabstrip::before { left: 0; background: linear-gradient(to right, var(--panel), transparent); }
-.tabstrip::after { right: 0; background: linear-gradient(to left, var(--panel), transparent); }
-.tabstrip[data-more-left]::before, .tabstrip[data-more-right]::after { opacity: 1; }
+.tabstrip::before {
+  left: 0;
+  background: linear-gradient(to right, var(--panel), transparent);
+}
+.tabstrip::after {
+  right: 0;
+  background: linear-gradient(to left, var(--panel), transparent);
+}
+.tabstrip[data-more-left]::before,
+.tabstrip[data-more-right]::after {
+  opacity: 1;
+}
