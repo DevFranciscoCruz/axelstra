@@ -6,6 +6,7 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
 @import "./styles.css" layer(legacy);
+@import "./a11y.css";
 
 /* shadcn's semantic names, pointing at the app's own tokens (so light and dark come for free) */
 @theme inline {
@@ -36,6 +37,8 @@
   --text-sm: var(--fs-md);
   --text-base: var(--fs-base);
   --text-lg: var(--fs-lg);
+  --text-xl: var(--fs-xl);
+  --text-2xl: var(--fs-2xl);
 }
 
 /* brand colour of the agent logos (Select, pickers); set through `data-agent` because the CSP forbids `style=` */

@@ -33,9 +33,9 @@ export function CloseConfirm() {
   };
   return (
     <Show when={open()}>
-      <Modal label={U.closeConfirm.label} onClose={() => setOpen(false)}>
+      <Modal label={U.closeConfirm.label} role="alertdialog" describedBy="close-confirm-msg" onClose={() => setOpen(false)}>
         <div class="m-title font-semibold">{U.closeConfirm.title}</div>
-        <div class="auto-note">
+        <div id="close-confirm-msg" class="auto-note">
           {running() === 0
             ? U.closeConfirm.none
             : keep()

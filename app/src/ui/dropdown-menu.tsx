@@ -18,9 +18,9 @@ export type DropdownItem =
     };
 
 const content =
-  "z-[70] min-w-[13rem] rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none";
+  "z-[70] min-w-[13rem] rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-hidden";
 const row =
-  "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-base text-foreground outline-none data-[highlighted]:bg-accent data-[expanded]:bg-accent data-[disabled]:cursor-default data-[disabled]:opacity-40";
+  "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-base text-foreground outline-hidden data-[highlighted]:bg-accent data-[expanded]:bg-accent data-[highlighted]:ring-2 data-[highlighted]:ring-inset data-[highlighted]:ring-ring data-[expanded]:ring-2 data-[expanded]:ring-inset data-[expanded]:ring-ring data-[disabled]:cursor-default data-[disabled]:opacity-40";
 
 const openFirst = (e: Event) => {
   // Kobalte would focus the menu itself; the first enabled entry gets focus instead

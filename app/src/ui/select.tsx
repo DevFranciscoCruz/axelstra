@@ -68,7 +68,7 @@ export function Select(props: {
           <K.Item
             item={ip.item}
             title={props.iconOnly && o().icon ? o().label : undefined}
-            class="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-md px-2.5 py-1.5 text-base text-popover-foreground outline-none data-[highlighted]:bg-accent"
+            class="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-md px-2.5 py-1.5 text-base text-popover-foreground outline-hidden data-[highlighted]:bg-accent data-[highlighted]:ring-2 data-[highlighted]:ring-inset data-[highlighted]:ring-ring"
           >
             <Show when={o().icon}>
               {(n) => (
@@ -98,7 +98,7 @@ export function Select(props: {
       <K.Trigger
         ref={trigger}
         class={cn(
-          "select-btn flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-input bg-background py-1.5 pr-2 pl-2.5 text-left text-base text-foreground outline-none hover:border-primary focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50",
+          "select-btn flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-input bg-background py-1.5 pr-2 pl-2.5 text-left text-base text-foreground outline-hidden hover:border-primary focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50",
           props.class,
         )}
         aria-label={props.label ? `${props.label}: ${label()}` : undefined}
@@ -127,7 +127,7 @@ export function Select(props: {
           class="z-[70] min-w-[max(var(--kb-popper-anchor-width),8.75rem)] rounded-xl border border-border bg-popover p-1 shadow-lg"
           onContextMenu={(e: MouseEvent) => e.preventDefault()}
         >
-          <K.Listbox class="m-0 list-none p-0 outline-none" />
+          <K.Listbox class="m-0 list-none p-0 outline-hidden" />
         </K.Content>
       </K.Portal>
     </K>

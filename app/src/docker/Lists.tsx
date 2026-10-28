@@ -118,22 +118,22 @@ export function Row(props: {
     <div
       class="dk-row"
       classList={{ sel: props.sel, cur: props.cur }}
-      role="option"
+      role="row"
       aria-selected={props.sel}
       tabindex="-1"
       data-cid={props.c.id}
       onClick={() => props.onPick()}
       onContextMenu={(e) => props.onMenu(e)}
     >
-      <span class="dk-state" title={props.c.status}>
+      <span class="dk-state" role="gridcell" title={props.c.status}>
         <span class="dot" classList={{ on: st().cls === "on", warn: st().cls === "warn" }} />
         <span>{st().text}</span>
       </span>
-      <span class="dk-name">
+      <span class="dk-name" role="gridcell">
         <strong>{props.c.name}</strong>
         <span class="auto-note">{props.c.image}</span>
       </span>
-      <span class="dk-ports">
+      <span class="dk-ports" role="gridcell">
         <For each={chips()}>
           {(p) =>
             p.url ? (
@@ -156,16 +156,16 @@ export function Row(props: {
           }
         </For>
       </span>
-      <span class="dk-num" title="CPU">
+      <span class="dk-num" role="gridcell" title="CPU">
         {run() && props.stat ? `${fmtFixed(props.stat.cpu, 1)}%` : ""}
       </span>
-      <span class="dk-num dk-mem" title={P.docker.memory}>
+      <span class="dk-num dk-mem" role="gridcell" title={P.docker.memory}>
         {run() && props.stat ? props.stat.mem.split(" / ")[0] : ""}
       </span>
-      <span class="dk-num dk-age" title={props.c.created}>
+      <span class="dk-num dk-age" role="gridcell" title={props.c.created}>
         {ago(parseCreated(props.c.created))}
       </span>
-      <span class="dk-acts" role="group" aria-label={P.docker.actions} onClick={(e) => e.stopPropagation()}>
+      <span class="dk-acts" role="gridcell" aria-label={P.docker.actions} onClick={(e) => e.stopPropagation()}>
         <Show when={!run()}>
           <Button
             variant="icon"

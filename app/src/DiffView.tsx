@@ -79,6 +79,19 @@ export function DiffView() {
       setSendMsg(String(e));
     }
   };
+  // one tab stop for all the comment buttons; the arrows move between them
+  const [rov, setRov] = createSignal<number | null>(null);
+  const firstBtn = () => page().shown.findIndex((r) => r.kind !== "hunk" && r.kind !== "note");
+  const rove = (e: KeyboardEvent) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const t = e.target as HTMLElement;
+    if (!t.classList?.contains("cbtn")) return;
+    const all = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(".cbtn")];
+    const next = all[all.indexOf(t) + (e.key === "ArrowDown" ? 1 : -1)];
+    if (!next) return;
+    e.preventDefault();
+    next.focus();
+  };
   const file = () => changes()?.files.find((x) => x.path === openDiff());
 
   return (
@@ -99,7 +112,7 @@ export function DiffView() {
       <div class="diff-body">
         <Show when={!text.loading} fallback={<Loading onRetry={() => void refetch()} />}>
           <Show when={rows().length > 0} fallback={<div class="placeholder">{P.diff.noText}</div>}>
-            <table>
+            <table aria-label={P.diff.table} onKeyDown={rove}>
               <tbody>
                 <For each={page().shown}>
                   {(r, i) => (
@@ -108,7 +121,7 @@ export function DiffView() {
                         <td class="ln">{r.old ?? ""}</td>
                         <td class="ln">
                           <Show when={r.kind !== "hunk" && r.kind !== "note"} fallback={r.neu ?? ""}>
-                            <Button variant="icon" size="bare" class="cbtn px-0.5 text-xs hover:bg-transparent" title={P.diff.commentTip} aria-label={P.diff.commentTip} onClick={() => { setNote(""); setCommenting(commenting() === i() ? null : i()); }}>
+                            <Button variant="icon" size="bare" class="cbtn px-0.5 text-xs hover:bg-transparent" title={P.diff.commentTip} aria-label={P.diff.commentLine((r.neu ?? r.old) as number)} tabindex={i() === (rov() ?? firstBtn()) ? 0 : -1} onFocus={() => setRov(i())} onClick={() => { setNote(""); setCommenting(commenting() === i() ? null : i()); }}>
                               ＋
                             </Button>
                             <span class="lnum">{r.neu ?? ""}</span>

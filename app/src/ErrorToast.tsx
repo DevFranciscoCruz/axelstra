@@ -1,7 +1,7 @@
 import { For, Show, type JSX } from "solid-js";
 import { Icon } from "./Icon";
 import { daemonReconnecting, dismissToast, retryDaemon, toasts } from "./store";
-import { latestText, pauseToast, resumeToast, type Toast } from "./toasts";
+import { pauseToast, resumeToast, type Toast } from "./toasts";
 import { Button } from "./ui";
 import { S } from "./strings";
 
@@ -47,14 +47,20 @@ function ToastCard(props: { t: Toast }) {
  * them lands on top of another. Screen readers get two small always-present live regions (status and alert)
  * whose text changes; the visible cards are not live regions themselves, which announced unreliably.
  */
+/** the newest toast of these kinds, as a one-item list: `<For>` rebuilds the node for a new toast, so a second toast with the same text is announced again */
+const latestOf = (...kinds: Toast["kind"][]) => {
+  const t = [...toasts()].reverse().find((x) => kinds.includes(x.kind));
+  return t ? [t] : [];
+};
+
 export function ErrorToast(props: { children?: JSX.Element }) {
   return (
     <>
       <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {daemonReconnecting() ? S.toast.reconnecting : latestText("info") || latestText("warn")}
+        {daemonReconnecting() ? S.toast.reconnecting : <For each={latestOf("info", "warn")}>{(t) => t.text}</For>}
       </div>
       <div class="sr-only" role="alert" aria-atomic="true">
-        {latestText("error")}
+        <For each={latestOf("error")}>{(t) => t.text}</For>
       </div>
       <div class="toast-stack">
         <div class="toast-stack-in">

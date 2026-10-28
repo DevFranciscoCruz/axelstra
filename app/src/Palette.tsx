@@ -48,7 +48,7 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
     for (const p of projects()) {
       for (const w of p.worktrees) {
         const branch = w.is_main ? (p.default_branch ?? "main") : (w.branch ?? S.detached);
-        out.push({ id: `wt:${w.path}`, label: `${p.name} / ${branch}`, hint: "worktree", run: () => selectWorktree(w.path) });
+        out.push({ id: `wt:${w.path}`, label: `${p.name} / ${branch}`, hint: S.paletteWorktree, run: () => selectWorktree(w.path) });
       }
     }
     return out;
@@ -84,7 +84,7 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
         <Input
           class="pal-input"
           role="combobox"
-          aria-expanded="true"
+          aria-expanded={shown().length > 0}
           aria-controls="pal-list"
           aria-activedescendant={shown().length ? `pal-${sel()}` : undefined}
           aria-label={S.paletteTitle}
@@ -101,6 +101,9 @@ export function Palette(props: { actions: () => PaletteAction[] }) {
           }}
           ref={(el) => queueMicrotask(() => el.focus())}
         />
+        <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {shown().length ? S.paletteCount(shown().length) : ""}
+        </div>
         <div class="pal-list" id="pal-list" role="listbox" aria-label={S.paletteResults}>
           <For each={shown()} fallback={<div class="pal-empty" role="status" classList={{ "text-destructive": nothing() }}>{nothing() ? S.paletteNoMatch(q()) : S.paletteEmpty}</div>}>
             {(i, idx) => (

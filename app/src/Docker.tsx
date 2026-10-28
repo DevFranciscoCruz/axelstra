@@ -283,7 +283,7 @@ export function DockerView() {
             </Button>
           )}
         </For>
-        <span class="grow" />
+        <span class="grow" role="gridcell" />
         <Show when={status()?.running}>
           <Button variant="ghost" class="dk-nav-item h-auto justify-between px-2.5 py-1.5 font-normal text-muted-foreground" onClick={pruneMenu} aria-haspopup="menu">
             <span>{P.docker.prune}</span>
@@ -330,7 +330,7 @@ export function DockerView() {
             <Show when={nav() === "containers"}>
               <ComposeBar compose={compose()} wt={selectedWorktree()} busy={busy()} run={composeDo} />
               <Show when={shown().length} fallback={<Empty text={containers().length ? P.docker.empty.noMatch : P.docker.empty.none} />}>
-                <div class="dk-list" role="listbox" aria-label={P.docker.nav.containers} tabindex="0" onKeyDown={onListKey}>
+                <div class="dk-list" role="grid" aria-label={P.docker.nav.containers} tabindex="0" onKeyDown={onListKey}>
                   <For each={groupNames()}>
                     {(g) => {
                       const items = createMemo(() => itemsOf(g));
@@ -338,17 +338,17 @@ export function DockerView() {
                       const running = () => items().filter(isRunning).length;
                       const toggle = () => setOpen((s) => { const n = new Set(s); n.has(g) ? n.delete(g) : n.add(g); return n; });
                       return (
-                        <div class="dk-group">
-                          <div class="dk-ghead">
-                            <Button variant="ghost" class="dk-gtoggle h-auto px-0 py-0.5 font-normal hover:bg-transparent" aria-expanded={!collapsed()} onClick={toggle}>
+                        <div class="dk-group" role="rowgroup">
+                          <div class="dk-ghead" role="row">
+                            <span role="gridcell" class="contents"><Button variant="ghost" class="dk-gtoggle h-auto px-0 py-0.5 font-normal hover:bg-transparent" aria-expanded={!collapsed()} onClick={toggle}>
                               <span class="dk-chev" classList={{ shut: collapsed() }}><Icon name="chevDown" size={12} /></span>
                               <strong>{g || P.docker.noProject}</strong>
                               <span class="auto-note">{P.docker.runningOf(running(), items().length)}</span>
-                            </Button>
-                            <span class="grow" />
-                            <Button variant="ghost" size="sm" class="dk-gbtn text-muted-foreground" disabled={busy()} onClick={() => bulk(g, items(), "up")}>{P.docker.start}</Button>
-                            <Button variant="ghost" size="sm" class="dk-gbtn text-muted-foreground" disabled={busy()} onClick={() => bulk(g, items(), "stop")}>{P.docker.stop}</Button>
-                            <Button variant="ghost" size="sm" class="dk-gbtn danger text-muted-foreground hover:text-destructive" disabled={busy()} onClick={() => bulk(g, items(), "rm")}>{P.docker.delete}</Button>
+                            </Button></span>
+                            <span class="grow" role="gridcell" />
+                            <span role="gridcell" class="contents"><Button variant="ghost" size="sm" class="dk-gbtn text-muted-foreground" disabled={busy()} onClick={() => bulk(g, items(), "up")}>{P.docker.start}</Button></span>
+                            <span role="gridcell" class="contents"><Button variant="ghost" size="sm" class="dk-gbtn text-muted-foreground" disabled={busy()} onClick={() => bulk(g, items(), "stop")}>{P.docker.stop}</Button></span>
+                            <span role="gridcell" class="contents"><Button variant="ghost" size="sm" class="dk-gbtn danger text-muted-foreground hover:text-destructive" disabled={busy()} onClick={() => bulk(g, items(), "rm")}>{P.docker.delete}</Button></span>
                           </div>
                           <Show when={!collapsed()}>
                             <For each={items()}>

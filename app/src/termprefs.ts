@@ -5,6 +5,7 @@ export type TermTheme = "dark" | "light";
 /** `screenReader`: xterm mirrors its output into an accessible DOM tree (costs speed, so it is off by default) */
 export type TermPrefs = { theme: TermTheme; fontFamily: string; fontSize: number; screenReader: boolean };
 
+// same stack as --font-mono-term in styles.css (xterm needs the literal string)
 export const DEFAULT_FONT = '"Cascadia Mono", Consolas, monospace';
 export const DEFAULT_PREFS: TermPrefs = { theme: "dark", fontFamily: DEFAULT_FONT, fontSize: 13, screenReader: false };
 export const MIN_FONT = 8;
@@ -24,15 +25,15 @@ export const THEMES: Record<TermTheme, ITheme> = {
     blue: "#0550ae",
     magenta: "#8250df",
     cyan: "#1b7c83",
-    white: "#6e7781",
+    white: "#69717b",
     brightBlack: "#57606a",
     brightRed: "#a40e26",
     brightGreen: "#1a7f37",
     brightYellow: "#7d4e00",
     brightBlue: "#0969da",
     brightMagenta: "#8250df",
-    brightCyan: "#3192aa",
-    brightWhite: "#8c959f",
+    brightCyan: "#17717f",
+    brightWhite: "#5f6770",
   },
 };
 

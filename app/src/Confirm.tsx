@@ -1,4 +1,4 @@
-import { For, Show, createSignal, untrack } from "solid-js";
+import { For, Show, createSignal, createUniqueId, untrack } from "solid-js";
 import { Modal } from "./Modal";
 import { P } from "./strings.panels";
 import { Button, CopyWord, Input, cn } from "./ui";
@@ -103,12 +103,20 @@ const answer = (ok: boolean) => {
 
 /** mounted once; renders whatever `ask` queued (keyed: a question asked while another is open gets a fresh dialog and focus) */
 export function ConfirmHost() {
+  const msgId = createUniqueId();
   return (
     <Show when={pending()} keyed>
       {(p) => (
-        <Modal label={p.opts.title ?? P.confirm.title} onClose={() => answer(false)}>
+        <Modal
+          label={p.opts.title ?? P.confirm.title}
+          role={p.opts.kind === "info" ? "dialog" : "alertdialog"}
+          describedBy={msgId}
+          onClose={() => answer(false)}
+        >
           <div class="m-title font-semibold">{p.opts.title ?? P.confirm.title}</div>
-          <div class="auto-note whitespace-pre-wrap">{p.message}</div>
+          <div id={msgId} class="auto-note whitespace-pre-wrap">
+            {p.message}
+          </div>
           <Show when={p.opts.typeToConfirm}>
             {(want) => (
               <>
@@ -118,6 +126,7 @@ export function ConfirmHost() {
                   aria-label={P.confirm.typeToConfirm(want())}
                   autocomplete="off"
                   spellcheck={false}
+                  ref={(el: HTMLInputElement) => queueMicrotask(() => el.focus())}
                   value={typed()}
                   onInput={(e) => setTyped(e.currentTarget.value)}
                   onKeyDown={(e) => e.key === "Enter" && typedMatches(want(), typed()) && answer(true)}
@@ -127,7 +136,9 @@ export function ConfirmHost() {
           </Show>
           <div class="m-actions justify-end">
             <Button
-              ref={(el: HTMLButtonElement) => focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())}
+              ref={(el: HTMLButtonElement) =>
+                !p.opts.typeToConfirm && focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())
+              }
               onClick={() => answer(false)}
             >
               {p.opts.cancelLabel ?? P.confirm.cancel}
@@ -150,7 +161,9 @@ export function ConfirmHost() {
               <Button
                 variant={isDanger(p.opts.kind) && !p.third ? "destructive" : "default"}
                 class={cn("primary", isDanger(p.opts.kind) && !p.third && "kind-warn")}
-                ref={(el: HTMLButtonElement) => !focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())}
+                ref={(el: HTMLButtonElement) =>
+                  !p.opts.typeToConfirm && !focusesCancel(p.opts.kind) && queueMicrotask(() => el.focus())
+                }
                 disabled={!!p.opts.typeToConfirm && !typedMatches(p.opts.typeToConfirm, typed())}
                 onClick={() => answer(true)}
               >

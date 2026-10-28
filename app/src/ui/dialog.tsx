@@ -4,10 +4,20 @@ import { Portal } from "solid-js/web";
 import { menuOpen } from "../ContextMenu";
 import { isTopModal, popModal, pushModal, syncShell } from "../modalStack";
 
-const FOCUSABLE = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE =
+  'button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), a[href], summary, [contenteditable=""], [contenteditable="true"], [tabindex]:not([tabindex="-1"])';
+
+/** the focusable elements of `box` that are really shown (display:none and visibility:hidden ones cannot take focus, so
+ *  they must not be the "first" or "last" the Tab loop wraps on) */
+const focusables = (box: HTMLElement) =>
+  [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.checkVisibility?.({ visibilityProperty: true }) !== false);
 
 export type DialogProps = {
   label: string;
+  /** `alertdialog` for a question that must be answered (a confirmation of something destructive) */
+  role?: "dialog" | "alertdialog";
+  /** id of the element holding the message, so a screen reader reads it when the dialog opens */
+  describedBy?: string;
   onClose: () => void;
   /** unsaved input: a click on the backdrop must not close (and lose) it */
   dirty?: boolean;
@@ -36,7 +46,7 @@ export function Dialog(props: DialogProps) {
       e.stopImmediatePropagation();
       props.onClose();
     } else if (e.key === "Tab") {
-      const els = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      const els = focusables(box);
       if (!els.length) {
         e.preventDefault();
         return;
@@ -67,7 +77,7 @@ export function Dialog(props: DialogProps) {
     syncShell();
     // the portal content may be created just after mount: then look for it on the next microtask
     const focusIn = () => {
-      if (box && !box.contains(document.activeElement)) box.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+      if (box && !box.contains(document.activeElement)) focusables(box)[0]?.focus();
     };
     focusIn();
     if (!box) queueMicrotask(focusIn);
@@ -94,6 +104,8 @@ export function Dialog(props: DialogProps) {
             class={props.class ?? "modal"}
             aria-modal="true"
             aria-label={props.label}
+            role={props.role}
+            aria-describedby={props.describedBy}
             onEscapeKeyDown={(e) => e.preventDefault()}
             onInteractOutside={(e) => e.preventDefault()}
             onOpenAutoFocus={(e) => e.preventDefault()}

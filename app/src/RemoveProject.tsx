@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onMount, untrack } from "solid-js";
+import { For, Show, createMemo, createSignal, createUniqueId, onMount, untrack } from "solid-js";
 import { typedMatches } from "./Confirm";
 import { Modal } from "./Modal";
 import { type RemoveMode, removeProjectPreview } from "./api";
@@ -25,6 +25,7 @@ const answer = (m: RemoveMode | null) => {
 
 function Body(props: Pending) {
   const T = P.removeProject;
+  const askId = createUniqueId();
   const [mode, setMode] = createSignal<RemoveMode>("list");
   const [prev, setPrev] = createSignal<Preview>(null);
   const [why, setWhy] = createSignal("");
@@ -40,9 +41,11 @@ function Body(props: Pending) {
   const typedOk = () => !needsTyped(mode(), prev()) || typedMatches(props.name, typed());
   const ready = () => canChoose(mode(), prev()) && typedOk();
   return (
-    <Modal label={T.title} onClose={() => answer(null)} closeOnBackdrop={false}>
+    <Modal label={T.title} role="alertdialog" describedBy={askId} onClose={() => answer(null)} closeOnBackdrop={false}>
       <div class="m-title font-semibold">{T.title}</div>
-      <div class="auto-note">{T.ask(props.name)}</div>
+      <div id={askId} class="auto-note">
+        {T.ask(props.name)}
+      </div>
       <RadioGroup
         label={T.modes}
         value={mode()}
@@ -76,6 +79,7 @@ function Body(props: Pending) {
           aria-label={T.typeToConfirm(props.name)}
           autocomplete="off"
           spellcheck={false}
+          ref={(el: HTMLInputElement) => queueMicrotask(() => el.focus())}
           value={typed()}
           onInput={(e) => setTyped(e.currentTarget.value)}
           onKeyDown={(e) => e.key === "Enter" && ready() && answer(mode())}

@@ -169,35 +169,23 @@ export function StatusBar() {
   return (
     <div class="statusbar">
       <Button variant="row" size="xs" class={cn("sb-item cursor-pointer hover:bg-foreground/10 hover:text-foreground", awake() && "text-[var(--ok)]")} title={awakeOk() ? S.status.awake : S.status.awakeNA} aria-pressed={awake()} onClick={toggle}>
-        <svg {...svg}>
-          <path d="M3 7h8v3a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7zM11 8h1a1.5 1.5 0 0 1 0 3h-1M5 2.5v2M8 2.5v2" />
-        </svg>
-        <span class="size-2 rounded-full" classList={{ "bg-[var(--ok)]": awake() && awakeOk(), "bg-[var(--err)]": !awake(), "bg-[var(--muted)]": awake() && !awakeOk() }} aria-hidden="true" />
+        <Icon name="coffee" size={14} />
+        <span class="size-2 rounded-full" classList={{ "bg-[var(--ok)]": awake() && awakeOk(), "bg-[var(--danger)]": !awake(), "bg-[var(--muted)]": awake() && !awakeOk() }} aria-hidden="true" />
         <span class="sr-only">{awake() ? (awakeOk() ? S.status.on : S.status.na) : S.status.off}</span>
       </Button>
       <span class="sb-item" title={memTip()}>
-        <svg {...svg}>
-          <rect x="2" y="5" width="12" height="6" rx="1" />
-          <path d="M5 11v2M8 11v2M11 11v2M5 5V3M8 5V3M11 5V3" />
-        </svg>
+        <Icon name="memory" size={14} />
         <span>{usage() ? fmt(total()) : "–"}</span>
       </span>
       <Show when={usage()?.cpu != null}>
         <span class="sb-item" title={S.status.cpuTip}>
-          <svg {...svg}>
-            <rect x="4" y="4" width="8" height="8" rx="1" />
-            <path d="M6.5 1.5v2.5M9.5 1.5v2.5M6.5 12v2.5M9.5 12v2.5M1.5 6.5H4M1.5 9.5H4M12 6.5h2.5M12 9.5h2.5" />
-          </svg>
+          <Icon name="cpu" size={14} />
           <span>{pct(usage()!.cpu!)}%</span>
         </span>
       </Show>
       <Show when={usage()?.gpu != null}>
         <span class="sb-item">
-          <svg {...svg}>
-            <rect x="1.5" y="4.5" width="13" height="7" rx="1" />
-            <circle cx="8" cy="8" r="2" />
-            <path d="M4 11.5v2M12 11.5v2" />
-          </svg>
+          <Icon name="gpu" size={14} />
           <span>{pct(usage()!.gpu!)}%</span>
         </span>
       </Show>
@@ -210,9 +198,7 @@ export function StatusBar() {
         label={S.status.agentsRunning(running())}
         chip={
           <>
-            <svg {...svg}>
-              <path d="M2.5 4.5l3 3-3 3M7.5 11.5h6" />
-            </svg>
+            <Icon name="terminal" size={14} />
             <span>{running()}</span>
           </>
         }
@@ -316,12 +302,10 @@ export function StatusBar() {
         )}
       </Popover>
       <span class="sb-item" title={ports().length ? ports().map((p) => `:${p.port}`).join("\n") : S.status.noPorts}>
-        <svg {...svg}>
-          <path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v2.5a3.5 3.5 0 0 1-7 0V5.5zM8 11.5v2" />
-        </svg>
+        <Icon name="plug" size={14} />
         <span>{ports().length}</span>
       </span>
-      <Button variant="row" size="xs" class="sb-item cursor-pointer hover:bg-foreground/10 hover:text-foreground" title={K("Atalhos de teclado (?)")} aria-label={S.status.shortcutsHint} onClick={() => setShowShortcuts(true)}>
+      <Button variant="row" size="xs" class="sb-item cursor-pointer hover:bg-foreground/10 hover:text-foreground" title={K(S.status.shortcutsTip)} aria-label={S.status.shortcutsHint} onClick={() => setShowShortcuts(true)}>
         <kbd>?</kbd>
         <span class="hint-keys">{S.status.shortcutsHint}</span>
       </Button>

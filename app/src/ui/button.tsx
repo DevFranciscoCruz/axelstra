@@ -3,7 +3,7 @@ import { JSX, splitProps } from "solid-js";
 import { cn } from "./cn";
 
 export const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border text-sm font-medium cursor-pointer select-none transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-50 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border text-sm font-medium cursor-pointer select-none transition-colors outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -21,7 +21,7 @@ export const buttonVariants = cva(
         /** muted text that darkens on hover (side links, section toggles) */
         link: "border-transparent bg-transparent font-normal text-muted-foreground hover:text-foreground",
         /** a tinted success button (an open port) */
-        success: "border-[color-mix(in_srgb,var(--ok)_35%,transparent)] bg-[color-mix(in_srgb,var(--ok)_12%,transparent)] font-normal text-[var(--ok)] hover:bg-[color-mix(in_srgb,var(--ok)_22%,transparent)]",
+        success: "border-[var(--ok-line)] bg-[var(--ok-tint)] font-normal text-[var(--ok)] hover:bg-[var(--ok-tint-hover)]",
       },
       size: {
         default: "h-8 px-3",

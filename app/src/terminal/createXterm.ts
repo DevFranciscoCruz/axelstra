@@ -74,6 +74,8 @@ export function createXterm(host: HTMLElement, visible: boolean, session?: numbe
     cursorBlink: cursorBlinks(),
     screenReaderMode: prefs.screenReader,
     allowProposedApi: true,
+    // ANSI dim/colour text from agents stays readable (WCAG 1.4.3) whatever the palette
+    minimumContrastRatio: 4.5,
     linkHandler: { activate: (_e, uri) => void openTermUrl(uri, true), allowNonHttpProtocols: false },
     theme: THEMES[prefs.theme],
   });

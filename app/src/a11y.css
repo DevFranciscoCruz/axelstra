@@ -1,0 +1,56 @@
+/* Accessibility rules. Imported unlayered from tailwind.css, so they win over both the `legacy` layer and the
+   utilities: only what must hold whatever a component sets. Colours come from the tokens, none are defined here. */
+
+/* Forced colours (Windows High Contrast) drops box-shadow, which is how most focus rings here are drawn: give every
+   focused control a real outline, and selected rows and chips a border the user's palette keeps. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: -2px;
+  }
+  .item.active,
+  .dk-row.sel,
+  .pal-item.on,
+  .kcard,
+  .chip,
+  .pill {
+    border: 1px solid ButtonText;
+  }
+  .item.active,
+  .dk-row.sel,
+  .pal-item.on {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+}
+
+/* a card hovered while it has the keyboard focus keeps its ring (the hover shadow has the higher specificity) */
+.kcard:hover:focus-visible {
+  box-shadow: var(--ring);
+}
+
+/* the focused terminal of a split is told apart by a full-contrast 2px ring, not a 1px hairline */
+.term-host:focus-within {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* Targets of at least 24x24 px (WCAG 2.5.8) without changing how the small controls look: the clickable area grows
+   through a transparent pseudo-element centred on the control. */
+.x,
+button.icon,
+.cbtn,
+button.sb-item {
+  position: relative;
+}
+.x::after,
+button.icon::after,
+.cbtn::after,
+button.sb-item::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 24px);
+  height: max(100%, 24px);
+  transform: translate(-50%, -50%);
+}
