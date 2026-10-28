@@ -144,7 +144,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             if let Some(par) = parent {
                 crate::projects::check_parent(&pr, None, par)?;
             }
+            let new_root = super::scanx::root_is_new(&pr.path);
             let (wt, env) = tokio::task::block_in_place(|| crate::projects::worktree_create_report(&pr, name))?;
+            if new_root {
+                super::scanx::root_created(reg, &pr.path);
+            }
             // also clears a link left by an earlier worktree at the same path
             if let Err(e) = crate::projects::set_parent(&reg.store, &pr.id, &wt.path, parent) {
                 eprintln!("parent of {}: {e:#}", wt.path);
@@ -229,7 +233,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "worktree.from_pr" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let n = p["number"].as_u64().ok_or_else(|| missing("number"))?;
+            let new_root = super::scanx::root_is_new(&pr.path);
             let (wt, warning) = tokio::task::block_in_place(|| crate::projects::worktree_from_pr_report(&pr, n))?;
+            if new_root {
+                super::scanx::root_created(reg, &pr.path);
+            }
             let mut v = serde_json::to_value(wt)?;
             if let (Some(w), Some(o)) = (warning, v.as_object_mut()) {
                 o.insert("warning".into(), json!(w.text));

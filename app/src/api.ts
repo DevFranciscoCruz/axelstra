@@ -459,7 +459,8 @@ export type DaemonEvent =
   | "limits.changed"
   | "usage.changed"
   | "resources.changed"
-  | "pr.changed";
+  | "pr.changed"
+  | "scanx.changed";
 /** What an event carries besides its name (`kanban.changed {project}`, `orch.changed {run, project}`, `clone.changed {id}`...). */
 export type DaemonEventData = { event?: string; project?: string; run?: string; id?: string | number; worktree?: string; [k: string]: unknown };
 const eventSubs = new Map<string, Set<(d: DaemonEventData) => void>>();
@@ -1005,6 +1006,50 @@ export type JanitorEvent = {
 };
 /** Worktrees the automatic sweep removed since the last call (take semantics); an older daemon has none. */
 export const janitorEvents = () => callOr<{ events: JanitorEvent[] }>("janitor.events", {}, { events: [] }).then((r) => r.events ?? []);
+
+// ---- Antivirus and indexer exclusions of the .axelstra-wt folders (daemon: scanx.*, see docs/SCANX-api.md) ----
+export type ScanxFolder = {
+  project: string;
+  name: string;
+  path: string;
+  exists: boolean;
+  /** null: unknown or not applicable (Linux) */
+  indexable: boolean | null;
+  excluded: "yes" | "no" | "unknown" | "n/a";
+  source: "defender" | "recorded" | null;
+  drive: string | null;
+  fs: string | null;
+  dev_drive: boolean;
+};
+export type ScanxJobResult = {
+  op: "apply" | "revert" | "hint";
+  ok: boolean;
+  changed?: string[];
+  unchanged?: string[];
+  error?: string;
+  error_code?: string;
+  error_params?: Record<string, unknown>;
+};
+export type ScanxStatus = {
+  os: "windows" | "macos" | "linux";
+  defender: { state: "active" | "inactive" | "unavailable" | "n/a"; realtime: boolean | null; tamper: boolean | null; exclusions_readable: boolean };
+  folders: ScanxFolder[];
+  can_apply: boolean;
+  can_revert: boolean;
+  hint: boolean;
+  hint_dismissed: boolean;
+  job: { running: "apply" | "revert" | null; last: ScanxJobResult | null };
+  error?: string;
+  error_code?: string;
+  error_params?: Record<string, unknown>;
+};
+export type ScanxProc = { name: string; pid: number; cpu: number | null; rss: number | null };
+export const scanxStatus = () => call<ScanxStatus>("scanx.status", {});
+/** Starts the elevated Defender change; the result arrives as the `scanx.changed` event. Never call it without the user's click. */
+export const scanxDefenderApply = () => call<{ started: boolean; op: string }>("scanx.defender_apply", {});
+export const scanxDefenderRevert = () => call<{ started: boolean; op: string }>("scanx.defender_revert", {});
+export const scanxDiag = () => call<{ os: string; state: "ok" | "n/a"; procs: ScanxProc[] }>("scanx.diag", {});
+export const scanxHintDismiss = () => call<Record<string, never>>("scanx.hint_dismiss", {});
 
 // ---- CI-fix trigger (daemon: triggers.*) ----
 export type TriggerFiring = { ts: number; worktree: string; sha: string; checks: string[]; kind: "fired" | "limited" | "failed"; detail: string };

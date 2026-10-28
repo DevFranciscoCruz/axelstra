@@ -313,6 +313,8 @@ pub(crate) fn create_at(p: &Project, name: &str, base: &str, copy_env: bool) -> 
         return Err(coded!("worktree.dir_exists", "{path} already exists", path = dir.display()));
     }
     std::fs::create_dir_all(dir.parent().unwrap())?;
+    // before git fills it: everything created below inherits "not content indexed" (see scanx.rs)
+    crate::scanx::on_root_ready(dir.parent().unwrap());
     git::worktree_add(repo, &dir, &format!("ax/{n}"), base)?;
     // untracked config (.env...) the project asked for: a failure here never undoes the worktree
     let report = if copy_env { crate::wtenv::copy_into(repo, &dir) } else { crate::wtenv::Report::default() };

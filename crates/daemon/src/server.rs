@@ -21,6 +21,7 @@ mod orchestration;
 mod origin;
 mod registry;
 mod removal;
+mod scanx;
 mod session;
 mod sources;
 mod triggers;
@@ -102,6 +103,8 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         // describing, revealing, opening or RUNNING a path: the user confirmed it in the app, an agent must never
         | "files.resolve_path"
         | "files.path_action" => true,
+        // a Defender exclusion is a security decision: the user takes it in the app, an agent never asks for one
+        m if m.starts_with("scanx.") => true,
         _ => false,
     }
 }
@@ -295,6 +298,8 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     if let Err(e) = crate::projects::migrate_marks(&reg.store) {
         eprintln!("janitor: mark migration failed: {e:#}");
     }
+    // keeps the indexers off the existing worktree folders (background thread, once)
+    scanx::spawn_startup(&reg);
     // the daemon starting is one of the moments to look for merged worktrees
     reg.janitor.bump();
     spawn_janitor(reg.clone());
@@ -592,57 +597,59 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
 /// background waiters that watch the pulse have nothing new to look at after it.
 fn reads_only(method: &str) -> bool {
     let prefix = method.split('.').next().unwrap_or_default();
-    matches!(prefix, "fs" | "files" | "git" | "watch" | "open" | "docker" | "ports" | "host" | "env" | "audit" | "pm" | "agents" | "codex")
-        || matches!(
-            method,
-            "session.list"
-                | "session.status"
-                | "session.screen"
-                | "session.resources"
-                | "session.usage"
-                | "session.pending"
-                | "session.resize"
-                | "session.subscribe"
-                | "session.unsubscribe"
-                | "settings.get"
-                | "project.list"
-                | "project.logo"
-                | "project.log"
-                | "project.discover"
-                | "project.clone_status"
-                | "project.env_preview"
-                | "worktree.status"
-                | "worktree.overview"
-                | "dispatch.meta"
-                | "dispatch.overlaps"
-                | "dispatch.overlap_files"
-                | "triggers.get"
-                | "triggers.preview"
-                | "agent.status"
-                | "agent.search"
-                | "agent.usage"
-                | "agent.worktree_usage"
-                | "budget.status"
-                | "hooks.status"
-                | "orch.limits"
-                | "orch.trust_info"
-                | "orch.status"
-                | "kanban.list"
-                | "automation.list"
-                | "flow.list"
-                | "computer.status"
-                | "app.dir"
-                | "gh.list"
-                | "gh.comments"
-                | "gh.repos"
-                | "msg.thread"
-                | "msg.reply_of"
-                | "notes.read"
-                | "notes.read_file"
-                | "notes.export"
-                | "notes.worktree"
-                | "ping"
-        )
+    matches!(
+        prefix,
+        "fs" | "files" | "git" | "watch" | "open" | "docker" | "ports" | "host" | "env" | "audit" | "pm" | "agents" | "codex" | "scanx"
+    ) || matches!(
+        method,
+        "session.list"
+            | "session.status"
+            | "session.screen"
+            | "session.resources"
+            | "session.usage"
+            | "session.pending"
+            | "session.resize"
+            | "session.subscribe"
+            | "session.unsubscribe"
+            | "settings.get"
+            | "project.list"
+            | "project.logo"
+            | "project.log"
+            | "project.discover"
+            | "project.clone_status"
+            | "project.env_preview"
+            | "worktree.status"
+            | "worktree.overview"
+            | "dispatch.meta"
+            | "dispatch.overlaps"
+            | "dispatch.overlap_files"
+            | "triggers.get"
+            | "triggers.preview"
+            | "agent.status"
+            | "agent.search"
+            | "agent.usage"
+            | "agent.worktree_usage"
+            | "budget.status"
+            | "hooks.status"
+            | "orch.limits"
+            | "orch.trust_info"
+            | "orch.status"
+            | "kanban.list"
+            | "automation.list"
+            | "flow.list"
+            | "computer.status"
+            | "app.dir"
+            | "gh.list"
+            | "gh.comments"
+            | "gh.repos"
+            | "msg.thread"
+            | "msg.reply_of"
+            | "notes.read"
+            | "notes.read_file"
+            | "notes.export"
+            | "notes.worktree"
+            | "ping"
+    )
 }
 
 /// Writes one chunk of keystrokes; a full backlog (the program is not reading) is waited out for a while rather than
@@ -923,6 +930,7 @@ fn dispatch_call(c: &mut Ctx) -> Result<Value> {
         "fs" | "files" | "watch" | "open" => files::call(c),
         "git" | "gh" => vcs::call(c),
         "triggers" => triggers::call(c),
+        "scanx" => scanx::call(c),
         "docker" => containers::call(c),
         "orch" | "kanban" | "automation" => orchestration::call(c),
         "msg" | "notes" => messaging::call(c),
