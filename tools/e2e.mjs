@@ -687,7 +687,7 @@ ${dataDirReport()}`);
   await radioOf("all");
   await until("all selected", async () => (await checkedMode()) === "all", 3000);
   await until("the typed-name guard", async () => (await okState()) === "disabled", 3000);
-  await typeInto("input[placeholder=rmrepo]", "rmrepo");
+  await typeInto("input:not([type=radio]):not([type=checkbox])", "rmrepo");
   await until("the OK button to enable", async () => (await okState()) === "enabled", 3000);
   console.log("ok  removeproject: 'all' with unsaved work needs the typed name");
 
@@ -706,7 +706,7 @@ ${dataDirReport()}`);
   await openRemove();
   await radioOf("all");
   await until("all selected", async () => (await checkedMode()) === "all", 3000);
-  await typeInto("input[placeholder=rmrepo]", "rmrepo");
+  await typeInto("input:not([type=radio]):not([type=checkbox])", "rmrepo");
   await until("the OK button to enable", async () => (await okState()) === "enabled", 3000);
   await pressOk();
   await until("the dialog to close", closed, 5000);
