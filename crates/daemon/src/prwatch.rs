@@ -358,8 +358,19 @@ mod tests {
         s.checks = vec![Check { name: "build".into(), state: "pass".into(), link: String::new() }];
         assert_eq!(t.note(p, &s, 4_000), Observed::Changed);
         // a different spelling of the same path is the same worktree
+        assert_eq!(t.note(Path::new("C:/r/wt/"), &s, 4_500), Observed::Same);
+        // case is spelling on Windows and macOS, backslashes only on Windows; on Linux both tell paths apart (`paths::norm`)
+        #[cfg(windows)]
         assert_eq!(t.note(Path::new("c:\\r\\wt"), &s, 5_000), Observed::Same);
+        #[cfg(target_os = "macos")]
+        assert_eq!(t.note(Path::new("c:/r/wt"), &s, 5_000), Observed::Same);
+        #[cfg(any(windows, target_os = "macos"))]
         assert_eq!(t.len(), 1);
+        #[cfg(not(any(windows, target_os = "macos")))]
+        {
+            assert_eq!(t.note(Path::new("c:/r/wt"), &s, 5_000), Observed::First);
+            assert_eq!(t.len(), 2);
+        }
         // the PR got merged
         assert_eq!(t.note(p, &st("merged", "pass", "a"), 6_000), Observed::Changed);
     }
