@@ -882,7 +882,7 @@ mod tests {
 
     #[test]
     fn project_dir_name_matches_claudes_scheme() {
-        assert_eq!(claude_dir_name(r"C:\Users\franc\Desktop\Projetos\axelstra"), "C--Users-franc-Desktop-Projetos-axelstra");
+        assert_eq!(claude_dir_name(r"C:\Users\x\Projetos\proj"), "C--Users-x-Projetos-proj");
         assert_eq!(claude_dir_name("/home/a b/x.y"), "-home-a-b-x-y");
     }
 

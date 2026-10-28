@@ -10,6 +10,6 @@
   "description": "say hi"
  },
  "tool_response": {
-  "llmContent": "<untrusted_context>\nOutput: mkdir : An item with the specified name C:\\wt\\gem\\newdir_stub already \nexists.\nAt line:1 char:19\n+ chcp 65001 >$null;mkdir newdir_stub\n+                   ~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : ResourceExists: (C:\\Users\\franc\\...oj2\\newdir_stub:String) [New-Item], IOExcepti \n   on\n    + FullyQualifiedErrorId : DirectoryExist,Microsoft.PowerShell.Commands.NewItemCommand\n \nExit Code: 1\nProcess Group PGID: 261556\n</untrusted_context>"
+  "llmContent": "<untrusted_context>\nOutput: mkdir : An item with the specified name C:\\wt\\gem\\newdir_stub already \nexists.\nAt line:1 char:19\n+ chcp 65001 >$null;mkdir newdir_stub\n+                   ~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : ResourceExists: (C:\\Users\\x\\...oj2\\newdir_stub:String) [New-Item], IOExcepti \n   on\n    + FullyQualifiedErrorId : DirectoryExist,Microsoft.PowerShell.Commands.NewItemCommand\n \nExit Code: 1\nProcess Group PGID: 261556\n</untrusted_context>"
  }
 }

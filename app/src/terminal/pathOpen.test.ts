@@ -43,7 +43,7 @@ describe("classifyPath", () => {
     expect(classifyPath("Makefile")).toBe("text");
     expect(classifyPath(".gitignore")).toBe("text");
     for (const p of [
-      String.raw`C:\Users\franc\Desktop\Projetos\axelstra\target\release\bundle\nsis\Axelstra_0.1.0_x64-setup.exe`,
+      String.raw`C:\Users\x\Projetos\proj\target\release\bundle\nsis\Axelstra_0.1.0_x64-setup.exe`,
       "x.msi",
       "x.bat",
       "x.cmd",
@@ -100,7 +100,7 @@ describe("openPath", () => {
   });
 
   it("asks before running a program, then runs the canonical path only on the run answer", async () => {
-    const exe = String.raw`C:\Users\franc\Desktop\Projetos\axelstra\target\release\bundle\nsis\Axelstra_0.1.0_x64-setup.exe`;
+    const exe = String.raw`C:\Users\x\Projetos\proj\target\release\bundle\nsis\Axelstra_0.1.0_x64-setup.exe`;
     const prog = info({ path: exe, exec: true, can_run: true, can_open: false });
     const yes = deps({ info: prog, answer: "run" });
     await openPath(link(exe), 3, yes.d);

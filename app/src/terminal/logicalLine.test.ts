@@ -48,12 +48,12 @@ describe("logicalLinks", () => {
 
   it("Windows path split over 2 rows, in backticks", () => {
     const buf = fakeBuffer(
-      "`" + String.raw`C:\Users\franc\target\release\bundle\nsis\Axelstra_0.1.0_x64-setup.exe` + "` done",
+      "`" + String.raw`C:\Users\x\target\release\bundle\nsis\Axelstra_0.1.0_x64-setup.exe` + "` done",
       40,
     );
     for (const y of [1, 2]) {
       const [l] = paths(buf, y);
-      expect(l.text).toBe(String.raw`C:\Users\franc\target\release\bundle\nsis\Axelstra_0.1.0_x64-setup.exe`);
+      expect(l.text).toBe(String.raw`C:\Users\x\target\release\bundle\nsis\Axelstra_0.1.0_x64-setup.exe`);
       expect(l.range.start).toEqual({ x: 2, y: 1 });
       expect(l.range.end.y).toBe(2);
     }

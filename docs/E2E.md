@@ -79,7 +79,7 @@ How it stays hermetic:
 - **A positive clone is not driven through the page**: it only offers `https://`, `ssh://` and `user@host:path`, and there is no offline server for those. A clone from a
   local bare repo (`file://`, accepted by the daemon only under test) with progress, cancel and cleanup is covered by `crates/daemon/tests/sources.rs`.
   `tools/smoke.mjs` has no RPC client (the CLI has no raw call), so it does not cover `project.init`/`project.clone`.
-- Never run it against ScorpioBots or any real project: every path it creates is under the temp dir of the run.
+- Never run it against any real project: every path it creates is under the temp dir of the run.
 
 ### Scenario removeproject (the sidebar X)
 
