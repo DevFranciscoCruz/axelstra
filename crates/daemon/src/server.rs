@@ -423,7 +423,7 @@ struct ConnState {
     /// set by a `hello` that presented a session's capability token: such a connection has role=agent, and is that session
     agent: Option<u32>,
     /// process id of the client end, where the OS tells it: `hello` classifies the connection by it (see `origin`)
-    peer: Option<u32>,
+    peer: Option<origin::Peer>,
     subs: HashMap<u32, Arc<AtomicBool>>,
 }
 
@@ -569,7 +569,7 @@ fn write_input(s: &Session, data: &[u8]) -> bool {
     }
 }
 
-async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Registry>, token: String, peer: Option<u32>) {
+async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Registry>, token: String, peer: Option<origin::Peer>) {
     reg.clients.fetch_add(1, Ordering::SeqCst);
     reg.pulse.bump();
     let _guard = ClientGuard(reg.clone());
@@ -747,7 +747,7 @@ struct Ctx<'a> {
     authed: &'a mut bool,
     cli: &'a mut bool,
     agent: &'a mut Option<u32>,
-    peer: Option<u32>,
+    peer: Option<origin::Peer>,
     token: &'a str,
     after: &'a mut Vec<Box<dyn FnOnce() + Send>>,
     /// how long to hold the reply back (a refused `hello`)

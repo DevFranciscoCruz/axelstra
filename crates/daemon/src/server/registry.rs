@@ -204,6 +204,12 @@ impl Registry {
     }
 
     /// Same, for an event that carries data (`session.exited`).
+/// How a closed session without a label is named inside a coded message ("session {sessions} closed"): the word
+/// "session" belongs to the message text in each language, so the daemon adds only the number.
+pub(super) fn unnamed_label(id: u32) -> String {
+    format!("#{id}")
+}
+
     pub(super) fn broadcast_event(&self, ev: Value) {
         let frame = encode(EVENT, ev.to_string().as_bytes());
         self.watchers.lock_recover().retain(|(stop, tx)| {
@@ -593,7 +599,7 @@ impl Registry {
         self.tear_down(&sessions);
         let mut labels = vec![];
         for (id, _) in &doomed {
-            labels.push(self.labels.lock_recover().get(id).cloned().unwrap_or_else(|| format!("sessão {id}")));
+            labels.push(self.labels.lock_recover().get(id).cloned().unwrap_or_else(|| unnamed_label(*id)));
             self.forget_session(*id);
         }
         self.note_activity(path);
@@ -901,5 +907,25 @@ pub(super) fn kill_and_wait(sessions: &[Arc<Session>], limit: Duration) {
     let end = std::time::Instant::now() + limit;
     while std::time::Instant::now() < end && sessions.iter().any(|s| s.try_wait().is_none()) {
         std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[cfg(test)]
+mod close_label_tests {
+    use super::*;
+
+    #[test]
+    fn a_closed_session_without_a_label_is_named_without_any_language() {
+        assert_eq!(unnamed_label(7), "#7");
+        let dir = std::env::temp_dir().join(format!("axl-close-label-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let reg = Arc::new(Registry::new(dir.join("projects.json"), "p".into(), "t".into()));
+        let (prog, args): (&str, Vec<String>) =
+            if cfg!(windows) { ("cmd", vec!["/c".into(), "ping -n 30 127.0.0.1 >nul".into()]) } else { ("sleep", vec!["30".into()]) };
+        let spawn = Spawn { program: prog.into(), args, cwd: Some(dir.clone()), env: vec![], cols: 80, rows: 24 };
+        let id = reg.spawn(&spawn, None, Some(json!({"worktree": dir.to_string_lossy()}))).unwrap();
+        reg.labels.lock_recover().remove(&id);
+        let labels = reg.close_worktree(&dir.to_string_lossy());
+        assert_eq!(labels, vec![format!("#{id}")]);
     }
 }

@@ -19,6 +19,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let target = reg.get(to).ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = to))?;
             let text = p["text"].as_str().unwrap_or_default();
             let m = reg.bus.send(from, to, kind, text, p["reply_to"].as_u64(), p["thread"].as_str().map(String::from));
+            // `axelstra ask` and `axelstra wait` sleep until the watch stream speaks. The session monitor only speaks when
+            // its summary of a session moved (unread count, escalated, finished...), and a reply that lands in the same
+            // tick as another change of that summary (the asker read its inbox meanwhile) leaves it as it was: the
+            // message announces itself, so no answer waits for an unrelated change.
+            reg.broadcast("session.changed");
             // a finished agent is not restored; new work for it (a message or reply) makes it restorable again
             if let (true, Some(f)) = (kind == "done", from) {
                 reg.set_done(f, true);
@@ -111,5 +116,58 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({"reply": reg.bus.reply_to(id), "original": reg.bus.get(id)}))
         }
         m => Err(unknown_method(m)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    fn long_sleep() -> Spawn {
+        let (prog, args): (&str, Vec<String>) =
+            if cfg!(windows) { ("cmd", vec!["/c".into(), "ping -n 30 127.0.0.1 >nul".into()]) } else { ("sleep", vec!["30".into()]) };
+        Spawn { program: prog.into(), args, cwd: None, env: vec![], cols: 80, rows: 24 }
+    }
+
+    /// Without the session monitor running (nothing else can announce), a message must reach every watcher at once.
+    #[test]
+    fn a_message_announces_itself_to_watchers_without_the_monitor() {
+        let dir = std::env::temp_dir().join(format!("axl-msg-announce-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let reg = Arc::new(Registry::new(dir.join("projects.json"), "p".into(), "t".into()));
+        let (asker, boss) = (reg.spawn(&long_sleep(), None, None).unwrap(), reg.spawn(&long_sleep(), None, None).unwrap());
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(16);
+        reg.watchers.lock_recover().push((Arc::new(AtomicBool::new(false)), tx));
+
+        let send = |from: u32, to: u32, kind: &str, reply_to: Option<u64>| {
+            let req = Req { id: 1, method: "msg.send".into(), params: Value::Null };
+            let p = json!({"from": from, "to": to, "text": "t", "kind": kind, "reply_to": reply_to, "quiet": true});
+            let (tx2, _rx2) = mpsc::channel(1);
+            let (mut subs, mut authed, mut cli, mut agent, mut after, mut delay) =
+                (HashMap::new(), true, true, None, vec![], Duration::ZERO);
+            let mut c = Ctx {
+                req: &req,
+                p: &p,
+                reg: &reg,
+                tx: &tx2,
+                subs: &mut subs,
+                authed: &mut authed,
+                cli: &mut cli,
+                agent: &mut agent,
+                peer: None,
+                token: "t",
+                after: &mut after,
+                delay: &mut delay,
+            };
+            call(&mut c).unwrap()["id"].as_u64().unwrap()
+        };
+        let q = send(asker, boss, "ask", None);
+        assert!(rx.try_recv().is_ok(), "the ask is announced");
+        while rx.try_recv().is_ok() {}
+        send(boss, asker, "reply", Some(q));
+        let frame = rx.try_recv().expect("the reply is announced by the handler itself, in the same call");
+        assert!(String::from_utf8_lossy(&frame).contains("session.changed"));
+        assert_eq!(reg.bus.reply_to(q).map(|m| m.text), Some("t".to_string()));
     }
 }
