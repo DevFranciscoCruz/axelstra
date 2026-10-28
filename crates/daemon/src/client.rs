@@ -166,7 +166,7 @@ impl std::error::Error for NotSent {}
 /// The daemon did not answer a request in time. The connection is unusable afterwards (a late reply could
 /// arrive half way through the next one), so the caller must reconnect.
 #[derive(Debug)]
-pub struct CallTimeout(pub String);
+pub struct CallTimeout(pub String, pub Option<axelstra_core::msg::Coded>);
 
 impl std::fmt::Display for CallTimeout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -174,16 +174,51 @@ impl std::fmt::Display for CallTimeout {
     }
 }
 
-impl std::error::Error for CallTimeout {}
+impl std::error::Error for CallTimeout {
+    /// the message code naming the method that took long, so `msg::find` sees it through this wrapper
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.1.as_ref().map(|c| c as &(dyn std::error::Error + 'static))
+    }
+}
 
-/// How long `call` waits for the reply. Calls that run git, the network or an agent CLI get longer; none wait forever.
-fn default_timeout(method: &str) -> Duration {
+/// A timeout for `method` after `limit`: the English text and a coded error (`rpc.call_timeout {method, secs}`) the UI
+/// shows in its language, so the user sees which call was slow instead of a global "the daemon did not answer".
+fn call_timeout(method: &str, limit: Duration, text: String) -> CallTimeout {
+    let coded = axelstra_core::coded!("rpc.call_timeout", "{method} did not answer within {secs} s", method = method, secs = limit.as_secs().max(1))
+        .downcast::<axelstra_core::msg::Coded>()
+        .ok();
+    CallTimeout(text, coded)
+}
+
+/// How long `call` waits for the reply, by method (mirrored, plus a margin, by `timeoutFor` in app/src/api.ts): quick
+/// methods fail early so a hung daemon shows up fast; git/worktree scans get longer because they run git on every worktree;
+/// pushes, merges, clones and whole agent runs get the longest. None wait forever.
+pub fn default_timeout(method: &str) -> Duration {
     match method {
         "git.push" | "git.pr" | "git.suggest" | "git.commit" | "worktree.create" | "worktree.from_pr" | "worktree.sweep"
-        | "project.add" | "automation.run" | "orch.start" | "gh.list" | "gh.comments" | "gh.send_comment" | "git.suggest_pr"
-        | "agent.search" | "git.merge" | "git.checks" => Duration::from_secs(600),
-        _ => Duration::from_secs(60),
+        | "project.add" | "project.remove" | "project.init" | "project.clone" | "automation.run" | "orch.start" | "gh.list"
+        | "gh.comments" | "gh.send_comment" | "git.suggest_pr" | "agent.search" | "git.merge" | "git.checks" | "diagnostics" => {
+            Duration::from_secs(600)
+        }
+        m if ["git.", "gh.", "docker.", "pm.", "orch.", "worktree.", "project.", "dispatch.", "ports.", "agent.", "fs.", "files."]
+            .iter()
+            .any(|p| m.starts_with(p)) =>
+        {
+            Duration::from_secs(120)
+        }
+        _ => Duration::from_secs(30),
     }
+}
+
+/// True for methods that may run long (git on many worktrees, gh, docker, scans): the app keeps them off the connection
+/// reserved for quick calls (`Lanes`), so a slow scan never holds up `project.list` or `session.list`.
+pub fn is_slow(method: &str) -> bool {
+    const SLOW_PREFIX: &[&str] = &["git.", "gh.", "docker.", "pm.", "orch.", "worktree.", "dispatch.", "ports.", "fs."];
+    // `project.list` and the like read the project file and must stay quick; the project operations that run git or clone do not
+    SLOW_PREFIX.iter().any(|p| method.starts_with(p))
+        || default_timeout(method) >= Duration::from_secs(600)
+        || method == "agent.search"
+        || method == "watch.subscribe"
 }
 
 /// True for the error a read gets when its deadline fires: a socket timeout (Unix) or the pipe read cancelled by
@@ -642,7 +677,7 @@ impl Client {
     /// gives a `CallTimeout` error instead of freezing the caller. Streaming reads (`read`) are not bounded.
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value> {
         if self.broken {
-            return Err(anyhow::Error::new(CallTimeout(format!("{method}: the connection to the daemon timed out earlier; reconnect"))));
+            return Err(anyhow::Error::new(call_timeout(method, Duration::ZERO, format!("{method}: the connection to the daemon timed out earlier; reconnect"))));
         }
         self.next += 1;
         let id = self.next;
@@ -656,7 +691,7 @@ impl Client {
             Err(e) if fired || is_timeout(&e) => {
                 self.broken = true;
                 let msg = format!("{method}: the daemon did not answer within {limit:?} (it may be hung); reconnect or restart it");
-                Err(self.explain(anyhow::Error::new(CallTimeout(msg))))
+                Err(self.explain(anyhow::Error::new(call_timeout(method, limit, msg))))
             }
             Err(e) => Err(self.explain(e)),
             r => r,
@@ -757,5 +792,66 @@ impl Client {
             JSON => Frame::Response(serde_json::from_slice(&buf)?),
             k => bail!("unknown frame kind {k}"),
         })
+    }
+}
+
+/// A small pool of connections of one kind (the app's request/response calls). The daemon runs the calls of one connection
+/// in order, and a caller holds its connection for the whole call, so with a single connection one slow reply (a git scan
+/// of many worktrees) makes every later call wait behind it. With several, a slow call only occupies its own slot; the
+/// first `fast_only` slots never take a slow method, so a quick call (`project.list`, `session.list`) always finds a free one.
+pub struct Lanes<T> {
+    slots: Vec<Mutex<Option<T>>>,
+    claimed: Vec<std::sync::atomic::AtomicBool>,
+    fast_only: usize,
+    turn: std::sync::atomic::AtomicUsize,
+}
+
+/// A slot reserved by `Lanes::pick` for one call; it is free for the next caller when this drops.
+pub struct Claim<'a, T> {
+    lanes: &'a Lanes<T>,
+    idx: usize,
+    owned: bool,
+}
+
+impl<T> Lanes<T> {
+    /// `total` slots (at least `fast_only` + 1), the first `fast_only` of them kept for quick methods.
+    pub fn new(total: usize, fast_only: usize) -> Self {
+        let total = total.max(fast_only + 1);
+        Lanes {
+            slots: (0..total).map(|_| Mutex::new(None)).collect(),
+            claimed: (0..total).map(|_| std::sync::atomic::AtomicBool::new(false)).collect(),
+            fast_only,
+            turn: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// An idle slot for a call (`slow`: it may take long; those never use the quick-only slots). When every allowed slot
+    /// is busy the caller queues on one of them, round robin, instead of failing.
+    pub fn pick(&self, slow: bool) -> Claim<'_, T> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let allowed = if slow { self.fast_only..self.slots.len() } else { 0..self.slots.len() };
+        // a quick call tries the reserved slots first, so the others stay free for slow ones
+        for i in allowed.clone() {
+            if self.claimed[i].compare_exchange(false, true, SeqCst, SeqCst).is_ok() {
+                return Claim { lanes: self, idx: i, owned: true };
+            }
+        }
+        let n = allowed.len();
+        let idx = allowed.start + self.turn.fetch_add(1, SeqCst) % n;
+        Claim { lanes: self, idx, owned: false }
+    }
+}
+
+impl<T> Claim<'_, T> {
+    pub fn slot(&self) -> &Mutex<Option<T>> {
+        &self.lanes.slots[self.idx]
+    }
+}
+
+impl<T> Drop for Claim<'_, T> {
+    fn drop(&mut self) {
+        if self.owned {
+            self.lanes.claimed[self.idx].store(false, std::sync::atomic::Ordering::SeqCst);
+        }
     }
 }

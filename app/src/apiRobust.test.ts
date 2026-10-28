@@ -7,6 +7,7 @@ const writes: { id: number; data: string }[] = [];
 const state = vi.hoisted(() => ({
   pending: [] as any[],
   hang: false,
+  hangMethods: new Set<string>(),
   fail: null as unknown,
   sessions: [] as any[],
   watchStarts: 0,
@@ -44,7 +45,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       return null;
     }
     if (cmd !== "daemon_call" && cmd !== "daemon_call_bg") return null;
-    if (state.hang) return new Promise(() => {});
+    if (state.hang || state.hangMethods.has(args.method)) return new Promise(() => {});
     if (state.fail !== null) throw state.fail;
     calls.push({ method: args.method, params: args.params });
     switch (args.method) {
@@ -80,6 +81,8 @@ import {
   watchWorktree,
   writeSession,
   CALL_TIMEOUT_MS,
+  PING_WAIT_MS,
+  timeoutFor,
 } from "./api";
 
 beforeEach(() => {
@@ -87,6 +90,7 @@ beforeEach(() => {
   writes.length = 0;
   state.pending = [];
   state.hang = false;
+  state.hangMethods.clear();
   state.fail = null;
   state.sessions = [];
   state.watchStarts = 0;
@@ -99,16 +103,39 @@ afterEach(() => {
 });
 
 describe("call", () => {
-  it("fails with an AppError naming the method when the daemon never answers", async () => {
+  it("names only the slow method when the daemon still answers ping", async () => {
     vi.useFakeTimers();
-    state.hang = true;
+    state.hangMethods.add("session.list");
     const p = call("session.list");
     const seen = p.catch((e: any) => e);
     await vi.advanceTimersByTimeAsync(CALL_TIMEOUT_MS + 10);
     const e = (await seen) as AppError;
     expect(e).toBeInstanceOf(AppError);
     expect(e.method).toBe("session.list");
-    expect(String(e)).toContain("Sem resposta do daemon");
+    expect(e.code).toBe("rpc.call_timeout");
+    expect(e.params).toEqual({ method: "session.list", secs: 40 });
+    expect(String(e)).toContain("session.list");
+    expect(String(e)).not.toContain("Sem resposta do daemon");
+  });
+
+  it("says the daemon is silent only when ping is silent too", async () => {
+    vi.useFakeTimers();
+    state.hang = true;
+    const p = call("session.list");
+    const seen = p.catch((e: any) => e);
+    await vi.advanceTimersByTimeAsync(CALL_TIMEOUT_MS + PING_WAIT_MS + 10);
+    const e = (await seen) as AppError;
+    expect(e).toBeInstanceOf(AppError);
+    expect(e.method).toBe("session.list");
+    expect(e.code).toBeUndefined();
+    expect(String(e)).toContain("Sem resposta do daemon (session.list)");
+  });
+
+  it("gives git/worktree scans more than a quick call, and a long run the most", () => {
+    expect(timeoutFor("session.list")).toBe(CALL_TIMEOUT_MS);
+    expect(timeoutFor("worktree.overview")).toBeGreaterThan(CALL_TIMEOUT_MS);
+    expect(timeoutFor("dispatch.overlap_files")).toBeGreaterThan(CALL_TIMEOUT_MS);
+    expect(timeoutFor("git.push")).toBeGreaterThan(timeoutFor("worktree.overview"));
   });
 
   it("gives slow methods (git, docker) longer than the default", async () => {
@@ -120,7 +147,7 @@ describe("call", () => {
     void p.then(() => (done = true));
     await vi.advanceTimersByTimeAsync(0);
     expect(done).toBe(false);
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await vi.advanceTimersByTimeAsync(11 * 60_000 + PING_WAIT_MS);
     expect(await p).toBeInstanceOf(AppError);
   });
 

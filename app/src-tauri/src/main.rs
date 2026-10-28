@@ -15,7 +15,6 @@ use std::time::{Duration, Instant};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::Manager;
 
-#[derive(Default)]
 struct State {
     /// request/response calls
     control: Mutex<Option<Client>>,
@@ -24,6 +23,12 @@ struct State {
     /// slow background polling (git status of every worktree, gh, transcript scans): its own connection,
     /// so creating a worktree or listing sessions never waits behind it
     bg: Mutex<Option<Client>>,
+    /// the page's `call`s to the local daemon: the daemon runs one connection's calls in order, so these are several
+    /// connections; the first two never take a slow method (git scans, gh, docker), so `project.list`/`session.list`
+    /// always find a free one even while worktree scans are running
+    lanes: axelstra_daemon::client::Lanes<Client>,
+    /// the page's `callBg` polling: slow by nature, never on the quick lanes
+    bg_lanes: axelstra_daemon::client::Lanes<Client>,
     /// per session id, one stop flag per attach token (a remounted view can attach again before the old one detaches)
     attachments: Mutex<std::collections::HashMap<u32, std::collections::HashMap<u64, Arc<AtomicBool>>>>,
     /// write side of the change-event connection (see `watch_start`)
@@ -32,6 +37,22 @@ struct State {
     watch_gen: std::sync::atomic::AtomicU64,
     /// an update already downloaded and verified, waiting for a restart (or for the app to be closed)
     pending: Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State {
+            control: Mutex::default(),
+            input: Mutex::default(),
+            bg: Mutex::default(),
+            lanes: axelstra_daemon::client::Lanes::new(5, 2),
+            bg_lanes: axelstra_daemon::client::Lanes::new(2, 0),
+            attachments: Mutex::default(),
+            watch: Mutex::default(),
+            watch_gen: Default::default(),
+            pending: Mutex::default(),
+        }
+    }
 }
 
 #[cfg(all(windows, target_env = "msvc", debug_assertions))]
@@ -471,8 +492,11 @@ async fn daemon_call(state: tauri::State<'_, Arc<State>>, method: String, params
 
 /// One call, to this machine's daemon or (when its paths or session id say so) to a remote host's.
 fn routed(st: &State, method: &str, params: Value, bg: bool) -> Result<Value, CallError> {
-    let slot = if bg { &st.bg } else { &st.control };
-    let local = |m: &str, p: Value| with_client(slot, read_only(m), |c| c.call(m, p.clone()));
+    // one slot per call: a slow reply only holds its own connection (see `Lanes`)
+    let local = |m: &str, p: Value| {
+        let claim = if bg { st.bg_lanes.pick(true) } else { st.lanes.pick(axelstra_daemon::client::is_slow(m)) };
+        with_client(claim.slot(), read_only(m), |c| c.call(m, p.clone()))
+    };
     hosts::route(method, params, bg, read_only(method), &local).map_err(|e| CallError::from(&e))
 }
 

@@ -43,18 +43,51 @@ export type Project = { id: string; name: string; path: string; worktrees: Workt
   push_after_integrate?: boolean;
 };
 
-/** A call that gets no answer in this long fails (a stuck daemon must not leave the UI waiting for ever). */
-export const CALL_TIMEOUT_MS = 30_000;
-/** Methods that legitimately run git, gh, docker or a whole agent run: they get longer. */
-export const SLOW_TIMEOUT_MS = 5 * 60_000;
-const SLOW = /^(git\.|gh\.|docker\.|pm\.|orch\.|worktree\.(create|from_pr|remove|sweep|rename|integrate)|project\.(add|remove|init)|agent\.|fs\.grep|automation\.run|diagnostics)/;
-export const timeoutFor = (method: string) => (SLOW.test(method) ? SLOW_TIMEOUT_MS : CALL_TIMEOUT_MS);
+/**
+ * Backstop for a call that gets no answer. The host (`default_timeout` in client.rs) times a call out by method first
+ * (30 s quick, 120 s git/worktree reads, 600 s long runs) and names it in a coded error; these are the same limits plus a
+ * margin, so only a host that is itself stuck ends here. The error names the method: one slow call is not "the daemon is gone".
+ */
+export const CALL_TIMEOUT_MS = 40_000;
+/** git/worktree/gh/docker reads and scans: they run git on every worktree and can take a while with many sessions open */
+export const MEDIUM_TIMEOUT_MS = 130_000;
+/** Methods that legitimately run a whole agent run, a push, a build or a clone. */
+export const SLOW_TIMEOUT_MS = 10 * 60_000 + 10_000;
+const SLOW = /^(git\.(push|pr|suggest|commit|suggest_pr|merge|checks)|gh\.(list|comments|send_comment)|worktree\.(create|from_pr|sweep)|project\.(add|remove|init|clone)|orch\.start|agent\.search|automation\.run|diagnostics)/;
+const MEDIUM = /^(git\.|gh\.|docker\.|pm\.|orch\.|worktree\.|project\.|dispatch\.|ports\.|agent\.|fs\.|files\.)/;
+export const timeoutFor = (method: string) => (SLOW.test(method) ? SLOW_TIMEOUT_MS : MEDIUM.test(method) ? MEDIUM_TIMEOUT_MS : CALL_TIMEOUT_MS);
 
-/** `p`, but failing with a readable AppError when it rejects or takes longer than the method's timeout. */
+/** How long the liveness check after a late call waits for `ping` (it goes on a quick connection, see `Lanes`). */
+export const PING_WAIT_MS = 5_000;
+const daemonAlive = (): Promise<boolean> =>
+  new Promise((done) => {
+    const t = setTimeout(() => done(false), PING_WAIT_MS);
+    invoke("daemon_call", { method: "ping", params: {} }).then(
+      () => (clearTimeout(t), done(true)),
+      () => (clearTimeout(t), done(false)),
+    );
+  });
+
+/**
+ * `p`, but failing with a readable AppError (naming the method) when it rejects or takes longer than the method's timeout.
+ * A late call is followed by a `ping` on another connection: if the daemon answers it, only this method was slow
+ * (`rpc.call_timeout`, an error of that call); only when the ping is silent too is it "the daemon did not answer".
+ */
 const guard = <T>(method: string, p: Promise<T>): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, rej) => {
-    timer = setTimeout(() => rej(new AppError(method, `Sem resposta do daemon (${method}) ao fim de ${Math.round(timeoutFor(method) / 1000)} s.`)), timeoutFor(method));
+    const secs = Math.round(timeoutFor(method) / 1000);
+    timer = setTimeout(
+      () =>
+        void daemonAlive().then((alive) =>
+          rej(
+            alive
+              ? new AppError(method, `${method} did not answer within ${secs} s`, "rpc.call_timeout", { method, secs })
+              : new AppError(method, `Sem resposta do daemon (${method}) ao fim de ${secs} s.`),
+          ),
+        ),
+      timeoutFor(method),
+    );
   });
   return Promise.race([p, late]).catch((e) => Promise.reject(toAppError(method, e))).finally(() => clearTimeout(timer));
 };
