@@ -153,6 +153,8 @@ export const ptS = {
     close: "Fechar",
     reconnecting: "A reconectar ao daemon…",
     retryNow: "Tentar agora",
+    slow: (method: string) => `A carregar… o sistema está lento (${method})`,
+    slowCancel: "Cancelar",
   },
 
   update: {

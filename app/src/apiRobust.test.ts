@@ -8,6 +8,8 @@ const state = vi.hoisted(() => ({
   pending: [] as any[],
   hang: false,
   hangMethods: new Set<string>(),
+  /** a call the test answers (or fails) by hand, like the host does when the daemon replies or the pipe closes */
+  gated: new Map<string, { resolve: (v: unknown) => void; reject: (e: unknown) => void }[]>(),
   fail: null as unknown,
   loadingFor: new Map<string, number>(),
   loadingDelay: 0,
@@ -48,6 +50,8 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (cmd !== "daemon_call" && cmd !== "daemon_call_bg") return null;
     if (state.hang || state.hangMethods.has(args.method)) return new Promise(() => {});
+    if (state.gated.has(args.method))
+      return new Promise((resolve, reject) => state.gated.get(args.method)!.push({ resolve, reject }));
     if (state.fail !== null) throw state.fail;
     calls.push({ method: args.method, params: args.params });
     const left = state.loadingFor.get(args.method) ?? 0;
@@ -89,10 +93,10 @@ import {
   onDaemonEvent,
   watchWorktree,
   writeSession,
-  CALL_TIMEOUT_MS,
-  PING_WAIT_MS,
-  timeoutFor,
+  CEILING_MS,
 } from "./api";
+import { SLOW_NOTICE_MS, cancelSlow, slowMethods } from "./slowCalls";
+import { isCancelled } from "./appError";
 
 beforeEach(() => {
   calls.length = 0;
@@ -100,6 +104,8 @@ beforeEach(() => {
   state.pending = [];
   state.hang = false;
   state.hangMethods.clear();
+  state.gated.clear();
+  slowMethods().forEach(cancelSlow);
   state.fail = null;
   state.loadingFor.clear();
   state.loadingDelay = 0;
@@ -114,52 +120,75 @@ afterEach(() => {
 });
 
 describe("call", () => {
-  it("names only the slow method when the daemon still answers ping", async () => {
+  it("a reply after 90 s succeeds: slow was shown, no error", async () => {
     vi.useFakeTimers();
-    state.hangMethods.add("session.list");
-    const p = call("session.list");
-    const seen = p.catch((e: any) => e);
-    await vi.advanceTimersByTimeAsync(CALL_TIMEOUT_MS + 10);
-    const e = (await seen) as AppError;
-    expect(e).toBeInstanceOf(AppError);
-    expect(e.method).toBe("session.list");
-    expect(e.code).toBe("rpc.call_timeout");
-    expect(e.params).toEqual({ method: "session.list", secs: 40 });
-    expect(String(e)).toContain("session.list");
-    expect(String(e)).not.toContain("Sem resposta do daemon");
-  });
-
-  it("says the daemon is silent only when ping is silent too", async () => {
-    vi.useFakeTimers();
-    state.hang = true;
-    const p = call("session.list");
-    const seen = p.catch((e: any) => e);
-    await vi.advanceTimersByTimeAsync(CALL_TIMEOUT_MS + PING_WAIT_MS + 10);
-    const e = (await seen) as AppError;
-    expect(e).toBeInstanceOf(AppError);
-    expect(e.method).toBe("session.list");
-    expect(e.code).toBeUndefined();
-    expect(String(e)).toContain("Sem resposta do daemon (session.list)");
-  });
-
-  it("gives git/worktree scans more than a quick call, and a long run the most", () => {
-    expect(timeoutFor("session.list")).toBe(CALL_TIMEOUT_MS);
-    expect(timeoutFor("worktree.overview")).toBeGreaterThan(CALL_TIMEOUT_MS);
-    expect(timeoutFor("dispatch.overlap_files")).toBeGreaterThan(CALL_TIMEOUT_MS);
-    expect(timeoutFor("git.push")).toBeGreaterThan(timeoutFor("worktree.overview"));
-  });
-
-  it("gives slow methods (git, docker) longer than the default", async () => {
-    vi.useFakeTimers();
-    state.hang = true;
-    const p = call("git.push", {}).catch((e) => e);
-    await vi.advanceTimersByTimeAsync(CALL_TIMEOUT_MS + 10);
-    let done = false;
-    void p.then(() => (done = true));
+    state.gated.set("worktree.overview", []);
+    let out: unknown;
+    let err: unknown;
+    void call("worktree.overview").then((r) => (out = r), (e) => (err = e));
+    await vi.advanceTimersByTimeAsync(SLOW_NOTICE_MS - 100);
+    expect(slowMethods()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(slowMethods()).toEqual(["worktree.overview"]);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(err).toBeUndefined();
+    expect(out).toBeUndefined();
+    state.gated.get("worktree.overview")![0]!.resolve({ ok: 1 });
     await vi.advanceTimersByTimeAsync(0);
-    expect(done).toBe(false);
-    await vi.advanceTimersByTimeAsync(11 * 60_000 + PING_WAIT_MS);
-    expect(await p).toBeInstanceOf(AppError);
+    expect(out).toEqual({ ok: 1 });
+    expect(err).toBeUndefined();
+    expect(slowMethods()).toEqual([]);
+  });
+
+  it("a connection closed mid-call fails at once, naming the method", async () => {
+    vi.useFakeTimers();
+    state.gated.set("session.list", []);
+    const p = call("session.list").catch((e: any) => e);
+    await vi.advanceTimersByTimeAsync(1_000);
+    state.gated.get("session.list")![0]!.reject({ message: "closed", code: "rpc.connection_closed", params: { method: "session.list" } });
+    const e = (await p) as AppError;
+    expect(e).toBeInstanceOf(AppError);
+    expect(e.code).toBe("rpc.connection_closed");
+    expect(e.method).toBe("session.list");
+    expect(String(e)).toContain("fechou a ligação");
+  });
+
+  it("cancel drops the app-side request, clears the notice, and the next call works", async () => {
+    vi.useFakeTimers();
+    state.gated.set("git.log", []);
+    const p = call("git.log").catch((e: any) => e);
+    await vi.advanceTimersByTimeAsync(SLOW_NOTICE_MS + 10);
+    expect(slowMethods()).toEqual(["git.log"]);
+    cancelSlow("git.log");
+    const e = await p;
+    expect(isCancelled(e)).toBe(true);
+    expect(slowMethods()).toEqual([]);
+    state.gated.clear();
+    await expect(call("session.list")).resolves.toEqual([]);
+  });
+
+  it("no ping and no timeout error before the safety ceiling, however slow", async () => {
+    vi.useFakeTimers();
+    state.hang = true;
+    let err: unknown;
+    void call("session.list").catch((e) => (err = e));
+    await vi.advanceTimersByTimeAsync(CEILING_MS - 1_000);
+    expect(err).toBeUndefined();
+    expect(slowMethods()).toEqual(["session.list"]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect((err as AppError).code).toBe("rpc.call_timeout");
+    expect((err as AppError).params).toEqual({ method: "session.list", secs: 600 });
+    expect(slowMethods()).toEqual([]);
+  });
+
+  it("a cosmetic read keeps its own short limit and shows no slow notice", async () => {
+    vi.useFakeTimers();
+    state.hangMethods.add("project.logo");
+    const p = call("project.logo", { id: "x" }).catch((e: any) => e);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(slowMethods()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(((await p) as AppError).code).toBe("rpc.call_timeout");
   });
 
   it("re-issues a lane read that answers {loading: true} and returns the real data", async () => {
@@ -173,13 +202,15 @@ describe("call", () => {
     expect(await call("git.push", {})).toEqual({ loading: true });
   });
 
-  it("stops re-issuing once the call timed out", async () => {
+  it("stops re-issuing once the call was cancelled", async () => {
     vi.useFakeTimers();
     state.loadingFor.set("git.changes", 1_000_000);
     state.loadingDelay = 20_000;
     const p = call("git.changes", {}).catch((e: any) => e);
-    await vi.advanceTimersByTimeAsync(timeoutFor("git.changes") + PING_WAIT_MS + 10);
-    expect(await p).toBeInstanceOf(AppError);
+    await vi.advanceTimersByTimeAsync(SLOW_NOTICE_MS + 10);
+    cancelSlow("git.changes");
+    expect(isCancelled(await p)).toBe(true);
+    await vi.advanceTimersByTimeAsync(25_000);
     const n = calls.length;
     await vi.advanceTimersByTimeAsync(60_000);
     expect(calls.length).toBeLessThanOrEqual(n + 1);
