@@ -17,7 +17,7 @@
 //! The resource governor (branch `ax/resource-governor`) can feed its free-memory limit into [`Facts::free_mem_bytes`]
 //! and [`lock_budget_mb`]; this module does not depend on it.
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 /// Peak memory of one rustc job (a link of the daemon or the host is the worst one). Same as `scripts/lib/jobs.mjs`.
@@ -26,6 +26,8 @@ pub const DEFAULT_PER_JOB_BYTES: u64 = 3 * 1024 * 1024 * 1024 / 2;
 pub const DEFAULT_RESERVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 /// Granularity of the lock's memory budget: a unit is one lock file.
 pub const LOCK_UNIT_MB: u64 = 512;
+/// Memory that must stay available after a `lock --mem-mb` holder is admitted (setting `build.lock_margin_mb`).
+pub const LOCK_MARGIN_MB: u64 = 2048;
 
 /// How many parallel compile jobs fit: half the cores (SMT siblings do not help a compile), limited by free memory.
 /// Never fewer than 1. Unknown free memory (`None`) limits nothing but the cores.
@@ -46,11 +48,20 @@ pub struct BuildSettings {
     pub shared_target: bool,
     pub shared_js_cache: bool,
     pub lock_budget_mb: Option<u64>,
+    pub lock_margin_mb: Option<u64>,
 }
 
 impl Default for BuildSettings {
     fn default() -> Self {
-        BuildSettings { enabled: true, jobs: None, sccache: true, shared_target: false, shared_js_cache: true, lock_budget_mb: None }
+        BuildSettings {
+            enabled: true,
+            jobs: None,
+            sccache: true,
+            shared_target: false,
+            shared_js_cache: true,
+            lock_budget_mb: None,
+            lock_margin_mb: None,
+        }
     }
 }
 
@@ -66,8 +77,53 @@ impl BuildSettings {
             shared_target: b["shared_target"].as_bool().unwrap_or(d.shared_target),
             shared_js_cache: b["shared_js_cache"].as_bool().unwrap_or(d.shared_js_cache),
             lock_budget_mb: b["lock_budget_mb"].as_u64().filter(|m| *m > 0),
+            lock_margin_mb: b["lock_margin_mb"].as_u64(),
         }
     }
+
+    /// The object `settings.get` reports and `settings.set` stores (every key present, so the app needs no defaults).
+    pub fn to_json(&self) -> Value {
+        json!({
+            "enabled": self.enabled, "jobs": self.jobs, "sccache": if self.sccache { "auto" } else { "off" },
+            "shared_target": self.shared_target, "shared_js_cache": self.shared_js_cache, "lock_budget_mb": self.lock_budget_mb,
+            "lock_margin_mb": self.lock_margin_mb,
+        })
+    }
+}
+
+/// A `build` object sent to `settings.set`: only known keys of the right type are kept, anything else is refused (`None`).
+/// Keys left out keep their default; `jobs` is 1..=256 and `lock_budget_mb` above 0, both or null (auto).
+pub fn validate(v: &Value) -> Option<Value> {
+    let o = v.as_object()?;
+    let d = BuildSettings::default();
+    let flag = |k: &str, default: bool| match o.get(k) {
+        None => Some(default),
+        Some(x) => x.as_bool(),
+    };
+    let count = |k: &str, max: u64| match o.get(k) {
+        None | Some(Value::Null) => Some(None),
+        Some(x) => x.as_u64().filter(|n| (1..=max).contains(n)).map(Some),
+    };
+    let sccache = match o.get("sccache") {
+        None => d.sccache,
+        Some(x) => match x.as_str()? {
+            "auto" => true,
+            "off" => false,
+            _ => return None,
+        },
+    };
+    Some(
+        BuildSettings {
+            enabled: flag("enabled", d.enabled)?,
+            jobs: count("jobs", 256)?.map(|j| j as u32),
+            sccache,
+            shared_target: flag("shared_target", d.shared_target)?,
+            shared_js_cache: flag("shared_js_cache", d.shared_js_cache)?,
+            lock_budget_mb: count("lock_budget_mb", 4_194_304)?,
+            lock_margin_mb: count("lock_margin_mb", 4_194_304)?,
+        }
+        .to_json(),
+    )
 }
 
 /// What the machine and the session's folder look like right now (injected, so tests need no real machine).
@@ -205,6 +261,43 @@ pub fn lock_budget_mb(setting: Option<u64>, total_bytes: Option<u64>) -> u64 {
     mb.max(LOCK_UNIT_MB)
 }
 
+/// The margin of the lock's memory gate, in MB: the setting, else [`LOCK_MARGIN_MB`].
+pub fn lock_margin_mb(setting: Option<u64>) -> u64 {
+    setting.unwrap_or(LOCK_MARGIN_MB)
+}
+
+/// What the memory lock does with a holder that asks for `need_mb`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gate {
+    Admit,
+    /// Admitted although the memory is short, because nobody else holds anything: the machine's only builder never waits.
+    AdmitShort,
+    /// Wait for the next release of a holder, then decide again.
+    Wait,
+}
+
+/// The pure gate of the memory lock. A holder is admitted only if `free_units >= need_units` AND
+/// `available - need >= margin` (`available_bytes` `None` = unknown: memory limits nothing). Short memory with
+/// `nobody_holding` still admits (warn), so the only builder cannot deadlock.
+pub fn mem_gate(
+    need_mb: u64,
+    need_units: usize,
+    free_units: usize,
+    available_bytes: Option<u64>,
+    margin_mb: u64,
+    nobody_holding: bool,
+) -> Gate {
+    if free_units < need_units {
+        return Gate::Wait;
+    }
+    let fits = available_bytes.is_none_or(|a| a / (1024 * 1024) >= need_mb.saturating_add(margin_mb));
+    match (fits, nobody_holding) {
+        (true, _) => Gate::Admit,
+        (false, true) => Gate::AdmitShort,
+        (false, false) => Gate::Wait,
+    }
+}
+
 /// Estimated memory of a heavy command with `jobs` compile jobs, in MB, for `lock --mem-mb` defaults.
 pub fn mem_mb_for_jobs(jobs: u32) -> u64 {
     jobs.max(1) as u64 * DEFAULT_PER_JOB_BYTES / (1024 * 1024)
@@ -263,7 +356,7 @@ mod tests {
         assert_eq!(BuildSettings::from_settings(&json!({})), BuildSettings::default());
         assert_eq!(BuildSettings::from_settings(&json!({"build": "x"})), BuildSettings::default());
         let s = BuildSettings::from_settings(
-            &json!({"build": {"enabled": false, "jobs": 3, "sccache": "off", "shared_target": true, "shared_js_cache": false, "lock_budget_mb": 4096}}),
+            &json!({"build": {"enabled": false, "jobs": 3, "sccache": "off", "shared_target": true, "shared_js_cache": false, "lock_budget_mb": 4096, "lock_margin_mb": 1024}}),
         );
         assert_eq!(
             s,
@@ -273,10 +366,28 @@ mod tests {
                 sccache: false,
                 shared_target: true,
                 shared_js_cache: false,
-                lock_budget_mb: Some(4096)
+                lock_budget_mb: Some(4096),
+                lock_margin_mb: Some(1024)
             }
         );
         assert_eq!(BuildSettings::from_settings(&json!({"build": {"jobs": 0}})).jobs, None);
+    }
+
+    #[test]
+    fn validate_normalizes_and_refuses_junk() {
+        let v = validate(&json!({"jobs": 4, "sccache": "off", "lock_budget_mb": 8192})).unwrap();
+        assert_eq!(v["jobs"], 4);
+        assert_eq!(v["sccache"], "off");
+        assert_eq!(v["enabled"], true);
+        assert_eq!(v["lock_budget_mb"], 8192);
+        assert_eq!(BuildSettings::from_settings(&json!({"build": v})).jobs, Some(4));
+        assert_eq!(validate(&json!({"jobs": null})).unwrap()["jobs"], Value::Null);
+        assert!(validate(&json!({"jobs": 0})).is_none());
+        assert!(validate(&json!({"jobs": 999})).is_none());
+        assert!(validate(&json!({"sccache": "on"})).is_none());
+        assert!(validate(&json!({"enabled": "yes"})).is_none());
+        assert!(validate(&json!("x")).is_none());
+        assert_eq!(BuildSettings::from_settings(&json!({"build": validate(&json!({})).unwrap()})), BuildSettings::default());
     }
 
     #[test]
@@ -387,6 +498,25 @@ mod tests {
         // a holder taking the whole budget waits for any busy unit
         assert_eq!(admit(&[false, true], 2), Err(1));
         assert_eq!(admit(&[true, true], 1), Err(0));
+    }
+
+    #[test]
+    fn gate_needs_free_units_and_available_memory_above_the_margin() {
+        let g = |need, nu, fu, avail_mb: Option<u64>, held: bool| mem_gate(need, nu, fu, avail_mb.map(|m| m * 1024 * 1024), 2048, !held);
+        // fits both: 3000 + 2048 <= 5048
+        assert_eq!(g(3000, 6, 6, Some(5048), true), Gate::Admit);
+        // one MB short while another holder runs: wait
+        assert_eq!(g(3000, 6, 6, Some(5047), true), Gate::Wait);
+        // units short wins over memory
+        assert_eq!(g(3000, 6, 5, Some(99999), true), Gate::Wait);
+        // nobody holding: admitted even with short memory
+        assert_eq!(g(3000, 6, 6, Some(100), false), Gate::AdmitShort);
+        // unknown memory limits nothing
+        assert_eq!(g(3000, 6, 6, None, true), Gate::Admit);
+        // margin is a parameter
+        assert_eq!(mem_gate(1000, 2, 2, Some(1500 << 20), 0, false), Gate::Admit);
+        assert_eq!(lock_margin_mb(None), LOCK_MARGIN_MB);
+        assert_eq!(lock_margin_mb(Some(512)), 512);
     }
 
     #[test]

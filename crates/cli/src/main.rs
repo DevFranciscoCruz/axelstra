@@ -220,11 +220,15 @@ enum Cmd {
     /// Run a command when a slot of a named lock is free: agents work in parallel, the heavy command takes turns
     Lock {
         name: String,
-        /// how many may hold the lock at once (default 1; `build` and `verify` default to a memory need instead)
+        /// how many may hold the lock at once (default 1 for other names). Bare `build`/`verify` do NOT mean one at a
+        /// time: they declare a memory need and several holders run while memory allows; `--slots 1` is strict
+        /// one-at-a-time
         #[arg(long, conflicts_with = "mem_mb")]
         slots: Option<usize>,
         /// estimated memory of the command in MB: admitted while the holders' needs fit the budget (setting
-        /// `build.lock_budget_mb`, else physical memory minus 2 GB); use it for every caller of the name
+        /// `build.lock_budget_mb`, else physical memory minus 2 GB) and the memory available now minus the need
+        /// still leaves 2 GB (`build.lock_margin_mb`); short memory waits for a release (the only holder runs anyway,
+        /// with a warning); use it for every caller of the name
         #[arg(long)]
         mem_mb: Option<u64>,
         /// seconds to wait for a slot

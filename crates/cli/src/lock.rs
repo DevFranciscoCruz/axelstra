@@ -4,7 +4,9 @@
 //!
 //! `--mem-mb N` swaps the count slots for a memory budget: the holder declares what its command needs and is admitted
 //! while the declared needs of the holders fit the budget (setting `build.lock_budget_mb`, else physical memory minus a
-//! reserve). The budget is cut into units of `LOCK_UNIT_MB`, one lock file each (`NAME-mem-<i>.lock`); a holder takes
+//! reserve) AND the memory available right now minus the need still leaves a margin (`LOCK_MARGIN_MB`, setting
+//! `build.lock_margin_mb`; `buildenv::mem_gate`). Short memory waits for the next release; with nobody holding, the
+//! holder is admitted anyway after a warning. The budget is cut into units of `LOCK_UNIT_MB`, one lock file each (`NAME-mem-<i>.lock`); a holder takes
 //! `ceil(N / unit)` free units. A waiter blocks in the OS lock call of one busy unit and rescans when it is released, so
 //! there is no polling and nobody holds units while waiting (no deadlock). Use it for every caller of a name or none:
 //! count slots and memory units are separate files and do not exclude each other.
@@ -84,8 +86,15 @@ fn acquire(name: &str, slots: usize, timeout: Duration) -> Result<(File, usize)>
 }
 
 /// Waits until `need_mb` of the budget is free; returns the held unit files (dropping them releases the memory).
-fn acquire_mem(name: &str, budget_mb: u64, need_mb: u64, timeout: Duration) -> Result<Vec<File>> {
-    use axelstra_daemon::buildenv::{admit, units_for, LOCK_UNIT_MB};
+fn acquire_mem(
+    name: &str,
+    budget_mb: u64,
+    need_mb: u64,
+    margin_mb: u64,
+    available: impl Fn() -> Option<u64>,
+    timeout: Duration,
+) -> Result<Vec<File>> {
+    use axelstra_daemon::buildenv::{admit, mem_gate, units_for, Gate, LOCK_UNIT_MB};
     let dir = dir()?;
     let units = ((budget_mb / LOCK_UNIT_MB).max(1) as usize).min(MAX_SLOTS * 4);
     let need = units_for(need_mb, units);
@@ -104,7 +113,21 @@ fn acquire_mem(name: &str, budget_mb: u64, need_mb: u64, timeout: Duration) -> R
             }
             files.push(f);
         }
-        match admit(&busy, need) {
+        let free = busy.iter().filter(|b| !**b).count();
+        let nobody = free == units;
+        let decision = match admit(&busy, need) {
+            Ok(take) => match mem_gate(need_mb, need, free, available(), margin_mb, nobody) {
+                Gate::Admit => Ok(take),
+                Gate::AdmitShort => {
+                    eprintln!("axelstra lock: warning: '{name}' needs {need_mb} MB and available memory is short, but nothing else holds it: running anyway");
+                    Ok(take)
+                }
+                // memory is short while others hold units: wait for one of them to let go
+                Gate::Wait => Err(busy.iter().position(|b| *b).unwrap_or(0)),
+            },
+            Err(wait_on) => Err(wait_on),
+        };
+        match decision {
             // the units not taken are let go (dropped), the taken ones stay held
             Ok(take) => return Ok(files.into_iter().enumerate().filter(|(i, _)| take.contains(i)).map(|(_, f)| f).collect()),
             Err(wait_on) => {
@@ -145,11 +168,15 @@ fn default_mem_mb(name: &str) -> Option<u64> {
     Some(b::mem_mb_for_jobs(jobs))
 }
 
-fn budget_mb() -> u64 {
+/// `(budget in MB, margin in MB)` from the settings and the machine.
+fn budget_and_margin() -> (u64, u64) {
     let file = axelstra_daemon::proto::data_dir().join("settings.json");
     let doc = axelstra_daemon::store::read_json::<serde_json::Value>(&file).ok().flatten().unwrap_or_default();
     let s = axelstra_daemon::buildenv::BuildSettings::from_settings(&doc);
-    axelstra_daemon::buildenv::lock_budget_mb(s.lock_budget_mb, axelstra_daemon::buildenv::memory().map(|m| m.0))
+    (
+        axelstra_daemon::buildenv::lock_budget_mb(s.lock_budget_mb, axelstra_daemon::buildenv::memory().map(|m| m.0)),
+        axelstra_daemon::buildenv::lock_margin_mb(s.lock_margin_mb),
+    )
 }
 
 fn clamp_slots(slots: usize) -> usize {
@@ -166,7 +193,10 @@ pub fn run(name: &str, slots: Option<usize>, mem_mb: Option<u64>, timeout: u64, 
     }
     let mem = mem_mb.or(if slots.is_none() { default_mem_mb(name) } else { None });
     let held = match mem {
-        Some(need) => acquire_mem(name, budget_mb(), need, Duration::from_secs(timeout))?,
+        Some(need) => {
+            let (budget, margin) = budget_and_margin();
+            acquire_mem(name, budget, need, margin, || axelstra_daemon::buildenv::memory().map(|m| m.1), Duration::from_secs(timeout))?
+        }
         None => vec![acquire(name, clamp_slots(slots.unwrap_or(1)), Duration::from_secs(timeout))?.0],
     };
     let mut cmd = Command::new(&command[0]);
@@ -320,6 +350,30 @@ mod tests {
         }
     }
 
+    fn plenty() -> Option<u64> {
+        Some(1 << 50)
+    }
+
+    #[test]
+    fn short_memory_waits_for_a_release_but_never_blocks_the_only_holder() {
+        isolate();
+        let name = format!("r{}", std::process::id());
+        let _clean = CleanupMem(name.clone());
+        let budget = 4 * axelstra_daemon::buildenv::LOCK_UNIT_MB;
+        let short = || Some(100u64 << 20);
+        // nobody holds: admitted despite short memory
+        let a = acquire_mem(&name, budget, 512, 2048, short, Duration::from_secs(1)).unwrap();
+        // units are free but memory is short and `a` holds: waits
+        assert!(acquire_mem(&name, budget, 512, 2048, short, Duration::from_millis(400)).is_err());
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            drop(a);
+        });
+        // the release wakes it, and with nobody holding it is admitted
+        assert!(acquire_mem(&name, budget, 512, 2048, short, Duration::from_secs(20)).is_ok());
+        releaser.join().unwrap();
+    }
+
     #[test]
     fn memory_budget_admits_what_fits_and_wakes_on_release() {
         isolate();
@@ -327,16 +381,16 @@ mod tests {
         let _clean = CleanupMem(name.clone());
         // 4 units; two holders of 2 units fill it
         let budget = 4 * axelstra_daemon::buildenv::LOCK_UNIT_MB;
-        let a = acquire_mem(&name, budget, 1024, Duration::from_secs(1)).unwrap();
-        let b = acquire_mem(&name, budget, 1024, Duration::from_secs(1)).unwrap();
+        let a = acquire_mem(&name, budget, 1024, 0, plenty, Duration::from_secs(1)).unwrap();
+        let b = acquire_mem(&name, budget, 1024, 0, plenty, Duration::from_secs(1)).unwrap();
         assert_eq!((a.len(), b.len()), (2, 2));
-        assert!(acquire_mem(&name, budget, 512, Duration::from_millis(400)).is_err());
+        assert!(acquire_mem(&name, budget, 512, 0, plenty, Duration::from_millis(400)).is_err());
         let releaser = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(150));
             drop(a);
         });
         let t = std::time::Instant::now();
-        assert!(acquire_mem(&name, budget, 1024, Duration::from_secs(20)).is_ok());
+        assert!(acquire_mem(&name, budget, 1024, 0, plenty, Duration::from_secs(20)).is_ok());
         assert!(t.elapsed() < Duration::from_secs(5), "took {:?}", t.elapsed());
         releaser.join().unwrap();
         drop(b);
@@ -347,7 +401,7 @@ mod tests {
         isolate();
         let name = format!("h{}", std::process::id());
         let _clean = CleanupMem(name.clone());
-        let held = acquire_mem(&name, 1024, 99999, Duration::from_secs(1)).unwrap();
+        let held = acquire_mem(&name, 1024, 99999, 0, plenty, Duration::from_secs(1)).unwrap();
         assert_eq!(held.len(), 2);
     }
 
