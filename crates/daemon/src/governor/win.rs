@@ -137,6 +137,134 @@ pub fn global_status() -> Option<MemInfo> {
     Some(MemInfo { total_mb: mb(m.ullTotalPhys), free_mb: mb(m.ullAvailPhys), commit_pct })
 }
 
+// ---- cause: kernel pools, machine counters, per-process stats (direct APIs only, never PDH) ----
+
+use super::cause::{CpuTimes, KernelMem, SysCounters};
+use windows_sys::Win32::System::ProcessStatus::{
+    GetPerformanceInfo, GetProcessMemoryInfo, PERFORMANCE_INFORMATION, PROCESS_MEMORY_COUNTERS,
+};
+use windows_sys::Win32::System::Threading::{
+    GetProcessHandleCount, GetProcessTimes, GetSystemTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+};
+
+#[link(name = "ntdll")]
+extern "system" {
+    fn NtQuerySystemInformation(class: u32, info: *mut std::ffi::c_void, len: u32, ret: *mut u32) -> i32;
+}
+
+const MB: u64 = 1024 * 1024;
+
+fn perf_info() -> Option<PERFORMANCE_INFORMATION> {
+    // SAFETY: plain data, zeroed is valid; `cb` is set as the API requires and the pointer is to our own struct.
+    let mut p: PERFORMANCE_INFORMATION = unsafe { std::mem::zeroed() };
+    p.cb = std::mem::size_of::<PERFORMANCE_INFORMATION>() as u32;
+    (unsafe { GetPerformanceInfo(&mut p, p.cb) } != 0).then_some(p)
+}
+
+/// Kernel paged / nonpaged pools and the system cache (which includes the standby list), in MB.
+pub fn kernel_and_cache() -> Option<(KernelMem, u64)> {
+    let p = perf_info()?;
+    let page = p.PageSize as u64;
+    let (paged, nonpaged) = (p.KernelPaged as u64 * page / MB, p.KernelNonpaged as u64 * page / MB);
+    Some((KernelMem { paged_mb: paged, nonpaged_mb: nonpaged, alert_mb: paged + nonpaged }, p.SystemCache as u64 * page / MB))
+}
+
+/// Handles open on the whole system.
+pub fn system_handles() -> Option<u64> {
+    perf_info().map(|p| p.HandleCount as u64)
+}
+
+fn query_sys<const N: usize>(class: u32) -> Option<[u8; N]> {
+    let mut buf = [0u8; N];
+    let mut ret = 0u32;
+    // SAFETY: `buf` is a writable buffer of N bytes and the length passed is N; the call only writes inside it.
+    let st = unsafe { NtQuerySystemInformation(class, buf.as_mut_ptr().cast(), N as u32, &mut ret) };
+    (st >= 0).then_some(buf)
+}
+
+fn u32_at(b: &[u8], off: usize) -> u64 {
+    u32::from_le_bytes([b[off], b[off + 1], b[off + 2], b[off + 3]]) as u64
+}
+
+fn usize_at(b: &[u8], off: usize) -> u64 {
+    let mut a = [0u8; 8];
+    a.copy_from_slice(&b[off..off + 8]);
+    u64::from_le_bytes(a)
+}
+
+/// CPU times from `GetSystemTimes` (kernel includes idle), paging from `SystemPerformanceInformation` (class 2: page
+/// reads at byte 80, dirty and mapped page writes at 96 and 104 on 64-bit), commit from `GetPerformanceInfo`, the modified
+/// list from `SystemMemoryListInformation` (class 80). Each part is `None` when its call fails.
+pub fn system_counters() -> Option<SysCounters> {
+    let ft = |f: &windows_sys::Win32::Foundation::FILETIME| ((f.dwHighDateTime as u64) << 32) | f.dwLowDateTime as u64;
+    // SAFETY: FILETIME is plain data; the three out pointers are to our own locals.
+    let cpu = unsafe {
+        let (mut i, mut k, mut u): (windows_sys::Win32::Foundation::FILETIME, _, _) =
+            (std::mem::zeroed(), std::mem::zeroed(), std::mem::zeroed());
+        (GetSystemTimes(&mut i, &mut k, &mut u) != 0).then(|| {
+            let (idle, kern, user) = (ft(&i), ft(&k), ft(&u));
+            CpuTimes { idle, kernel: kern.saturating_sub(idle), user }
+        })
+    };
+    let pages = query_sys::<512>(2).map(|b| u32_at(&b, 80) + u32_at(&b, 96) + u32_at(&b, 104));
+    let perf = perf_info();
+    let page = perf.as_ref().map(|p| p.PageSize as u64).unwrap_or(4096);
+    // ZeroPageCount, FreePageCount, ModifiedPageCount, ... (pointer-sized)
+    let modified = query_sys::<128>(80).map(|b| usize_at(&b, 16) * page / MB);
+    Some(SysCounters {
+        cpu,
+        pages,
+        commit_mb: perf.as_ref().map(|p| p.CommitTotal as u64 * page / MB),
+        commit_limit_mb: perf.as_ref().map(|p| p.CommitLimit as u64 * page / MB),
+        modified_mb: modified,
+    })
+}
+
+#[derive(Default)]
+pub struct ProcStats {
+    pub rss_kib: u64,
+    pub handles: Option<u32>,
+    pub cpu_100ns: Option<u64>,
+    pub io_bytes: Option<u64>,
+}
+
+/// Working set, handle count, CPU time and I/O bytes of one process. Zeros / `None` when the process cannot be opened
+/// (protected processes, gone since the table was taken).
+pub fn process_stats(pid: u32) -> ProcStats {
+    let mut st = ProcStats::default();
+    if pid == 0 {
+        return st;
+    }
+    // SAFETY: the handle is checked for null and closed below; every out pointer is to a local of the type the API expects.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return st;
+        }
+        let mut mc: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+        mc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        if GetProcessMemoryInfo(h, &mut mc, mc.cb) != 0 {
+            st.rss_kib = mc.WorkingSetSize as u64 / 1024;
+        }
+        let mut n = 0u32;
+        if GetProcessHandleCount(h, &mut n) != 0 {
+            st.handles = Some(n);
+        }
+        let z = || std::mem::zeroed::<windows_sys::Win32::Foundation::FILETIME>();
+        let (mut c, mut e, mut k, mut u) = (z(), z(), z(), z());
+        if GetProcessTimes(h, &mut c, &mut e, &mut k, &mut u) != 0 {
+            let ft = |f: &windows_sys::Win32::Foundation::FILETIME| ((f.dwHighDateTime as u64) << 32) | f.dwLowDateTime as u64;
+            st.cpu_100ns = Some(ft(&k) + ft(&u));
+        }
+        let mut io: windows_sys::Win32::System::Threading::IO_COUNTERS = std::mem::zeroed();
+        if windows_sys::Win32::System::Threading::GetProcessIoCounters(h, &mut io) != 0 {
+            st.io_bytes = Some(io.ReadTransferCount + io.WriteTransferCount);
+        }
+        CloseHandle(h);
+    }
+    st
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -323,6 +323,25 @@ User guide: `docs/MEMORY.md`. PROTO 31.
 - **`agent_forbidden`.** `mem.config`, `mem.pause`, `mem.resume`: an agent must not switch the governor off, move its lines, or freeze
   or unfreeze sessions (including a sibling or its own lead). `mem.status`, `mem.admit`, `mem.hold`, `mem.unhold` stay open because
   `axelstra lock` runs inside agents; `mem.hold` refuses a pid outside the agent's own tree (`not_own_tree`).
+- **Cause of the pressure (`governor/cause.rs`).** `mem.status` carries an additive `breakdown` (no new method, no PROTO bump): `kernel`
+  `{paged_mb, nonpaged_mb, total_mb, baseline_mb, high}` (Windows `GetPerformanceInfo`; Linux `SReclaimable`/`SUnreclaim`, alerting on the
+  unreclaimable part only; macOS `null`), `cache_mb`, `compressed_mb` (Windows: the working set of `Memory Compression`, which is then not listed
+  as external; Linux `Zswapped`), `sessions` per tier (`main|lead|agent|worker|terminal`: count and RSS), `builds` (processes under a `mem.hold` pid,
+  counted apart from their session), `external` (top 8 by RSS, same-name processes grouped, everything outside the sessions), `others_mb`
+  (memory in use, total minus free, minus the above; the cache is not subtracted because available memory already counts it as free; saturating),
+  `handles {total, top: [{name,pid,handles}]}` (only when the kernel is high, the machine has over 200k handles or one process over 50k; Windows only),
+  `system {cpu_user_pct, cpu_kernel_pct, commit_mb, commit_limit_mb, modified_mb, pages_per_sec}` and `top_cpu`/`top_io` `[{name,pid,value}]`
+  (CPU % of the machine, I/O bytes/s; measured over a 300 ms window only while an alert is open, else `null`). Every source is a `CauseSource` (injected
+  in tests, `Governor::cause.set_source`); the OS one uses direct APIs only (`GetSystemTimes`, `GetPerformanceInfo`, `NtQuerySystemInformation`,
+  `GetProcessMemoryInfo/HandleCount/Times/IoCounters`, `/proc`), never PDH or `Get-Counter` (they fail on some installs). Processes the OS refuses to open
+  (protected ones, e.g. Defender) show RSS 0; nothing ever acts on them.
+- **Kernel alerts.** No new timer: `Governor::set_tick` runs `server/governor.rs::cause_tick` on each wake of the governor thread (OS event or its
+  computed deadline), which reads only the kernel pools and the machine counters (`cause::Monitor::evaluate`). Pool alert (`KernelWatch`): the first
+  reading is the baseline; the line is the lower of `kernel_pool_mb` and twice the baseline (floor 1 GB); one `governor.kernel_pool_high {gb, handles}`
+  notice (`store::notice_coded`, so `notices.take`) per episode, which ends when the pool falls below 85% of the line. Load alert (`LoadWatch`): the
+  rates come from the delta between two evaluations; kernel CPU over 15% or over 5000 pages/s for 3 evaluations in a row raises one
+  `governor.kernel_load_high {kernel_pct, pages}` notice, re-armed below 70% of both lines. The process table is read only when a notice is raised or
+  `mem.status` is asked. `mem.config` accepts `kernel_pool_mb` (256..=1048576, default 3072, `governor.bad_config` otherwise).
 
 ## Removing a project
 

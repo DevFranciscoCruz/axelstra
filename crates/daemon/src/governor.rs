@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+pub mod cause;
 #[cfg(target_os = "linux")]
 mod linux;
 mod sample;
@@ -83,6 +84,8 @@ pub struct Config {
     pub crit_free_pct: u8,
     pub high_free_mb: u64,
     pub crit_free_mb: u64,
+    /// kernel pools (paged + nonpaged) above this many MB raise one notice per episode (`cause::KernelWatch`)
+    pub kernel_pool_mb: u64,
 }
 
 impl Default for Config {
@@ -96,12 +99,14 @@ impl Default for Config {
             crit_free_pct: 10,
             high_free_mb: 3072,
             crit_free_mb: 1536,
+            kernel_pool_mb: 3072,
         }
     }
 }
 
-const KEYS: [&str; 8] =
-    ["enabled", "admission", "auto_pause", "warn_only", "high_free_pct", "crit_free_pct", "high_free_mb", "crit_free_mb"];
+const KEYS: [&str; 9] =
+    ["enabled", "admission", "auto_pause", "warn_only", "high_free_pct", "crit_free_pct", "high_free_mb", "crit_free_mb", "kernel_pool_mb"];
+const KERNEL_POOL_RANGE: std::ops::RangeInclusive<u64> = 256..=1_048_576;
 const MAX_MB: u64 = 4 * 1024 * 1024;
 
 impl Config {
@@ -151,6 +156,11 @@ impl Config {
                 "crit_free_pct" => c.crit_free_pct = num(90)? as u8,
                 "high_free_mb" => c.high_free_mb = num(MAX_MB)?,
                 "crit_free_mb" => c.crit_free_mb = num(MAX_MB)?,
+                "kernel_pool_mb" => {
+                    c.kernel_pool_mb = v.as_u64().filter(|n| KERNEL_POOL_RANGE.contains(n)).ok_or_else(|| {
+                        bad(format!("{k} must be a whole number from {} to {}", KERNEL_POOL_RANGE.start(), KERNEL_POOL_RANGE.end()))
+                    })?
+                }
                 other => return Err(bad(format!("unknown key {other} (known: {})", KEYS.join(", ")))),
             }
         }
@@ -349,6 +359,8 @@ struct State {
 
 /// Callback run on each level change (outside the state lock).
 pub type OnChange = Arc<dyn Fn(&Change) + Send + Sync>;
+/// Callback run on each wake of the governor thread (no argument; it reads what it needs).
+pub type OnTick = Arc<dyn Fn() + Send + Sync>;
 
 pub struct Governor {
     st: Mutex<State>,
@@ -356,6 +368,10 @@ pub struct Governor {
     stop: Arc<Stop>,
     source: Mutex<Option<Arc<dyn MemSource>>>,
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// why memory is short: the breakdown source and the kernel / load alert state
+    pub cause: cause::Monitor,
+    /// run on each wake of the governor thread, after the reading is fed (the alert evaluation)
+    tick: Mutex<Option<OnTick>>,
 }
 
 impl Governor {
@@ -367,7 +383,14 @@ impl Governor {
             stop: Arc::new(Stop::default()),
             source: Mutex::new(None),
             thread: Mutex::new(None),
+            cause: cause::Monitor::os(),
+            tick: Mutex::new(None),
         }
+    }
+
+    /// Sets what runs on each wake of the thread (before `start`).
+    pub fn set_tick(&self, f: OnTick) {
+        *self.tick.lock_recover() = Some(f);
     }
 
     pub fn level(&self) -> Level {
@@ -471,6 +494,10 @@ impl Governor {
                     }
                     None => quiet = quiet.saturating_add(1),
                 }
+            }
+            let tick = self.tick.lock_recover().clone();
+            if let Some(f) = tick {
+                f();
             }
             let (level, info) = self.state();
             let wait = next_deadline(level, &info, &self.thresholds(), quiet, source.has_events());
@@ -670,11 +697,18 @@ mod tests {
             json!({"high_free_pct": 95}),
             json!({"crit_free_pct": 20}),
             json!({"crit_free_mb": 4000}),
+            json!({"kernel_pool_mb": 255}),
+            json!({"kernel_pool_mb": 1_048_577}),
+            json!({"kernel_pool_mb": 0}),
+            json!({"kernel_pool_mb": "big"}),
             json!(3),
         ] {
             let e = c.patch(&bad).unwrap_err();
             assert_eq!(axelstra_core::msg::find(&e).map(|c| c.code.as_str()), Some("governor.bad_config"), "{bad}");
         }
+        assert_eq!(c.kernel_pool_mb, 3072);
+        assert_eq!(c.patch(&json!({"kernel_pool_mb": 256})).unwrap().kernel_pool_mb, 256);
+        assert_eq!(c.patch(&json!({"kernel_pool_mb": 1_048_576})).unwrap().kernel_pool_mb, 1_048_576);
         let mut settings = json!({"shell": "bash"});
         p.into_settings(&mut settings);
         assert_eq!(settings["shell"], "bash");
