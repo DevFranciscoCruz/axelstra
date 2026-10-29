@@ -80,7 +80,7 @@ experimental job.
 - **G11. `buildenv::memory` is `None` on macOS.** `crates/daemon/src/buildenv.rs:223`. `CARGO_BUILD_JOBS` is then derived
   from cores alone, which can over-subscribe a small Mac. The governor's `vm_stat` reader (`sample.rs`) already has the
   data.
-- **G12. No click-through OS toast off Windows.** `app/src-tauri/src/main.rs:1073-1076` returns `false`; the UI falls back
+- **G12. No click-through OS toast off Windows.** `app/src-tauri/src/main.rs` (`notify_session`, :1035) returns `false`; the UI falls back
   to the notification plugin (`main.rs:1449`) which has no click callback, so clicking a notification on Linux/macOS does
   not focus the worktree.
 - **G13. Test-hidden window is Windows only.** `main.rs:1407-1420` (`make_inert`). `AXELSTRA_TEST_HIDDEN`
