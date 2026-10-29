@@ -225,6 +225,19 @@ pub fn remove(store: &Path, id: &str) -> Result<()> {
 /// Only worktrees of registered projects may be inspected, never arbitrary paths.
 /// A project whose folder is gone (or whose git fails) is skipped, not an error for every other project.
 pub fn known_worktree(store: &Path, path: &str) -> Result<PathBuf> {
+    // every git/fs/watch call starts here, and each project costs a `git worktree list`: the answer is kept until a
+    // worktree is added or removed (core's counter), a mutation or an event bumps `*`. A positive answer only; the
+    // floor covers a worktree changed by the git CLI. Never call this while holding a permit of `memo::git_pool`:
+    // a waiter would hold the permit the leader of this run needs.
+    let key = format!("known|{}|{}", store.display(), axelstra_core::paths::norm(path));
+    let opts = crate::memo::Opts { scopes: &["*", "wt"], max_age: Some(crate::memo::WORKTREE_MAX_AGE), stale_ok: false };
+    let v = crate::memo::memo().cached(&key, opts, || {
+        Ok(serde_json::Value::String(crate::memo::git_pool().run(|| known_worktree_uncached(store, path))?.to_string_lossy().into_owned()))
+    })?;
+    Ok(PathBuf::from(v.as_str().unwrap_or_default()))
+}
+
+fn known_worktree_uncached(store: &Path, path: &str) -> Result<PathBuf> {
     for p in try_load(store)? {
         let Ok(list) = git::worktree_list(Path::new(&p.path)) else { continue };
         for w in list {

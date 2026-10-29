@@ -195,7 +195,12 @@ pub(super) fn spawn_loop(reg: Arc<Registry>) {
         let mut seen_refusals = std::collections::HashSet::new();
         let r = reg.clone();
         // a remote ref moved: a merge may have arrived, so the janitor looks too (it has its own gap)
-        let mut refs = prwatch::RefWatch::new(Arc::new(move || r.janitor.bump()));
+        // and what the daemon kept about commits, branches and PRs is outdated (a commit, a fetch, a checkout moved a ref)
+        let mut refs = prwatch::RefWatch::new(Arc::new(move || {
+            crate::memo::memo().bump_all();
+            crate::memo::memo().bump("gh");
+            r.janitor.bump()
+        }));
         let mut event = true;
         loop {
             if reg.closing.load(Ordering::SeqCst) {

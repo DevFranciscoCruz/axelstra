@@ -7,7 +7,17 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "git.changes" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             let base = p["base"].as_str();
-            Ok(serde_json::to_value(tokio::task::block_in_place(|| crate::changes::changes(&wt, base))?)?)
+            // dropped when the watcher of this worktree reports a file change (it bumps the path), by any mutation and by a ref move
+            let path = norm(&wt.to_string_lossy());
+            crate::memo::memo().cached(
+                &memo_key(reg, &["changes", &path, base.unwrap_or_default()]),
+                memo_opts(reg, &["*", "wt", &path], Some(crate::memo::WORKTREE_MAX_AGE)),
+                || {
+                    Ok(serde_json::to_value(tokio::task::block_in_place(|| {
+                        crate::memo::git_pool().run(|| crate::changes::changes(&wt, base))
+                    })?)?)
+                },
+            )
         }
         "git.log" | "git.show" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
@@ -76,14 +86,24 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         // the window got focus: PRs that GitHub changed meanwhile raise no local event, so look at the stale ones once
         "gh.pr_refresh" => {
+            crate::memo::memo().bump("gh");
             crate::prwatch::WAKE.bump();
             Ok(json!({}))
         }
         "gh.list" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let kind = p["kind"].as_str().unwrap_or("pr").to_string();
-            let items = tokio::task::block_in_place(|| crate::gh::list(std::path::Path::new(&pr.path), &kind))?;
-            Ok(json!({"items": items}))
+            // PR and issue lists move on GitHub's side: `pr.changed` and the window's `gh.pr_refresh` bump `gh`
+            crate::memo::memo().cached(
+                &memo_key(reg, &["gh.list", &pr.id, &kind]),
+                memo_opts(reg, &["gh", "wt"], Some(crate::memo::GH_MAX_AGE)),
+                || {
+                    let items = tokio::task::block_in_place(|| {
+                        crate::memo::git_pool().run(|| crate::gh::list(std::path::Path::new(&pr.path), &kind))
+                    })?;
+                    Ok(json!({"items": items}))
+                },
+            )
         }
         "gh.comments" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;

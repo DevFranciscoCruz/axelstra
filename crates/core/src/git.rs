@@ -164,6 +164,12 @@ static WT_CACHE: std::sync::Mutex<Option<WtCache>> = std::sync::Mutex::new(None)
 /// Bumped by every `forget_worktree_lists`: a list computed before the bump may be stale and must not be cached.
 static WT_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Moves on every `forget_worktree_lists` (a worktree was added, removed or moved): a cache that must not outlive such
+/// a change compares it, instead of expiring on a clock.
+pub fn worktree_generation() -> u64 {
+    WT_GEN.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 pub fn forget_worktree_lists() {
     WT_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     *WT_CACHE.lock_recover() = None;

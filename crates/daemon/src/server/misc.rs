@@ -188,21 +188,29 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "agent.worktree_usage" => {
             let paths: Vec<String> =
                 p["worktrees"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-            let usage = tokio::task::block_in_place(|| crate::agentlog::worktree_usage(&paths));
-            Ok(json!({"usage": usage}))
+            // only `usage.changed` (the watcher of the agents' logs) drops it: no mutation of ours changes the logs
+            crate::memo::memo().cached(&memo_key(reg, &["wt_usage", &paths.join("|")]), memo_opts(reg, &["usage"], None), || {
+                let usage = tokio::task::block_in_place(|| crate::agentlog::worktree_usage(&paths));
+                Ok(json!({"usage": usage}))
+            })
         }
         // spending against the token limits (read only); `worktrees` limits it to those paths, else every project worktree
         "budget.status" => {
             let budgets = reg.with_settings(crate::budget::parse);
             let asked: Option<Vec<String>> =
                 p["worktrees"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
-            let rows = tokio::task::block_in_place(|| {
-                let paths = asked.unwrap_or_else(|| budget_paths(reg, &budgets));
-                let totals = budget_totals(&paths);
-                let state = read_json::<crate::budget::State>(&budget_state_path(reg)).ok().flatten().unwrap_or_default();
-                crate::budget::status(&state, &budgets, &totals, chrono::Local::now().date_naive())
-            });
-            Ok(json!({"budgets": rows}))
+            // the limits (settings.set bumps `*`), the logs (`usage`), the worktree set (`wt`) and the day; the scheduler writes
+            // the state file without an event, so a floor too
+            let key = memo_key(reg, &["budget", &asked.as_ref().map(|a| a.join("|")).unwrap_or_default()]);
+            crate::memo::memo().cached(&key, memo_opts(reg, &["*", "usage", "wt"], Some(crate::memo::BUDGET_MAX_AGE)), || {
+                let rows = tokio::task::block_in_place(|| {
+                    let paths = asked.clone().unwrap_or_else(|| crate::memo::git_pool().run(|| budget_paths(reg, &budgets)));
+                    let totals = budget_totals(&paths);
+                    let state = read_json::<crate::budget::State>(&budget_state_path(reg)).ok().flatten().unwrap_or_default();
+                    crate::budget::status(&state, &budgets, &totals, chrono::Local::now().date_naive())
+                });
+                Ok(json!({"budgets": rows}))
+            })
         }
         // evaluates the limits now (the scheduler does it every two minutes), e.g. right after the user changed them
         "budget.check" => Ok(json!({"budgets": tokio::task::block_in_place(|| budget_check(reg))})),
@@ -221,6 +229,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             std::thread::sleep(Duration::from_millis(p["ms"].as_u64().unwrap_or(0).min(10_000)));
             Ok(json!({"ran": RAN.fetch_add(1, Ordering::SeqCst) + 1}))
         }
+        // load tests and tools/idle-load.mjs: calls per method and child processes started since the daemon began
+        "debug.load" if std::env::var_os("AXELSTRA_TESTING").is_some() => {
+            Ok(json!({"calls": crate::lag::snapshot(), "spawns": axelstra_core::proc::spawn_count()}))
+        }
         // what the daemon recovered or lost on its own (a state file moved aside, restored from a backup): shown once
         "audit.list" => {
             let limit = p["limit"].as_u64().map_or(100, |n| n.clamp(1, 500) as usize);
@@ -229,10 +241,6 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "env.tools" => Ok(json!({"tools": tokio::task::block_in_place(crate::envtools::detect)})),
         "backup.export" => {
-        // load tests and tools/idle-load.mjs: calls per method and child processes started since the daemon began
-        "debug.load" if std::env::var_os("AXELSTRA_TESTING").is_some() => {
-            Ok(json!({"calls": crate::lag::snapshot(), "spawns": axelstra_core::proc::spawn_count()}))
-        }
             // sessions.json is the registry's own view, not whatever was last flushed
             reg.persist();
             let dir = reg.saved.parent().unwrap_or(std::path::Path::new("")).to_path_buf();

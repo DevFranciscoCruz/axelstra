@@ -919,6 +919,104 @@ fn changes_projects(method: &str) -> bool {
             ))
 }
 
+/// The key of a kept answer of this daemon (the registry's address keeps daemons hosted by one process apart).
+fn memo_key(reg: &Arc<Registry>, parts: &[&str]) -> String {
+    format!("{:p}|{}", Arc::as_ptr(reg), parts.join("|"))
+}
+
+/// How a slow read is kept: valid while `scopes` do not move (and under `max_age`, where no event reports a change),
+/// and served as it is while the memory governor says High or Critical.
+fn memo_opts<'a>(reg: &Registry, scopes: &'a [&'a str], max_age: Option<Duration>) -> crate::memo::Opts<'a> {
+    crate::memo::Opts { scopes, max_age, stale_ok: reg.under_pressure() }
+}
+
+/// What each event of the watch stream says about the answers `crate::memo` keeps. No clock: the event is the moment.
+fn invalidate_for_event(name: &str) {
+    let m = crate::memo::memo();
+    match name {
+        // worktrees, sessions (who is busy, which ports), the dispatch file, the janitor's and the boards' work
+        "projects.changed" | "session.exited" | "session.hibernated" | "session.woke" | "dispatch.changed" | "janitor.events"
+        | "kanban.changed" | "orch.changed" => m.bump_all(),
+        "pr.changed" => {
+            m.bump("gh");
+            m.bump_all();
+        }
+        "usage.changed" | "limits.changed" | "budget.events" => m.bump("usage"),
+        _ => {}
+    }
+}
+
+/// Whether a call can change what a kept answer shows. The pure reads are listed; anything else (an unknown method, a
+/// commit, a file write, a spawn) counts as a change, so a new mutating method is safe without being added anywhere.
+fn may_change_answers(method: &str) -> bool {
+    !matches!(
+        method,
+        "ping"
+            | "hello"
+            | "session.list"
+            | "session.status"
+            | "session.screen"
+            | "session.resources"
+            | "session.usage"
+            | "session.pending"
+            | "session.resize"
+            | "session.subscribe"
+            | "session.unsubscribe"
+            | "settings.get"
+            | "project.list"
+            | "project.logo"
+            | "project.log"
+            | "project.discover"
+            | "project.clone_status"
+            | "project.env_preview"
+            | "worktree.status"
+            | "worktree.overview"
+            | "dispatch.meta"
+            | "dispatch.overlaps"
+            | "dispatch.overlap_files"
+            | "ports.list"
+            | "git.changes"
+            | "git.log"
+            | "git.show"
+            | "git.diff"
+            | "git.timeline"
+            | "git.suggest_pr"
+            | "gh.list"
+            | "gh.comments"
+            | "gh.repos"
+            | "gh.pr_refresh"
+            | "fs.read"
+            | "fs.list"
+            | "fs.stat"
+            | "fs.search"
+            | "fs.grep"
+            | "watch.subscribe"
+            | "watch.unsubscribe"
+            | "triggers.get"
+            | "triggers.preview"
+            | "agent.status"
+            | "agent.search"
+            | "agent.usage"
+            | "agent.worktree_usage"
+            | "budget.status"
+            | "mem.status"
+            | "mem.admit"
+            | "hooks.status"
+            | "msg.thread"
+            | "msg.reply_of"
+            | "notes.read"
+            | "notes.read_file"
+            | "notes.export"
+            | "notes.worktree"
+            | "orch.status"
+            | "kanban.list"
+            | "flow.list"
+            | "automation.list"
+            | "computer.status"
+            | "app.dir"
+    )
+}
+
 /// Drops the cached project list and bumps the generation a `project.list` in flight checks before caching its answer.
 fn forget_project_list(reg: &Registry) {
     *reg.plist.lock_recover() = None;
@@ -930,10 +1028,18 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
     // Forgotten before the call and again after it: a `project.list` that started in between (the UI polls it) would
     // otherwise cache the state from before the change and serve it for the next seconds.
     let (reg, mutating) = (c.reg.clone(), changes_projects(&c.req.method));
+    // before the call and after it: a read that starts in between keeps nothing, and one after the reply sees the change
+    let changes = may_change_answers(&c.req.method);
+    if changes {
+        crate::memo::memo().bump_all();
+    }
     if mutating {
         forget_project_list(&reg);
     }
     let out = dispatch_call(c);
+    if changes {
+        crate::memo::memo().bump_all();
+    }
     if mutating {
         forget_project_list(&reg);
         // a change made from the CLI or a flow shows up in the app without it polling (once the reply is queued)

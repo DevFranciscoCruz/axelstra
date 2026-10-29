@@ -50,9 +50,13 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             }
             let stop = Arc::new(AtomicBool::new(false));
             let (tx2, path) = (tx.clone(), wt.to_string_lossy().to_string());
+            let scope = norm(&path);
             let weak = Arc::downgrade(reg);
             tokio::task::block_in_place(|| {
                 crate::watcher::start(wt, stop.clone(), move || {
+                    // what the daemon kept about this worktree's files (changes, status, overview, overlaps) is outdated
+                    crate::memo::memo().bump(&scope);
+                    crate::memo::memo().bump("fs");
                     // the worktree itself was deleted (outside the app): its sessions have nothing left to show
                     if !std::path::Path::new(&path).exists() {
                         if let Some(r) = weak.upgrade() {

@@ -4,7 +4,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
     let req = c.req;
     let (p, reg) = (c.p, c.reg);
     match req.method.as_str() {
-        "worktree.overview" => Ok(tokio::task::block_in_place(|| crate::overview::cached(&reg.store, &|path| reg.worktree_busy(path)))),
+        "worktree.overview" => crate::memo::memo().cached(
+            &memo_key(reg, &["overview"]),
+            memo_opts(reg, &["*", "wt", "fs"], Some(crate::memo::WORKTREE_MAX_AGE)),
+            || {
+                Ok(tokio::task::block_in_place(|| {
+                    crate::memo::git_pool().run(|| crate::overview::compute(&reg.store, &|path| reg.worktree_busy(path)))
+                }))
+            },
+        ),
         "worktree.sweep" => {
             let dry = p["dry_run"].as_bool().unwrap_or(false);
             let before = reg.closed.read();
@@ -55,63 +63,31 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             // only paths the daemon knows; the list comes from the UI and git runs in each
             let list: Vec<String> =
                 p["paths"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
-            let out = tokio::task::block_in_place(|| {
-                let mut allowed = std::collections::HashSet::new();
-                for pr in crate::projects::load(&reg.store) {
-                    for w in axelstra_core::git::worktree_list(std::path::Path::new(&pr.path)).unwrap_or_default() {
-                        allowed.insert(norm(&w.path));
-                    }
-                }
-                list.iter().take(64).filter(|w| allowed.contains(&norm(w))).map(|w| crate::wtstatus::status_cached(w)).collect::<Vec<_>>()
-            });
-            Ok(json!({"status": out}))
-        }
-        "project.list" => {
-            if let Some((at, v)) = reg.plist.lock_recover().as_ref() {
-                if at.elapsed() < Duration::from_secs(3) {
-                    return Ok(v.clone());
-                }
-            }
-            // the app asks for the list when something changed in the repositories: the moment to notice a worktree deleted behind our back
-            reap_orphans(reg);
-            let gen = reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst);
-            let ps = crate::projects::load(&reg.store);
-            // each project starts several git processes: a few projects at a time, not one after the other
-            let one = |pr: &crate::projects::Project| -> Value {
-                let repo = std::path::Path::new(&pr.path);
-                let mut wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();
-                wts.retain(|w| w.is_main || w.path.replace('\\', "/").contains("/.axelstra-wt/"));
-                let ident = axelstra_core::git::identity(repo);
-                let parents = crate::projects::parent_paths(pr, &wts);
-                let wts: Vec<Value> = wts
-                    .into_iter()
-                    .map(|w| {
-                        let parent = parents.get(&w.path).cloned();
-                        let mut v = serde_json::to_value(w).unwrap_or_default();
-                        if let Some(par) = parent {
-                            v["parent"] = json!(par);
+            // one entry per list, dropped when any of its worktrees reports a file change (the watcher bumps its path)
+            let mine: Vec<String> = list.iter().take(64).map(|w| norm(w)).collect();
+            let mut scopes: Vec<&str> = vec!["*", "wt"];
+            scopes.extend(mine.iter().map(String::as_str));
+            let key = memo_key(reg, &["status", &mine.join("|")]);
+            crate::memo::memo().cached(&key, memo_opts(reg, &scopes, Some(crate::memo::WORKTREE_MAX_AGE)), || {
+                let out = tokio::task::block_in_place(|| {
+                    crate::memo::git_pool().run(|| {
+                        let mut allowed = std::collections::HashSet::new();
+                        for pr in crate::projects::load(&reg.store) {
+                            for w in axelstra_core::git::worktree_list(std::path::Path::new(&pr.path)).unwrap_or_default() {
+                                allowed.insert(norm(&w.path));
+                            }
                         }
-                        v
+                        list.iter().take(64).filter(|w| allowed.contains(&norm(w))).map(|w| crate::wtstatus::status(w)).collect::<Vec<_>>()
                     })
-                    .collect();
-                json!({"id": pr.id, "name": ident.display_name, "path": pr.path, "worktrees": wts, "git": axelstra_core::git::is_repo(repo),
-                       "setup": pr.setup, "default_branch": axelstra_core::git::default_branch(repo), "slug": ident.slug, "icon_url": ident.icon_url, "remote": ident.remote})
-            };
-            let mut v: Vec<Value> = Vec::with_capacity(ps.len());
-            for chunk in ps.chunks(4) {
-                std::thread::scope(|sc| {
-                    let hs: Vec<_> = chunk.iter().map(|pr| sc.spawn(|| one(pr))).collect();
-                    v.extend(hs.into_iter().filter_map(|h| h.join().ok()));
                 });
-            }
-            let all = Value::Array(v);
-            // an answer computed while a project or worktree changed may predate the change: serve it, do not keep it
-            if reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst) == gen {
-                *reg.plist_last.lock_recover() = Some(all.clone());
-                *reg.plist.lock_recover() = Some((std::time::Instant::now(), all.clone()));
-            }
-            Ok(all)
+                Ok(json!({"status": out}))
+            })
         }
+        "project.list" => crate::memo::memo().cached(
+            &memo_key(reg, &["plist"]),
+            memo_opts(reg, &["*", "wt"], Some(crate::memo::WORKTREE_MAX_AGE)),
+            || project_list(reg),
+        ),
         "project.logo" => {
             let pr = crate::projects::find(&reg.store, p["id"].as_str().unwrap_or_default())?;
             // runs in the logo lane (own pool, single flight, 5 s answer limit); the cache spares repeat disk reads
@@ -203,12 +179,20 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "dispatch.overlaps" => {
             let f = reg.saved.with_file_name("dispatch.json");
             // not `paths::norm`: the app keys dispatch.json by lowercase on every platform
-            Ok(tokio::task::block_in_place(|| crate::overlaps::overlaps(&reg.store, &f)))
+            crate::memo::memo().cached(
+                &memo_key(reg, &["overlaps"]),
+                memo_opts(reg, &["*", "wt", "fs"], Some(crate::memo::WORKTREE_MAX_AGE)),
+                || Ok(tokio::task::block_in_place(|| crate::memo::git_pool().run(|| crate::overlaps::overlaps(&reg.store, &f)))),
+            )
         }
         "dispatch.overlap_files" => {
             let f = reg.saved.with_file_name("dispatch.json");
             // not `paths::norm`: the app keys dispatch.json by lowercase on every platform
-            Ok(tokio::task::block_in_place(|| crate::overlaps::overlap_files(&reg.store, &f)))
+            crate::memo::memo().cached(
+                &memo_key(reg, &["overlap_files"]),
+                memo_opts(reg, &["*", "wt", "fs"], Some(crate::memo::WORKTREE_MAX_AGE)),
+                || Ok(tokio::task::block_in_place(|| crate::memo::git_pool().run(|| crate::overlaps::overlap_files(&reg.store, &f)))),
+            )
         }
         "worktree.rebase" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
@@ -225,7 +209,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             };
             let pids: Vec<u32> =
                 ids.iter().filter_map(|id| reg.get(*id)).filter(|s| s.try_wait().is_none()).filter_map(|s| s.pid()).collect();
-            Ok(json!({"ports": tokio::task::block_in_place(|| crate::ports::listening(&pids))?}))
+            let ports = crate::memo::memo().cached(
+                &memo_key(reg, &["ports", &key, &format!("{pids:?}")]),
+                memo_opts(reg, &["*"], Some(crate::memo::PORTS_MAX_AGE)),
+                || Ok(json!(tokio::task::block_in_place(|| crate::memo::git_pool().run(|| crate::ports::listening(&pids)))?)),
+            )?;
+            Ok(json!({"ports": ports}))
         }
         "worktree.from_pr" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
@@ -410,4 +399,48 @@ fn agent_owns_worktree(reg: &Registry, me: u32, pr: &crate::projects::Project, g
         }
     }
     metas.iter().any(|(id, m)| m["worktree"].as_str().is_some_and(|w| axelstra_core::paths::norm(w) == gone) && agent_drives(reg, me, *id))
+}
+
+/// `project.list` computed: the worktrees and identity of every project. Each project starts several git processes, so
+/// a few run at a time on their own threads, each taking a permit of the git pool for its own work (the caller holds none).
+fn project_list(reg: &Arc<Registry>) -> Result<Value> {
+    // the app asks for the list when something changed in the repositories: the moment to notice a worktree deleted behind our back
+    reap_orphans(reg);
+    let gen = reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst);
+    let ps = crate::projects::load(&reg.store);
+    // each project starts several git processes: a few projects at a time, not one after the other
+    let one = |pr: &crate::projects::Project| -> Value { crate::memo::git_pool().run(|| one_project(pr)) };
+    fn one_project(pr: &crate::projects::Project) -> Value {
+        let repo = std::path::Path::new(&pr.path);
+        let mut wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();
+        wts.retain(|w| w.is_main || w.path.replace('\\', "/").contains("/.axelstra-wt/"));
+        let ident = axelstra_core::git::identity(repo);
+        let parents = crate::projects::parent_paths(pr, &wts);
+        let wts: Vec<Value> = wts
+            .into_iter()
+            .map(|w| {
+                let parent = parents.get(&w.path).cloned();
+                let mut v = serde_json::to_value(w).unwrap_or_default();
+                if let Some(par) = parent {
+                    v["parent"] = json!(par);
+                }
+                v
+            })
+            .collect();
+        json!({"id": pr.id, "name": ident.display_name, "path": pr.path, "worktrees": wts, "git": axelstra_core::git::is_repo(repo),
+               "setup": pr.setup, "default_branch": axelstra_core::git::default_branch(repo), "slug": ident.slug, "icon_url": ident.icon_url, "remote": ident.remote})
+    }
+    let mut v: Vec<Value> = Vec::with_capacity(ps.len());
+    for chunk in ps.chunks(4) {
+        std::thread::scope(|sc| {
+            let hs: Vec<_> = chunk.iter().map(|pr| sc.spawn(|| one(pr))).collect();
+            v.extend(hs.into_iter().filter_map(|h| h.join().ok()));
+        });
+    }
+    let all = Value::Array(v);
+    // an answer computed while a project or worktree changed may predate the change: serve it, do not keep it
+    if reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst) == gen {
+        *reg.plist_last.lock_recover() = Some(all.clone());
+    }
+    Ok(all)
 }

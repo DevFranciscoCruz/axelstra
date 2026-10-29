@@ -232,6 +232,7 @@ impl Registry {
 
     /// Same, for an event that carries data (`session.exited`).
     pub(super) fn broadcast_event(&self, ev: Value) {
+        invalidate_for_event(ev["event"].as_str().unwrap_or_default());
         let frame = encode(EVENT, ev.to_string().as_bytes());
         self.watchers.lock_recover().retain(|(stop, tx)| {
             !stop.load(Ordering::SeqCst) && !matches!(tx.try_send(frame.clone()), Err(mpsc::error::TrySendError::Closed(_)))
@@ -256,6 +257,11 @@ impl Registry {
         if crate::budget::has_events() {
             self.broadcast("budget.events");
         }
+    }
+
+    /// The memory governor is above Normal: slow reads serve what they kept and compute nothing new (`crate::memo`).
+    pub(super) fn under_pressure(&self) -> bool {
+        self.governor.level() != crate::governor::Level::Normal
     }
 
     /// The worktrees changed outside a request that already says so: drop the cached lists and tell the app.
