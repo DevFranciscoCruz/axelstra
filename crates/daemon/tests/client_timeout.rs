@@ -1,4 +1,5 @@
-//! A daemon that stops answering must give the caller an error, not a frozen thread.
+//! An explicit limit (`Client::timeout`) on a daemon that stops answering gives the caller an error, not a frozen
+//! thread. Without one, no elapsed time fails a call: see `client_events.rs`.
 
 mod common;
 use axelstra_daemon::client::{CallTimeout, Client};
@@ -73,5 +74,5 @@ fn a_hung_daemon_times_out_with_a_clear_error() {
 
     // the connection is not reused after a timeout
     let again = c.call("ping", json!({})).unwrap_err();
-    assert!(again.downcast_ref::<CallTimeout>().is_some(), "{again:#}");
+    assert_eq!(axelstra_core::msg::find(&again).map(|c| c.code.as_str()), Some("rpc.connection_closed"), "{again:#}");
 }

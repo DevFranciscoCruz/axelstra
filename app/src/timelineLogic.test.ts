@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "./i18n";
-import { ciLine, eventTitle, stamp, toMarkdown, tokenLine, withTimeout, type Timeline } from "./timelineLogic";
+import { ciLine, eventTitle, stamp, toMarkdown, tokenLine, type Timeline } from "./timelineLogic";
 
 const t: Timeline = {
   branch: "ax/feat",
@@ -71,19 +71,5 @@ describe("eventTitle", () => {
     setLocale("en");
     expect(eventTitle(e)).toBe("Integrated into main");
     expect(eventTitle({ at: 1, kind: "commit", detail: "", title: "fix: a" })).toBe("fix: a");
-  });
-});
-
-describe("withTimeout", () => {
-  it("passes a quick answer through", async () => {
-    await expect(withTimeout(Promise.resolve(7), 50, () => "late")).resolves.toBe(7);
-  });
-  it("rejects with the message when the answer never comes", async () => {
-    vi.useFakeTimers();
-    const r = withTimeout(new Promise<number>(() => {}), 1000, () => "late");
-    const seen = expect(r).rejects.toThrow("late");
-    await vi.advanceTimersByTimeAsync(1000);
-    await seen;
-    vi.useRealTimers();
   });
 });

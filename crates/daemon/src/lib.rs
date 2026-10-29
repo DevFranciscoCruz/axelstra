@@ -39,6 +39,7 @@ pub mod rebase;
 pub mod remote;
 pub mod removal;
 pub mod runner;
+pub mod scanx;
 pub mod server;
 pub mod skill;
 pub mod stall;

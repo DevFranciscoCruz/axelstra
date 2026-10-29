@@ -313,6 +313,8 @@ pub(crate) fn create_at(p: &Project, name: &str, base: &str, copy_env: bool) -> 
         return Err(coded!("worktree.dir_exists", "{path} already exists", path = dir.display()));
     }
     std::fs::create_dir_all(dir.parent().unwrap())?;
+    // before git fills it: everything created below inherits "not content indexed" (see scanx.rs)
+    crate::scanx::on_root_ready(dir.parent().unwrap());
     git::worktree_add(repo, &dir, &format!("ax/{n}"), base)?;
     // untracked config (.env...) the project asked for: a failure here never undoes the worktree
     let report = if copy_env { crate::wtenv::copy_into(repo, &dir) } else { crate::wtenv::Report::default() };
@@ -336,6 +338,7 @@ pub(crate) fn worktree_attach(p: &Project, branch: &str) -> Result<git::Worktree
         return Err(coded!("worktree.dir_exists", "{path} already exists", path = dir.display()));
     }
     std::fs::create_dir_all(dir.parent().unwrap())?;
+    crate::scanx::on_root_ready(dir.parent().unwrap());
     git::forget_worktree_lists();
     git::must(repo, &["-c", "core.longpaths=true", "worktree", "add", &dir.to_string_lossy(), branch])?;
     git::forget_worktree_lists();
@@ -602,6 +605,43 @@ pub fn logo_data_url(repo: &Path) -> Option<String> {
         return Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)));
     }
     None
+}
+
+const LOGO_HIT_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+const LOGO_MISS_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+type LogoCache = std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, Option<String>)>>;
+
+fn logo_cache() -> &'static LogoCache {
+    static C: std::sync::OnceLock<LogoCache> = std::sync::OnceLock::new();
+    C.get_or_init(Default::default)
+}
+
+/// `logo_data_url` with a memory cache that also remembers "no logo" (shorter TTL), so the sidebar's repeated asks
+/// do not walk the disk each time.
+pub fn logo_cached(repo: &Path) -> Option<String> {
+    let key = axelstra_core::paths::norm(&repo.to_string_lossy());
+    {
+        let c = logo_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, v)) = c.get(&key) {
+            if at.elapsed() < if v.is_some() { LOGO_HIT_TTL } else { LOGO_MISS_TTL } {
+                return v.clone();
+            }
+        }
+    }
+    let v = logo_data_url(repo);
+    let mut c = logo_cache().lock().unwrap_or_else(|e| e.into_inner());
+    if c.len() > 256 {
+        c.clear();
+    }
+    c.insert(key, (std::time::Instant::now(), v.clone()));
+    v
+}
+
+/// Drops every cached logo answer (a repo's logo file changed; tests).
+#[doc(hidden)]
+pub fn forget_logos() {
+    logo_cache().lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
 
 #[cfg(test)]

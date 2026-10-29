@@ -32,7 +32,7 @@ const blank = (project: string): Automation => ({
 /** Scheduled agent runs: each one gets its own worktree and an agent started with the prompt. */
 export function Automations() {
   const [list, { refetch }] = createResource(listAutomations);
-  const [agents] = createResource(agentsList);
+  const [agents] = createResource(() => agentsList().catch((e) => (console.debug("agentsList", e), undefined)));
   // the daemon says `automations.changed` when one was saved, deleted or run (by the scheduler too): reload then, never on a timer
   const live = createLive(() => refetch(), ["automations.changed"]);
   onCleanup(live.stop);

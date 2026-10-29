@@ -68,7 +68,7 @@ worker prompt) and the axelstration skill tell agents to use it instead of stopp
 `PROTO` in `crates/daemon/src/proto.rs` is the app <-> daemon contract version. A daemon outlives
 app updates, and the app only restarts a daemon older than `PROTO`. Bump it (and add the new method
 to the doc comment above it) whenever the app starts calling a daemon method an old daemon lacks.
-Do not bump it for changes an old daemon already tolerates. Current: 30 (`orch.cancel {project}`: stops the run, the thread wakes by event, kills the workers' sessions, the unfinished cards go back to `todo`, `orchend::finish` never integrates a cancelled run (`orch.kept` when it left work); `integrate.undo {project, default_branch, prev_tip, new_tip, branch, branch_tip}`: takes back a `worktree.integrate` by compare-and-swap, only while the default branch is still at `new_tip`, not pushed and its checkout clean; both app only), before that 29 (`gh.pr_refresh`; events `pr.changed {worktree, number, state, ci}`, `usage.changed`, `limits.changed`, `resources.changed` now emitted), before that 28 (events `clone.changed {id}` and `docker.changed {}` on the watch stream, the latter from a lazy `docker events` child; no new method), before that 27 (events `kanban.changed {project}`, `orch.changed {run, project}`, `automations.changed` on the watch stream; no new method), before that 26 (files.resolve_path, files.path_action), before that 25 (project.remove_preview and `mode` in project.remove), before that 24 (files.resolve_html), before that 23 (project.discover, project.add_discovered, project.clone, project.clone_status, project.clone_cancel,
+Do not bump it for changes an old daemon already tolerates. Current: 31 (memory governor: `mem.status`, `mem.config`, `mem.pause`, `mem.resume`, events `memory.pressure`, `session.paused`, `session.resumed`; app only for the config/pause ones), before that 30 (`orch.cancel {project}`: stops the run, the thread wakes by event, kills the workers' sessions, the unfinished cards go back to `todo`, `orchend::finish` never integrates a cancelled run (`orch.kept` when it left work); `integrate.undo {project, default_branch, prev_tip, new_tip, branch, branch_tip}`: takes back a `worktree.integrate` by compare-and-swap, only while the default branch is still at `new_tip`, not pushed and its checkout clean; both app only), before that 29 (`gh.pr_refresh`; events `pr.changed {worktree, number, state, ci}`, `usage.changed`, `limits.changed`, `resources.changed` now emitted), before that 28 (events `clone.changed {id}` and `docker.changed {}` on the watch stream, the latter from a lazy `docker events` child; no new method), before that 27 (events `kanban.changed {project}`, `orch.changed {run, project}`, `automations.changed` on the watch stream; no new method), before that 26 (files.resolve_path, files.path_action), before that 25 (project.remove_preview and `mode` in project.remove), before that 24 (files.resolve_html), before that 23 (project.discover, project.add_discovered, project.clone, project.clone_status, project.clone_cancel,
 project.init, gh.repos, wsl_distros/ssh_hosts in host.info, notices.take, audit.list, backup.export,
 backup.restore, orch.trust_info, env.tools, janitor.events, workspace.export, workspace.import_preview,
 workspace.import, host.info, host.browse, stalled in session.list, stall_minutes, and the watch-stream events janitor.events, triggers.events, budget.events, dispatch.changed).
@@ -164,6 +164,32 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   gone). The pump thread lingers until the next output because the pty `Receiver` cannot be woken.
 - **Peer and messages.** `origin_of` validates the peer by pid plus process start time (`Peer` in `origin.rs`). `msg.send`
   broadcasts `session.changed` itself, so `ask`/`wait` never depend on the monitor tuple.
+- **Daemon calls (`client.rs`, Tauri host, CLI).** A pending call ends only by event: the reply, the connection closing
+  (daemon gone, EOF, broken pipe, the `ssh`/`wsl.exe` child dying: coded `rpc.connection_closed {method}`; the client is then
+  `broken` and the caller reconnects), never by elapsed time. There is no per-method default limit any more
+  (`default_timeout` is gone). Liveness is state (process alive + pipe open); `ping`/`hello` only detect an outdated daemon
+  (`PROTO`/`SECURITY_MIN`), they never declare it dead. The one clock left is a high safety ceiling for a lost handle:
+  `client::ceiling()`, 600 s, `AXELSTRA_CALL_CEILING_SECS` to change it (min 1), also the bound of a blocked write and of the
+  app waiting for a reconnect or an outdated daemon's exit (`rpc.call_ceiling {method, secs}`, connection dropped). Limits kept
+  as policy, not watchdog: `Client::timeout` set by the caller (CLI `--timeout` flags, `list_host` of a remote host's sidebar
+  list, 8 s), `policy_limit` for cosmetic reads (`project.logo`), `hook.rs` (an agent hook must never hold the agent up), the
+  CLI's screen snapshot read (`recv_timeout` 1.5 s on a session that printed nothing), the app quitting (3 s on a daemon that
+  ignores `daemon.shutdown`), `connect_remote`'s connect budget (ssh/WSL start; `ssh` also has `ConnectTimeout` and
+  `ServerAlive*`, which close the stream when the link dies). Slow methods keep their lane (`is_slow`) and the method name in
+  `rpc.call_timeout`/`rpc.call_ceiling`/`rpc.connection_closed`. Tests: `crates/daemon/tests/client_events.rs` (gated fake
+  daemon: late reply succeeds, close mid-call fails at once, ceiling, explicit limit) and `remote.rs` (process killed).
+- **Daemon calls, app side (`app/src/api.ts`, `slowCalls.ts`).** `call`/`callBg` have no elapsed-time failure either: a pending call
+  ends with the host's reply or error (`rpc.connection_closed`, `rpc.call_ceiling`, any coded error); the old 40 s / 130 s / 10 min
+  guards and the `ping` after a late call are gone (`ping`/`hello` never declare the daemon dead). Slowness is information: a call
+  still waiting after `SLOW_NOTICE_MS` (6 s) is listed in `slowMethods()` and `ErrorToast` shows a non-blocking "A carregar... o
+  sistema está lento (<method>)" notice with Cancelar; that button (`cancelSlow`) rejects only the app-side request with
+  `AppError` code `rpc.cancelled` (`isCancelled`), the daemon keeps working. `setError` ignores that text, `Section` (the
+  ErrorBoundary) rebuilds instead of showing the failure, and a panel's own inline error shows a plain "Pedido cancelado." with its retry.
+  Clocks kept as policy/net: `policyLimit` (cosmetic `project.logo`, 6 s, silent fallback in `logo.ts`, no slow notice) and
+  `CEILING_MS` (600 s + 10 s margin after the host's `AXELSTRA_CALL_CEILING_SECS`, a lost invoke handle only; `rpc.call_timeout`).
+  Also kept: `hydrateUi` 2 s (first paint must not wait for a daemon; the sync goes on), `NUDGE_LIMIT_MS` (a one-shot wait for an
+  agent screen, not a call), UI debounces. The timeline panel's own 20 s `withTimeout` is gone (the slow notice covers it).
+  Tests: `apiRobust.test.ts` (fake transport: reply after 90 s succeeds, connection closed fails at once, cancel, ceiling, cosmetic).
 - **Sleeps kept on purpose.** The rest are bounded backoffs on external OS resources: AV/indexer rename locks (`fsops.rs`,
   `store.rs`), the git handle of a killed process (`git.rs`), cleanup in `sources.rs`, Windows `PeekRead` 1-10 ms (`client.rs`; the
   sync pipe has no readiness event), synthetic input settle (`computer.rs`), the runner trust menu (`runner.rs`), the docker events
@@ -193,6 +219,14 @@ named locks in `locks/` (shared by all projects), the flow progress files (not t
 
 Every method the frontend calls must also be in `ALLOWED_METHODS` in `app/src-tauri/src/main.rs`; a unit test reads
 `app/src` (`call`, `callBg`, `callOr` with a string literal) and fails when the list and the sources drift apart.
+
+## Indexer exclusion
+
+Worktree folders (`.axelstra-wt`) are slow under file indexers. `crates/daemon/src/scanx.rs` keeps them out, with no admin, no
+prompt, no UI and no daemon method: Windows sets `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED` on `.axelstra-wt` and each worktree folder
+(new content below a flagged folder inherits it); macOS puts an empty `.metadata_never_index` in `.axelstra-wt`; Linux does nothing.
+Set by event: `projects::create_at` (`worktree.create`, `worktree.from_pr`), `orch.start`, and once at daemon start in a
+low-priority, capped thread (`scanx::spawn_sweep`; no locks, no polling). Tests use an in-memory `Fs` and temp dirs only.
 
 ## SECURITY_MIN
 
