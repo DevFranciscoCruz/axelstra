@@ -100,7 +100,8 @@ import {
   selectedWorktree,
   selectWorktree,
   sessionsOf,
-  setActiveSession,
+  activate as storeActivate,
+  settleActive,
   setError,
   showSidebar,
   showRightPanel,
@@ -142,11 +143,7 @@ export function App() {
   useBootstrap();
 
   const tabs = () => sortedTabs(sessionsOf(selectedWorktree()));
-  // making the session shown in the split pane the active one swaps the two, so the pane never ends up empty
-  const activate = (id: number) => {
-    if (id === splitSession()) setSplitSession(activeSession() !== id ? activeSession() : null);
-    setActiveSession(id);
-  };
+  const activate = (id: number) => storeActivate(id, "user");
   const showTab = (s: SessionInfo) =>
     guarded(() => {
       showView();
@@ -179,16 +176,8 @@ export function App() {
     if (splitSession() !== null && splitSession() === activeSession()) setSplitSession(null);
   });
 
-  // keep one terminal tab selected whenever the worktree has terminals
-  createEffect(() => {
-    const t = tabs();
-    const a = activeSession();
-    if (t.length > 0 && (a === null || !t.some((s) => s.id === a))) {
-      // a worktree opens on its own agent first (the main worktree has its own session, apart from the tasks), else on its first terminal
-      setActiveSession((t.find((s) => s.meta?.kind === "agent" && s.running) ?? t[0]).id);
-    }
-    if (t.length === 0 && a !== null) setActiveSession(null);
-  });
+  // seat a tab when a worktree opens (or the sessions come back); never switches from a live tab to another
+  createEffect(() => settleActive(tabs()));
 
   const spawnShell = async (c: NonNullable<ReturnType<typeof current>>) => {
     const [program, args] = await defaultShell(c.wt.path);

@@ -407,7 +407,7 @@ describe("the view only moves by the user's own action", () => {
   it("sessions and finished agents of another project do not change the selection", async () => {
     const store = await load();
     store.selectWorktree(WT);
-    store.setActiveSession(1);
+    store.activate(1, "user");
     // an agent in another project works, finishes and a new session appears there
     await tick(store, agent({ id: 1, meta: { kind: "agent", agent: "claude", worktree: WT } }));
     sessionsNow.list = [

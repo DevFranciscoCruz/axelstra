@@ -89,10 +89,10 @@ describe("session.exited", () => {
     const { store } = await load();
     now.list = [agent(1), agent(2), agent(3)];
     await store.refreshSessions();
-    store.setActiveSession(1);
+    store.activate(1, "user");
     store.handleSessionExited({ id: 3, code: 0 }); // not the active one
     expect(store.activeSession()).toBe(1);
-    store.setActiveSession(2);
+    store.activate(2, "user");
     store.handleSessionExited({ id: 2, code: 0 }); // the active one: its neighbour
     expect(store.activeSession()).toBe(1);
     store.handleSessionExited({ id: 1, code: 0 });
@@ -103,7 +103,7 @@ describe("session.exited", () => {
     const { store } = await load();
     now.list = [agent(1), agent(2), agent(3)];
     await store.refreshSessions();
-    store.setActiveSession(2);
+    store.activate(2, "user");
     store.setSplitSession(3);
     now.list = [agent(1)];
     await store.refreshSessions();
@@ -113,7 +113,7 @@ describe("session.exited", () => {
     // another tab vanishing does not steal focus
     now.list = [agent(1), agent(4)];
     await store.refreshSessions();
-    store.setActiveSession(1);
+    store.activate(1, "user");
     now.list = [agent(1)];
     await store.refreshSessions();
     expect(store.activeSession()).toBe(1);

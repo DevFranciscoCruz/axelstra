@@ -5,7 +5,7 @@ import { Icon } from "./Icon";
 import { PAGE, capList } from "./listing";
 import { gitDiff, writeSession } from "./api";
 import { P } from "./strings.panels";
-import { activeSession, baseRef, changes, openDiff, selectedWorktree, sessionsOf, setActiveSession, setOpenDiff } from "./store";
+import { activeSession, baseRef, changes, openDiff, selectedWorktree, sessionsOf, activate, setOpenDiff } from "./store";
 
 type Row = { kind: "hunk" | "add" | "del" | "ctx" | "note"; old?: number; neu?: number; text: string };
 
@@ -74,7 +74,7 @@ export function DiffView() {
       await writeSession(target.id, msg + "\r");
       setCommenting(null);
       setOpenDiff(null);
-      setActiveSession(target.id);
+      activate(target.id, "user");
     } catch (e) {
       setSendMsg(String(e));
     }

@@ -25,6 +25,7 @@ import {
   handleSessionExited,
   norm,
   openSession,
+  armAutoPick,
   ports,
   refreshChanges,
   refreshProjects,
@@ -123,6 +124,7 @@ export function useBootstrap() {
     const unlisten = [
       onTauriEvent("daemon-restarted", () => {
         showNotice(S.app.daemonRestarted);
+        armAutoPick();
         void restore(S.app.afterRestart);
       }),
       // the host reconnects to the daemon on its own: show it meanwhile, and say so when it did not work

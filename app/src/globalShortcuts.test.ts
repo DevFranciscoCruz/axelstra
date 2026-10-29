@@ -41,9 +41,9 @@ const setup = async () => {
   const { createShortcutHandler } = await import("./useGlobalShortcuts");
   const voice = await import("./Voice");
   const tabs = [sess(1), sess(2), sess(3)];
-  const showTab = vi.fn((s: SessionInfo) => store.setActiveSession(s.id));
+  const showTab = vi.fn((s: SessionInfo) => store.activate(s.id, "user"));
   const reopenClosed = vi.fn();
-  store.setActiveSession(1);
+  store.activate(1, "user");
   const run = vi.fn((_id: string) => true);
   const handle = createShortcutHandler({ tabs: () => tabs, showTab, reopenClosed, run });
   const press = (init: KeyboardEventInit, target?: Element) => {
@@ -65,7 +65,7 @@ describe("global shortcuts", () => {
     const { press, showTab, store } = await setup();
     press({ key: "Tab", ctrlKey: true });
     expect(showTab).toHaveBeenLastCalledWith(expect.objectContaining({ id: 2 }));
-    store.setActiveSession(1);
+    store.activate(1, "user");
     const e = press({ key: "Tab", ctrlKey: true, shiftKey: true });
     expect(showTab).toHaveBeenLastCalledWith(expect.objectContaining({ id: 3 }));
     expect(e.defaultPrevented).toBe(true);

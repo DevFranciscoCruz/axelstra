@@ -20,7 +20,50 @@ export const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
 /** false until the first `session.list` answered: an empty list before that says nothing about leads */
 export const [sessionsLoaded, setSessionsLoaded] = createSignal(false);
 
-export const [activeSession, setActiveSession] = createSignal<number | null>(null);
+const [active, setActive] = createSignal<number | null>(null);
+export const activeSession = active;
+
+/** Who asks for a change of the active session. Only the user changes it; `auto` is the app filling an empty seat. */
+export type ActivateBy = "user" | "auto";
+
+/** True while the app may seat a session by itself: at start (restoring) and right after the user selected a worktree or the
+ *  daemon was replaced and restored the sessions. One automatic pick uses it up; a session that appears later (a spawn by an
+ *  agent, a worker, dispatch) never finds it armed, so it cannot take the focus. */
+let autoPick = true;
+export const armAutoPick = () => {
+  autoPick = true;
+};
+
+const seat = (id: number | null) => {
+  // making the session shown in the split pane the active one swaps the two, so the pane never ends up empty
+  if (id !== null && id === splitSession()) setSplitSession(active() !== id ? active() : null);
+  setActive(id);
+};
+
+/** The ONE way to change the active session. `user`: always. `auto`: clearing (null) is always fine; a session only when the
+ *  seat is empty and an automatic pick is armed (initial restore, a freshly selected worktree). Returns whether it applied. */
+export const activate = (id: number | null, by: ActivateBy): boolean => {
+  if (by === "auto" && id !== null) {
+    if (!autoPick || active() !== null) return false;
+    autoPick = false;
+  }
+  seat(id);
+  return true;
+};
+
+/** Keeps the active session consistent with the tabs of the selected worktree (call from an effect). A worktree opens on its
+ *  own agent first (the main worktree has its own session, apart from the tasks), else on its first terminal, but only when an
+ *  automatic pick is armed; a tab that vanished just empties the seat. It never switches from one live tab to another. */
+export const settleActive = (tabs: SessionInfo[]) => {
+  if (!sessionsLoaded()) return;
+  const a = active();
+  const missing = a === null || !tabs.some((s) => s.id === a);
+  if (autoPick && tabs.length > 0 && missing) {
+    if (a !== null) setActive(null);
+    activate((tabs.find((s) => s.meta?.kind === "agent" && s.running) ?? tabs[0]).id, "auto");
+  } else if (a !== null && missing) activate(null, "auto");
+  autoPick = false;
+};
 
 /** "working": produced output in the last few seconds; "idle": quiet; "done": the process ended */
 const WORKING_MS = 3000;
@@ -37,9 +80,10 @@ const waitSeen = new Map<number, string>();
 
 /** opens a session from a clicked notification */
 export const openSession = (path: string, id: number) =>
+  // eslint-disable-next-line solid/reactivity -- only called from click handlers
   guarded(() => {
     doSelect(path);
-    setActiveSession(id);
+    activate(id, "user");
   });
 
 /** Counts every change of the selected worktree. A flow that selects something after an `await` takes `navStamp()`
@@ -210,7 +254,8 @@ const refocusAfterDrop = (prev: SessionInfo[], next: SessionInfo[]) => {
     if (was) {
       const k = norm(was.meta?.worktree);
       const here = sortedTabs(prev.filter((s) => norm(s.meta?.worktree) === k));
-      setActiveSession(neighbourOf(here, a, (id) => next.some((s) => s.id === id)));
+      // rule: only the active tab leaving moves focus, once, to its neighbour
+      seat(neighbourOf(here, a, (id) => next.some((s) => s.id === id)));
     }
   }
   const sp = splitSession();
@@ -352,7 +397,8 @@ const doSelect = (path: string | null) => {
       return n;
     });
   writeString("axelstra.worktree", path ?? ""); // "" = none selected
-  setActiveSession(null);
+  setActive(null);
+  armAutoPick();
   setSplitSession(null);
   showView();
   setChanges(null);
