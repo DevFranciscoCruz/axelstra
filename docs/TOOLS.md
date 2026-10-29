@@ -61,6 +61,8 @@ Set them yourself only to reproduce a release build: `AXELSTRA_GIT_SHA=abc1234 A
 - `make-icons.py`: regenerates the app icons from `assets/logo.png` (crop, black glow to alpha). Needs Python 3 and
   Pillow (`pip install pillow`). Only run it when the logo changes.
 
+- `axelstra mem [--json]` / `axelstra resume <session>|--all`: memory pressure, the biggest sessions and what the governor paused; continue paused sessions. `axelstra lock` also waits for memory before taking a slot. See [`MEMORY.md`](MEMORY.md).
+
 ## Dependencies and policy
 
 - `deny.toml`: cargo-deny policy (advisories, licenses, bans, sources). CI runs `cargo deny check`. Locally:

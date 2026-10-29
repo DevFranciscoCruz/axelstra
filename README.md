@@ -62,6 +62,7 @@ The interface comes in Portuguese (pt-PT), Brazilian Portuguese and English, pic
 - **Search and usage:** `Ctrl+Shift+F` searches past Claude, Codex and Gemini conversations and resumes one. Tokens (input, output, cache) per worktree are read from the agent logs; no cost is estimated.
 - **Budgets and limits:** daily and weekly token limits per worktree; you are notified when one is near or over, and a runaway agent can be paused. `axelstra limit N` caps concurrent workers.
 - **Notifications:** a bell lists the last 100 events (agent finished or waiting, CI changed, merge done, errors), kept across restarts. On Windows, clicking the toast opens that session; elsewhere the worktree gets an attention dot instead.
+- **Memory governor:** watches free memory; under pressure it warns, delays new agents and builds, and can freeze the biggest idle consumers until memory recovers (nothing stays frozen). `axelstra mem`, `axelstra resume`, [`docs/MEMORY.md`](docs/MEMORY.md).
 - **Status bar:** keep-awake switch, memory, terminals, listening ports, total agent tokens, a list of running agents and a worktree overview. The bell, terminals, branches and ports each open a popover.
 - **Remote hosts:** projects on a WSL distro or an SSH host run on that machine's own daemon, driven from the same app ([`docs/remote-daemon.md`](docs/remote-daemon.md) says what is not supported there).
 - **Workspace transfer:** `axelstra workspace export|import` and the Settings buttons move projects, automations, settings and Kanban cards between machines (no tokens, no sessions; the import shows a preview first).
@@ -245,7 +246,7 @@ Signing secrets are GitHub Environment secrets: the `release` Environment holds 
 
 ## More documentation
 
-[`AGENTS.md`](AGENTS.md) (layout, build, lifecycle rules) · [`docs/AGENTS.md`](docs/AGENTS.md) (agent support notes) · [`docs/TESTING.md`](docs/TESTING.md) · [`docs/TOOLS.md`](docs/TOOLS.md) · [`docs/E2E.md`](docs/E2E.md) · [`docs/RELEASING.md`](docs/RELEASING.md) · [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) · [`docs/remote-daemon.md`](docs/remote-daemon.md) · [`docs/s3-app-secret.md`](docs/s3-app-secret.md) · [`SECURITY.md`](SECURITY.md) · [`CHANGELOG.md`](CHANGELOG.md)
+[`AGENTS.md`](AGENTS.md) (layout, build, lifecycle rules) · [`docs/AGENTS.md`](docs/AGENTS.md) (agent support notes) · [`docs/MEMORY.md`](docs/MEMORY.md) · [`docs/TESTING.md`](docs/TESTING.md) · [`docs/TOOLS.md`](docs/TOOLS.md) · [`docs/E2E.md`](docs/E2E.md) · [`docs/RELEASING.md`](docs/RELEASING.md) · [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) · [`docs/remote-daemon.md`](docs/remote-daemon.md) · [`docs/s3-app-secret.md`](docs/s3-app-secret.md) · [`SECURITY.md`](SECURITY.md) · [`CHANGELOG.md`](CHANGELOG.md)
 
 ## License
 
