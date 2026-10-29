@@ -50,6 +50,7 @@ fn render(r: &Value) -> String {
             let _ = writeln!(o, "  session {:<5} {} MB", n(&s["id"]), n(&s["rss_mb"]));
         }
     }
+    breakdown(&mut o, &r["breakdown"], n(&r["total_mb"]));
     let paused = r["paused"].as_array().cloned().unwrap_or_default();
     if paused.is_empty() {
         let _ = writeln!(o, "paused: none");
@@ -64,6 +65,94 @@ fn render(r: &Value) -> String {
         }
     }
     o
+}
+
+/// Width of a bar in the breakdown.
+const BAR: usize = 20;
+
+fn bar(pct: f64) -> String {
+    let full = ((pct / 100.0) * BAR as f64).round().clamp(0.0, BAR as f64) as usize;
+    format!("[{}{}]", "#".repeat(full), ".".repeat(BAR - full))
+}
+
+fn gb(mb: u64) -> String {
+    format!("{:.1}", mb as f64 / 1024.0)
+}
+
+/// The `breakdown` of `mem.status` (additive: a daemon without it prints nothing here). Absent numbers print nothing.
+fn breakdown(o: &mut String, b: &Value, total: u64) {
+    use std::fmt::Write;
+    if !b.is_object() {
+        return;
+    }
+    let n = |v: &Value| v.as_u64().unwrap_or(0);
+    let f = |v: &Value| v.as_f64();
+    let line = |o: &mut String, name: &str, mb: u64, extra: &str| {
+        let pct = if total > 0 { mb as f64 * 100.0 / total as f64 } else { 0.0 };
+        let _ = writeln!(o, "  {:<24} {} {:>7} MB {:>5.1}%{}", name, bar(pct), mb, pct, extra);
+    };
+    let _ = writeln!(o, "where the memory goes:");
+    if let Some(sys) = b["system"].as_object() {
+        let sys = Value::Object(sys.clone());
+        if let (Some(u), Some(k)) = (f(&sys["cpu_user_pct"]), f(&sys["cpu_kernel_pct"])) {
+            let _ = writeln!(o, "  CPU: user {u:.0}% kernel {k:.0}%");
+        }
+        if let (Some(c), Some(l)) = (sys["commit_mb"].as_u64(), sys["commit_limit_mb"].as_u64()) {
+            let _ = writeln!(o, "  commit {} of {} GB", gb(c), gb(l));
+        }
+    }
+    for s in b["sessions"].as_array().into_iter().flatten() {
+        let extra = format!("  ({})", n(&s["count"]));
+        line(o, &format!("sessions: {}", s["tier"].as_str().unwrap_or("?")), n(&s["rss_mb"]), &extra);
+    }
+    if n(&b["builds"]["count"]) > 0 || n(&b["builds"]["rss_mb"]) > 0 {
+        let extra = format!("  ({})", n(&b["builds"]["count"]));
+        line(o, "builds (axelstra lock)", n(&b["builds"]["rss_mb"]), &extra);
+    }
+    if b["kernel"].is_object() {
+        let k = &b["kernel"];
+        let base = k["baseline_mb"].as_u64().map(|v| format!("  (baseline {v} MB)")).unwrap_or_default();
+        line(o, "kernel paged", n(&k["paged_mb"]), "");
+        line(o, "kernel non-paged", n(&k["nonpaged_mb"]), &base);
+    }
+    if let Some(v) = b["cache_mb"].as_u64() {
+        line(o, "system cache", v, "");
+    }
+    if let Some(v) = b["compressed_mb"].as_u64() {
+        line(o, "compressed memory", v, "");
+    }
+    line(o, "others", n(&b["others_mb"]), "");
+    let ext = b["external"].as_array().cloned().unwrap_or_default();
+    if !ext.is_empty() {
+        let _ = writeln!(o, "programs outside Axelstra (information only):");
+        for e in &ext {
+            let c = n(&e["count"]);
+            let times = if c > 1 { format!(" x{c}") } else { String::new() };
+            let _ = writeln!(o, "  {:<24} {} MB", format!("{}{times}", e["name"].as_str().unwrap_or("?")), n(&e["rss_mb"]));
+        }
+    }
+    for (key, head, unit) in [("top_cpu", "top CPU:", "%"), ("top_io", "top disk I/O:", "")] {
+        let rows = b[key].as_array().cloned().unwrap_or_default();
+        if rows.is_empty() {
+            continue;
+        }
+        let _ = writeln!(o, "{head}");
+        for r in &rows {
+            let v = f(&r["value"]).unwrap_or(0.0);
+            let _ = writeln!(o, "  {} ({}) {v:.0}{unit}", r["name"].as_str().unwrap_or("?"), n(&r["pid"]));
+        }
+    }
+    let h = &b["handles"];
+    if h.is_object() {
+        let _ = writeln!(o, "handles: {} in total", n(&h["total"]));
+        for e in h["top"].as_array().into_iter().flatten() {
+            let _ = writeln!(o, "  {} ({}) {}", e["name"].as_str().unwrap_or("?"), n(&e["pid"]), n(&e["handles"]));
+        }
+    }
+    if b["kernel"]["high"].as_bool() == Some(true) {
+        let g = gb(n(&b["kernel"]["total_mb"]));
+        let _ = writeln!(o, "suggestion: kernel memory is high ({g} GB): possible handle or driver leak; restarting frees it");
+    }
 }
 
 pub fn resume(mut c: Client, session: Option<u32>, all: bool) -> Result<()> {
@@ -95,5 +184,50 @@ mod tests {
         assert!(t.contains("memory: critical  free 900 MB of 16384 MB"), "{t}");
         assert!(t.contains("session 3     1200 MB"), "{t}");
         assert!(t.contains("build 'verify' of session 3 (memory, 4 processes)"), "{t}");
+    }
+
+    fn sample() -> Value {
+        json!({
+            "level": "normal", "free_mb": 8000, "total_mb": 16000,
+            "thresholds": {}, "config": {}, "sessions": [], "paused": [],
+            "breakdown": {
+                "kernel": {"paged_mb": 300, "nonpaged_mb": 4000, "total_mb": 4300, "baseline_mb": 800, "high": true},
+                "cache_mb": 1000, "compressed_mb": null,
+                "sessions": [{"tier": "agent", "count": 2, "rss_mb": 1600}],
+                "builds": {"count": 1, "rss_mb": 2000},
+                "external": [{"name": "MsMpEng.exe", "count": 1, "rss_mb": 700}, {"name": "chrome.exe", "count": 12, "rss_mb": 3000}],
+                "others_mb": 500,
+                "handles": {"total": 300000, "top": [{"name": "leak.exe", "pid": 7, "handles": 90000}]},
+                "system": {"cpu_user_pct": 12.0, "cpu_kernel_pct": 30.0, "commit_mb": 20480, "commit_limit_mb": 40960},
+                "top_cpu": [{"name": "a.exe", "pid": 1, "value": 55.0}],
+                "top_io": [{"name": "b.exe", "pid": 2, "value": 120.0}],
+            },
+        })
+    }
+
+    #[test]
+    fn the_breakdown_lists_categories_externals_handles_and_the_suggestion() {
+        let t = render(&sample());
+        assert!(t.contains("where the memory goes:"), "{t}");
+        assert!(t.contains("kernel non-paged") && t.contains("4000 MB  25.0%"), "{t}");
+        assert!(t.contains("(baseline 800 MB)"), "{t}");
+        assert!(t.contains("chrome.exe x12"), "{t}");
+        assert!(t.contains("MsMpEng.exe"), "{t}");
+        assert!(t.contains("CPU: user 12% kernel 30%"), "{t}");
+        assert!(t.contains("commit 20.0 of 40.0 GB"), "{t}");
+        assert!(t.contains("leak.exe (7) 90000"), "{t}");
+        assert!(t.contains("a.exe (1) 55%") && t.contains("b.exe (2) 120"), "{t}");
+        assert!(t.contains("suggestion: kernel memory is high (4.2 GB): possible handle or driver leak; restarting frees it"), "{t}");
+        assert!(!t.contains("compressed"), "null is not printed: {t}");
+    }
+
+    #[test]
+    fn no_suggestion_when_the_kernel_is_not_high_and_nothing_without_a_breakdown() {
+        let mut r = sample();
+        r["breakdown"]["kernel"]["high"] = json!(false);
+        assert!(!render(&r).contains("suggestion"));
+        let mut old = sample();
+        old.as_object_mut().unwrap().remove("breakdown");
+        assert!(!render(&old).contains("where the memory goes"));
     }
 }

@@ -48,6 +48,30 @@ session resumes it first.
   toast when memory is normal again and when sessions continue.
 - **Settings > Resource governor:** the switches and the four lines below.
 
+## Where the memory goes (breakdown)
+
+`mem.status` carries an additive `breakdown` field (no new method, no PROTO bump; an older daemon simply lacks it and
+the app and CLI print nothing extra). `axelstra mem` prints it as bars with MB and percent of total memory, and the
+panel shows one bar per category. Every size is in MB; a number the OS does not give is left out.
+
+- **Categories:** Axelstra sessions per tier (main, lead, agent, worker, terminal), builds under `axelstra lock`, programs
+  outside Axelstra, kernel pools (paged and non-paged), system cache, compressed memory, and the rest (`others`, total
+  minus everything else).
+- **Programs outside Axelstra:** the top 8 by resident memory, grouped by name with a count (for example `chrome.exe x12`).
+  Antivirus and indexers (`MsMpEng`, `SearchIndexer`...) are listed like any other consumer. They are information only:
+  Axelstra offers no action on them and never touches them.
+- **System numbers:** CPU split (`CPU: user X% kernel Y%`), `commit X of Y GB`, plus the top programs by CPU and by disk
+  I/O when the daemon reports them.
+- **Kernel pool alert:** the kernel pools (paged + non-paged) are compared with `kernel_pool_mb` (default 3072,
+  256..=1048576, a `mem.config` field and a field in Settings > Resource governor). Above it `kernel.high` is true: the
+  CLI and the panel then show "kernel memory is high (X GB): possible handle or driver leak; restarting frees it", and
+  the daemon notifies once per episode (`governor.kernel_pool_high`). The kernel pools are not charged to any process,
+  so a leak there hides from the session list; `baseline_mb` (measured at daemon start) shows what is normal.
+- **Handles:** only filled when the kernel is high (or past 200000 handles): the total and the 5 processes holding most
+  handles, which is where to look for the leak. The suggestion is advice only; nothing is closed or frozen for it.
+- **Thresholds:** the free-memory levels above are unchanged; the kernel pool limit is separate and does not change the
+  level, the pausing or the admission.
+
 ## Settings
 
 Saved in `settings.json` under `governor` (change them in the app, or `mem.config`). Defaults:
@@ -75,7 +99,7 @@ are unsure about the thresholds for your machine.
 ## Command line
 
 ```
-axelstra mem [--json]       level, free/total memory, thresholds, the biggest sessions, what is paused
+axelstra mem [--json]       level, free/total memory, thresholds, breakdown (where it goes), the biggest sessions, what is paused
 axelstra resume <session>   continue one paused session (and the builds it runs)
 axelstra resume --all       continue everything that is paused
 ```

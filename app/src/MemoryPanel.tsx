@@ -2,8 +2,21 @@ import { For, Show, createSignal } from "solid-js";
 import { memConfig, memResume, type GovernorConfig } from "./api";
 import { errorText } from "./appError";
 import { Icon } from "./Icon";
-import { levelClass, parseAmount, thresholdProblem, type PausedItem, type Thresholds } from "./memoryLogic";
+import {
+  breakdownRows,
+  commitPair,
+  cpuSplit,
+  kernelHigh,
+  kernelPoolProblem,
+  levelClass,
+  parseAmount,
+  thresholdProblem,
+  type PausedItem,
+  type Thresholds,
+} from "./memoryLogic";
 import { fmtMb } from "./memoryView";
+import { fmtNumber } from "./i18n";
+import { setSection } from "./settingsNav";
 import { memory, refreshMemory, sessions, setError, setShowSettings, showNotice, tabLabel } from "./store";
 import { G } from "./strings.memory";
 import { ago } from "./time";
@@ -47,6 +60,87 @@ export function MemoryPanelBody(props: { close: () => void }) {
             </div>
           )}
         </For>
+        <Show when={breakdownRows(m().breakdown, m().total_mb).length > 0}>
+          <div class="sb-head">{G.breakdown.head}</div>
+          <Show when={kernelHigh(m().breakdown)}>
+            <div class="mem-hint">{G.breakdown.kernelHigh(fmtMb(m().breakdown?.kernel?.total_mb ?? 0))}</div>
+          </Show>
+          <For each={breakdownRows(m().breakdown, m().total_mb)}>
+            {(r) => (
+              <>
+                <div class="mem-row">
+                  <span class="mem-name">{G.breakdown.category[r.key]}</span>
+                  <span class="mem-num">{G.breakdown.row(fmtMb(r.mb), G.breakdown.pct(r.pct))}</span>
+                </div>
+                <div class={r.key.startsWith("kernel") ? "mem-bar mem-kernel" : "mem-bar"}>
+                  <i style={{ "--w": `${r.pct}%` }} />
+                </div>
+              </>
+            )}
+          </For>
+          <Show when={cpuSplit(m().breakdown)}>
+            {(c) => (
+              <div class="mem-row">
+                <span class="mem-name">
+                  {G.breakdown.cpu(fmtNumber(Math.round(c().user)), fmtNumber(Math.round(c().kernel)))}
+                </span>
+              </div>
+            )}
+          </Show>
+          <Show when={commitPair(m().breakdown)}>
+            {(c) => (
+              <div class="mem-row">
+                <span class="mem-name">{G.breakdown.commit(fmtMb(c().used), fmtMb(c().limit))}</span>
+              </div>
+            )}
+          </Show>
+          <For each={m().breakdown?.top_cpu ?? []}>
+            {(e, i) => (
+              <>
+                <Show when={i() === 0}>
+                  <div class="sb-head">{G.breakdown.topCpuHead}</div>
+                </Show>
+                <div class="mem-row">
+                  <span class="mem-name">{G.breakdown.value(e.name, `${fmtNumber(Math.round(e.value))}%`)}</span>
+                </div>
+              </>
+            )}
+          </For>
+          <For each={m().breakdown?.top_io ?? []}>
+            {(e, i) => (
+              <>
+                <Show when={i() === 0}>
+                  <div class="sb-head">{G.breakdown.topIoHead}</div>
+                </Show>
+                <div class="mem-row">
+                  <span class="mem-name">{G.breakdown.value(e.name, `${fmtNumber(Math.round(e.value))} MB/s`)}</span>
+                </div>
+              </>
+            )}
+          </For>
+          <Show when={(m().breakdown?.external ?? []).length > 0}>
+            <div class="sb-head">{G.breakdown.externalHead}</div>
+            <For each={m().breakdown?.external ?? []}>
+              {(e) => (
+                <div class="mem-row">
+                  <span class="mem-name">{G.breakdown.external(e.name, e.count)}</span>
+                  <span class="mem-num">{fmtMb(e.rss_mb)}</span>
+                </div>
+              )}
+            </For>
+            <div class="auto-note">{G.breakdown.externalNote}</div>
+          </Show>
+          <Show when={(m().breakdown?.handles?.top ?? []).length > 0}>
+            <div class="sb-head">{G.breakdown.handlesHead}</div>
+            <For each={m().breakdown?.handles?.top ?? []}>
+              {(h) => (
+                <div class="mem-row">
+                  <span class="mem-name">{G.breakdown.handles(h.name, h.pid, fmtNumber(h.handles))}</span>
+                </div>
+              )}
+            </For>
+          </Show>
+        </Show>
         <div class="sb-head">
           {G.panel.pausedHead} <span class="lim-dim">({m().paused.length})</span>
         </div>
@@ -83,6 +177,7 @@ export function MemoryPanelBody(props: { close: () => void }) {
             size="sm"
             onClick={() => {
               props.close();
+              setSection("memory");
               setShowSettings(true);
             }}
           >
@@ -107,10 +202,18 @@ export function MemorySection() {
   const cfg = (): GovernorConfig | null => memory().config;
   const patch = (p: Partial<GovernorConfig>) => void act(() => memConfig(p));
   const draft: Partial<Record<ThresholdKey, string>> = {};
+  let kernelDraft: string | undefined;
   const [busy, setBusy] = createSignal(false);
   const saveThresholds = async () => {
     const c = cfg();
     if (!c) return;
+    let kernel: number | undefined;
+    if (c.kernel_pool_mb !== undefined && kernelDraft !== undefined) {
+      const k = parseAmount(kernelDraft);
+      if (k === null) return setError(G.settings.notNumber);
+      if (kernelPoolProblem(k)) return setError(G.settings.kernelPoolRange);
+      kernel = k;
+    }
     const next = {} as Thresholds;
     for (const f of THRESHOLD_FIELDS) {
       const typed = draft[f.key];
@@ -122,7 +225,7 @@ export function MemorySection() {
     if (problem) return setError(G.settings.problem[problem]);
     setBusy(true);
     try {
-      await memConfig(next);
+      await memConfig(kernel === undefined ? next : { ...next, kernel_pool_mb: kernel });
       showNotice(G.settings.saved);
     } catch (e) {
       setError(errorText(e));
@@ -168,6 +271,18 @@ export function MemorySection() {
                 )}
               </For>
             </div>
+            <Show when={c().kernel_pool_mb !== undefined}>
+              <p class="auto-note">{G.settings.kernelPoolNote}</p>
+              <Field label={G.settings.kernelPool}>
+                <Input
+                  type="text"
+                  inputmode="numeric"
+                  value={String(c().kernel_pool_mb)}
+                  spellcheck={false}
+                  onInput={(e) => (kernelDraft = e.currentTarget.value)}
+                />
+              </Field>
+            </Show>
             <Button disabled={busy()} onClick={() => void saveThresholds()}>
               {G.settings.save}
             </Button>
