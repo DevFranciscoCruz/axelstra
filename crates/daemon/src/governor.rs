@@ -22,6 +22,7 @@ use std::time::Duration;
 #[cfg(target_os = "linux")]
 mod linux;
 mod sample;
+pub mod suspend;
 #[cfg(windows)]
 mod win;
 
@@ -160,6 +161,16 @@ impl Config {
             return Err(bad("crit_free_mb must be below high_free_mb".into()));
         }
         Ok(c)
+    }
+
+    /// Whether admission control acts (not just reports): on, not warn-only.
+    pub fn gate_active(&self) -> bool {
+        self.enabled && self.admission && !self.warn_only
+    }
+
+    /// Whether the pauser acts: on, not warn-only.
+    pub fn pause_active(&self) -> bool {
+        self.enabled && self.auto_pause && !self.warn_only
     }
 
     pub fn thresholds(&self) -> Thresholds {
@@ -332,6 +343,8 @@ struct State {
     cfg: Config,
     /// bumped on every level change: waiters compare it to the one they saw
     gen: u64,
+    /// set by `stop`: every waiter returns at once
+    closed: bool,
 }
 
 /// Callback run on each level change (outside the state lock).
@@ -349,7 +362,7 @@ impl Governor {
     /// A governor that has not started: Normal, no reading. `start` runs the thread.
     pub fn new(cfg: Config) -> Governor {
         Governor {
-            st: Mutex::new(State { level: Level::Normal, info: MemInfo::default(), cfg, gen: 0 }),
+            st: Mutex::new(State { level: Level::Normal, info: MemInfo::default(), cfg, gen: 0, closed: false }),
             cv: Condvar::new(),
             stop: Arc::new(Stop::default()),
             source: Mutex::new(None),
@@ -389,8 +402,19 @@ impl Governor {
     /// generation now. Admission waiters use this: they sleep until the governor says something changed.
     pub fn wait_change(&self, seen: u64, timeout: Duration) -> (Level, u64) {
         let g = self.st.lock_recover();
-        let (g, _) = self.cv.wait_timeout_while(g, timeout, |s| s.gen == seen).unwrap_or_else(|e| e.into_inner());
+        let (g, _) = self.cv.wait_timeout_while(g, timeout, |s| s.gen == seen && !s.closed).unwrap_or_else(|e| e.into_inner());
         (g.level, g.gen)
+    }
+
+    /// Whether `stop` was called.
+    pub fn is_closed(&self) -> bool {
+        self.st.lock_recover().closed
+    }
+
+    /// Wakes everyone in `wait_change` without a level change (a setting moved: they look again).
+    pub fn poke(&self) {
+        self.st.lock_recover().gen += 1;
+        self.cv.notify_all();
     }
 
     /// Replaces the config (the caller saved it) and applies it to the last reading at once.
@@ -456,8 +480,10 @@ impl Governor {
         }
     }
 
-    /// Stops the thread and waits for it.
+    /// Stops the thread and waits for it. Also releases everyone blocked in `wait_change`.
     pub fn stop(&self) {
+        self.st.lock_recover().closed = true;
+        self.cv.notify_all();
         self.stop.trigger();
         if let Some(s) = self.source.lock_recover().clone() {
             s.wake();
@@ -466,6 +492,41 @@ impl Governor {
             let _ = h.join();
         }
     }
+}
+
+/// Worker limit under pressure. Normal: the configured `limit`. High: half of it (at least 1). Critical: 1.
+pub fn effective_worker_limit(limit: usize, level: Level) -> usize {
+    match level {
+        Level::Normal => limit,
+        Level::High => (limit / 2).max(1).min(limit),
+        Level::Critical => 1.min(limit),
+    }
+}
+
+/// What kind of spawn is asking to start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SpawnKind {
+    /// an ephemeral worker (counts against the worker limit)
+    pub worker: bool,
+    /// the request came over an agent's connection (an agent starting something), not the app or the user's CLI
+    pub by_agent: bool,
+    /// the new session is an agent (not a plain terminal)
+    pub agent: bool,
+    /// workers already running
+    pub live_workers: usize,
+}
+
+/// Whether a new session must wait for memory. Pure. The user's own terminals and sessions started by the app are never
+/// refused. At High and Critical: an agent started by an agent is refused outright; a worker is refused once the
+/// (lowered) worker limit is reached.
+pub fn admission_denied(cfg: &Config, level: Level, limit: usize, k: SpawnKind) -> bool {
+    if !cfg.gate_active() || level == Level::Normal {
+        return false;
+    }
+    if k.agent && k.by_agent && !k.worker {
+        return true;
+    }
+    k.worker && k.live_workers >= effective_worker_limit(limit, level)
 }
 
 #[cfg(test)]
@@ -740,5 +801,37 @@ mod tests {
         assert_eq!(g.level(), Level::High);
         g.set_config(Config { high_free_pct: 5, crit_free_pct: 2, high_free_mb: 200, crit_free_mb: 100, ..Config::default() }, Some(&cb));
         assert_eq!(g.level(), Level::Normal);
+    }
+
+    #[test]
+    fn admission_is_denied_at_high_and_critical_and_allowed_at_normal() {
+        let on = Config::default();
+        let agent_by_agent = SpawnKind { worker: false, by_agent: true, agent: true, live_workers: 0 };
+        let terminal_by_agent = SpawnKind { worker: false, by_agent: true, agent: false, live_workers: 0 };
+        let by_user = SpawnKind { worker: false, by_agent: false, agent: true, live_workers: 0 };
+        let worker = |live| SpawnKind { worker: true, by_agent: true, agent: true, live_workers: live };
+        use Level::*;
+        assert!(!admission_denied(&on, Normal, 6, agent_by_agent));
+        assert!(!admission_denied(&on, Normal, 6, worker(5)));
+        assert!(admission_denied(&on, High, 6, agent_by_agent));
+        assert!(admission_denied(&on, Critical, 6, agent_by_agent));
+        // the user's own agents and terminals are never refused
+        assert!(!admission_denied(&on, Critical, 6, by_user));
+        assert!(!admission_denied(&on, Critical, 6, terminal_by_agent));
+        // the worker limit drops: High half, Critical one
+        assert!(!admission_denied(&on, High, 6, worker(2)));
+        assert!(admission_denied(&on, High, 6, worker(3)));
+        assert!(!admission_denied(&on, Critical, 6, worker(0)));
+        assert!(admission_denied(&on, Critical, 6, worker(1)));
+        assert_eq!((effective_worker_limit(1, High), effective_worker_limit(0, Critical), effective_worker_limit(6, Normal)), (1, 0, 6));
+        // switched off, warn-only or admission off: nothing is refused
+        for cfg in [
+            Config { enabled: false, ..on.clone() },
+            Config { warn_only: true, ..on.clone() },
+            Config { admission: false, ..on.clone() },
+        ] {
+            assert!(!admission_denied(&cfg, Critical, 6, agent_by_agent));
+            assert!(!admission_denied(&cfg, Critical, 6, worker(9)));
+        }
     }
 }

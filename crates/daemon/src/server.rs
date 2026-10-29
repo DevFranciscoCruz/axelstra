@@ -20,6 +20,7 @@ mod messaging;
 mod misc;
 mod orchestration;
 mod origin;
+mod pause;
 mod registry;
 mod removal;
 mod session;
@@ -69,7 +70,7 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         "daemon.shutdown" | "session.pending_clear" => true,
         "janitor.auto" => p.get("on").is_some(),
         // an agent must not switch the memory governor off or move its lines
-        "mem.config" => true,
+        "mem.config" | "mem.pause" | "mem.resume" => true,
         "project.add"
         | "project.remove"
         | "project.remove_preview"
@@ -287,6 +288,9 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     origin::adopt_orphans();
     let reg = Arc::new(Registry::new(store, pipe.clone(), token.clone()));
     let _ = reg.me.set(Arc::downgrade(&reg));
+    // processes a crashed run left frozen are continued first; and whatever this run freezes is continued however it ends
+    reg.pauser.recover_stale();
+    let _resume_guard = pause::ResumeGuard(reg.clone());
     let dir = reg.saved.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
     let _ = std::fs::create_dir_all(&dir);
     write_hooks_json(&dir, std::env::current_exe().ok().as_deref());
@@ -295,6 +299,7 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     spawn_data_watch(reg.clone());
     spawn_session_monitor(reg.clone());
     governor::spawn(&reg);
+    pause::spawn(&reg);
     // worktrees that exist now and carry no mark become manual, before the janitor may look at them
     if let Err(e) = crate::projects::migrate_marks(&reg.store) {
         eprintln!("janitor: mark migration failed: {e:#}");
@@ -573,7 +578,7 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
         reg.audit.record(me, &req.method, &req.params, &res.as_ref().map(|_| ()).map_err(|e| format!("{e:#}")));
     }
     // calls that wait on purpose are not slow
-    if !matches!(req.method.as_str(), "ask" | "msg.ask" | "session.wait" | "hello") {
+    if !matches!(req.method.as_str(), "ask" | "msg.ask" | "session.wait" | "mem.admit" | "hello") {
         crate::lag::note(&format!("daemon {}", req.method), t0.elapsed(), 30);
     }
     let body = reply_body(req.id, res.map_err(|e| error_fields(&e)));
@@ -628,6 +633,7 @@ fn reads_only(method: &str) -> bool {
                 | "agent.worktree_usage"
                 | "budget.status"
                 | "mem.status"
+                | "mem.admit"
                 | "hooks.status"
                 | "orch.limits"
                 | "orch.trust_info"
@@ -843,7 +849,7 @@ fn session_list(reg: &Registry) -> Vec<Value> {
                 );
                 json!({"minutes": stall_min, "code": c.code, "params": c.params_json(), "text": c.to_string()})
             });
-            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "wait": wait.map(|w| json!({"kind": w.kind.as_str(), "text": w.text})), "awaiting": awaiting.map(|a| json!({"reason": a.reason, "since": a.since, "until": a.until})), "stalled": stalled, "stall": stall, "mem_level": mem_level, "mem_free_mb": mem_free, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
+            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "wait": wait.map(|w| json!({"kind": w.kind.as_str(), "text": w.text})), "awaiting": awaiting.map(|a| json!({"reason": a.reason, "since": a.since, "until": a.until})), "stalled": stalled, "stall": stall, "paused": reg.pauser.paused_of(id).map(|(reason, since, build)| json!({"reason": reason, "since": since, "build": build})), "mem_level": mem_level, "mem_free_mb": mem_free, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
         })
         .collect();
     v.sort_by_key(|x| x["id"].as_u64());

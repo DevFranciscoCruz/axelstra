@@ -54,6 +54,8 @@ pub struct Facts {
     pub awaiting: bool,
     /// a child session of it is still running (it legitimately waits for it)
     pub live_children: bool,
+    /// the memory governor froze it (or a build it runs): the silence is ours
+    pub paused: bool,
     /// ms since the last output
     pub idle_ms: u64,
     /// ms since the user last typed into it
@@ -70,6 +72,7 @@ pub fn is_stalled(f: &Facts, threshold_ms: u64) -> bool {
         && !f.escalated
         && !f.awaiting
         && !f.live_children
+        && !f.paused
         && f.idle_ms.min(f.since_input_ms) >= threshold_ms
 }
 
@@ -77,7 +80,7 @@ pub fn is_stalled(f: &Facts, threshold_ms: u64) -> bool {
 /// threshold, or (while it awaits something) the moment the await expires. `None`: nothing time alone can change, an
 /// event (pulse) will say. This is what lets the watchdog sleep instead of ticking.
 pub fn next_check_ms(f: &Facts, threshold_ms: u64, await_left_ms: Option<u64>) -> Option<u64> {
-    if threshold_ms == 0 || !f.agent || f.main || !f.running || f.reported || f.escalated || f.live_children {
+    if threshold_ms == 0 || !f.agent || f.main || !f.running || f.reported || f.escalated || f.live_children || f.paused {
         return None;
     }
     if f.awaiting {

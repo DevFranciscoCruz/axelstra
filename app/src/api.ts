@@ -25,7 +25,7 @@ export type StallInfo = { minutes: number; code: string; params: Record<string, 
 export type WaitInfo = { kind: "permission" | "question" | "idle_input"; text: string };
 /** The agent said it only waits for something external (CI, deploy): `since`/`until` are Unix ms, `until` null = no deadline. */
 export type AwaitInfo = { reason: string; since: number; until: number | null };
-export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; wait?: WaitInfo | null; stalled?: boolean; stall?: StallInfo | null; awaiting?: AwaitInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
+export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; wait?: WaitInfo | null; stalled?: boolean; stall?: StallInfo | null; paused?: { reason: string; since: number; build: boolean } | null; awaiting?: AwaitInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean; /** worktree of the same project this one is grouped under */ parent?: string | null };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   /** false for a plain folder that is not a git repository (yet) */
@@ -857,8 +857,14 @@ export type MemStatus = {
   thresholds: Record<string, number>;
   config: GovernorConfig;
   sessions: { id: number; rss_mb: number }[];
+  /** frozen sessions and builds: `kind` is "session" or "build" (a test run under `axelstra lock`) */
+  paused: { kind: string; session: number | null; reason: string; since: number; name?: string | null }[];
 };
 export const memStatus = () => callBg<MemStatus>("mem.status");
+export const memPause = (session: number) => call<{ paused: number[] }>("mem.pause", { session });
+/** Continues one paused session, or all of them. */
+export const memResume = (target: number | "all") =>
+  call<{ resumed: number[]; count: number }>("mem.resume", target === "all" ? { all: true } : { session: target });
 export const memConfig = (patch: Partial<GovernorConfig>) => call<{ config: GovernorConfig }>("mem.config", { patch });
 export const sessionResources = () => callBg<{ sessions: SessionRes[]; cores: number }>("session.resources");
 

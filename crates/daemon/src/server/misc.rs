@@ -327,6 +327,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 }
             }
             reg.closing.store(true, Ordering::SeqCst);
+            // nothing may stay frozen behind the daemon
+            reg.resume_paused(None);
+            crate::governor::suspend::resume_all_tracked();
             // a save still waiting out its debounce must not be lost with the process
             reg.persist_now();
             // keep what each agent terminal showed, so the restored tab is not empty

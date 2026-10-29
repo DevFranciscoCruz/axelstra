@@ -57,7 +57,7 @@ impl Registry {
 /// Creation time of process `pid` (any monotone-per-process-lifetime value; only compared for equality), `None` when
 /// the process does not exist or cannot be examined.
 #[cfg(windows)]
-fn process_start(pid: u32) -> Option<u64> {
+pub(super) fn process_start(pid: u32) -> Option<u64> {
     use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
     use windows_sys::Win32::System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
     // the only unsafe of this check: a handle opened, asked once and closed again
@@ -76,7 +76,7 @@ fn process_start(pid: u32) -> Option<u64> {
 
 /// Linux: field 22 of `/proc/<pid>/stat` (start time in clock ticks since boot). Elsewhere `ps -o lstart=`.
 #[cfg(unix)]
-fn process_start(pid: u32) -> Option<u64> {
+pub(super) fn process_start(pid: u32) -> Option<u64> {
     #[cfg(target_os = "linux")]
     {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;

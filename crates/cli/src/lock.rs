@@ -80,12 +80,49 @@ fn clamp_slots(slots: usize) -> usize {
     slots.clamp(1, MAX_SLOTS)
 }
 
+/// The daemon, if one is running: the lock never starts one and never fails because there is none.
+fn daemon() -> Option<axelstra_daemon::client::Client> {
+    let token = axelstra_daemon::proto::load_or_create_token().ok()?;
+    axelstra_daemon::client::Client::connect_cli(&axelstra_daemon::proto::pipe_name(), &token).ok()
+}
+
+/// Longest single wait asked of the daemon (its calls time out at 30 s).
+const ADMIT_CHUNK_MS: u64 = 20_000;
+
+/// While the machine is short of memory a NEW build waits here, before it takes a slot (a slot held while waiting would
+/// block the ones already running). The daemon answers when the memory level changes, so this is an event wait. Slots
+/// already held are untouched. `timeout` is the same limit the slot wait has.
+fn wait_for_memory(c: &mut axelstra_daemon::client::Client, timeout: Duration) -> Result<()> {
+    let end = std::time::Instant::now() + timeout;
+    let mut told = false;
+    loop {
+        let left = end.saturating_duration_since(std::time::Instant::now());
+        let ask = (left.as_millis() as u64).min(ADMIT_CHUNK_MS);
+        // a daemon that cannot answer never holds a build back
+        let Ok(r) = c.call("mem.admit", serde_json::json!({"wait_ms": ask})) else { return Ok(()) };
+        if r["ok"].as_bool() != Some(false) {
+            return Ok(());
+        }
+        if !told {
+            eprintln!("axelstra lock: waiting: low memory (free {} MB)", r["free_mb"].as_u64().unwrap_or(0));
+            told = true;
+        }
+        if left.is_zero() {
+            bail!("timed out waiting for memory ({} MB free)", r["free_mb"].as_u64().unwrap_or(0));
+        }
+    }
+}
+
 pub fn run(name: &str, slots: usize, timeout: u64, command: &[String]) -> Result<i32> {
     if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         bail!("lock name: letters, digits, - and _ only");
     }
     if command.is_empty() {
         bail!("no command given");
+    }
+    let mut daemon = daemon();
+    if let Some(c) = daemon.as_mut() {
+        wait_for_memory(c, Duration::from_secs(timeout))?;
     }
     let (held, _slot) = acquire(name, clamp_slots(slots), Duration::from_secs(timeout))?;
     let mut cmd = Command::new(&command[0]);
@@ -102,7 +139,16 @@ pub fn run(name: &str, slots: usize, timeout: u64, command: &[String]) -> Result
     };
     #[cfg(unix)]
     let mut child = unix::spawn(&mut cmd, &held)?;
-    let status = child.wait()?;
+    // tells the daemon which process is the build, so it may freeze it under memory pressure (and lets it go at the end)
+    let hold = daemon
+        .as_mut()
+        .and_then(|c| c.call("mem.hold", serde_json::json!({"name": name, "pid": child.id()})).ok())
+        .and_then(|r| r["id"].as_u64());
+    let status = child.wait();
+    if let (Some(c), Some(id)) = (daemon.as_mut(), hold) {
+        let _ = c.call("mem.unhold", serde_json::json!({"id": id}));
+    }
+    let status = status?;
     #[cfg(windows)]
     job.kill();
     drop(held);
