@@ -174,85 +174,122 @@ mod tests {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
-    fn child() -> std::process::Child {
-        let mut c = if cfg!(windows) {
-            let mut c = Command::new("ping");
-            c.args(["-n", "60", "127.0.0.1"]);
-            c
-        } else {
-            let mut c = Command::new("sleep");
-            c.arg("60");
-            c
-        };
-        c.stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap()
+    /// The two real-process tests share the process-wide `tracked()` set, and `resume_all_tracked`
+    /// continues every pid in it: run them one at a time so one never resumes the other's child.
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        static L: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        L.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Whether the process is stopped, by what the OS says.
-    #[cfg(target_os = "linux")]
-    fn is_stopped(pid: u32) -> bool {
-        std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            .is_ok_and(|s| s.rsplit_once(')').is_some_and(|r| r.1.trim_start().starts_with('T')))
+    /// A child that appends to a heartbeat file in a tight loop. It touches nothing but that file.
+    struct Beat {
+        c: std::process::Child,
+        file: std::path::PathBuf,
     }
 
-    #[cfg(all(unix, not(target_os = "linux")))]
-    fn is_stopped(pid: u32) -> bool {
-        let o = Command::new("ps").args(["-o", "stat=", "-p", &pid.to_string()]).output().unwrap();
-        String::from_utf8_lossy(&o.stdout).trim().starts_with('T')
+    impl Beat {
+        fn new(tag: &str) -> Beat {
+            let dir = std::env::temp_dir();
+            let name = format!("axelstra-beat-{}-{tag}.txt", std::process::id());
+            let file = dir.join(&name);
+            let _ = std::fs::write(&file, b"");
+            let mut c = if cfg!(windows) {
+                let mut c = Command::new("cmd");
+                c.args(["/C", &format!("for /L %i in (1,1,2000000000) do @echo x>>{name}")]);
+                c
+            } else {
+                let mut c = Command::new("sh");
+                c.args(["-c", &format!("while :; do echo x >> {name}; done")]);
+                c
+            };
+            let c = c.current_dir(&dir).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+            Beat { c, file }
+        }
+
+        fn pid(&self) -> u32 {
+            self.c.id()
+        }
+
+        fn size(&self) -> u64 {
+            std::fs::metadata(&self.file).map(|m| m.len()).unwrap_or(0)
+        }
+
+        /// True once the file has not grown over `quiet` consecutive samples. A suspended child
+        /// cannot write; a running one writes thousands of times a second.
+        fn frozen(&self, wait: Duration) -> bool {
+            let t = Instant::now();
+            loop {
+                let a = self.size();
+                std::thread::sleep(Duration::from_millis(250));
+                if self.size() == a && self.size() > 0 {
+                    std::thread::sleep(Duration::from_millis(250));
+                    if self.size() == a {
+                        return true;
+                    }
+                }
+                if t.elapsed() > wait {
+                    return false;
+                }
+            }
+        }
+
+        /// True as soon as the file grows.
+        fn beating(&self, wait: Duration) -> bool {
+            let a = self.size();
+            let t = Instant::now();
+            while self.size() == a {
+                if t.elapsed() > wait {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            true
+        }
+
+        fn end(mut self) {
+            let _ = self.c.kill();
+            let _ = self.c.wait();
+            let _ = std::fs::remove_file(&self.file);
+        }
     }
 
-    /// Windows: a suspended process has every thread waiting with reason Suspended (read through PowerShell).
-    #[cfg(windows)]
-    fn is_stopped(pid: u32) -> bool {
-        let script = format!(
-            "(Get-Process -Id {pid}).Threads | Where-Object {{ $_.ThreadState -ne 'Wait' -or $_.WaitReason -ne 'Suspended' }} | Measure-Object | ForEach-Object Count"
-        );
-        let o = Command::new("powershell").args(["-NoProfile", "-Command", &script]).output().unwrap();
-        String::from_utf8_lossy(&o.stdout).trim() == "0"
-    }
-
-    /// One real cycle on a child this test started: stopped, then running again, then killed.
+    /// One real cycle on a child this test started: its heartbeat stops, then runs again, then it is killed.
     #[test]
     fn a_real_cycle_stops_and_continues_a_child_the_test_owns() {
         let s = OsSuspender;
         if !s.supported() {
             return;
         }
-        let mut c = child();
-        let pid = c.id();
+        let _g = serial();
+        let b = Beat::new("cycle");
+        let pid = b.pid();
+        assert!(b.beating(Duration::from_secs(60)), "the child never started writing");
         let stopped = s.suspend(&[pid]);
         assert_eq!(stopped, vec![pid], "could not stop our own child");
-        let t = Instant::now();
-        while !is_stopped(pid) {
-            assert!(t.elapsed() < Duration::from_secs(10), "the child never showed as stopped");
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        assert!(b.frozen(Duration::from_secs(60)), "the child kept writing after suspend");
         s.resume(&[pid]);
-        let t = Instant::now();
-        while is_stopped(pid) {
-            assert!(t.elapsed() < Duration::from_secs(10), "the child stayed stopped after resume");
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        assert!(tracked().lock_recover().is_empty() || !tracked().lock_recover().contains(&pid));
-        let _ = c.kill();
-        let _ = c.wait();
+        assert!(b.beating(Duration::from_secs(60)), "the child stayed stopped after resume");
+        assert!(!tracked().lock_recover().contains(&pid));
+        b.end();
     }
 
     #[test]
     fn resume_all_tracked_lets_go_of_everything_the_os_suspender_stopped() {
         let s = OsSuspender;
-        let mut c = child();
-        let pid = c.id();
+        if !s.supported() {
+            return;
+        }
+        let _g = serial();
+        let b = Beat::new("all");
+        let pid = b.pid();
+        assert!(b.beating(Duration::from_secs(60)), "the child never started writing");
         assert_eq!(s.suspend(&[pid]), vec![pid]);
         assert!(tracked().lock_recover().contains(&pid));
+        assert!(b.frozen(Duration::from_secs(60)), "the child kept writing after suspend");
         resume_all_tracked();
         assert!(!tracked().lock_recover().contains(&pid));
-        let t = Instant::now();
-        while is_stopped(pid) {
-            assert!(t.elapsed() < Duration::from_secs(10), "still stopped");
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        let _ = c.kill();
-        let _ = c.wait();
+        assert!(b.beating(Duration::from_secs(60)), "still stopped");
+        b.end();
     }
 
     #[test]
