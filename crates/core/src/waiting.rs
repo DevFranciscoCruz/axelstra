@@ -272,6 +272,36 @@ mod tests {
         assert!(h.take_untold(1).is_none());
     }
 
+    /// What clears a wait: the Stop hook (idle), UserPromptSubmit (working), the user typing, new output. An
+    /// `idle_prompt` after a real wait must not leave the old one standing either.
+    #[test]
+    fn a_wait_is_cleared_by_stop_prompt_submit_input_and_output() {
+        let wait = |h: &Hints| h.set(1, HintState::Waiting, w(WaitKind::Permission, "Allow Bash?"));
+        let h = Hints::default();
+        wait(&h);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert!(h.waiting(1, u64::MAX, 60_000).is_some());
+        // (output after the redraw slack clears it too: see hint_waits_until_input_output_or_expiry)
+        // the user typed after the hint
+        assert!(h.waiting(1, 0, 60_000).is_none());
+        for next in [HintState::Idle, HintState::Working] {
+            wait(&h);
+            h.set(1, next, None);
+            assert!(h.waiting(1, u64::MAX, 60_000).is_none(), "{next:?}");
+            assert!(h.take_untold(1).is_none(), "{next:?}");
+        }
+        // an idle_prompt after a real wait replaces it (the agent is at its input box now)
+        wait(&h);
+        h.set(1, HintState::Waiting, w(WaitKind::IdleInput, "Claude is waiting for your input"));
+        assert!(h.waiting(1, u64::MAX, 60_000).is_none());
+        // the same permission asked again after being answered is a new wait the parent hears of again
+        wait(&h);
+        assert!(h.take_untold(1).is_some());
+        h.set(1, HintState::Working, None);
+        wait(&h);
+        assert!(h.take_untold(1).is_some());
+    }
+
     #[test]
     fn kinds_round_trip_and_text_is_cleaned() {
         for k in [WaitKind::Permission, WaitKind::Question, WaitKind::IdleInput] {
