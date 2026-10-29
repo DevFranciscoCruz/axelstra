@@ -689,7 +689,7 @@ impl Registry {
         let snap = axelstra_core::procs::snapshot();
         let ids: Vec<u32> =
             self.sessions.lock_recover().iter().filter(|(_, x)| sessions.iter().any(|s| Arc::ptr_eq(s, x))).map(|(id, _)| *id).collect();
-        for id in ids {
+        for &id in &ids {
             self.resume_before_kill(id);
         }
         let roots: Vec<u32> = sessions.iter().filter_map(|s| s.pid()).collect();
@@ -697,7 +697,11 @@ impl Registry {
         let bytes: u64 = sessions.iter().map(|s| s.memory_now_in(&snap)).sum();
         kill_and_wait(sessions, Duration::from_secs(5));
         let left = axelstra_core::procs::alive_of(&tree);
-        let stray: std::collections::HashSet<u32> = left.into_iter().filter(|p| !roots.contains(p)).collect();
+        let mut stray: std::collections::HashSet<u32> = left.into_iter().filter(|p| !roots.contains(p)).collect();
+        // what carries a closed session's mark is its own, even when it left the tree (Linux; empty elsewhere)
+        for id in &ids {
+            stray.extend(axelstra_core::procs::marked(&axelstra_core::procs::mark_prefix(std::process::id(), *id)));
+        }
         axelstra_core::procs::kill_pids(&stray);
         self.closed.sessions.fetch_add(sessions.len() as u64, Ordering::SeqCst);
         self.closed.procs.fetch_add(tree.len() as u64, Ordering::SeqCst);
@@ -831,6 +835,10 @@ impl Registry {
         self.agent_tokens.lock_recover().retain(|_, v| *v != id);
         let mut s = s.clone();
         s.env.push(("AXELSTRA_SESSION".into(), id.to_string()));
+        // marks every process of the session, so `tear_down` finds the ones that left its tree (Linux)
+        let spawned = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        s.env.retain(|(k, _)| k != axelstra_core::procs::MARK_ENV);
+        s.env.push((axelstra_core::procs::MARK_ENV.into(), format!("{}:{id}:{spawned}", std::process::id())));
         // the session's own credential: it identifies the connection as an agent, which cannot do the app-only calls
         s.env.retain(|(k, _)| k != "AXELSTRA_AGENT_TOKEN");
         if let Some(t) = new_agent_token() {

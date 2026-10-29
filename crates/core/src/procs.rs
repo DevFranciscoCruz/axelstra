@@ -132,6 +132,49 @@ pub fn kill_pids(pids: &HashSet<u32>) {
     }
 }
 
+/// Environment variable every session's process carries. Its value is `<daemon pid>:<session id>:<spawn time>`, and
+/// children inherit it, so a process that left the session's tree (`setsid`, a double fork, a reparent to init) can
+/// still be found by it.
+pub const MARK_ENV: &str = "AXELSTRA_MARK";
+
+/// The `AXELSTRA_MARK` entry prefix that names every process of session `id` under daemon `daemon_pid`, whatever its
+/// spawn time (a woken session keeps its id and gets a new time).
+pub fn mark_prefix(daemon_pid: u32, id: u32) -> String {
+    format!("{MARK_ENV}={daemon_pid}:{id}:")
+}
+
+/// Whether a NUL-separated environment block has an entry starting with `prefix`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn environ_has(block: &[u8], prefix: &str) -> bool {
+    block.split(|b| *b == 0).any(|e| e.starts_with(prefix.as_bytes()))
+}
+
+/// Pids whose environment carries an entry starting with `prefix` (see `mark_prefix`), other than this process.
+/// Linux only (`/proc/<pid>/environ`): other systems give no way to read another process' environment, so they get an
+/// empty set and keep relying on the process tree. Processes of other users are unreadable and skipped.
+pub fn marked(prefix: &str) -> HashSet<u32> {
+    #[allow(unused_mut)]
+    let mut out = HashSet::new();
+    #[cfg(target_os = "linux")]
+    if let Ok(dir) = std::fs::read_dir("/proc") {
+        let me = std::process::id();
+        for e in dir.flatten() {
+            let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
+            if pid == me {
+                continue;
+            }
+            if let Ok(block) = std::fs::read(e.path().join("environ")) {
+                if environ_has(&block, prefix) {
+                    out.insert(pid);
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = prefix;
+    out
+}
+
 /// Executable names (lowercase, no directory, no `.exe`) of those of `pids` that are running now. One table dump, so
 /// ask for all the pids of a tree together.
 pub fn names_of(pids: &HashSet<u32>) -> HashMap<u32, String> {
@@ -215,6 +258,36 @@ mod tests {
         let b = snapshot_cached(Duration::from_secs(60));
         assert!(Arc::ptr_eq(&a, &b));
         assert!(a.procs.iter().any(|p| p.pid == std::process::id()));
+    }
+
+    #[test]
+    fn mark_prefix_matches_one_session_only() {
+        let block = b"PATH=/bin\0AXELSTRA_MARK=7:12:1700\0HOME=/h\0";
+        assert!(environ_has(block, &mark_prefix(7, 12)));
+        assert!(!environ_has(block, &mark_prefix(7, 1)), "id 1 must not match id 12");
+        assert!(!environ_has(block, &mark_prefix(8, 12)), "another daemon's session");
+        assert!(!environ_has(b"", &mark_prefix(7, 12)));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn finds_a_process_that_left_the_tree() {
+        use std::os::unix::process::CommandExt;
+        let tag = format!("{}:{}:", std::process::id(), 900_000 + std::process::id() % 1000);
+        // its own process group: `kill(-pgid)` of the session's group would not reach it
+        // the kernel fills /proc/<pid>/environ a moment after spawn returns, so wait until the child says it runs
+        let mut c = std::process::Command::new("sh");
+        c.args(["-c", "echo up; sleep 30"]).env(MARK_ENV, format!("{tag}1")).process_group(0).stdout(std::process::Stdio::piped());
+        let mut child = c.spawn().unwrap();
+        let pid = child.id();
+        let mut up = String::new();
+        std::io::BufRead::read_line(&mut std::io::BufReader::new(child.stdout.take().unwrap()), &mut up).unwrap();
+        assert_eq!(up.trim(), "up");
+        let found = marked(&format!("{MARK_ENV}={tag}"));
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(found.contains(&pid));
+        assert!(!found.contains(&std::process::id()));
     }
 
     #[test]
