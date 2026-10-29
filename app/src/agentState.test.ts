@@ -1,19 +1,56 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => undefined }));
-vi.mock("./api", () => ({ call: async () => ({}), callBg: async () => ({}), listSessions: async () => [], listProjects: async () => [], worktreeStatus: async () => [], ghListBg: async () => [], gitChanges: async () => null, flowTasks: async () => [] }));
+vi.mock("./api", () => ({
+  call: async () => ({}),
+  callBg: async () => ({}),
+  listSessions: async () => [],
+  listProjects: async () => [],
+  worktreeStatus: async () => [],
+  ghListBg: async () => [],
+  gitChanges: async () => null,
+  flowTasks: async () => [],
+}));
 
 import type { SessionInfo } from "./api";
 import { DOT_GLYPH, DOT_LABEL, dotOfSession, dotOfWorktree, dotTip } from "./agentState";
 
-const sess = (over: Partial<SessionInfo>): SessionInfo => ({ id: 1, running: true, meta: { kind: "agent" }, ...over }) as SessionInfo;
+const sess = (over: Partial<SessionInfo>): SessionInfo =>
+  ({ id: 1, running: true, meta: { kind: "agent" }, ...over }) as SessionInfo;
 
 describe("status dots", () => {
   it("every visible state has its own shape and its own words", () => {
-    const states = ["working", "idle", "waiting", "awaiting", "stalled", "done", "attention", "queued", "running"] as const;
+    const states = [
+      "working",
+      "idle",
+      "waiting",
+      "awaiting",
+      "stalled",
+      "done",
+      "attention",
+      "queued",
+      "running",
+    ] as const;
     expect(new Set(states.map((s) => DOT_GLYPH[s])).size).toBe(states.length);
     expect(new Set(states.map((s) => DOT_LABEL[s])).size).toBe(states.length);
     expect(DOT_LABEL.none).toBe("");
+  });
+  it("a hibernated agent has its own dot and tip, and a paused or ended one does not", () => {
+    const h = { since: 1_000, saved_mb: 120, waking: false, queued: false };
+    expect(dotOfSession(sess({ idle_ms: 600000, hibernated: h }))).toBe("hibernated");
+    expect(dotOfSession(sess({ idle_ms: 100, hibernated: h }))).toBe("hibernated");
+    expect(dotOfSession(sess({ running: false, hibernated: h }))).toBe("done");
+    expect(dotOfSession(sess({ meta: { kind: "shell" }, hibernated: h }))).toBe("running");
+    expect(DOT_LABEL.hibernated).not.toBe(DOT_LABEL.idle);
+    expect(DOT_GLYPH.hibernated).not.toBe(DOT_GLYPH.paused);
+    expect(dotTip(sess({ hibernated: h }), 61_000)).toContain("120 MB");
+    expect(dotTip(sess({ hibernated: { ...h, waking: true } }), 61_000)).not.toBe(
+      dotTip(sess({ hibernated: h }), 61_000),
+    );
+    expect(dotTip(sess({ hibernated: { ...h, waking: true, queued: true } }), 61_000)).not.toBe(
+      dotTip(sess({ hibernated: { ...h, waking: true } }), 61_000),
+    );
+    expect(dotTip(sess({ idle_ms: 100 }))).toBeNull();
   });
   it("tells agent sessions apart", () => {
     expect(dotOfSession(sess({ idle_ms: 100 }))).toBe("working");

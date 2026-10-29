@@ -26,6 +26,8 @@ import { HooksSection } from "./HooksSection";
 import { WorkspaceSection } from "./WorkspaceSection";
 import { HostsSection } from "./HostsSection";
 import { MemorySection } from "./MemoryPanel";
+import { H } from "./strings.hibernate";
+import { idleChoices } from "./hibernateLogic";
 import { Modal } from "./Modal";
 import { S } from "./strings";
 import {
@@ -405,6 +407,30 @@ export function Settings() {
                   onPick={(v) => void save({ stall_minutes: Number(v) })}
                 />
               </Section>
+
+              <Show when={cfg().hibernate}>
+                {(h) => (
+                  <Section title={H.settings.title} note={H.settings.note}>
+                    <CheckboxField
+                      checked={h().enabled}
+                      onChange={(enabled) => void save({ hibernate: { ...h(), enabled } })}
+                    >
+                      {H.settings.enabled}
+                    </CheckboxField>
+                    <Show when={h().enabled}>
+                      <Choices
+                        label={H.settings.idle}
+                        value={String(h().idle_minutes)}
+                        options={idleChoices(h().idle_minutes).map((v) => ({
+                          value: String(v),
+                          label: H.settings.idleMin(v),
+                        }))}
+                        onPick={(v) => void save({ hibernate: { ...h(), idle_minutes: Number(v) } })}
+                      />
+                    </Show>
+                  </Section>
+                )}
+              </Show>
 
               <Show when={cfg().build}>{(b) => <BuildSection cfg={b()} save={(build) => void save({ build })} />}</Show>
 

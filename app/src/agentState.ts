@@ -2,6 +2,7 @@ import type { SessionInfo } from "./api";
 import { fmtDate } from "./i18n";
 import { sessionState } from "./store";
 import { G } from "./strings.memory";
+import { H } from "./strings.hibernate";
 import { L } from "./strings.logic";
 import { ago } from "./time";
 
@@ -16,6 +17,7 @@ export type DotState =
   | "attention"
   | "queued"
   | "paused"
+  | "hibernated"
   | "running"
   | "none";
 
@@ -32,6 +34,7 @@ export const DOT_GLYPH: Record<DotState, string> = {
   attention: "M4 1.6v3M4 6.2v.01",
   queued: "M4 1.8v2.4l1.3.9",
   paused: "M2.6 1.8v4.4M5.4 1.8v4.4",
+  hibernated: "M2 2h3L2 6h4",
   running: "M2 2.5l2 1.5-2 1.5M4.8 6h1.4",
   none: "",
 };
@@ -40,6 +43,8 @@ export const DOT_GLYPH: Record<DotState, string> = {
 export const dotOfSession = (s: SessionInfo): DotState => {
   const st = sessionState(s);
   if (s.meta?.kind !== "agent") return s.running ? "running" : "done";
+  // asleep: no process at all (the daemon keeps `running` true, the row did not end)
+  if (s.running && s.hibernated) return "hibernated";
   // frozen by the governor or by hand: neither working nor idle, whatever the screen did last
   if (s.running && s.paused) return "paused";
   // an agent that said it only waits for something external is never stalled, whatever the daemon flags
@@ -54,6 +59,11 @@ export const dotTip = (s: SessionInfo, now = Date.now()): string | null => {
   if (dotOfSession(s) === "paused" && s.paused) {
     const what = s.paused.reason === "memory" ? G.dot.memory : G.dot.manual;
     return G.dot.since(what, ago((now - s.paused.since) / 1000));
+  }
+  if (dotOfSession(s) === "hibernated" && s.hibernated) {
+    const h = s.hibernated;
+    const what = h.queued ? H.dot.queued : h.waking ? H.dot.waking : H.dot.hibernated;
+    return H.dot.since(what, ago((now - h.since) / 1000), Math.round(h.saved_mb));
   }
   const a = s.awaiting;
   if (!a || dotOfSession(s) !== "awaiting") return null;

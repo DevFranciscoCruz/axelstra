@@ -27,7 +27,9 @@ export type StallInfo = { minutes: number; code: string; params: Record<string, 
 export type WaitInfo = { kind: "permission" | "question" | "idle_input"; text: string };
 /** The agent said it only waits for something external (CI, deploy): `since`/`until` are Unix ms, `until` null = no deadline. */
 export type AwaitInfo = { reason: string; since: number; until: number | null };
-export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; wait?: WaitInfo | null; stalled?: boolean; stall?: StallInfo | null; /** stalled, but a parent agent was told and handles it: never an alert for the user */ stall_parent?: boolean; paused?: { reason: string; since: number; build: boolean } | null; mem_level?: MemLevel; mem_free_mb?: number; awaiting?: AwaitInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
+/** `hibernated` of a `session.list` row */
+export type HibernatedInfo = { since: number; saved_mb: number; waking: boolean; queued: boolean };
+export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; wait?: WaitInfo | null; stalled?: boolean; stall?: StallInfo | null; /** stalled, but a parent agent was told and handles it: never an alert for the user */ stall_parent?: boolean; paused?: { reason: string; since: number; build: boolean } | null; /** asleep: the process ended, the row stays (`waking`: coming back, `queued`: no free worker slot yet) */ hibernated?: HibernatedInfo | null; mem_level?: MemLevel; mem_free_mb?: number; awaiting?: AwaitInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean; /** worktree of the same project this one is grouped under */ parent?: string | null };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   /** false for a plain folder that is not a git repository (yet) */
@@ -137,10 +139,14 @@ export type ShellChoice = "auto" | "pwsh" | "powershell" | "bash" | "wsl" | "cmd
 export type BuildSettings = {
   enabled: boolean; jobs: number | null; sccache: "auto" | "off"; shared_target: boolean; shared_js_cache: boolean; lock_budget_mb: number | null; lock_margin_mb: number | null;
 };
+/** `hibernate` of settings.json: put idle agents to sleep by themselves, after this many quiet minutes (1 to 1440) */
+export type HibernateSettings = { enabled: boolean; idle_minutes: number };
 export type Settings = {
   terse: Terse; rules: string | null; pm: string | null; installed: string[]; auto_install: boolean;
   /** absent on a daemon from before these keys existed */
   notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice; stall_minutes?: number;
+  /** absent on a daemon from before hibernation */
+  hibernate?: HibernateSettings;
   /** absent on a daemon from before the build settings */
   build?: BuildSettings;
   /** UI choices the webview keeps (pins, folded groups, notifications...): `axelstra.*` key -> saved string */
@@ -148,7 +154,7 @@ export type Settings = {
   /** token limits per day / week; absent on a daemon from before budgets */
   budgets?: Budgets;
 };
-export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice; stall_minutes?: number; budgets?: Budgets; build?: BuildSettings };
+export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice; stall_minutes?: number; budgets?: Budgets; build?: BuildSettings; hibernate?: HibernateSettings };
 /** `terse` asks for the rules of that level (a project's own choice) instead of the saved one */
 export const getSettings = (terse?: Terse) => call<Settings>("settings.get", terse ? { terse } : {});
 /** `ui`: UI state to store (`null` removes a key), sent by uiState.ts only, so it is not part of what the Settings screen merges */
@@ -469,7 +475,11 @@ export type DaemonEvent =
   | "memory.pressure"
   | "memory.would_pause"
   | "session.paused"
-  | "session.resumed";
+  | "session.resumed"
+  | "session.hibernated"
+  | "session.woke"
+  | "session.wake_failed"
+  | "session.input_dropped";
 /** What an event carries besides its name (`kanban.changed {project}`, `orch.changed {run, project}`, `clone.changed {id}`...). */
 export type DaemonEventData = { event?: string; project?: string; run?: string; id?: string | number; worktree?: string; [k: string]: unknown };
 const eventSubs = new Map<string, Set<(d: DaemonEventData) => void>>();

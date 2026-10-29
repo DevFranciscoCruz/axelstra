@@ -9,6 +9,7 @@ import { agentRowInfo, agentRowLabel } from "../agentRow";
 import { isLead, lacksLead, leadFirst } from "../leadRole";
 import { P } from "../strings.panels";
 import { G } from "../strings.memory";
+import { H } from "../strings.hibernate";
 import { fmtMb } from "../memoryView";
 import { MenuItem, isMenuKey, showMenu, showMenuAt } from "../ContextMenu";
 import { createSidebarActions } from "./actions";
@@ -25,7 +26,7 @@ import {
   sessionsOf,
   tabLabel,
 } from "../store";
-import { memPause, memResume, type SessionInfo } from "../api";
+import { hibernateSession, memPause, memResume, wakeSession, type SessionInfo } from "../api";
 
 const T = P.sidebar;
 
@@ -46,6 +47,10 @@ export function AgentList(props: {
   // a lead is never paused from here (its workers answer to it); an ended session has nothing to freeze
   const pausable = (a: SessionInfo) => a.running && (!!a.paused || !isLead(a));
   const togglePause = (a: SessionInfo) => void actions.run(() => (a.paused ? memResume(a.id) : memPause(a.id)));
+  // the project main never sleeps; a plain terminal has no conversation to come back to
+  const sleepable = (a: SessionInfo) => a.running && a.meta?.kind === "agent" && a.meta?.main !== true;
+  const toggleSleep = (a: SessionInfo) =>
+    void actions.run(() => (a.hibernated ? wakeSession(a.id) : hibernateSession(a.id)));
   const rssTip = (a: SessionInfo) => {
     const mb = rssOf(a.id);
     return mb === undefined ? "" : ` · ${G.sidebar.rss(fmtMb(mb))}`;
@@ -59,6 +64,7 @@ export function AgentList(props: {
         open: () => openSession(wt, a.id),
         end: () => void closeSessionTab(a),
         pause: pausable(a) ? { paused: !!a.paused, run: () => togglePause(a) } : undefined,
+        hibernate: sleepable(a) ? { hibernated: !!a.hibernated, run: () => toggleSleep(a) } : undefined,
       },
       a.id,
       wt,
@@ -208,6 +214,19 @@ export function AgentList(props: {
                       aria-label={G.sidebar.resumeLabel(info().name)}
                       title={G.menu.resume}
                       onClick={() => togglePause(a)}
+                    >
+                      <Icon name="play" size={12} />
+                    </Button>
+                  </Show>
+                  <Show when={a.running && a.hibernated && !a.hibernated.waking && renaming() !== a.id}>
+                    <Button
+                      type="button"
+                      variant="chip"
+                      size="chip"
+                      class="mr-1 flex-none px-[6px]"
+                      aria-label={H.wakeLabel(info().name)}
+                      title={H.menu.wake}
+                      onClick={() => toggleSleep(a)}
                     >
                       <Icon name="play" size={12} />
                     </Button>

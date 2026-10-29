@@ -739,6 +739,8 @@ async fn handle(pipe: impl AsyncRead + AsyncWrite + Send + 'static, reg: Arc<Reg
                     // typing into a hibernated tab wakes it; the keys cannot reach a process that does not exist yet
                     if reg.hib.is_sleeping(id) {
                         hibernate::wake(&reg, id);
+                        // on the watch stream too: the app's window listens there, not on the input connection
+                        reg.broadcast_event(json!({"event": "session.input_dropped", "id": id}));
                         let ev = json!({"event": "session.input_dropped", "id": id});
                         let _ = tx.send(encode(EVENT, ev.to_string().as_bytes())).await;
                     }

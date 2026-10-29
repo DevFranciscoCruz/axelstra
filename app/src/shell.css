@@ -32,6 +32,13 @@
   box-shadow: 0 0 0 3px rgba(var(--warn-rgb), 0.25);
   animation: none;
 }
+/* hibernated session dot: no process, the row stays */
+.dot.hibernated {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+  color: var(--muted);
+  animation: none;
+}
 .mem-high {
   color: var(--warn);
 }

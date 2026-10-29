@@ -8,6 +8,7 @@ import { R } from "../strings.remote";
 import { P } from "../strings.panels";
 import { S } from "../strings";
 import { G } from "../strings.memory";
+import { H } from "../strings.hibernate";
 import { agentLabel } from "../agentLabel";
 import {
   canonAgent,
@@ -159,6 +160,8 @@ export type AgentMenuDeps = Pick<MenuDeps, "run" | "copy"> & {
   end: () => void;
   /** pause / resume entry of the governor; absent when the session cannot be paused (a lead, an ended one) */
   pause?: { paused: boolean; run: () => void };
+  /** hibernate / wake entry; absent when it does not apply (an ended session, the project main) */
+  hibernate?: { hibernated: boolean; run: () => void };
 };
 
 /** Right-click menu of an agent row in the sidebar; `wt` is the worktree the session works in. */
@@ -173,6 +176,15 @@ export const agentMenu = (d: AgentMenuDeps, id: number, wt: string): MenuItem[] 
           label: d.pause.paused ? G.menu.resume : G.menu.pause,
           icon: d.pause.paused ? "play" : "pause",
           run: d.pause.run,
+        },
+      ]
+    : []),
+  ...(d.hibernate
+    ? [
+        {
+          label: d.hibernate.hibernated ? H.menu.wake : H.menu.hibernate,
+          icon: d.hibernate.hibernated ? "play" : "moon",
+          run: d.hibernate.run,
         },
       ]
     : []),

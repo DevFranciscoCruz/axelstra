@@ -115,6 +115,7 @@ export const enL: Widen<typeof ptL> = {
     attention: "Stopped: needs attention",
     queued: "Queued: the plan has not reached this task yet",
     paused: "Paused",
+    hibernated: "Hibernated",
     running: "Terminal running",
     none: "",
   },

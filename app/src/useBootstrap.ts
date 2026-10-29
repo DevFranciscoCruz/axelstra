@@ -41,6 +41,7 @@ import {
   showNotice,
   toast,
   watchHosts,
+  watchHibernate,
   watchMemory,
 } from "./store";
 import { L } from "./strings.logic";
@@ -66,6 +67,7 @@ export function useBootstrap() {
 
   onMount(() => onCleanup(watchHosts()));
   onMount(() => onCleanup(watchMemory()));
+  onMount(() => onCleanup(watchHibernate()));
 
   onMount(
     () =>

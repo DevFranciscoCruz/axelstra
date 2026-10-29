@@ -163,7 +163,7 @@ export const ptBR: Widen<typeof pt> = {
   "session.not_found": "Não existe nenhuma sessão {id}.",
   "session.worker_limit":
     "Limite de workers atingido ({live} rodando, máximo {max}). Espere um terminar ou aumente o limite com `axelstra limit N`.",
-  "session.queued": "À espera na fila por um lugar de worker.",
+  "session.queued": "Aguardando na fila por uma vaga de worker.",
   "session.bad_state": "O estado precisa ser waiting, idle ou working.",
   "session.await_reason": 'Um await precisa de um motivo, por exemplo "CI #3703".',
   "session.input_full": "A fila de entrada da sessão está cheia: o programa não está lendo o que é enviado a ele.",

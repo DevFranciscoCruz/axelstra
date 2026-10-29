@@ -591,20 +591,6 @@ fn valid_resume_id(id: &str) -> bool {
     (8..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
 }
 
-#[cfg(test)]
-mod tests {
-    use super::valid_resume_id;
-
-    #[test]
-    fn only_uuid_shaped_resume_ids_pass() {
-        assert!(valid_resume_id("0f8fad5b-d9cb-469f-a165-70867728950e"));
-        assert!(valid_resume_id("abcdef12"));
-        for bad in ["", "abc", "x; calc", "$(id)", "0f8fad5b-d9cb-469f-a165-70867728950e; calc", "abc def12", "ghijklmn", &"a".repeat(65)] {
-            assert!(!valid_resume_id(bad), "{bad}");
-        }
-    }
-}
-
 /// How long one `session.spawn` with `queue: true` sleeps before it answers `queued` (the caller then comes back with its ticket).
 const SPAWN_QUEUE_CHUNK: Duration = Duration::from_secs(20);
 
@@ -626,6 +612,20 @@ impl Drop for LinePlace {
             if self.reg.spawnq.lock_recover().leave(t) {
                 self.reg.pulse.bump();
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_resume_id;
+
+    #[test]
+    fn only_uuid_shaped_resume_ids_pass() {
+        assert!(valid_resume_id("0f8fad5b-d9cb-469f-a165-70867728950e"));
+        assert!(valid_resume_id("abcdef12"));
+        for bad in ["", "abc", "x; calc", "$(id)", "0f8fad5b-d9cb-469f-a165-70867728950e; calc", "abc def12", "ghijklmn", &"a".repeat(65)] {
+            assert!(!valid_resume_id(bad), "{bad}");
         }
     }
 }
