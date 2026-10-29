@@ -1,6 +1,6 @@
 # Platform support
 
-What works on which OS, and where it does not. Audit of commit `72054b4`; line numbers are at that commit and drift as
+What works on which OS, and where it does not. Audit of commit `72054b4`, updated at `8aa82d9`; line numbers drift as
 the gaps close. "Full" means the same behavior as the reference OS for that row, not byte-identical code.
 
 Status: **Windows** is the reference (shipped, signed, E2E). **Linux** and **macOS** build and pass the engine tests in
@@ -12,18 +12,18 @@ experimental job.
 | Feature | Windows | Linux | macOS | Gap |
 |---|---|---|---|---|
 | Daemon transport | named pipe, DACL on current user + SYSTEM, SID in name | unix socket in data dir | unix socket in data dir | none |
-| Peer check (`origin_of`) | pid + `GetProcessTimes` | pid + `/proc/<pid>/stat` field 22 | pid + `ps -o lstart=` (1 s resolution) | G9 |
+| Peer check (`origin_of`) | pid + `GetProcessTimes` | pid + `/proc/<pid>/stat` field 22 | pid + `proc_pidinfo` start (µs) | none |
 | Pty and process ownership (`job.rs`) | Job Object, KILL_ON_JOB_CLOSE | process group per child, `waitid` | same as Linux | none |
 | Orphan adoption (`adopt_orphans`) | not needed (Job Object) | `PR_SET_CHILD_SUBREAPER` | nothing: a double-forked child escapes its session | G4 |
-| Process table (`procs.rs`) | Toolhelp, `rss` = 0, `pgid` = 0 | `ps -A -o pid,ppid,pgid,rss` | same `ps`; BSD `ps` flags need a check | G1, G2 |
-| Process names (`procs::names_of`) | Toolhelp `szExeFile` | `ps -o comm=` | `ps -o comm=` gives a full path, may hold spaces | G2 |
-| Memory level source (`governor/sample.rs`) | `GlobalMemoryStatusEx` + commit % | `/proc/meminfo` `MemAvailable` | `vm_stat` + `sysctl hw.memsize` | G3 |
+| Process table (`procs.rs`) | Toolhelp + working set per pid, `pgid` = 0 | one `ps -A -o pid,ppid,pgid,rss` | same `ps` (columns accepted by BSD `ps`) | G2 (spawn) |
+| Process names (`procs::names_of`) | Toolhelp `szExeFile` | `ps -o comm=` | `ps -o comm=`, full path with spaces parsed (`parse_ps_names`) | none |
+| Memory level source | `GlobalMemoryStatusEx` + commit % | `/proc/meminfo` `MemAvailable` | `host_statistics64` + `hw.memsize` (`governor/mac.rs`, no spawn) | none |
 | Memory events (`governor.rs` `os_source`) | `CreateMemoryResourceNotification` | PSI trigger + `poll` | none: computed deadline only (15 s cap) | G3 |
-| Pressure cause (`governor/cause.rs`) | kernel pools, handles, pool tags, CPU/IO, compression | `meminfo` slab, cache, zswap, `/proc/stat`, per-pid cpu/io | `kernel`, `system`, cpu, io all `null`; cache/compressed `null` (read `/proc`) | G5 |
+| Pressure cause (`governor/cause.rs`) | kernel pools, handles, pool tags, CPU/IO, compression | `meminfo` slab, cache, zswap, `/proc/stat`, per-pid cpu/io | `null` fields named with a reason in `breakdown.unavailable` | G5 (data) |
 | Pause / resume (`suspend.rs`) | `NtSuspendProcess` | `SIGSTOP`/`SIGCONT` per pid | same as Linux | none |
 | Indexer exclusion (`scanx.rs`) | `NOT_CONTENT_INDEXED` attribute | nothing (no indexer is in the way) | `.metadata_never_index` marker | none, by design |
 | Defender hint (`server/governor.rs:196`) | exclusion command in the FMfn notice | n/a | n/a | none |
-| Listening ports (`ports.rs`) | `GetExtendedTcpTable`, `netstat` fallback | `lsof` | `lsof` | G6 |
+| Listening ports (`ports.rs`) | `GetExtendedTcpTable`, `netstat` fallback | `/proc/net/tcp{,6}` + `/proc/<pid>/fd`, `lsof` fallback | `lsof` | none |
 | Default shell | `powershell -NoLogo` | `$SHELL -l`, else `/bin/bash` | `$SHELL -l`, else `/bin/zsh` | G7 |
 | Agent launch line | PowerShell `& 'prog' ...` | `sh -l -c 'cmd; exec $SHELL -l'` | same | none |
 | Agent CLI lookup (`agents.rs`) | `.exe .cmd .bat .com` | exec bit | exec bit | none |
@@ -35,7 +35,7 @@ experimental job.
 | Long paths | `\\?\` verbatim (`git.rs:306`) | n/a | n/a | none |
 | Line endings | `.gitattributes`: LF everywhere, CRLF for `.ps1/.bat/.cmd` | LF | LF | none |
 | App: usage (RSS, CPU, GPU) | RSS, CPU, GPU counters | RSS via `ps`; CPU, GPU `None` | RSS via `ps`; CPU, GPU `None` | G10 |
-| App: free-memory facts (`buildenv::memory`) | `GlobalMemoryStatusEx` | `/proc/meminfo` | `None`: build jobs ignore free memory | G11 |
+| Build jobs free memory (`buildenv::memory`) | `GlobalMemoryStatusEx` | `/proc/meminfo` | `governor::mac::memory_bytes` | none |
 | App: OS toast with click (`notify_session`) | WinRT toast | plugin fallback | plugin fallback | G12 |
 | App: keep awake (`stats.rs`) | `SetThreadExecutionState` | `systemd-inhibit` if present | `caffeinate` | none |
 | App: GPU preference (`gpu.rs`) | registry GPU preference | n/a | n/a | none, by design |
@@ -54,18 +54,18 @@ experimental job.
   (`job.rs`) and `win::process_stats` instead. Not a bug, but two code paths for one number.
 - **G2. macOS process table.** `procs.rs:63` and `procs.rs:164` use `ps -A -o ...`; the `comm=` column is a full path on
   macOS, possibly with spaces, and `clean` (`procs.rs:138-141`) only splits on `/` and `\\`. A `ps` per call also costs a
-  process spawn on every platform that has `/proc` or `libproc`. *Being closed by the process-table worker.*
+  process spawn on every platform that has `/proc` or `libproc`. **Partly closed (`1409f40`):** Windows rows carry the working set (one `OpenProcess` per pid per snapshot, closed at once), the `comm=` parser keeps spaces. Still one `ps` spawn per snapshot on unix.
 - **G3. macOS memory source has no event.** `governor.rs:329` `os_source` falls back to `Sampler` on macOS, so
   `has_events()` is false and the level is caught only by the deadline (`sample.rs`, `macos_now` runs `sysctl` and
-  `vm_stat` per read). `commit_pct` is `None` (`sample.rs:79`). *Being closed by the governor worker.*
+  `vm_stat` per read). `commit_pct` is `None` (`sample.rs:79`). **Closed (`3221746`):** `governor/mac.rs` reads `host_statistics64` directly (no spawn). Still no OS event on macOS: the deadline is the only wake.
 - **G4. No subreaper on macOS.** `server/origin.rs:119` `adopt_orphans` is `cfg(target_os = "linux")`. On macOS a
   process that double-forks out of its session group is no longer "descended from the daemon" (`origin.rs:111`), so
   `orphan_of_ours` misses it and the janitor/reaper may not see it.
 - **G5. Cause breakdown is `null` on macOS.** `governor/cause.rs` (`linux_cpu`/`linux_io` stubs) returns `None` for per-pid CPU and I/O off
   Linux; `meminfo()` reads `/proc/meminfo`, which does not exist on macOS, so `cache_mb` and `compressed_mb` are
   `None`; the non-Windows `CauseSource` returns `None` for `kernel` and `system` unless Linux. The panel shows nothing without saying
-  why. *Being closed by the governor worker (macOS source and the reasons for `null`).*
-- **G6. Ports need `lsof` on unix.** `crates/daemon/src/ports.rs:113`. Minimal Linux images (and containers) often
+  why. **Partly closed (`3221746`):** `breakdown.unavailable` names each `null` field and why; macOS cache/compressed/kernel data is still missing.
+- **G6. Closed (`0a93b67`) on Linux.** Was: ports need `lsof` on unix. `crates/daemon/src/ports.rs:113`. Minimal Linux images (and containers) often
   lack it; `/proc/net/tcp` plus `/proc/<pid>/fd` would avoid the dependency. The error is reported (`tool_failed`), so
   the failure is visible.
 - **G7. Shell choice is duplicated.** `crates/cli/src/ctl.rs:535` (`default_shell`) and the app each pick a shell;
@@ -73,11 +73,11 @@ experimental job.
   otherwise assume a POSIX shell. `fish`, `nu` or `csh` as `$SHELL` break `-c 'a; exec b -l'`. Windows never uses
   `pwsh` by default, only `powershell` 5.1.
 - **G8. No computer use on Linux.** `crates/daemon/src/computer.rs:505` is a stub for everything but Windows and macOS.
-- **G9. macOS peer start time has 1 s resolution.** `server/origin.rs:79` (`process_start`, `ps -o lstart=`). A pid reused within the
+- **G9. Closed (`8aa82d9`).** Was: macOS peer start time has 1 s resolution. `server/origin.rs:79` (`process_start`, `ps -o lstart=`). A pid reused within the
   same second after exit passes the pid + start check. Low risk; `libproc` `proc_pidinfo` gives microseconds.
 - **G10. App usage has no CPU or GPU off Windows.** `app/src-tauri/src/stats.rs:342-346` return `None` / empty; memory
   uses a full `ps` dump (`stats.rs:323`).
-- **G11. `buildenv::memory` is `None` on macOS.** `crates/daemon/src/buildenv.rs:223`. `CARGO_BUILD_JOBS` is then derived
+- **G11. Closed (`8aa82d9`).** Was: `buildenv::memory` is `None` on macOS. `crates/daemon/src/buildenv.rs:223`. `CARGO_BUILD_JOBS` is then derived
   from cores alone, which can over-subscribe a small Mac. The governor's `vm_stat` reader (`sample.rs`) already has the
   data.
 - **G12. No click-through OS toast off Windows.** `app/src-tauri/src/main.rs` (`notify_session`, :1035) returns `false`; the UI falls back
@@ -102,9 +102,10 @@ Checked and fine on other OS because they are behind `cfg!`/`cfg(windows)` or ar
 
 ## Closing the gaps
 
-Concurrent work, not edited here: **governor/\*** (macOS memory source and the reasons for `null` in the cause
-breakdown: G3, G5, with G11 as a consumer), **core procs/job/paths/scanx** (macOS process table and the `.exe`/path
-assumptions: G1, G2, G4), **CI matrix** (G14, the test side). Open with no owner: G6, G7, G8, G9, G10, G12, G13.
+Closed or partly closed on `ax/crossplat`: G1, G2 (`1409f40`), G3, G5 (`3221746`), G6 (`0a93b67`), G9, G11 (`8aa82d9`).
+Open: G2 (unix spawn per snapshot), G4, G5 (macOS data), G7, G8, G10, G12, G13, G14. A `paused.json` written by an
+older macOS daemon used the `ps` start hash, so after the update `recover_stale` leaves those pids alone (only after a
+daemon crash with frozen sessions; a clean shutdown resumes everything).
 
 Rule for every platform branch (from the task): a pure function with injected data and a unit test that runs on every
 OS, plus a `cfg`-gated test for the real OS call.
