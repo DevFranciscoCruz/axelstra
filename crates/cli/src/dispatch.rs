@@ -13,7 +13,7 @@ use std::process::Command;
 
 const FOOTER: &str = "
 
-You are the LEAD of this worktree: a dispatcher, not an implementer. You own the topic, but you do not do the work yourself. Run `axelstra skills get axelstration` first. Then: (1) plan the request into subtasks; (2) start one worker per independent subtask in THIS worktree with `axelstra agent . --prompt \"<self-contained task, files, acceptance criteria>\" --report-to $AXELSTRA_SESSION` (workers appear as `Tarefa N` under you; never give two workers the same files, never create more worktrees); (3) do NOT edit code and do NOT run heavy builds or test suites yourself; you only integrate the workers' commits, resolve conflicts and run the final check with `axelstra lock verify -- <cmd>`; (4) wait for their `done`/`ask`/`escalate` reports (answer asks with `axelstra reply`, unblock with `axelstra msg`) and treat reports as claims to verify; (5) when all is integrated and verified, run `axelstra done \"<report: commits, what was verified, what was not verified>\"`: that report goes to whoever dispatched you and your session closes by itself (the worktree is cleaned up once its branch is integrated). A trivial request (one file, one step) still goes to a single worker: you never execute it alone. Later requests for the same topic are sent to you.";
+You are the LEAD of this worktree: a dispatcher, not an implementer. You own the topic, but you do not do the work yourself. Run `axelstra skills get axelstration` first. Then: (1) plan the request into subtasks; (2) start one worker per independent subtask in THIS worktree with `axelstra agent . --prompt \"<self-contained task, files, acceptance criteria>\" --report-to $AXELSTRA_SESSION` (workers appear as `Tarefa N` under you; never give two workers the same files, never create more worktrees); (3) do NOT edit code and do NOT run heavy builds or test suites yourself; you only integrate the workers' commits, resolve conflicts and run the final check with `axelstra lock verify -- <cmd>`; (4) wait for their `done`/`ask`/`escalate` reports (answer asks with `axelstra reply`, unblock with `axelstra msg`) and treat reports as claims to verify; (5) when all is integrated and verified, run `axelstra done \"<report: commits, what was verified, what was not verified>\"`: that report goes to whoever dispatched you and your session closes by itself (the worktree is cleaned up once its branch is integrated). Later requests for the same topic are sent to you.";
 
 /// What a dispatched lead starts with: the request, who it is, how it finishes, and the rule against waiting silently.
 fn lead_prompt(request: &str) -> String {
@@ -23,11 +23,77 @@ fn lead_prompt(request: &str) -> String {
 /// A lead started by `dispatch` is ephemeral like a `--report-to` worker: it closes itself when it calls `axelstra done`
 /// (mode `exit`: never because it went quiet while waiting on its workers). The report goes to the dispatching session.
 fn lead_reap() -> Value {
-    let mut r = json!({"mode": "exit", "lead": true});
+    let mut r = worker_reap();
+    r["lead"] = json!(true);
+    r
+}
+
+/// A direct worker (no lead) is a normal ephemeral worker: mode `exit`, counts against the worker limit, and its
+/// `done` report goes to the dispatching session (the project main, $AXELSTRA_SESSION).
+fn worker_reap() -> Value {
+    let mut r = json!({"mode": "exit"});
     if let Some(p) = std::env::var("AXELSTRA_SESSION").ok().and_then(|s| s.trim().parse::<u32>().ok()) {
         r["parent"] = json!(p);
     }
     r
+}
+
+const WORKER_FOOTER: &str = "
+
+You are a WORKER started directly by the project main for this request: there is no lead above you, so you do the work yourself and you integrate it yourself. Steps: (1) implement the request in THIS worktree and commit in small commits; (2) merge the default branch (usually `main`; `git fetch` first when there is a remote) into your branch and resolve any conflicts; (3) run the project's check through the build lock: `axelstra lock verify -- node scripts/check.mjs` (or the check the project documents) and fix what fails; (4) run `axelstra done \"<report: commits, what was verified, what was not verified>\"`: that report goes to whoever dispatched you and your session closes by itself (the worktree is cleaned up once its branch is integrated). Later requests for the same topic start a new worker.";
+
+/// What a direct worker starts with: the request, that it integrates its own work, how it finishes, and the rule
+/// against waiting silently.
+fn worker_prompt(request: &str) -> String {
+    format!("{request}{WORKER_FOOTER} {} {}", axelstra_core::waiting::NEVER_WAIT_RULE, axelstra_daemon::prompts::BUILD_RULE)
+}
+
+/// Lead or single worker for a request that did not say. Conservative: only a request that visibly lists two or more
+/// independent items asks for a lead (two numbered or bulleted lines, or inline `(1) ... (2) ...` / `1) ... 2) ...`
+/// markers); anything ambiguous is one worker.
+fn wants_lead(request: &str) -> bool {
+    request.lines().filter(|l| is_item_line(l)).count() >= 2 || has_inline_markers(request)
+}
+
+/// `1. x`, `2) x`, `(3) x`, `- x`, `* x`, `• x`
+fn is_item_line(line: &str) -> bool {
+    let t = line.trim_start();
+    if let Some(rest) = t.strip_prefix(['-', '*', '\u{2022}']) {
+        return rest.starts_with(' ') && !rest.trim().is_empty();
+    }
+    let t = t.strip_prefix('(').unwrap_or(t);
+    let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits == 0 || digits > 2 {
+        return false;
+    }
+    t[digits..].strip_prefix(['.', ')']).is_some_and(|r| r.starts_with(' ') && !r.trim().is_empty())
+}
+
+/// both a `(1)` and a `(2)` (or a bare `1)` and `2)` that start a word) in the text
+fn has_inline_markers(text: &str) -> bool {
+    let has = |n: u32| {
+        let (paren, bare) = (format!("({n})"), format!("{n})"));
+        let before = |i: usize| text[..i].chars().next_back();
+        text.match_indices(&paren).any(|(i, _)| before(i).is_none_or(|c| !c.is_alphanumeric()))
+            || text.match_indices(&bare).any(|(i, _)| before(i).is_none_or(char::is_whitespace))
+    };
+    has(1) && has(2)
+}
+
+/// `--lead` / `--no-lead` override the heuristic.
+fn choose_lead(lead: bool, no_lead: bool, request: &str) -> bool {
+    lead || (!no_lead && wants_lead(request))
+}
+
+/// Start the agent for a request in `path`: a lead (dispatcher) or one direct worker. Prints which one.
+fn start(c: &mut Client, path: &str, agent: &str, request: &str, as_lead: bool) -> Result<u32> {
+    if as_lead {
+        println!("mode: lead (plans the request and starts workers)");
+        spawn_agent(c, Path::new(path), agent, Some(&lead_prompt(request)), Some(lead_reap()), false)
+    } else {
+        println!("mode: single worker (no lead; it integrates its own work)");
+        spawn_agent(c, Path::new(path), agent, Some(&worker_prompt(request)), Some(worker_reap()), false)
+    }
 }
 
 fn meta_path(c: &mut Client) -> Result<PathBuf> {
@@ -246,7 +312,7 @@ pub fn run(cmd: DispCmd, mut c: Client) -> Result<()> {
                 }
             }
         }
-        DispCmd::Send { worktree, request, agent } => {
+        DispCmd::Send { worktree, request, agent, lead, no_lead } => {
             let rs = rows(&mut c, &meta, None)?;
             let r = resolve(&rs, &worktree)?;
             if r.merged || r.archived {
@@ -269,20 +335,21 @@ pub fn run(cmd: DispCmd, mut c: Client) -> Result<()> {
                 paste(&mut c, id as u32, &request)?;
                 println!("sent to session {id} in {branch}");
             } else {
-                let id = spawn_agent(&mut c, Path::new(&path), &agent, Some(&lead_prompt(&request)), Some(lead_reap()), false)?;
-                println!("no agent was running in {branch}: started session {id}");
+                println!("no agent was running in {branch}");
+                let id = start(&mut c, &path, &agent, &request, choose_lead(lead, no_lead, &request))?;
+                println!("started session {id}");
             }
             remember(&mut meta, &path, None, &request);
             save(&mp, &meta)?;
         }
-        DispCmd::New { project, name, request, title, agent } => {
+        DispCmd::New { project, name, request, title, agent, lead, no_lead } => {
             let projects = c.call("project.list", json!({}))?;
             let pid = find_project_by_ref(&projects, &project)
                 .and_then(|p| p["id"].as_str().map(String::from))
                 .with_context(|| format!("no registered project matches {project:?}"))?;
             let w = c.call("worktree.create", json!({"project": pid, "name": name, "auto": true}))?;
             let path = w["path"].as_str().unwrap_or_default().to_string();
-            let id = spawn_agent(&mut c, Path::new(&path), &agent, Some(&lead_prompt(&request)), Some(lead_reap()), false)?;
+            let id = start(&mut c, &path, &agent, &request, choose_lead(lead, no_lead, &request))?;
             remember(&mut meta, &path, title.as_deref(), &request);
             save(&mp, &meta)?;
             println!("worktree {path}\nsession {id}");
@@ -323,11 +390,55 @@ mod tests {
         assert!(p.contains("axelstra agent . --prompt") && p.contains("--report-to $AXELSTRA_SESSION"));
         assert!(p.contains("do NOT edit code") && p.contains("axelstra lock verify"));
         assert!(p.contains("CARGO_BUILD_JOBS") && p.contains("cargo check"));
-        assert!(p.contains("you never execute it alone"));
+        assert!(!p.contains("you never execute it alone"));
         assert!(p.contains("commits, what was verified, what was not verified"));
     }
 
     use super::*;
+
+    #[test]
+    fn worker_prompt_does_the_work_and_integrates_it() {
+        let p = worker_prompt("fix X");
+        assert!(p.starts_with("fix X"));
+        assert!(p.contains("WORKER") && p.contains("integrate it yourself"));
+        assert!(p.contains("merge") && p.contains("axelstra lock verify -- node scripts/check.mjs"));
+        assert!(p.contains("axelstra done") && p.contains("commits, what was verified, what was not verified"));
+        assert!(p.contains("Never wait silently for the human"));
+        assert!(p.contains("CARGO_BUILD_JOBS") && p.contains("cargo check"));
+        assert!(!p.contains("dispatcher, not an implementer"));
+    }
+
+    #[test]
+    fn wants_lead_needs_visible_independent_items() {
+        assert!(!wants_lead("fix the typo in README"));
+        assert!(!wants_lead("add a filter to the orders page and make sure it is fast"));
+        assert!(!wants_lead("1. the only item"));
+        assert!(!wants_lead("call f(1) then f(2) in the loop"));
+        assert!(!wants_lead("bump to v2.1 - see notes"));
+        assert!(wants_lead("do these:\n1. fix the login\n2. add a test"));
+        assert!(wants_lead("- fix the login\n- add a test"));
+        assert!(wants_lead("  * a thing\n  * another thing"));
+        assert!(wants_lead("(1) fix the login (2) add a test"));
+        assert!(wants_lead("First 1) fix login, then 2) add a test"));
+        assert!(wants_lead("(1) fix login\n(2) add a test"));
+    }
+
+    #[test]
+    fn flags_override_the_heuristic() {
+        let many = "1. a\n2. b";
+        assert!(choose_lead(false, false, many));
+        assert!(!choose_lead(false, true, many));
+        assert!(choose_lead(true, false, "one thing"));
+        assert!(!choose_lead(false, false, "one thing"));
+    }
+
+    #[test]
+    fn a_direct_worker_reaps_like_a_lead_but_is_not_one() {
+        assert_eq!(lead_reap()["lead"], json!(true));
+        assert!(worker_reap().get("lead").is_none());
+        assert_eq!(worker_reap()["mode"], "exit");
+        assert_eq!(lead_reap()["mode"], "exit");
+    }
 
     #[test]
     fn areas_group_files_by_top_folders() {

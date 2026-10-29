@@ -383,14 +383,23 @@ enum DispCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Send a request to the agent of a worktree (path, branch or title); starts one if none is running
+    /// Send a request to the agent of a worktree (path, branch or title); starts one if none is running.
+    /// A new agent is one direct worker unless the request lists 2+ independent items (or `--lead`)
     Send {
         worktree: String,
         request: String,
         #[arg(long, default_value = "claude")]
         agent: String,
+        /// start a lead (dispatcher that plans subtasks and starts workers) even for a simple request
+        #[arg(long, conflicts_with = "no_lead")]
+        lead: bool,
+        /// start one direct worker (no lead) even if the request lists several items
+        #[arg(long)]
+        no_lead: bool,
     },
-    /// New topic: create a worktree and start an agent in it with the request
+    /// New topic: create a worktree and start an agent in it with the request. Default: one direct worker that
+    /// integrates its own work; a lead when the request lists 2+ independent items (numbered, bulleted or
+    /// "(1) ... (2) ..."). `--lead` / `--no-lead` force the choice
     New {
         project: String,
         name: String,
@@ -399,6 +408,12 @@ enum DispCmd {
         title: Option<String>,
         #[arg(long, default_value = "claude")]
         agent: String,
+        /// start a lead (dispatcher that plans subtasks and starts workers) even for a simple request
+        #[arg(long, conflicts_with = "no_lead")]
+        lead: bool,
+        /// start one direct worker (no lead) even if the request lists several items
+        #[arg(long)]
+        no_lead: bool,
     },
     /// Stop sending requests to a worktree (its work is done)
     Archive { worktree: String },
