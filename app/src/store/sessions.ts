@@ -1,4 +1,4 @@
-import { createMemo, createRoot, createSignal } from "solid-js";
+import { batch, createMemo, createRoot, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { coded } from "../msg";
 import { DispatchMeta, SessionExit, SessionInfo, callBg, flowTasks, listSessions, onDaemonEvent } from "../api";
@@ -389,17 +389,21 @@ export const selectedWorktree = wt;
 export const selectWorktree = (path: string | null) => guarded(() => doSelect(path));
 const doSelect = (path: string | null) => {
   navEpoch++;
-  setWt(path);
-  if (path)
-    setAttention((cur) => {
-      const n = new Set(cur);
-      n.delete(norm(path));
-      return n;
-    });
-  writeString("axelstra.worktree", path ?? ""); // "" = none selected
-  setActive(null);
-  armAutoPick();
-  setSplitSession(null);
-  showView();
-  setChanges(null);
+  // one batch, armed first: the effect that seats a tab must see the new worktree together with an armed pick, never the new
+  // worktree with a pick an earlier empty settle already used up (then nothing would seat a tab and no terminal would mount)
+  batch(() => {
+    setActive(null);
+    armAutoPick();
+    setWt(path);
+    if (path)
+      setAttention((cur) => {
+        const n = new Set(cur);
+        n.delete(norm(path));
+        return n;
+      });
+    writeString("axelstra.worktree", path ?? ""); // "" = none selected
+    setSplitSession(null);
+    showView();
+    setChanges(null);
+  });
 };
