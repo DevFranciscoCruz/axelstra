@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { LOGO_TRIES, createLogoLoader, type LogoAnswer } from "./logo";
-import { COSMETIC_TIMEOUT_MS, timeoutFor } from "./api";
+import { COSMETIC_TIMEOUT_MS, policyLimit } from "./api";
 
 const URL = "data:image/png;base64,AAAA";
 
@@ -53,8 +53,8 @@ describe("project logo fallback", () => {
   });
 
   it("project.logo has a short client timeout", () => {
-    expect(timeoutFor("project.logo")).toBe(COSMETIC_TIMEOUT_MS);
+    expect(policyLimit("project.logo")).toBe(COSMETIC_TIMEOUT_MS);
     expect(COSMETIC_TIMEOUT_MS).toBeLessThanOrEqual(6_000);
-    expect(timeoutFor("project.list")).toBeGreaterThan(COSMETIC_TIMEOUT_MS);
+    expect(policyLimit("project.list")).toBeNull();
   });
 });

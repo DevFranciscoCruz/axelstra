@@ -91,7 +91,26 @@ fn hello_works_through_login_noise_and_a_silent_call_kills_the_child() {
     assert!(format!("{err:#}").contains("hung helper started"), "stderr of the child missing: {err:#}");
     assert!(wait_dead(pid), "the child outlived its call timeout");
     // and the connection is not reused
-    assert!(c.call("ping", json!({})).unwrap_err().downcast_ref::<CallTimeout>().is_some());
+    let again = c.call("ping", json!({})).unwrap_err();
+    assert_eq!(axelstra_core::msg::find(&again).map(|c| c.code.as_str()), Some("rpc.connection_closed"), "{again:#}");
+}
+
+#[test]
+fn the_process_behind_a_pending_call_dying_fails_it_at_once() {
+    let mut c = Client::connect_remote(&helper_spec("hung"), Duration::from_secs(20)).unwrap();
+    assert_eq!(c.timeout, None, "no limit: only the process ending can end this call");
+    let killer = c.try_clone().unwrap();
+    let t0 = Instant::now();
+    let k = std::thread::spawn(move || {
+        // the call below is pending (the helper never answers); the process then goes away
+        std::thread::sleep(Duration::from_millis(500));
+        killer.kill_child();
+    });
+    let err = c.call("git.log", json!({})).unwrap_err();
+    k.join().unwrap();
+    assert!(t0.elapsed() < Duration::from_secs(20), "took {:?}", t0.elapsed());
+    assert!(err.downcast_ref::<CallTimeout>().is_none(), "a dead process is not a timeout: {err:#}");
+    assert_eq!(axelstra_core::msg::find(&err).map(|c| c.code.as_str()), Some("rpc.connection_closed"), "{err:#}");
 }
 
 #[test]

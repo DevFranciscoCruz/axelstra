@@ -295,6 +295,10 @@ pub async fn serve_with_store(pipe: String, token: String, store: std::path::Pat
     if let Err(e) = crate::projects::migrate_marks(&reg.store) {
         eprintln!("janitor: mark migration failed: {e:#}");
     }
+    // keeps the indexers off the existing worktree folders (background thread, once)
+    crate::scanx::spawn_sweep(
+        crate::projects::load(&reg.store).iter().filter_map(|p| crate::scanx::root_of(std::path::Path::new(&p.path))).collect(),
+    );
     // the daemon starting is one of the moments to look for merged worktrees
     reg.janitor.bump();
     spawn_janitor(reg.clone());

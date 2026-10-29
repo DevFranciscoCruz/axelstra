@@ -506,7 +506,6 @@ export const enP: Widen<typeof ptP> = {
     withCiTip: "Asks GitHub for the checks status (may take a while)",
     copy: "Copy markdown",
     copied: "Timeline copied.",
-    timedOut: (s: number) => `No answer after ${s} s. The daemon may be busy reading the agent logs.`,
     nothing: "Pick a worktree.",
     empty: "No events in this worktree.",
     events: "Events",
