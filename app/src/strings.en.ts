@@ -45,6 +45,32 @@ export const enS: Widen<typeof ptS> = {
   stallOff: "Off",
   stallMin: (n: number) => `${n} min`,
 
+  build: {
+    title: "Build cost",
+    note: "Limits the cost of building with several agents on one machine. It applies to sessions started after you change it; sessions already open keep the environment they started with.",
+    enabled: "Prepare the build environment of sessions",
+    jobs: "Parallel cargo jobs",
+    jobsManual: "Manual",
+    jobsHint: (max: string) =>
+      `A whole number from 1 to ${max}. Automatic uses half the cores, limited by free memory.`,
+    sccache: "Use sccache when it is installed",
+    sccacheHint: "Only used if sccache is on the PATH; you do not need to install it.",
+    sharedTarget: "Share the target folder between the project's worktrees",
+    sharedTargetWarn:
+      "Careful: cargo locks the build directory, so builds of the project wait for each other across all worktrees; each worktree has a different path, so the project's own crates still rebuild (only dependencies are shared); and worktrees on different profiles or features thrash each other's artifacts. Off by default.",
+    sharedJsCache: "Share the JS package manager's download cache",
+    sharedJsCacheHint:
+      "Only points the download cache at a common folder; each worktree's node_modules does not change.",
+    budget: "Memory for simultaneous builds",
+    budgetManual: "Manual (MB)",
+    budgetHint: (max: string) =>
+      `Budget of axelstra lock, in MB, from 1 to ${max}. Automatic uses physical memory minus 2 GB.`,
+    margin: "Free memory to keep after admitting a build",
+    marginHint: (max: string) =>
+      `In MB, from 1 to ${max}. Automatic is 2048 MB: if available memory falls short, the build waits for a release.`,
+    invalid: "Invalid value.",
+  },
+
   shell: "Terminal shell",
   shellNote: "Applies to new terminals and agents. “Automatic” uses the system's default shell.",
   shells: {

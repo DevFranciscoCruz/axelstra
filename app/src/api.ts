@@ -138,16 +138,22 @@ import { L } from "./strings.logic";
 export type Terse = "off" | "short" | "tiny";
 export type NotifyMode = "all" | "waiting" | "off";
 export type ShellChoice = "auto" | "pwsh" | "powershell" | "bash" | "wsl" | "cmd";
+/** `build` of settings.json: how sessions started afterwards compile (`null` = derived by the daemon) */
+export type BuildSettings = {
+  enabled: boolean; jobs: number | null; sccache: "auto" | "off"; shared_target: boolean; shared_js_cache: boolean; lock_budget_mb: number | null; lock_margin_mb: number | null;
+};
 export type Settings = {
   terse: Terse; rules: string | null; pm: string | null; installed: string[]; auto_install: boolean;
   /** absent on a daemon from before these keys existed */
   notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice; stall_minutes?: number;
+  /** absent on a daemon from before the build settings */
+  build?: BuildSettings;
   /** UI choices the webview keeps (pins, folded groups, notifications...): `axelstra.*` key -> saved string */
   ui?: Record<string, string>;
   /** token limits per day / week; absent on a daemon from before budgets */
   budgets?: Budgets;
 };
-export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice; stall_minutes?: number; budgets?: Budgets };
+export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice; stall_minutes?: number; budgets?: Budgets; build?: BuildSettings };
 /** `terse` asks for the rules of that level (a project's own choice) instead of the saved one */
 export const getSettings = (terse?: Terse) => call<Settings>("settings.get", terse ? { terse } : {});
 /** `ui`: UI state to store (`null` removes a key), sent by uiState.ts only, so it is not part of what the Settings screen merges */

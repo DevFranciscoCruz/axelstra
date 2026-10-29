@@ -35,3 +35,18 @@ export const diagnosticRows = (d: Diagnostics | null | undefined): { label: stri
     { label: S.diagLag, value: lag },
   ];
 };
+
+export const MAX_BUILD_JOBS = 256;
+export const MAX_BUILD_MB = 4_194_304;
+/** Defaults offered when the user switches a build number from automatic to manual. */
+export const DEFAULT_BUILD_JOBS = 4;
+export const DEFAULT_BUILD_MB = 8192;
+export const DEFAULT_BUILD_MARGIN_MB = 2048;
+
+/** A whole number of 1..max typed in a build field (jobs, lock memory), or null when it is empty or not valid. */
+export const parseBuildNumber = (text: string, max: number): number | null => {
+  const t = text.trim();
+  if (!/^\d{1,9}$/.test(t)) return null;
+  const n = Number(t);
+  return n >= 1 && n <= max ? n : null;
+};
