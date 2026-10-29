@@ -916,7 +916,8 @@ pub(super) fn stall_tick(reg: &Arc<Registry>) -> Option<Duration> {
         soonest(Some(threshold + 20));
     }
     // one message per parent and pass, however many of its children stalled together
-    let mut by_parent: Vec<(u32, Vec<(String, u32, Vec<String>)>)> = Vec::new();
+    type Child = (String, u32, Vec<String>);
+    let mut by_parent: Vec<(u32, Vec<Child>)> = Vec::new();
     for (id, label, parent, screen) in fresh {
         let Some(pid) = parent.filter(|p| reg.get(*p).is_some()) else { continue };
         let item = (label.unwrap_or_else(|| format!("session {id}")), id, screen);
