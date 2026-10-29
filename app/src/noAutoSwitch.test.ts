@@ -40,7 +40,16 @@ const poll = async (store: Awaited<ReturnType<typeof load>>["store"], list: Sess
   await store.refreshSessions();
 };
 
-beforeEach(() => invoke.mockClear());
+beforeEach(() => {
+  invoke.mockClear();
+  // selectWorktree persists the choice and a fresh module load restores it: never let one test seed the next
+  try {
+    localStorage.clear(); // some runtimes expose no usable localStorage: then nothing leaks either
+  } catch {
+    /* no storage */
+  }
+  now.list = [];
+});
 
 describe("only the user changes the active session", () => {
   it("restore: seats the worktree's agent once the first list arrived, not before", async () => {
