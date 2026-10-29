@@ -17,7 +17,7 @@ if (-not $PSBoundParameters.ContainsKey("Jobs")) {
     # A release link with lto is the heavy part, so the floor here is 2 (a release build with one job takes too long), not 1.
     $freeBytes = [uint64](Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB
     $byCpu = [Math]::Max(1, [int]([Environment]::ProcessorCount / 2))
-    $byMem = [int][Math]::Floor([Math]::Max(0, [double]$freeBytes - 2GB) / 1.5GB)
+    $byMem = [int][Math]::Floor([Math]::Max(0.0, [double]$freeBytes - 2GB) / 1.5GB)
     $Jobs = [Math]::Max(2, [Math]::Min($byCpu, $byMem))
     Write-Host "Jobs: $Jobs (derived from $([Environment]::ProcessorCount) logical cores and $([Math]::Round($freeBytes / 1GB, 1)) GB free memory; -Jobs overrides)"
 }
