@@ -16,6 +16,7 @@ pub const WT_DIR: &str = ".axelstra-wt";
 pub const MARKER: &str = ".metadata_never_index";
 pub const NOT_CONTENT_INDEXED: u32 = 0x2000;
 const ATTR_NORMAL: u32 = 0x80;
+#[cfg(windows)]
 const ATTR_REPARSE: u32 = 0x400;
 /// Attribute changes made for one tree before the walk stops (it goes on at the next start).
 pub const MAX_SET: usize = 50_000;
@@ -382,23 +383,24 @@ mod tests {
     #[test]
     fn windows_flags_the_root_and_existing_trees_but_not_links_and_is_idempotent() {
         let fs = FakeFs::default();
-        let root = r"C:\wt\.axelstra-wt";
+        // forward slashes: `Path::parent` only splits on them on every platform
+        let root = "/wt/.axelstra-wt";
         fs.dir(root, 0x10);
-        fs.dir(&format!("{root}\\old"), 0x10);
-        fs.dir(&format!("{root}\\old\\node_modules"), 0x10);
-        fs.file(&format!("{root}\\old\\node_modules\\a.js"), 0x21);
-        fs.link(&format!("{root}\\old\\junction"));
-        fs.dir(&format!("{root}\\fresh"), 0x10 | NOT_CONTENT_INDEXED);
-        fs.file(&format!("{root}\\fresh\\unvisited.txt"), 0x20);
+        fs.dir(&format!("{root}/old"), 0x10);
+        fs.dir(&format!("{root}/old/node_modules"), 0x10);
+        fs.file(&format!("{root}/old/node_modules/a.js"), 0x21);
+        fs.link(&format!("{root}/old/junction"));
+        fs.dir(&format!("{root}/fresh"), 0x10 | NOT_CONTENT_INDEXED);
+        fs.file(&format!("{root}/fresh/unvisited.txt"), 0x20);
         let r = sweep_root(&fs, Os::Windows, Path::new(root), 100, 100);
         assert_eq!(r.failed, 0);
         assert!(!r.capped);
-        for p in [root, r"C:\wt\.axelstra-wt\old", r"C:\wt\.axelstra-wt\old\node_modules"] {
+        for p in [root, "/wt/.axelstra-wt/old", "/wt/.axelstra-wt/old/node_modules"] {
             assert_ne!(fs.attr(p) & NOT_CONTENT_INDEXED, 0, "{p}");
         }
-        assert_eq!(fs.attr(r"C:\wt\.axelstra-wt\old\node_modules\a.js"), 0x2021, "other bits kept");
-        assert_eq!(fs.attr(r"C:\wt\.axelstra-wt\old\junction") & NOT_CONTENT_INDEXED, 0, "a link is left alone");
-        assert_eq!(fs.attr(r"C:\wt\.axelstra-wt\fresh\unvisited.txt"), 0x20, "a flagged worktree counts as done");
+        assert_eq!(fs.attr("/wt/.axelstra-wt/old/node_modules/a.js"), 0x2021, "other bits kept");
+        assert_eq!(fs.attr("/wt/.axelstra-wt/old/junction") & NOT_CONTENT_INDEXED, 0, "a link is left alone");
+        assert_eq!(fs.attr("/wt/.axelstra-wt/fresh/unvisited.txt"), 0x20, "a flagged worktree counts as done");
         let sets = fs.sets.lock().unwrap().len();
         let again = sweep_root(&fs, Os::Windows, Path::new(root), 100, 100);
         assert_eq!(again.changed, 0);
@@ -408,18 +410,18 @@ mod tests {
     #[test]
     fn a_capped_walk_leaves_the_worktree_unflagged_so_the_next_start_continues() {
         let fs = FakeFs::default();
-        let root = r"C:\wt\.axelstra-wt";
+        let root = "/wt/.axelstra-wt";
         fs.dir(root, 0x10);
-        fs.dir(&format!("{root}\\big"), 0x10);
+        fs.dir(&format!("{root}/big"), 0x10);
         for i in 0..10 {
-            fs.file(&format!("{root}\\big\\f{i}"), 0x20);
+            fs.file(&format!("{root}/big/f{i}"), 0x20);
         }
         let r = sweep_root(&fs, Os::Windows, Path::new(root), 4, 1000);
         assert!(r.capped);
-        assert_eq!(fs.attr(r"C:\wt\.axelstra-wt\big") & NOT_CONTENT_INDEXED, 0);
+        assert_eq!(fs.attr("/wt/.axelstra-wt/big") & NOT_CONTENT_INDEXED, 0);
         let r = sweep_root(&fs, Os::Windows, Path::new(root), 100, 1000);
         assert!(!r.capped);
-        assert_ne!(fs.attr(r"C:\wt\.axelstra-wt\big") & NOT_CONTENT_INDEXED, 0);
+        assert_ne!(fs.attr("/wt/.axelstra-wt/big") & NOT_CONTENT_INDEXED, 0);
         let again = sweep_root(&fs, Os::Windows, Path::new(root), 100, 1000);
         assert_eq!(again.changed, 0);
     }
