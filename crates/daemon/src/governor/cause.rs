@@ -289,6 +289,7 @@ pub fn breakdown(i: &Inputs) -> Value {
     } else {
         None
     };
+    let handles_present = handles.is_some();
 
     json!({
         "kernel": i.kernel.map(|k| json!({
@@ -307,7 +308,60 @@ pub fn breakdown(i: &Inputs) -> Value {
         "system": i.system,
         "top_cpu": i.top.as_ref().map(|t| &t.0),
         "top_io": i.top.as_ref().map(|t| &t.1),
+        "unavailable": unavailable(std::env::consts::OS, &Present {
+            kernel: i.kernel.is_some(),
+            pool_tags: i.pool_tags.is_some(),
+            cache: i.cache_mb.is_some(),
+            compressed: i.compressed_mb.is_some(),
+            handles: handles_present,
+        }),
     })
+}
+
+/// Which `breakdown` fields hold a value.
+pub struct Present {
+    pub kernel: bool,
+    pub pool_tags: bool,
+    pub cache: bool,
+    pub compressed: bool,
+    pub handles: bool,
+}
+
+/// Reason code for a `null` field of the breakdown, so a reader can tell "this OS has no such number" from "should be
+/// here but could not be read" from "left out on purpose":
+/// `unsupported_os` (no source on this OS), `read_failed` (the OS has it, the read gave nothing),
+/// `not_needed` (`handles`: only listed when the kernel is high or counts are big).
+pub const UNSUPPORTED_OS: &str = "unsupported_os";
+pub const READ_FAILED: &str = "read_failed";
+pub const NOT_NEEDED: &str = "not_needed";
+
+/// Whether `os` (`std::env::consts::OS`) has a source for `field`.
+fn supported(os: &str, field: &str) -> bool {
+    matches!(
+        (field, os),
+        ("kernel" | "compressed_mb" | "cache_mb", "windows" | "linux")
+            | ("cache_mb" | "compressed_mb", "macos")
+            | ("pool_tags" | "handles", "windows")
+    )
+}
+
+/// `breakdown.unavailable`: `{field: reason}` for each null field only (`{}` when all are present). Pure; additive.
+pub fn unavailable(os: &str, p: &Present) -> Value {
+    let mut m = serde_json::Map::new();
+    for (field, there) in
+        [("kernel", p.kernel), ("pool_tags", p.pool_tags), ("cache_mb", p.cache), ("compressed_mb", p.compressed), ("handles", p.handles)]
+    {
+        if there {
+            continue;
+        }
+        let reason = match (supported(os, field), field) {
+            (false, _) => UNSUPPORTED_OS,
+            (true, "handles") => NOT_NEEDED,
+            (true, _) => READ_FAILED,
+        };
+        m.insert(field.to_string(), json!(reason));
+    }
+    Value::Object(m)
 }
 
 /// What this daemon itself adds to the kernel pools: children started (each takes a security token and file objects) and
@@ -705,11 +759,17 @@ impl CauseSource for OsCause {
     }
 
     fn cache_mb(&self) -> Option<u64> {
+        if cfg!(target_os = "macos") {
+            return super::mac::read_counts().map(|(c, page, _)| super::mac::cache_mb(&c, page));
+        }
         let m = meminfo()?;
         Some(m.get("Cached")? + m.get("Buffers").copied().unwrap_or(0))
     }
 
     fn compressed_mb(&self, _rows: &[ProcRow]) -> Option<u64> {
+        if cfg!(target_os = "macos") {
+            return super::mac::read_counts().map(|(c, page, _)| super::mac::compressed_mb(&c, page));
+        }
         meminfo()?.get("Zswapped").copied()
     }
 
@@ -1166,6 +1226,26 @@ pgmajfault 77
         assert_eq!((j["tagged_mb"].as_u64(), j["sem_etiqueta_mb"].as_u64(), j["partial"].as_bool()), (Some(2055), Some(345), Some(true)));
         // no counters: the rest is unknown, not zero
         assert!(pool_tags_json(&tags, None)["sem_etiqueta_mb"].is_null());
+    }
+
+    #[test]
+    fn unavailable_names_why_per_os() {
+        let none = Present { kernel: false, pool_tags: false, cache: false, compressed: false, handles: false };
+        let mac = unavailable("macos", &none);
+        assert_eq!(mac["kernel"], UNSUPPORTED_OS);
+        assert_eq!(mac["pool_tags"], UNSUPPORTED_OS);
+        assert_eq!(mac["handles"], UNSUPPORTED_OS);
+        assert_eq!(mac["compressed_mb"], READ_FAILED);
+        let lin = unavailable("linux", &none);
+        assert_eq!(lin["pool_tags"], UNSUPPORTED_OS);
+        assert_eq!(lin["handles"], UNSUPPORTED_OS);
+        assert_eq!(lin["kernel"], READ_FAILED);
+        let win = unavailable("windows", &none);
+        assert_eq!(win["handles"], NOT_NEEDED);
+        assert_eq!(win["pool_tags"], READ_FAILED);
+        let all = Present { kernel: true, pool_tags: true, cache: true, compressed: true, handles: true };
+        assert_eq!(unavailable("windows", &all), json!({}));
+        assert_eq!(unavailable("freebsd", &none)["cache_mb"], UNSUPPORTED_OS);
     }
 
     #[test]
