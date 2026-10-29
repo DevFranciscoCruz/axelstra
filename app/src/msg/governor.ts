@@ -10,7 +10,8 @@ export const pt = {
 
 export const en: Widen<typeof pt> = {
   "governor.bad_config": "Invalid resource governor settings: {detail}",
-  "governor.admission_denied": "Not started: memory is {level} ({free_mb} MB free). Agents wait until it recovers; workers are limited to {max}.",
+  "governor.admission_denied":
+    "Not started: memory is {level} ({free_mb} MB free). Agents wait until it recovers; workers are limited to {max}.",
   "governor.pause_failed": "Session {id} could not be paused (already paused, or nothing to stop).",
 };
 

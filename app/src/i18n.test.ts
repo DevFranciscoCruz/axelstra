@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { LOCALES, count, dict, fmtNumber, leafPaths, locale, plural, setLocale } from "./i18n";
 import { ptB } from "./strings.budget";
+import { ptG } from "./strings.memory";
+import { enG } from "./strings.memory.en";
 import { enB } from "./strings.budget.en";
 import { ptP } from "./strings.panels";
 import { enP } from "./strings.panels.en";
@@ -68,13 +70,14 @@ describe("locale-aware plurals and numbers", () => {
 
 /** words that are the same in every language (names, protocol terms) and so legitimately equal in both dictionaries */
 const SAME =
-  /^(?:|[\s·/.:;,…()[\]{}<>+\-–—%|$#@*&=^~"'`«»\d]+|git|gh|GitHub|PR|PRs|Docker|Kanban|Compose|CPU|ctx|Claude|Codex|Gemini|Axelstra|daemon|WSL|CMD|Bash|PowerShell|npm|pnpm|yarn|bun|token|tokens|Terminal|Shell|Worktrees?|Hosts?|PowerShell 7|Windows PowerShell|Claude Code|Gemini CLI|branch|commit|merge|push|pull|rebase|stash|diff|SSH|URL|HTTPS?|JSON|YAML|OK|Ok|ok|n\/a|Editor|Volumes|Info|Logs|Total|Checks|CI|base|bin|main|COMMITS|Auto-merge|Compose down|Commit \(Ctrl\+Enter\))$/i;
+  /^(?:|[\s·/.:;,…()[\]{}<>+\-–—%|$#@*&=^~"'`«»\d]+|git|gh|GitHub|PR|PRs|Docker|Kanban|Compose|CPU|ctx|Claude|Codex|Gemini|Axelstra|daemon|WSL|CMD|Bash|PowerShell|npm|pnpm|yarn|bun|token|tokens|Terminal|Shell|Worktrees?|Hosts?|PowerShell 7|Windows PowerShell|Claude Code|Gemini CLI|branch|commit|merge|push|pull|rebase|stash|diff|SSH|URL|HTTPS?|JSON|YAML|OK|Ok|ok|n\/a|Editor|Volumes|Info|Logs|Total|normal|manual|Checks|CI|base|bin|main|COMMITS|Auto-merge|Compose down|Commit \(Ctrl\+Enter\))$/i;
 
 type Pair = [string, object, object];
 const pairs: Pair[] = [
   ["S", ptS, enS],
   ["P", ptP, enP],
   ["B", ptB, enB],
+  ["G", ptG, enG],
   ["R", ptR, enR],
   ["W", ptW, enW],
   ["WS", ptWS, enWS],

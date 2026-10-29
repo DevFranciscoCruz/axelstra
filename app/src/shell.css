@@ -25,3 +25,52 @@
   height: 14px;
   line-height: 1;
 }
+
+/* resource governor: paused session dot, status bar chip, memory panel */
+.dot.paused {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgba(var(--warn-rgb), 0.25);
+  animation: none;
+}
+.mem-high {
+  color: var(--warn);
+}
+.mem-critical {
+  color: var(--danger);
+  font-weight: 600;
+}
+.mem-panel {
+  min-width: 280px;
+  padding: 4px 6px;
+}
+.mem-panel .mem-sum {
+  padding: 2px 4px 6px;
+}
+.mem-panel .mem-sum.mem-high {
+  color: var(--warn);
+}
+.mem-panel .mem-sum.mem-critical {
+  color: var(--danger);
+}
+.mem-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+}
+.mem-row .mem-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mem-row .mem-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.mem-set-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}

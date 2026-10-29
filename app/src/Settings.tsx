@@ -24,6 +24,7 @@ import { AboutSection } from "./About";
 import { HooksSection } from "./HooksSection";
 import { WorkspaceSection } from "./WorkspaceSection";
 import { HostsSection } from "./HostsSection";
+import { MemorySection } from "./MemoryPanel";
 import { Modal } from "./Modal";
 import { S } from "./strings";
 import { classifySettingsError, diagnosticRows, errorText } from "./settingsLogic";
@@ -360,6 +361,7 @@ export function Settings() {
                 budgets={cfg().budgets}
                 onSave={(b) => void save({ budgets: b }).then(() => budgetCheck().then(setBudgetRows, () => undefined))}
               />
+              <MemorySection />
               <HostsSection />
               <WorkspaceSection />
 

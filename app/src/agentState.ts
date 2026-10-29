@@ -1,12 +1,23 @@
 import type { SessionInfo } from "./api";
 import { fmtDate } from "./i18n";
 import { sessionState } from "./store";
+import { G } from "./strings.memory";
 import { L } from "./strings.logic";
 import { ago } from "./time";
 
 /** What a status dot shows besides its colour: a shape, and the words for the tooltip and screen readers. */
 export type DotState =
-  "working" | "idle" | "waiting" | "awaiting" | "stalled" | "done" | "attention" | "queued" | "running" | "none";
+  | "working"
+  | "idle"
+  | "waiting"
+  | "awaiting"
+  | "stalled"
+  | "done"
+  | "attention"
+  | "queued"
+  | "paused"
+  | "running"
+  | "none";
 
 export const DOT_LABEL: Record<DotState, string> = L.dot;
 
@@ -20,6 +31,7 @@ export const DOT_GLYPH: Record<DotState, string> = {
   stalled: "M2 1.5h4M2 6.5h4M2.5 1.5l3 5M5.5 1.5l-3 5",
   attention: "M4 1.6v3M4 6.2v.01",
   queued: "M4 1.8v2.4l1.3.9",
+  paused: "M2.6 1.8v4.4M5.4 1.8v4.4",
   running: "M2 2.5l2 1.5-2 1.5M4.8 6h1.4",
   none: "",
 };
@@ -28,6 +40,8 @@ export const DOT_GLYPH: Record<DotState, string> = {
 export const dotOfSession = (s: SessionInfo): DotState => {
   const st = sessionState(s);
   if (s.meta?.kind !== "agent") return s.running ? "running" : "done";
+  // frozen by the governor or by hand: neither working nor idle, whatever the screen did last
+  if (s.running && s.paused) return "paused";
   // an agent that said it only waits for something external is never stalled, whatever the daemon flags
   if (s.running && s.stalled && !s.awaiting) return "stalled";
   if (st === "waiting") return "waiting";
@@ -35,8 +49,12 @@ export const dotOfSession = (s: SessionInfo): DotState => {
   return st === "working" ? "working" : st === "done" ? "done" : "idle";
 };
 
-/** Tooltip of an "awaiting" dot: the reason, how long ago it began and the deadline, if any. Null for any other state. */
+/** Tooltip of a "paused" dot (why, and for how long) or of an "awaiting" dot (the reason, how long ago it began and the deadline, if any). Null for any other state. */
 export const dotTip = (s: SessionInfo, now = Date.now()): string | null => {
+  if (dotOfSession(s) === "paused" && s.paused) {
+    const what = s.paused.reason === "memory" ? G.dot.memory : G.dot.manual;
+    return G.dot.since(what, ago((now - s.paused.since) / 1000));
+  }
   const a = s.awaiting;
   if (!a || dotOfSession(s) !== "awaiting") return null;
   return L.awaitingTip(a.reason, ago((now - a.since) / 1000), a.until == null ? null : fmtDate(a.until));

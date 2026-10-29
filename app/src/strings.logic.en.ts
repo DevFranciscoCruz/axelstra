@@ -114,6 +114,7 @@ export const enL: Widen<typeof ptL> = {
     stalled: "Stalled: went quiet without reporting, needs attention",
     attention: "Stopped: needs attention",
     queued: "Queued: the plan has not reached this task yet",
+    paused: "Paused",
     running: "Terminal running",
     none: "",
   },
