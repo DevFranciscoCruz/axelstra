@@ -376,3 +376,101 @@ fn an_awaiting_agent_hibernates_by_itself_after_the_configured_quiet_time() {
     let _ = c.call("session.kill", json!({"id": id}));
     let _ = c.call("session.kill", json!({"id": calm}));
 }
+
+/// A second connection to the same daemon (a blocked `session.spawn` holds its own).
+fn another(pipe: &str) -> Client {
+    Client::connect(pipe, &"h".repeat(32)).unwrap()
+}
+
+fn terminal_worker(c: &mut Client, wt: &Path, queue: bool, ticket: Option<u64>) -> anyhow::Result<Value> {
+    let mut p = json!({"program": if cfg!(windows) { "cmd" } else { "sh" }, "worker": true, "cwd": wt.to_string_lossy(), "meta": {"kind": "terminal"}});
+    if queue {
+        p["queue"] = json!(true);
+    }
+    if let Some(t) = ticket {
+        p["ticket"] = json!(t);
+    }
+    c.call("session.spawn", p)
+}
+
+#[test]
+fn spawns_that_wait_for_a_worker_slot_go_first_in_first_out() {
+    let root = temp("fifo");
+    let wt = root.join("wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    let (mut c, pipe) = start_at(&root, "fifo");
+    c.call("orch.limits", json!({"max_workers": 1})).unwrap();
+    let a = terminal_worker(&mut c, &wt, false, None).unwrap()["id"].as_u64().unwrap();
+    // without `queue` a full limit is still a refusal
+    assert_eq!(code_of(&terminal_worker(&mut c, &wt, false, None).unwrap_err()), "session.worker_limit");
+    let (tx, rx) = std::sync::mpsc::channel::<(&'static str, u64)>();
+    let mut handles = Vec::new();
+    for name in ["first", "second", "third"] {
+        let (pipe, wt, tx) = (pipe.clone(), wt.clone(), tx.clone());
+        handles.push(std::thread::spawn(move || {
+            let mut d = another(&pipe);
+            let r = terminal_worker(&mut d, &wt, true, None).unwrap();
+            assert!(r["queued"].is_null(), "{r}");
+            tx.send((name, r["id"].as_u64().unwrap())).unwrap();
+        }));
+        // the next one arrives later: the order of arrival is the order of the line
+        std::thread::sleep(Duration::from_millis(400));
+    }
+    assert!(rx.try_recv().is_err(), "nobody starts while the slot is taken");
+    let mut order = Vec::new();
+    let mut live = a;
+    for _ in 0..3 {
+        c.call("session.kill", json!({"id": live})).unwrap();
+        let (name, id) = rx.recv_timeout(Duration::from_secs(30)).expect("the next in line starts when the slot frees");
+        order.push(name);
+        live = id;
+        // only one at a time: the others are still waiting
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(rx.try_recv().is_err(), "one slot, one start");
+    }
+    assert_eq!(order, ["first", "second", "third"]);
+    for h in handles {
+        h.join().unwrap();
+    }
+    let _ = c.call("session.kill", json!({"id": live}));
+}
+
+#[test]
+fn a_queued_spawn_that_comes_back_with_its_ticket_keeps_its_place() {
+    let root = temp("ticket");
+    let wt = root.join("wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    let mut c = start(&root, "ticket");
+    c.call("orch.limits", json!({"max_workers": 1})).unwrap();
+    let a = terminal_worker(&mut c, &wt, false, None).unwrap()["id"].as_u64().unwrap();
+    // a refusal that is not a wait (no `queue`) leaves no ticket behind
+    assert!(terminal_worker(&mut c, &wt, false, None).is_err());
+    c.call("session.kill", json!({"id": a})).unwrap();
+    // the slot is free: a queued spawn goes straight through, with no ticket left
+    let r = terminal_worker(&mut c, &wt, true, None).unwrap();
+    assert!(r["queued"].is_null() && r["id"].is_u64(), "{r}");
+    let _ = c.call("session.kill", json!({"id": r["id"]}));
+}
+
+#[test]
+fn at_critical_an_idle_agent_is_hibernated_before_anything_is_paused() {
+    let root = temp("crit");
+    let wt = root.join("wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    let mut c = start(&root, "crit");
+    let id = agent(&mut c, &wt, &key(70), json!({}), json!({}));
+    // a lead would be fine too, but a plain agent shows the order: first agent of a worktree is its lead
+    ready(&mut c, id);
+    std::thread::sleep(Duration::from_millis(900));
+    // thresholds no machine meets: memory is Critical now
+    c.call("mem.config", json!({"patch": {"high_free_pct": 90, "crit_free_pct": 80, "high_free_mb": 4194304, "crit_free_mb": 4000000}}))
+        .unwrap();
+    until("hibernated by the memory governor", || row(&mut c, id).filter(|r| r["hibernated"].is_object()).map(|_| ()));
+    let st = c.call("mem.status", json!({})).unwrap();
+    assert!(st["paused"].as_array().is_some_and(|p| p.is_empty()), "nothing was frozen: {st}");
+    // memory back to normal thresholds: the sleeper stays asleep (waking is by event only)
+    c.call("mem.config", json!({"patch": {"high_free_pct": 20, "crit_free_pct": 10, "high_free_mb": 3072, "crit_free_mb": 1536}})).unwrap();
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(row(&mut c, id).unwrap()["hibernated"].is_object());
+    let _ = c.call("session.kill", json!({"id": id}));
+}

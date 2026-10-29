@@ -393,15 +393,26 @@ pub(crate) fn spawn_agent(
         meta["key"] = json!(k);
         env = json!({"AXELSTRA_KEY": k, "AXELSTRA_DIR": dir});
     }
-    let r = c.call(
-        "session.spawn",
-        with_reap(
-            json!({"program": program, "args": args, "cwd": wt, "label": agent, "meta": meta, "env": env, "goal": goal, "cols": 120, "rows": 30}),
-            reap,
-            worker,
-        ),
-    )?;
-    Ok(r["id"].as_u64().unwrap_or(0) as u32)
+    let mut req = with_reap(
+        json!({"program": program, "args": args, "cwd": wt, "label": agent, "meta": meta, "env": env, "goal": goal, "cols": 120, "rows": 30}),
+        reap,
+        worker,
+    );
+    // a worker that finds no free slot (or no memory) waits in the daemon's FIFO: each call sleeps there until something
+    // frees up, so this is not a retry loop with a sleep. The ticket keeps the place between calls.
+    req["queue"] = json!(true);
+    let mut told = false;
+    loop {
+        let r = c.call("session.spawn", req.clone())?;
+        if r["queued"] != json!(true) {
+            return Ok(r["id"].as_u64().unwrap_or(0) as u32);
+        }
+        req["ticket"] = r["ticket"].clone();
+        if !told {
+            told = true;
+            eprintln!("axelstra: waiting in line for a worker slot (position {})", r["position"]);
+        }
+    }
 }
 
 fn print_ls(v: &Value) {

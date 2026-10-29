@@ -469,6 +469,21 @@ pub(super) fn react(reg: &Arc<Registry>, level: Level) {
     reg.resume_paused(Some(MEMORY));
 }
 
+/// The sessions to try to hibernate, in order: workers, agents, leads; the biggest first within a tier. Pure.
+pub(super) fn sleepers(c: &[Facts]) -> Vec<u32> {
+    let mut v: Vec<&Facts> = c
+        .iter()
+        .filter(|f| matches!(f.target, Target::Session(_)) && !matches!(f.role, Role::Terminal | Role::Main | Role::Build))
+        .collect();
+    v.sort_by(|a, b| tier(a.role).cmp(&tier(b.role)).then(b.rss_mb.cmp(&a.rss_mb)).then(target_key(a.target).cmp(&target_key(b.target))));
+    v.into_iter()
+        .filter_map(|f| match f.target {
+            Target::Session(id) => Some(id),
+            Target::Build(_) => None,
+        })
+        .collect()
+}
+
 /// Pauses victims one by one while the level stays Critical.
 fn round(reg: &Arc<Registry>) {
     loop {
@@ -476,9 +491,17 @@ fn round(reg: &Arc<Registry>) {
         if reg.closing.load(Ordering::SeqCst) || reg.governor.level() != Level::Critical || !cfg.pause_active() {
             return;
         }
-        let order = victims(&reg.pause_candidates());
-        let mut paused = false;
+        let candidates = reg.pause_candidates();
+        let order = victims(&candidates);
+        // hibernating ends the process tree and frees the memory; pausing only stops its growth. So a session that can
+        // sleep goes to sleep first, one per round. `session.hibernate` makes the real checks (idle, resumable, no
+        // command running), so the pool is wider than the pause victims: every agent, workers first, biggest first
+        let mut paused = reg.with_settings(crate::hibernate::policy).enabled
+            && sleepers(&candidates).into_iter().any(|id| super::hibernate::hibernate(reg, id).is_ok());
         for t in order {
+            if paused {
+                break;
+            }
             paused = match t {
                 Target::Session(id) => reg.pause_session(id, MEMORY),
                 Target::Build(b) => reg.pause_build(b, MEMORY),
@@ -534,6 +557,21 @@ mod tests {
         Target::Session(id)
     }
     const QUIET: u64 = 10 * 60_000;
+
+    #[test]
+    fn sleepers_are_agents_by_tier_then_size_and_never_main_terminals_or_builds() {
+        let c = [
+            f(s(1), Role::Main, 900, QUIET, QUIET),
+            f(s(2), Role::Lead, 800, QUIET, QUIET),
+            f(s(3), Role::Agent, 700, 1_000, 1_000),
+            f(s(4), Role::Worker, 100, QUIET, QUIET),
+            f(s(5), Role::Worker, 400, QUIET, QUIET),
+            f(s(6), Role::Terminal, 4000, QUIET, QUIET),
+            f(Target::Build(7), Role::Build, 600, u64::MAX, u64::MAX),
+        ];
+        // not filtered by the pause rules (recent input, idle time): `session.hibernate` makes its own checks
+        assert_eq!(sleepers(&c), [5, 4, 3, 2]);
+    }
 
     #[test]
     fn victim_priority_order() {

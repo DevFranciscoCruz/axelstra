@@ -118,45 +118,94 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             // a dispatched lead is ephemeral like a worker but owns its worktree: it does not count against the worker limit
             let is_worker =
                 !lead && ((p["reap"].is_object() && p["reap"]["lead"].as_bool() != Some(true)) || p["worker"].as_bool() == Some(true));
-            {
-                // memory pressure: an agent started by an agent waits, and the worker limit drops (High: half, Critical: 1)
-                let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
-                let kind = crate::governor::SpawnKind {
-                    worker: is_worker,
-                    by_agent: agent.is_some(),
-                    agent: meta.as_ref().is_some_and(|m| m["kind"] == "agent"),
-                    live_workers: if is_worker { reg.bus.live_workers(alive) } else { 0 },
-                };
-                let (lv, info) = reg.governor.state();
-                let (cfg, limit) = (reg.governor.config(), reg.bus.limit());
-                if crate::governor::admission_denied(&cfg, lv, limit, kind) {
-                    return Err(axelstra_core::coded!(
-                        "governor.admission_denied",
-                        "not started: memory is {level} ({free_mb} MB free). Agents wait until it recovers; workers are limited to {max}",
-                        level = lv.as_str(),
-                        free_mb = info.free_mb,
-                        max = crate::governor::effective_worker_limit(limit, lv)
-                    ));
+            // `queue: true`: a refusal for the worker limit or for memory waits in line (FIFO) instead of failing. The call
+            // sleeps on the pulse (a freed slot, a limit change, a memory level change) up to one chunk, then answers
+            // `{queued, ticket, position}`; the caller comes back with its ticket and keeps its place
+            let queue = p["queue"].as_bool() == Some(true);
+            let mut ticket: Option<u64> = None;
+            let chunk_end = Instant::now() + SPAWN_QUEUE_CHUNK;
+            loop {
+                // taken before the check, so a pulse between the check and the sleep is not lost
+                let seen = reg.pulse.now();
+                if queue && (p["ticket"].is_u64() || !reg.spawnq.lock_recover().is_empty()) {
+                    ticket = Some(reg.spawnq.lock_recover().enter(ticket.or(p["ticket"].as_u64()), Instant::now()));
                 }
-            }
-            if is_worker {
-                let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
-                let (live, max) = (reg.bus.live_workers(alive), reg.bus.limit());
-                if live >= max {
-                    // the caller waits for a slot: that is work, not silence, for the stall watchdog
-                    if let Some(me) = agent {
-                        reg.work.want_slot(me);
-                        reg.pulse.bump();
+                let refusal: Result<()> = (|| {
+                    if let Some(t) = ticket {
+                        if !reg.spawnq.lock_recover().is_head(t, Instant::now()) {
+                            return Err(axelstra_core::coded!("session.queued", "waiting in line for a worker slot"));
+                        }
                     }
-                    return Err(axelstra_core::coded!(
-                        "session.worker_limit",
-                        "worker limit reached ({live} running, max {max}): wait for one to finish or raise it with `axelstra limit N`",
-                        live = live,
-                        max = max
-                    ));
-                }
-                if let Some(me) = agent {
-                    reg.work.got_slot(me);
+                    {
+                        // memory pressure: an agent started by an agent waits, and the worker limit drops (High: half, Critical: 1)
+                        let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
+                        let kind = crate::governor::SpawnKind {
+                            worker: is_worker,
+                            by_agent: agent.is_some(),
+                            agent: meta.as_ref().is_some_and(|m| m["kind"] == "agent"),
+                            live_workers: if is_worker { reg.bus.live_workers(alive) } else { 0 },
+                        };
+                        let (lv, info) = reg.governor.state();
+                        let (cfg, limit) = (reg.governor.config(), reg.bus.limit());
+                        if crate::governor::admission_denied(&cfg, lv, limit, kind) {
+                            return Err(axelstra_core::coded!(
+                                "governor.admission_denied",
+                                "not started: memory is {level} ({free_mb} MB free). Agents wait until it recovers; workers are limited to {max}",
+                                level = lv.as_str(),
+                                free_mb = info.free_mb,
+                                max = crate::governor::effective_worker_limit(limit, lv)
+                            ));
+                        }
+                    }
+                    if is_worker {
+                        let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
+                        let (live, max) = (reg.bus.live_workers(alive), reg.bus.limit());
+                        if live >= max {
+                            // the caller waits for a slot: that is work, not silence, for the stall watchdog
+                            if let Some(me) = agent {
+                                reg.work.want_slot(me);
+                                reg.pulse.bump();
+                            }
+                            return Err(axelstra_core::coded!(
+                                "session.worker_limit",
+                                "worker limit reached ({live} running, max {max}): wait for one to finish or raise it with `axelstra limit N`",
+                                live = live,
+                                max = max
+                            ));
+                        }
+                        if let Some(me) = agent {
+                            reg.work.got_slot(me);
+                        }
+                    }
+                    Ok(())
+                })();
+                match refusal {
+                    Ok(()) => {
+                        if let Some(t) = ticket {
+                            reg.spawnq.lock_recover().leave(t);
+                            // the next in line looks again
+                            reg.pulse.bump();
+                        }
+                        break;
+                    }
+                    Err(e) if queue && is_queueable(&e) => {
+                        let t = *ticket.get_or_insert_with(|| reg.spawnq.lock_recover().enter(None, Instant::now()));
+                        let now = Instant::now();
+                        if now >= chunk_end || reg.closing.load(Ordering::SeqCst) {
+                            let position = reg.spawnq.lock_recover().position(t);
+                            let reason = axelstra_core::msg::find(&e).map(|c| c.code.clone());
+                            return Ok(json!({"queued": true, "ticket": t, "position": position, "reason": reason}));
+                        }
+                        reg.pulse.wait(seen, Some(chunk_end - now));
+                    }
+                    Err(e) => {
+                        if let Some(t) = ticket {
+                            if reg.spawnq.lock_recover().leave(t) {
+                                reg.pulse.bump();
+                            }
+                        }
+                        return Err(e);
+                    }
                 }
             }
             // the flag stays in the meta so a hibernated worker counts against the limit again when it wakes
@@ -561,4 +610,13 @@ mod tests {
             assert!(!valid_resume_id(bad), "{bad}");
         }
     }
+}
+
+/// How long one `session.spawn` with `queue: true` sleeps before it answers `queued` (the caller then comes back with its ticket).
+const SPAWN_QUEUE_CHUNK: Duration = Duration::from_secs(20);
+
+/// A refusal that goes away by itself (a worker finishes, memory recovers): the ones a queued spawn waits for.
+fn is_queueable(e: &anyhow::Error) -> bool {
+    axelstra_core::msg::find(e)
+        .is_some_and(|c| matches!(c.code.as_str(), "session.worker_limit" | "governor.admission_denied" | "session.queued"))
 }

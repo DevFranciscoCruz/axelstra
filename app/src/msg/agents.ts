@@ -10,6 +10,7 @@ export const pt = {
   "session.not_found": "Não existe nenhuma sessão {id}.",
   "session.worker_limit":
     "Limite de workers atingido ({live} a correr, máximo {max}). Espera que um acabe ou aumenta o limite com `axelstra limit N`.",
+  "session.queued": "À espera na fila por um lugar de worker.",
   "session.bad_state": "O estado tem de ser waiting, idle ou working.",
   "session.await_reason": 'Um await precisa de um motivo, por exemplo "CI #3703".',
   "session.input_full": "A fila de entrada da sessão está cheia: o programa não está a ler o que lhe enviam.",
@@ -88,6 +89,7 @@ export const en: Widen<typeof pt> = {
   "session.not_found": "There is no session {id}.",
   "session.worker_limit":
     "Worker limit reached ({live} running, max {max}). Wait for one to finish or raise the limit with `axelstra limit N`.",
+  "session.queued": "Waiting in line for a worker slot.",
   "session.bad_state": "The state must be waiting, idle or working.",
   "session.await_reason": 'An await needs a reason, e.g. "CI #3703".',
   "session.input_full": "The session's input queue is full: the program is not reading what it is sent.",
@@ -161,6 +163,7 @@ export const ptBR: Widen<typeof pt> = {
   "session.not_found": "Não existe nenhuma sessão {id}.",
   "session.worker_limit":
     "Limite de workers atingido ({live} rodando, máximo {max}). Espere um terminar ou aumente o limite com `axelstra limit N`.",
+  "session.queued": "À espera na fila por um lugar de worker.",
   "session.bad_state": "O estado precisa ser waiting, idle ou working.",
   "session.await_reason": 'Um await precisa de um motivo, por exemplo "CI #3703".',
   "session.input_full": "A fila de entrada da sessão está cheia: o programa não está lendo o que é enviado a ele.",

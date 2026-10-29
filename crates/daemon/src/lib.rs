@@ -44,6 +44,7 @@ pub mod runner;
 pub mod scanx;
 pub mod server;
 pub mod skill;
+pub mod spawnq;
 pub mod stall;
 pub mod store;
 pub mod timeline;

@@ -97,6 +97,8 @@ pub(super) struct Registry {
     pub(super) settings: Mutex<Option<Value>>,
     /// hibernated sessions, wake queue, event counters (see `hibernate.rs`): a leaf lock
     pub(super) hib: crate::hibernate::Hib,
+    /// `session.spawn` callers waiting in line for a worker slot or for memory (see `spawnq.rs`): a leaf lock
+    pub(super) spawnq: Mutex<crate::spawnq::SpawnQ>,
     /// memory pressure (`crate::governor`); its thread starts with `server::governor::spawn`
     pub(super) governor: Arc<crate::governor::Governor>,
     /// what the governor froze (and the builds under `axelstra lock` it may freeze): see `server/pause.rs`
@@ -473,6 +475,7 @@ impl Registry {
             save_gen: AtomicU64::new(0),
             settings: Default::default(),
             hib: Default::default(),
+            spawnq: Default::default(),
             governor,
             pauser,
         }
