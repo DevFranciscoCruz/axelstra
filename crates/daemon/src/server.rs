@@ -594,6 +594,7 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
     }
     // calls that wait on purpose are not slow
     if !matches!(req.method.as_str(), "ask" | "msg.ask" | "session.wait" | "mem.admit" | "hello") {
+        crate::lag::count(&req.method, t0.elapsed());
         crate::lag::note(&format!("daemon {}", req.method), t0.elapsed(), 30);
     }
     let body = reply_body(req.id, res.map_err(|e| error_fields(&e)));

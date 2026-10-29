@@ -78,6 +78,13 @@ under test (see `docs/TOOLS.md`).
 
 The governor's tests drive the levels with the fake `MemSource` (`governor::fake::FakeSource`) and freeze nothing real: pause tests inject `FakeSuspender`. Never suspend a process the test does not own: the only real freeze (`governor/suspend.rs`) is of a child the test starts and kills itself, and it never targets the daemon or pids 0/1. A test must not push the machine into real memory pressure.
 
+## Idle load
+
+`lag.log` is written only by `lag::note`, when a call or step has just finished slow (an event; no periodic writer), so a
+daemon nobody talks to writes nothing (`crates/daemon/tests/lag_log_idle.rs`). `lag::count` keeps calls and total ms per method in
+memory and `debug.load` (only with `AXELSTRA_TESTING`) returns them with the number of child processes started through
+`core::proc::hidden`; `tools/idle-load.mjs` uses both (see `docs/TOOLS.md`).
+
 ## Opening HTML from a terminal
 
 `files.resolve_html` (daemon) turns a path clicked in a terminal into a `file://` URL; the host command `open_html_file`

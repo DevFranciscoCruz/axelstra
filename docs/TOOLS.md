@@ -68,6 +68,12 @@ a variable you already set. Edit `build` in `settings.json` (keys: `enabled`, `j
 - `smoke.mjs`: CLI-level smoke test. Starts `axelstra daemon` in a throwaway data dir (and, on Windows, a throwaway
   pipe name), checks `ls`, spawns and lists a session, kills it. `cargo build -p axelstra && node tools/smoke.mjs`.
   Runs in CI on Ubuntu and Windows. Never touches your real daemon.
+- `idle-load.mjs [--bin p] [--worktrees 8] [--sessions 2] [--chatty 1] [--idle 45] [--max-spawns-per-min 2] [--json]`: idle-load check. Boots an
+  isolated daemon (`AXELSTRA_DATA_DIR`, `AXELSTRA_TESTING=1`), makes a repo with N worktrees, connects like the app
+  (`hello`, `watch.subscribe`), calls the polled methods once, then stays idle and reports from `debug.load` (calls per
+  method, daemon-side; child processes counted by `core::proc::hidden`), the events the subscriber got per minute and new
+  `lag.log` lines. Exits 1 on more than `--max-spawns-per-min` child processes per minute, any new `lag.log` line or any
+  daemon call at idle. Run it before and after a change that touches polling, loaders or events.
 - `e2e.mjs [path\to\axelstra-app.exe]`: drives the real Windows app over the DevTools protocol (boot, a session, restore, the Add project dialog, CSP) in a throwaway data dir; see `docs/E2E.md`. Sets `AXELSTRA_TEST_HIDDEN=1` so no window shows.
 - `e2e-html-link.mjs [path\to\axelstra-app.exe]`: Ctrl+click on an `.html` path in a terminal logs its `file://` url to `AXELSTRA_TEST_OPENER_LOG` instead of opening a browser; same isolation and hidden window as `e2e.mjs`, see `docs/E2E.md`.
 - `e2e-kanban.mjs [path	oxelstra-app.exe]`: drag and drop on the Kanban board (pointer, Esc, drop outside, keyboard) with real input events, reading the `.kanban/` card files back; same isolation and hidden window as `e2e.mjs`, see `docs/E2E.md`.

@@ -8,6 +8,14 @@
 //! hides only the extra window). Tests that spawn helper processes are left alone too.
 
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Commands prepared through [`hidden`] (about the children the process started); read by `debug.load`.
+static SPAWNS: AtomicU64 = AtomicU64::new(0);
+
+pub fn spawn_count() -> u64 {
+    SPAWNS.load(Ordering::Relaxed)
+}
 
 /// `CREATE_NO_WINDOW`: the child gets no console window. Combine it with other flags only through `creation_flags`
 /// (that call replaces, it does not add: the desktop app starts the daemon with `DETACHED_PROCESS | NO_WINDOW`).
@@ -15,6 +23,7 @@ pub const NO_WINDOW: u32 = 0x0800_0000;
 
 /// Keeps a console window from flashing on Windows; a no-op elsewhere. Do not call it after another `creation_flags`.
 pub fn hidden(cmd: &mut Command) -> &mut Command {
+    SPAWNS.fetch_add(1, Ordering::Relaxed);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

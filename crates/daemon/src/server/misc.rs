@@ -229,6 +229,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "env.tools" => Ok(json!({"tools": tokio::task::block_in_place(crate::envtools::detect)})),
         "backup.export" => {
+        // load tests and tools/idle-load.mjs: calls per method and child processes started since the daemon began
+        "debug.load" if std::env::var_os("AXELSTRA_TESTING").is_some() => {
+            Ok(json!({"calls": crate::lag::snapshot(), "spawns": axelstra_core::proc::spawn_count()}))
+        }
             // sessions.json is the registry's own view, not whatever was last flushed
             reg.persist();
             let dir = reg.saved.parent().unwrap_or(std::path::Path::new("")).to_path_buf();
