@@ -32,7 +32,11 @@ pub fn claude_dir_name(cwd: &str) -> String {
 }
 
 fn mtime(p: &Path) -> u64 {
-    std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0)
+    std::fs::metadata(p).map(|m| mtime_of_meta(&m)).unwrap_or(0)
+}
+
+fn mtime_of_meta(m: &std::fs::Metadata) -> u64 {
+    m.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 fn jsonl_files(root: &Path, depth: usize, out: &mut Vec<PathBuf>) {
@@ -645,10 +649,13 @@ pub fn codex_limits() -> Option<Value> {
 const TAIL_BYTES: u64 = 256 * 1024;
 /// Entries each per-file cache keeps; past it the least recently modified transcripts are dropped.
 const CACHE_CAP: usize = 256;
+/// Cap of the Codex and Gemini caches: `worktree_usage` visits every such file on each call, so a cap below the file
+/// count would drop an entry before its next visit and reread the file every time. Entries are a few dozen bytes.
+const SESSIONS_CAP: usize = 8192;
 
-/// Makes room for one more entry: drops the entries with the oldest mtime until the map is under `CACHE_CAP`.
-fn evict<V>(map: &mut HashMap<PathBuf, V>, mtime_of: impl Fn(&V) -> u64) {
-    while map.len() >= CACHE_CAP {
+/// Makes room for one more entry: drops the entries with the oldest mtime until the map is under `cap`.
+fn evict<V>(map: &mut HashMap<PathBuf, V>, mtime_of: impl Fn(&V) -> u64, cap: usize) {
+    while map.len() >= cap {
         let Some(oldest) = map.iter().min_by_key(|(_, v)| mtime_of(v)).map(|(k, _)| k.clone()) else { return };
         map.remove(&oldest);
     }
@@ -675,7 +682,7 @@ pub fn claude_usage(cwd: &str, session_id: Option<&str>) -> Option<Usage> {
 /// The cache lock is held only to take and put back the entry, never while reading the file.
 fn file_usage(path: PathBuf) -> Option<Usage> {
     let meta = std::fs::metadata(&path).ok()?;
-    let (len, mt) = (meta.len(), mtime(&path));
+    let (len, mt) = (meta.len(), mtime_of_meta(&meta));
     let prev = CACHE.lock_recover().get_or_insert_with(HashMap::new).get(&path).cloned();
     if let Some((l, m, _, acc)) = &prev {
         if *l == len && *m == mt {
@@ -705,7 +712,7 @@ fn file_usage(path: PathBuf) -> Option<Usage> {
     let mut cache = CACHE.lock_recover();
     let map = cache.get_or_insert_with(HashMap::new);
     if !map.contains_key(&path) {
-        evict(map, |e| e.1);
+        evict(map, |e| e.1, CACHE_CAP);
     }
     map.insert(path, (len, mt, off, acc));
     Some(u)
@@ -777,7 +784,7 @@ type CodexEntry = (u64, u64, Option<String>, Usage);
 
 fn codex_file(path: &Path) -> Option<(Option<String>, Usage)> {
     let meta = std::fs::metadata(path).ok()?;
-    let (len, mt) = (meta.len(), mtime(path));
+    let (len, mt) = (meta.len(), mtime_of_meta(&meta));
     if let Some((l, m, cwd, u)) = CODEX_CACHE.lock_recover().get_or_insert_with(HashMap::new).get(path) {
         if *l == len && *m == mt {
             return Some((cwd.clone(), u.clone()));
@@ -793,10 +800,37 @@ fn codex_file(path: &Path) -> Option<(Option<String>, Usage)> {
     let mut cache = CODEX_CACHE.lock_recover();
     let map = cache.get_or_insert_with(HashMap::new);
     if !map.contains_key(path) {
-        evict(map, |e| e.1);
+        evict(map, |e| e.1, SESSIONS_CAP);
     }
     map.insert(path.to_path_buf(), (len, mt, cwd.clone(), u.clone()));
     Some((cwd, u))
+}
+
+/// per Gemini chat file: (length, mtime, totals); `None` totals = unreadable or too big
+static GEMINI_CACHE: Mutex<Option<HashMap<PathBuf, GeminiEntry>>> = Mutex::new(None);
+type GeminiEntry = (u64, u64, Option<Usage>);
+
+/// Totals of one Gemini chat file, reread only when its length or mtime moved.
+fn gemini_file_usage(path: &Path) -> Option<Usage> {
+    let meta = std::fs::metadata(path).ok()?;
+    let (len, mt) = (meta.len(), mtime_of_meta(&meta));
+    gemini_cached(path, len, mt, || read_gemini(path).map(|s| s.usage))
+}
+
+fn gemini_cached(path: &Path, len: u64, mt: u64, read: impl FnOnce() -> Option<Usage>) -> Option<Usage> {
+    if let Some((l, m, u)) = GEMINI_CACHE.lock_recover().get_or_insert_with(HashMap::new).get(path) {
+        if *l == len && *m == mt {
+            return u.clone();
+        }
+    }
+    let u = read();
+    let mut cache = GEMINI_CACHE.lock_recover();
+    let map = cache.get_or_insert_with(HashMap::new);
+    if !map.contains_key(path) {
+        evict(map, |e| e.1, SESSIONS_CAP);
+    }
+    map.insert(path.to_path_buf(), (len, mt, u.clone()));
+    u
 }
 
 /// Codex rollout listing, kept while the newest date folders have not changed (`YYYY/MM/DD` sorts by name, and new
@@ -855,7 +889,7 @@ pub fn worktree_usage(worktrees: &[String]) -> Vec<WorktreeUsage> {
         for w in &mut out {
             for dir in gemini_project_dirs(&root, &registry, &w.worktree) {
                 for f in gemini_files_of(&dir) {
-                    if let Some(u) = read_gemini(&f).map(|s| s.usage).filter(|u| u.messages > 0) {
+                    if let Some(u) = gemini_file_usage(&f).filter(|u| u.messages > 0) {
                         w.add(&u, "gemini");
                     }
                 }
@@ -1196,12 +1230,58 @@ mod tests {
         let mut m: HashMap<PathBuf, u64> = HashMap::new();
         for i in 0..(CACHE_CAP as u64 + 40) {
             if !m.contains_key(&PathBuf::from(format!("f{i}"))) {
-                evict(&mut m, |v| *v);
+                evict(&mut m, |v| *v, CACHE_CAP);
             }
             m.insert(PathBuf::from(format!("f{i}")), i);
         }
         assert_eq!(m.len(), CACHE_CAP);
         assert!(!m.contains_key(&PathBuf::from("f0")) && m.contains_key(&PathBuf::from(format!("f{}", CACHE_CAP + 39))));
+    }
+
+    #[test]
+    fn gemini_file_is_reread_only_when_length_or_mtime_moved() {
+        let p = PathBuf::from("/axelstra-test/gemini-cache-a.json");
+        let u = |n: u64| Usage { input: n, messages: 1, ..Default::default() };
+        let calls = std::cell::Cell::new(0);
+        let read = |n: u64| {
+            calls.set(calls.get() + 1);
+            Some(u(n))
+        };
+        assert_eq!(gemini_cached(&p, 10, 100, || read(1)), Some(u(1)));
+        // same length and mtime: served from the cache, the reader is not called
+        assert_eq!(gemini_cached(&p, 10, 100, || read(2)), Some(u(1)));
+        assert_eq!(calls.get(), 1);
+        // the file grew, or was touched: read again
+        assert_eq!(gemini_cached(&p, 20, 100, || read(3)), Some(u(3)));
+        assert_eq!(gemini_cached(&p, 20, 101, || read(4)), Some(u(4)));
+        assert_eq!(calls.get(), 3);
+        // an unreadable file is remembered too
+        let q = PathBuf::from("/axelstra-test/gemini-cache-b.json");
+        assert_eq!(gemini_cached(&q, 5, 5, || None), None);
+        assert_eq!(gemini_cached(&q, 5, 5, || read(9)), None);
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn codex_file_totals_are_cached_across_calls() {
+        let dir = std::env::temp_dir().join(format!("axl-codex-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("rollout-x.jsonl");
+        let meta = r#"{"type":"session_meta","payload":{"cwd":"/w/a"}}"#;
+        let tok = |i: u64| {
+            format!(
+                r#"{{"type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"input_tokens":{i},"cached_input_tokens":0,"output_tokens":1}}}}}}}}"#
+            )
+        };
+        std::fs::write(&f, format!("{meta}\n{}\n", tok(7))).unwrap();
+        assert_eq!(codex_file(&f).unwrap().1.input, 7);
+        // poison the cached entry: an unchanged file must answer from it without reading
+        CODEX_CACHE.lock_recover().as_mut().unwrap().get_mut(&f).unwrap().3.input = 999;
+        assert_eq!(codex_file(&f).unwrap().1.input, 999);
+        // a grown file is read again
+        std::fs::write(&f, format!("{meta}\n{}\n{}\n", tok(7), tok(30))).unwrap();
+        assert_eq!(codex_file(&f).unwrap().1.input, 30);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -453,23 +453,31 @@ pub(super) fn usage_roots(data_dir: &Path) -> Vec<UsageRoot> {
 }
 
 /// What a file system event means for `roots` (none for a read, or a path outside them).
-fn usage_kinds_of(ev: &notify::Event, roots: &[UsageRoot]) -> UsageKinds {
+///
+/// `canon[i]` is the resolved form of `roots[i].dir`, computed once (see `resolve_root`) instead of per event.
+fn usage_kinds_of(ev: &notify::Event, roots: &[UsageRoot], canon: &[Option<PathBuf>]) -> UsageKinds {
     let mut k = UsageKinds::default();
     if matches!(ev.kind, notify::EventKind::Access(_)) {
         return k;
     }
     for p in &ev.paths {
-        for r in roots {
+        for (r, c) in roots.iter().zip(canon) {
             if !r.json_only || p.extension().is_some_and(|x| x == "json") {
                 // FSEvents (macOS) reports canonical paths (`/private/var/...` for `/var/...`), so a root spelled
                 // through a symlink only matches by its resolved form
-                if p.starts_with(&r.dir) || r.dir.canonicalize().is_ok_and(|c| p.starts_with(c)) {
+                if p.starts_with(&r.dir) || c.as_ref().is_some_and(|c| p.starts_with(c)) {
                     k.merge(r.kinds);
                 }
             }
         }
     }
     k
+}
+
+/// The resolved form of each root's folder (`None` while it does not exist). Called when the watcher starts and again
+/// for a root only when it first appears, so an event never touches the file system to compare paths.
+fn resolve_root(r: &UsageRoot) -> Option<PathBuf> {
+    r.dir.canonicalize().ok()
 }
 
 /// Watches `roots` and calls `emit` once per burst of writes, with what changed. Asleep until the OS reports a write. A
@@ -481,10 +489,12 @@ pub(super) fn watch_usage(roots: Vec<UsageRoot>, emit: impl Fn(UsageKinds) + Sen
         let (tx, rx) = std::sync::mpsc::channel();
         let Ok(mut w) = notify::recommended_watcher(tx) else { return };
         let mut pending: Vec<usize> = vec![];
+        let canon: std::cell::RefCell<Vec<Option<PathBuf>>> = std::cell::RefCell::new(roots.iter().map(resolve_root).collect());
         let try_watch = |w: &mut notify::RecommendedWatcher, pending: &mut Vec<usize>| -> UsageKinds {
             let mut came = UsageKinds::default();
             pending.retain(|&i| {
                 if roots[i].dir.is_dir() && w.watch(&roots[i].dir, RecursiveMode::Recursive).is_ok() {
+                    canon.borrow_mut()[i] = resolve_root(&roots[i]);
                     came.merge(roots[i].kinds);
                     return false;
                 }
@@ -510,7 +520,7 @@ pub(super) fn watch_usage(roots: Vec<UsageRoot>, emit: impl Fn(UsageKinds) + Sen
             let mut kinds = UsageKinds::default();
             let mut take = |ev: notify::Result<notify::Event>, w: &mut notify::RecommendedWatcher, pending: &mut Vec<usize>| {
                 let Ok(ev) = ev else { return };
-                kinds.merge(usage_kinds_of(&ev, &roots));
+                kinds.merge(usage_kinds_of(&ev, &roots, &canon.borrow()));
                 // a watched folder's parent saw something: the folder may exist now
                 if !pending.is_empty() && !matches!(ev.kind, notify::EventKind::Access(_)) {
                     kinds.merge(try_watch(w, pending));
@@ -961,4 +971,42 @@ pub(super) fn stall_tick(reg: &Arc<Registry>) -> Option<Duration> {
         reg.broadcast("session.changed");
     }
     next.map(Duration::from_millis)
+}
+
+#[cfg(test)]
+mod usage_roots_tests {
+    use super::*;
+
+    fn event(path: &str) -> notify::Event {
+        notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Any)).add_path(PathBuf::from(path))
+    }
+
+    #[test]
+    fn an_event_matches_by_the_root_as_spelled_or_by_its_resolved_form() {
+        let kinds = UsageKinds { usage: true, limits: false };
+        let roots = vec![UsageRoot { dir: PathBuf::from("/var/agent"), kinds, json_only: false }];
+        // the resolved form comes from the cache: no file system call decides the match
+        let canon = vec![Some(PathBuf::from("/private/var/agent"))];
+        assert_eq!(usage_kinds_of(&event("/var/agent/a.jsonl"), &roots, &canon), kinds);
+        assert_eq!(usage_kinds_of(&event("/private/var/agent/a.jsonl"), &roots, &canon), kinds);
+        assert_eq!(usage_kinds_of(&event("/elsewhere/a.jsonl"), &roots, &canon), UsageKinds::default());
+        // a root that did not exist yet has no resolved form and matches as spelled only
+        assert_eq!(usage_kinds_of(&event("/private/var/agent/a.jsonl"), &roots, &[None]), UsageKinds::default());
+    }
+
+    #[test]
+    fn json_only_roots_ignore_other_files() {
+        let kinds = UsageKinds { usage: false, limits: true };
+        let roots = vec![UsageRoot { dir: PathBuf::from("/d/status"), kinds, json_only: true }];
+        assert_eq!(usage_kinds_of(&event("/d/status/s.json"), &roots, &[None]), kinds);
+        assert_eq!(usage_kinds_of(&event("/d/status/s.tmp"), &roots, &[None]), UsageKinds::default());
+    }
+
+    #[test]
+    fn resolving_a_root_happens_once_and_missing_roots_are_none() {
+        let r = UsageRoot { dir: std::env::temp_dir().join("axl-no-such-root-xyz"), kinds: UsageKinds::default(), json_only: false };
+        assert_eq!(resolve_root(&r), None);
+        let r = UsageRoot { dir: std::env::temp_dir(), kinds: UsageKinds::default(), json_only: false };
+        assert!(resolve_root(&r).is_some());
+    }
 }
