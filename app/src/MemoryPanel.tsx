@@ -15,7 +15,7 @@ import {
   type Thresholds,
 } from "./memoryLogic";
 import { fmtMb } from "./memoryView";
-import { fmtNumber } from "./i18n";
+import { fmtFixed, fmtNumber } from "./i18n";
 import { setSection } from "./settingsNav";
 import { memory, refreshMemory, sessions, setError, setShowSettings, showNotice, tabLabel } from "./store";
 import { G } from "./strings.memory";
