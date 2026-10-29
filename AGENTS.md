@@ -126,15 +126,19 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
 
 ## Worktree and agent lifecycle
 
-- Every non-main worktree has a lead: its first fresh agent (`notes::pick_role`, called from `session.spawn`). It is
-  named `main`, has `meta.lead = true`, takes no `Tarefa N` number (the counter counts tasks only and still restarts
-  when the project has no running agent) and its task file is `main - <worktree folder>.md`. Later agents of that
-  worktree get the lead as default parent (`AXELSTRA_PARENT`, `meta.parent`); the lead's parent is the project's main
-  agent. A `worker: true` spawn, a named (restored) session and the main checkout never become leads. The app sends
-  `lead` back on restore so a restart keeps the roles; the sidebar offers "Iniciar main do worktree" when none runs.
-- A lead started by `axelstra dispatch new/send` is ephemeral: when it calls `axelstra done` its session closes (a
-  reaper in mode `exit` with `lead: true`, so it does not count against the worker limit) and the report goes to main
-  and to the task file. Main only reads the report.
+- **A lead is per request, not per worktree.** A worktree needs none, and a plain first agent is no longer promoted
+  (`notes::pick_role`, called from `session.spawn`): only an explicit `meta.lead = true` makes a lead. A lead is named
+  `main`, takes no `Tarefa N` number (the counter counts tasks only and still restarts when the project has no running
+  agent) and its task file is `main - <worktree folder>.md`. Plain agents get the worktree's running lead as default parent
+  (`AXELSTRA_PARENT`, `meta.parent`), else the project's main agent; the lead's parent is the project's main agent. A
+  `worker: true` spawn, a named (restored) session and the main checkout never become leads. The app sends `lead` back on
+  restore so a restart keeps the roles. The sidebar shows an existing lead first with a star and its tasks indented; a
+  worktree of plain agents looks normal and nothing flags a missing lead ("Iniciar main do worktree" is an optional action
+  next to existing agents, `canStartLead` in `leadRole.ts`). Old worktrees that have a lead are unchanged.
+- A lead started by `axelstra dispatch new/send --lead` (or by the heuristic) is ephemeral: when it calls `axelstra done` its
+  session closes (a reaper in mode `exit` with `lead: true`, so it does not count against the worker limit) and the report
+  goes to main and to the task file. Main only reads the report. A direct worker (the default) reports to the project main
+  the same way.
 - **A session that ends on its own leaves the registry** (`Registry::retire`, called by `watch_exit`, and by the reaper
   of an ephemeral worker or lead after it reported to its parent). By event, no polling: it drops the row from
   `session.list`/`axelstra ls`, its spec from `sessions.json` (and its `sid/` and scrollback files), its bus state, then
@@ -159,7 +163,11 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
 - The lead is a dispatcher, not an implementer: its prompt (`FOOTER` in `crates/cli/src/dispatch.rs`) tells it to plan
   the request into subtasks, start workers in its own worktree (`axelstra agent . --report-to $AXELSTRA_SESSION`, they
   show as `Tarefa N` under `main`), not edit code or run heavy builds itself (only integrate commits and run the final
-  `axelstra lock verify`), and `done` with commits, verified and not verified. Even a trivial request goes to one worker.
+  `axelstra lock verify`), and `done` with commits, verified and not verified. It never executes alone.
+  `axelstra dispatch new/send` decide who starts: by default a direct worker (no lead; its parent is the project main; it
+  integrates itself: merge main, `axelstra lock verify -- node scripts/check.mjs`, `done`); a lead when the request lists
+  2+ independent subtasks (`wants_lead` in `crates/cli/src/dispatch.rs`); `--lead` / `--no-lead` override the heuristic.
+  The stall watchdog ignores a lead that never got a request. Worktrees that already have a lead keep working as before.
 - The janitor (`crates/daemon/src/janitor.rs`) is woken by events (daemon start, a session ending, a few seconds after each
   `done` or `git.merge` via `sweep_soon` in `server.rs`, a finished flow or run, a retry backoff) and by timers: the
   earliest moment a hand-made worktree stops counting as touched (`MANUAL_QUIET_SECS` after the daemon started or after

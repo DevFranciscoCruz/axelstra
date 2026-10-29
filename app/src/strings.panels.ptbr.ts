@@ -62,7 +62,7 @@ export const ptBRP: Widen<typeof ptP> = {
     leadTag: "main",
     leadTip: "Líder do worktree: as tarefas lançadas aqui reportam a ele",
     startLead: "Iniciar main do worktree",
-    startLeadTip: "Abre o agente líder deste worktree; as próximas tarefas reportam a ele",
+    startLeadTip: "Opcional: abre um agente líder neste worktree; as próximas tarefas reportam a ele",
     pending: {
       label: "A integrar",
       attentionLabel: "Precisa de atenção",

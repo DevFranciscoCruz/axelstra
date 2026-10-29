@@ -150,7 +150,7 @@ describe("session.exited", () => {
     const lead = (path: string) =>
       sess({ id: 1, label: "main", idle_ms: 600000, meta: { kind: "agent", worktree: path, lead: true } });
     const task = sess({ id: 2, label: "Tarefa 1", idle_ms: 0, meta: { kind: "agent", worktree: WT } });
-    const { lacksLead } = await import("./leadRole");
+    const { canStartLead: lacksLead } = await import("./leadRole");
     for (const p of [WT, "C:\\work\\proj-a", "c:/WORK/proj-a/", "\\\\?\\C:\\work\\proj-a"]) {
       now.list = [lead(p), task];
       await store.refreshSessions();

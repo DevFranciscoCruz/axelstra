@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isLead, lacksLead, leadFirst, leadOf, worktreeSignals } from "./leadRole";
+import { canStartLead, isLead, leadFirst, leadOf, worktreeSignals } from "./leadRole";
 import { agentRowInfo } from "./agentRow";
 
 const a = (id: number, over: { lead?: boolean; running?: boolean; state?: string; kind?: string } = {}) => ({
@@ -23,12 +23,17 @@ describe("lead of a worktree in the sidebar", () => {
     expect(agentRowInfo(a(1, { lead: true }), "C:/w").lead).toBe(true);
     expect(agentRowInfo(a(2), "C:/w").lead).toBe(false);
   });
-  it("offers to start a lead only in a worktree that has none running, never in the main checkout", () => {
-    expect(lacksLead([], false)).toBe(true);
-    expect(lacksLead([a(1)], false)).toBe(true);
-    expect(lacksLead([a(1, { lead: true, running: false })], false)).toBe(true);
-    expect(lacksLead([a(1, { lead: true })], false)).toBe(false);
-    expect(lacksLead([], true)).toBe(false);
+  it("offers to start a lead (optional) only in a worktree that has none running, never in the main checkout", () => {
+    expect(canStartLead([], false)).toBe(true);
+    expect(canStartLead([a(1)], false)).toBe(true);
+    expect(canStartLead([a(1, { lead: true, running: false })], false)).toBe(true);
+    expect(canStartLead([a(1, { lead: true })], false)).toBe(false);
+    expect(canStartLead([], true)).toBe(false);
+  });
+  it("a worktree of plain agents with no lead looks normal: order kept, no task indent flag", () => {
+    const list = [a(1), a(2)];
+    expect(leadFirst(list).map((s) => s.id)).toEqual([1, 2]);
+    expect(list.some((s) => isLead(s))).toBe(false);
   });
   it("finds the running lead of a worktree whatever its state and path spelling", () => {
     const at = (id: number, wt: string, over: Parameters<typeof a>[1] = {}) => {

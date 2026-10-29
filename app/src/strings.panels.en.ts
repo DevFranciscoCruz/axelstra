@@ -62,7 +62,7 @@ export const enP: Widen<typeof ptP> = {
     leadTag: "main",
     leadTip: "Worktree lead: tasks launched here report to it",
     startLead: "Start worktree main",
-    startLeadTip: "Opens this worktree's lead agent; later tasks report to it",
+    startLeadTip: "Optional: opens a lead agent in this worktree; later tasks report to it",
     pending: {
       label: "To integrate",
       attentionLabel: "Needs attention",

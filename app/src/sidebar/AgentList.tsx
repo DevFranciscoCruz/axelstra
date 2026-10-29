@@ -6,7 +6,7 @@ import { openNote } from "../NoteView";
 import { ago } from "../time";
 import { DOT_LABEL, dotOfSession, dotTip } from "../agentState";
 import { agentRowInfo, agentRowLabel } from "../agentRow";
-import { isLead, lacksLead, leadFirst } from "../leadRole";
+import { canStartLead, isLead, leadFirst } from "../leadRole";
 import { P } from "../strings.panels";
 import { G } from "../strings.memory";
 import { H } from "../strings.hibernate";
@@ -74,16 +74,18 @@ export function AgentList(props: {
   // the lead first, its tasks after it
   const agents = () => leadFirst(sessionsOf(props.path).filter((x) => x.meta?.kind === "agent"));
   const hasLead = () => agents().some((a) => a.running && isLead(a));
-  const missingLead = () => !!props.onStartLead && sessionsLoaded() && lacksLead(agents(), !!props.isMain);
+  // optional action, offered only next to existing agents: an empty or lead-less worktree is not "missing" anything
+  const offerLead = () =>
+    !!props.onStartLead && sessionsLoaded() && agents().length > 0 && canStartLead(agents(), !!props.isMain);
   const finishRename = (id: number, name: string | null) => {
     if (name !== null) renameTab(id, name);
     setRenaming(null);
     queueMicrotask(() => document.querySelector<HTMLElement>(`[data-agent-row="${id}"]`)?.focus());
   };
   return (
-    <Show when={agents().length > 0 || missingLead()}>
+    <Show when={agents().length > 0}>
       <div class="wt-agents" style={props.depth > 0 ? { "margin-left": `${14 + props.depth * 14}px` } : undefined}>
-        <Show when={missingLead()}>
+        <Show when={offerLead()}>
           <Button
             type="button"
             variant="link"

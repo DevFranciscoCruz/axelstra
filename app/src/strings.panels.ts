@@ -64,7 +64,7 @@ export const ptP = {
     leadTag: "main",
     leadTip: "Líder do worktree: as tarefas lançadas aqui reportam-lhe",
     startLead: "Iniciar main do worktree",
-    startLeadTip: "Abre o agente líder deste worktree; as tarefas seguintes reportam-lhe",
+    startLeadTip: "Opcional: abre um agente líder neste worktree; as tarefas seguintes reportam-lhe",
     pending: {
       label: "Por integrar",
       attentionLabel: "Precisa de atenção",
