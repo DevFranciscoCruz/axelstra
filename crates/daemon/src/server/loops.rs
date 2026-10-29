@@ -932,7 +932,8 @@ pub(super) fn stall_tick(reg: &Arc<Registry>) -> Option<Duration> {
             _ => crate::stall::parent_text_many(&items.iter().map(|(l, id, _)| (l.clone(), *id)).collect::<Vec<_>>(), minutes),
         };
         // a `notice` leaves the parent's own state (its pending question, its report) alone
-        let m = reg.bus.send(None, pid, "notice", &text, None, None);
+        let from = if let [(_, id, _)] = items.as_slice() { Some(*id) } else { None };
+        let m = reg.bus.send(from, pid, "notice", &text, None, None);
         let agent = reg.metas.lock_recover().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
         if agent {
             reg.deliver_untrusted(pid, ps, &crate::msgbus::notice(&m, "axelstra watchdog"));
