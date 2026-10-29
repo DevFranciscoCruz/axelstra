@@ -169,6 +169,28 @@ pub fn kernel_and_cache() -> Option<(KernelMem, u64)> {
     Some((KernelMem { paged_mb: paged, nonpaged_mb: nonpaged, alert_mb: paged + nonpaged }, p.SystemCache as u64 * page / MB))
 }
 
+/// Pool use per tag (`SystemPoolTagInformation`, class 22). Works without admin; `None` when the OS refuses or the buffer
+/// cannot be sized. The list is a few thousand entries (about 120 KB), read only when the breakdown is built.
+pub fn pool_tags() -> Option<Vec<super::cause::PoolTag>> {
+    const MISMATCH: i32 = 0xC000_0004u32 as i32; // STATUS_INFO_LENGTH_MISMATCH
+    let mut len = 512 * 1024u32;
+    for _ in 0..4 {
+        let mut buf = vec![0u8; len as usize];
+        let mut ret = 0u32;
+        // SAFETY: `buf` is writable for `len` bytes and the call writes inside that; `ret` is a local.
+        let st = unsafe { NtQuerySystemInformation(22, buf.as_mut_ptr().cast(), len, &mut ret) };
+        if st >= 0 {
+            return super::cause::parse_pool_tags(&buf);
+        }
+        if st != MISMATCH {
+            return None;
+        }
+        // the table grew between the size and the read: ask for what it said plus slack
+        len = ret.max(len).saturating_add(128 * 1024);
+    }
+    None
+}
+
 /// Handles open on the whole system.
 pub fn system_handles() -> Option<u64> {
     perf_info().map(|p| p.HandleCount as u64)

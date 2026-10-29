@@ -115,6 +115,7 @@ fn breakdown(o: &mut String, b: &Value, total: u64) {
         line(o, "kernel paged", n(&k["paged_mb"]), "");
         line(o, "kernel non-paged", n(&k["nonpaged_mb"]), &base);
     }
+    pool_tags(o, &b["pool_tags"], &b["own"]);
     if let Some(v) = b["cache_mb"].as_u64() {
         line(o, "system cache", v, "");
     }
@@ -151,7 +152,53 @@ fn breakdown(o: &mut String, b: &Value, total: u64) {
     }
     if b["kernel"]["high"].as_bool() == Some(true) {
         let g = gb(n(&b["kernel"]["total_mb"]));
-        let _ = writeln!(o, "suggestion: kernel memory is high ({g} GB): possible handle or driver leak; restarting frees it");
+        let big = b["pool_tags"]["top"][0]["tag"].as_str();
+        let why = match big {
+            Some(t) => {
+                let owner = b["pool_tags"]["top"][0]["owner"].as_str().map(|w| format!(", {}", owner_text(w))).unwrap_or_default();
+                format!("; biggest pool tag {t}{owner}")
+            }
+            None => String::new(),
+        };
+        let _ = writeln!(o, "suggestion: kernel memory is high ({g} GB): possible handle or driver leak; restarting frees it{why}");
+    }
+}
+
+/// Kernel pool per tag (Windows) and what Axelstra itself adds. Partial on purpose: the line "no tag" says how much is not named.
+fn pool_tags(o: &mut String, p: &Value, own: &Value) {
+    use std::fmt::Write;
+    let n = |v: &Value| v.as_u64().unwrap_or(0);
+    let f = |v: &Value| v.as_f64();
+    if p.is_object() {
+        let _ = writeln!(o, "kernel pool by tag (partial attribution):");
+        for t in p["top"].as_array().into_iter().flatten() {
+            let tag = t["tag"].as_str().unwrap_or("?");
+            let owner = t["owner"].as_str().map(|w| format!("  {}", owner_text(w))).unwrap_or_default();
+            let _ = writeln!(o, "  {tag:<5} paged {:>5} MB  non-paged {:>5} MB{owner}", n(&t["paged_mb"]), n(&t["nonpaged_mb"]));
+        }
+        if let Some(v) = p["sem_etiqueta_mb"].as_u64() {
+            let _ = writeln!(o, "  no tag (large allocations, special pools): {v} MB");
+        }
+    }
+    if own.is_object() {
+        let rate = f(&own["spawns_per_min"]).map(|r| format!(", {r:.1}/min")).unwrap_or_default();
+        let _ =
+            writeln!(o, "axelstra itself: {} child processes started{rate}, {} directories watched", n(&own["spawns"]), n(&own["watches"]));
+    }
+}
+
+/// English text of a pool tag owner id (the app words it in its own language).
+fn owner_text(owner: &str) -> &'static str {
+    match owner {
+        "filter" => "file-name cache of the filter manager (antivirus and other file filters)",
+        "tokens" => "security tokens (many processes started)",
+        "files" => "open file objects",
+        "watchers" => "folder change notifications (watchers)",
+        "ntfs" => "NTFS file structures",
+        "mm" => "memory manager",
+        "io" => "I/O name buffers",
+        "etw" => "event tracing (ETW) buffers",
+        _ => "",
     }
 }
 
@@ -197,6 +244,11 @@ mod tests {
                 "builds": {"count": 1, "rss_mb": 2000},
                 "external": [{"name": "MsMpEng.exe", "count": 1, "rss_mb": 700}, {"name": "chrome.exe", "count": 12, "rss_mb": 3000}],
                 "others_mb": 500,
+                "pool_tags": {"top": [
+                    {"tag": "FMfn", "paged_mb": 1541, "nonpaged_mb": 0, "owner": "filter"},
+                    {"tag": "Xyz1", "paged_mb": 3, "nonpaged_mb": 2, "owner": null}],
+                    "tagged_mb": 1546, "sem_etiqueta_mb": 1300, "partial": true},
+                "own": {"spawns": 240, "uptime_secs": 120, "spawns_per_min": 120.0, "watches": 35},
                 "handles": {"total": 300000, "top": [{"name": "leak.exe", "pid": 7, "handles": 90000}]},
                 "system": {"cpu_user_pct": 12.0, "cpu_kernel_pct": 30.0, "commit_mb": 20480, "commit_limit_mb": 40960},
                 "top_cpu": [{"name": "a.exe", "pid": 1, "value": 55.0}],
@@ -219,6 +271,29 @@ mod tests {
         assert!(t.contains("a.exe (1) 55%") && t.contains("b.exe (2) 120"), "{t}");
         assert!(t.contains("suggestion: kernel memory is high (4.2 GB): possible handle or driver leak; restarting frees it"), "{t}");
         assert!(!t.contains("compressed"), "null is not printed: {t}");
+    }
+
+    #[test]
+    fn pool_tags_name_known_owners_show_the_untagged_rest_and_the_own_share() {
+        let t = render(&sample());
+        assert!(t.contains("kernel pool by tag (partial attribution):"), "{t}");
+        assert!(t.contains("FMfn  paged  1541 MB  non-paged     0 MB  file-name cache of the filter manager"), "{t}");
+        assert!(
+            t.contains(
+                "Xyz1  paged     3 MB  non-paged     2 MB
+"
+            ),
+            "{t}"
+        );
+        assert!(t.contains("no tag (large allocations, special pools): 1300 MB"), "{t}");
+        assert!(t.contains("axelstra itself: 240 child processes started, 120.0/min, 35 directories watched"), "{t}");
+        assert!(t.contains("biggest pool tag FMfn, file-name cache"), "{t}");
+        // an old daemon or Linux: none of it prints
+        let mut r = sample();
+        r["breakdown"]["pool_tags"] = Value::Null;
+        r["breakdown"]["own"] = Value::Null;
+        let t = render(&r);
+        assert!(!t.contains("by tag") && !t.contains("axelstra itself"), "{t}");
     }
 
     #[test]

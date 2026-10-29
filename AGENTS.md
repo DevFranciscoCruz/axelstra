@@ -333,6 +333,17 @@ User guide: `docs/MEMORY.md`. PROTO 31.
   in tests, `Governor::cause.set_source`); the OS one uses direct APIs only (`GetSystemTimes`, `GetPerformanceInfo`, `NtQuerySystemInformation`,
   `GetProcessMemoryInfo/HandleCount/Times/IoCounters`, `/proc`), never PDH or `Get-Counter` (they fail on some installs). Processes the OS refuses to open
   (protected ones, e.g. Defender) show RSS 0; nothing ever acts on them.
+- **Pool tags and our own share.** `breakdown.pool_tags` (Windows only, `null` elsewhere or when the OS refuses; additive, no PROTO bump):
+  `NtQuerySystemInformation(22)` (`win::pool_tags`, no admin, buffer regrown on `STATUS_INFO_LENGTH_MISMATCH`) parsed by the pure
+  `cause::parse_pool_tags` (u32 count, 4 pad, 40-byte entries: tag at 0, PagedUsed at 16, NonPagedUsed at 32). `top` = 8 biggest by bytes
+  `{tag, paged_mb, nonpaged_mb, owner}`; `owner` is an id (`filter` FMfn, `tokens` Toke, `files` File, `watchers` Ntfc, `ntfs` Ntff, `mm` MmSt,
+  `io` IoNm, `etw` EtwB) or `null`: unknown tags get no invented owner. `sem_etiqueta_mb` = kernel counters minus the sum of all tags (large
+  allocations and special pools have no tag), `partial: true` always. Read only when the breakdown is built and when `governor.kernel_pool_high`
+  is raised (no timer). The notice then names the biggest tag with one code per owner (`governor.kernel_pool_{filter,tokens,files,watchers,ntfs,mm,io,etw,tag}`);
+  no tags (Linux, refused): the old generic code. Linux keeps `/proc/meminfo` Slab/SReclaimable/SUnreclaim only (slabinfo needs root).
+  `breakdown.own` = `{spawns, uptime_secs, spawns_per_min (null under 60 s), watches}`: children started through `core::proc::hidden`
+  (`spawn_stats`) and directories watched by `watcher.rs` (`core::proc::WatchTally`, dropped with the watcher thread; the few fixed
+  watchers of kanban, PR refs, usage and orchestrator runs are not counted). Shown in `axelstra mem`, the memory panel and `debug.load`.
 - **Kernel alerts.** No new timer: `Governor::set_tick` runs `server/governor.rs::cause_tick` on each wake of the governor thread (OS event or its
   computed deadline), which reads only the kernel pools and the machine counters (`cause::Monitor::evaluate`). Pool alert (`KernelWatch`): the first
   reading is the baseline; the line is the lower of `kernel_pool_mb` and twice the baseline (floor 1 GB); one `governor.kernel_pool_high {gb, handles}`

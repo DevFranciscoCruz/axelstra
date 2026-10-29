@@ -69,12 +69,23 @@ fn raise(reg: &Registry, alert: Alert) {
             let handles =
                 reg.governor.cause.source().handle_total().unwrap_or_else(|| rows.iter().filter_map(|r| r.handles).map(u64::from).sum());
             let handles = if rows.iter().any(|r| r.handles.is_some()) { handles.to_string() } else { "n/a".to_string() };
-            axelstra_core::coded!(
-                "governor.kernel_pool_high",
-                "kernel memory is high ({gb} GB): possible handle or driver leak; restarting frees it",
-                gb = cause::fmt_gb(mb),
-                handles = handles
-            )
+            let gb = cause::fmt_gb(mb);
+            // the biggest tag and what it usually means, when the OS tells (Windows); else the plain text
+            let top = reg
+                .governor
+                .cause
+                .source()
+                .pool_tags()
+                .and_then(|t| t.into_iter().max_by(|a, b| (a.paged + a.nonpaged).cmp(&(b.paged + b.nonpaged)).then(b.tag.cmp(&a.tag))));
+            match top {
+                Some(t) => pool_notice(&gb, &handles, &t),
+                None => axelstra_core::coded!(
+                    "governor.kernel_pool_high",
+                    "kernel memory is high ({gb} GB): possible handle or driver leak; restarting frees it",
+                    gb = gb,
+                    handles = handles
+                ),
+            }
         }
         Alert::Load(r) => axelstra_core::coded!(
             "governor.kernel_load_high",
@@ -85,6 +96,61 @@ fn raise(reg: &Registry, alert: Alert) {
     };
     if let Some(c) = axelstra_core::msg::find(&e) {
         crate::store::notice_coded(c.clone());
+    }
+}
+
+/// The kernel-pool notice naming the biggest tag. One code per known owner so each language words what that tag usually
+/// means; a tag with no known owner gets the generic wording with just the tag.
+fn pool_notice(gb: &str, handles: &str, t: &cause::PoolTag) -> anyhow::Error {
+    let mb = (t.paged + t.nonpaged) / (1024 * 1024);
+    let (tag, mb) = (t.tag.clone(), mb.to_string());
+    let (gb, handles) = (gb.to_string(), handles.to_string());
+    match cause::pool_owner(&t.tag) {
+        Some("filter") => axelstra_core::coded!(
+            "governor.kernel_pool_filter",
+            "kernel memory is high ({gb} GB); biggest pool tag {tag} ({mb} MB) is the file-name cache of the filter manager (antivirus and other file filters)",
+            gb = gb, tag = tag, mb = mb, handles = handles
+        ),
+        Some("tokens") => axelstra_core::coded!(
+            "governor.kernel_pool_tokens",
+            "kernel memory is high ({gb} GB); biggest pool tag {tag} ({mb} MB) is security tokens, which many started processes leave",
+            gb = gb, tag = tag, mb = mb, handles = handles
+        ),
+        Some("files") => axelstra_core::coded!(
+            "governor.kernel_pool_files",
+            "kernel memory is high ({gb} GB); biggest pool tag {tag} ({mb} MB) is open file objects",
+            gb = gb, tag = tag, mb = mb, handles = handles
+        ),
+        Some("watchers") => axelstra_core::coded!(
+            "governor.kernel_pool_watchers",
+            "kernel memory is high ({gb} GB); biggest pool tag {tag} ({mb} MB) is folder change notifications (watchers)",
+            gb = gb, tag = tag, mb = mb, handles = handles
+        ),
+        Some("ntfs") => axelstra_core::coded!(
+            "governor.kernel_pool_ntfs",
+            "kernel memory is high ({gb} GB); biggest pool tag {tag} ({mb} MB) is NTFS file structures",
+            gb = gb, tag = tag, mb = mb, handles = handles
+        ),
+        Some("mm") => axelstra_core::coded!(
+            "governor.kernel_pool_mm",
+            "kernel memory is high ({gb} GB); biggest pool tag {tag} ({mb} MB) belongs to the memory manager",
+            gb = gb, tag = tag, mb = mb, handles = handles
+        ),
+        Some("io") => axelstra_core::coded!(
+            "governor.kernel_pool_io",
+            "kernel memory is high ({gb} GB); biggest pool tag {tag} ({mb} MB) is I/O name buffers",
+            gb = gb, tag = tag, mb = mb, handles = handles
+        ),
+        Some("etw") => axelstra_core::coded!(
+            "governor.kernel_pool_etw",
+            "kernel memory is high ({gb} GB); biggest pool tag {tag} ({mb} MB) is event tracing (ETW) buffers",
+            gb = gb, tag = tag, mb = mb, handles = handles
+        ),
+        _ => axelstra_core::coded!(
+            "governor.kernel_pool_tag",
+            "kernel memory is high ({gb} GB); biggest pool tag is {tag} ({mb} MB), owner not known",
+            gb = gb, tag = tag, mb = mb, handles = handles
+        ),
     }
 }
 
@@ -104,6 +170,7 @@ fn breakdown(reg: &Registry, info: &crate::governor::MemInfo) -> Value {
     let (rates, load_raised) = reg.governor.cause.load_last();
     let counters = src.system();
     let alerting = kernel_high || load_raised;
+    let (spawns, secs) = axelstra_core::proc::spawn_stats();
 
     // whose each process is: a build (the tree of a `mem.hold` pid), a session (its job / group), or external
     let by_pid: HashMap<u32, &cause::ProcRow> = rows.iter().map(|r| (r.pid, r)).collect();
@@ -159,6 +226,8 @@ fn breakdown(reg: &Registry, info: &crate::governor::MemInfo) -> Value {
         classify: &classify,
         baseline_mb: baseline,
         kernel_high,
+        pool_tags: src.pool_tags(),
+        own: cause::own_json(spawns, secs, axelstra_core::proc::watch_count()),
         system: cause::system_json(counters.as_ref(), rates.as_ref()),
         top,
     })

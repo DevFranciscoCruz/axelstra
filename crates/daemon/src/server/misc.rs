@@ -230,9 +230,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({"ran": RAN.fetch_add(1, Ordering::SeqCst) + 1}))
         }
         // load tests and tools/idle-load.mjs: calls per method and child processes started since the daemon began
-        "debug.load" if std::env::var_os("AXELSTRA_TESTING").is_some() => {
-            Ok(json!({"calls": crate::lag::snapshot(), "spawns": axelstra_core::proc::spawn_count()}))
-        }
+        "debug.load" if std::env::var_os("AXELSTRA_TESTING").is_some() => Ok(
+            json!({"calls": crate::lag::snapshot(), "spawns": axelstra_core::proc::spawn_count(), "watches": axelstra_core::proc::watch_count()}),
+        ),
         // what the daemon recovered or lost on its own (a state file moved aside, restored from a backup): shown once
         "audit.list" => {
             let limit = p["limit"].as_u64().map_or(100, |n| n.clamp(1, 500) as usize);

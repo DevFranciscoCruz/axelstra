@@ -56,6 +56,22 @@ export const ptBRG: Widen<typeof ptG> = {
     handles: (name: string, pid: number, n: string) => `${name} (${pid}): ${n} handles`,
     kernelHigh: (size: string) =>
       `A memória do kernel está alta (${size}): possível vazamento de handles ou de um driver. Reiniciar a libera.`,
+    poolHead: "Memória do kernel por tag",
+    poolNote: "Atribuição parcial: só as tags que o Windows nomeia.",
+    pool: (tag: string, paged: string, nonpaged: string) => `${tag}: paginado ${paged}, não paginado ${nonpaged}`,
+    poolNoTag: (size: string) => `Sem tag (alocações grandes, pools especiais): ${size}`,
+    poolOwner: {
+      filter: "cache de nomes do gerenciador de filtros (antivírus e outros filtros de arquivos)",
+      tokens: "tokens de segurança (muitos processos iniciados)",
+      files: "objetos de arquivos abertos",
+      watchers: "notificações de mudança de pastas (vigias)",
+      ntfs: "estruturas de arquivos do NTFS",
+      mm: "gerenciador de memória",
+      io: "buffers de nomes de E/S",
+      etw: "buffers de rastreamento de eventos (ETW)",
+    } as Record<string, string>,
+    own: (spawns: string, perMin: string | null, watches: string) =>
+      `O próprio Axelstra: ${spawns} processos iniciados${perMin === null ? "" : ` (${perMin}/min)`}, ${watches} pastas vigiadas`,
   },
   dot: {
     memory: "Pausada: pouca memória",

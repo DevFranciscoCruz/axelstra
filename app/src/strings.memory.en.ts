@@ -56,6 +56,22 @@ export const enG: Widen<typeof ptG> = {
     handles: (name: string, pid: number, n: string) => `${name} (${pid}): ${n} handles`,
     kernelHigh: (size: string) =>
       `Kernel memory is high (${size}): possible handle or driver leak. Restarting frees it.`,
+    poolHead: "Kernel memory by tag",
+    poolNote: "Partial attribution: only the tags Windows names.",
+    pool: (tag: string, paged: string, nonpaged: string) => `${tag}: paged ${paged}, non-paged ${nonpaged}`,
+    poolNoTag: (size: string) => `No tag (large allocations, special pools): ${size}`,
+    poolOwner: {
+      filter: "file-name cache of the filter manager (antivirus and other file filters)",
+      tokens: "security tokens (many processes started)",
+      files: "open file objects",
+      watchers: "folder change notifications (watchers)",
+      ntfs: "NTFS file structures",
+      mm: "memory manager",
+      io: "I/O name buffers",
+      etw: "event tracing (ETW) buffers",
+    } as Record<string, string>,
+    own: (spawns: string, perMin: string | null, watches: string) =>
+      `Axelstra itself: ${spawns} processes started${perMin === null ? "" : ` (${perMin}/min)`}, ${watches} folders watched`,
   },
   dot: {
     memory: "Paused: low memory",

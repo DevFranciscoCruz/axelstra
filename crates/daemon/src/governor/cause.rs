@@ -73,6 +73,10 @@ pub trait CauseSource: Send + Sync {
         None
     }
     fn procs(&self) -> Vec<ProcRow>;
+    /// Kernel pool use per allocation tag (Windows only; `None` when the OS refuses or does not have it).
+    fn pool_tags(&self) -> Option<Vec<PoolTag>> {
+        None
+    }
 }
 
 /// The process whose working set IS the compressed memory (Windows).
@@ -115,6 +119,92 @@ pub enum Class {
     External,
 }
 
+/// Pool bytes one allocation tag holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoolTag {
+    pub tag: String,
+    pub paged: u64,
+    pub nonpaged: u64,
+}
+
+/// `SystemPoolTagInformation` (class 22): a `ULONG` count, 4 bytes of padding, then `SYSTEM_POOLTAG` entries of 40 bytes
+/// (x64): `Tag[4]` at 0, `PagedUsed` (u64) at 16, `NonPagedUsed` (u64) at 32. `None` when the buffer is shorter than its own
+/// count says. Tags that hold nothing are dropped. Pure.
+pub fn parse_pool_tags(buf: &[u8]) -> Option<Vec<PoolTag>> {
+    const HEAD: usize = 8;
+    const STRIDE: usize = 40;
+    let count = u32::from_le_bytes(buf.get(0..4)?.try_into().ok()?) as usize;
+    if buf.len() < HEAD.checked_add(count.checked_mul(STRIDE)?)? {
+        return None;
+    }
+    let u64_at = |o: usize| u64::from_le_bytes(buf[o..o + 8].try_into().unwrap());
+    Some(
+        (0..count)
+            .filter_map(|i| {
+                let o = HEAD + i * STRIDE;
+                let (paged, nonpaged) = (u64_at(o + 16), u64_at(o + 32));
+                (paged + nonpaged > 0).then(|| PoolTag {
+                    tag: buf[o..o + 4].iter().map(|b| if b.is_ascii_graphic() || *b == b' ' { *b as char } else { '?' }).collect(),
+                    paged,
+                    nonpaged,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// What a tag usually means: a short id the frontend translates. Only tags whose owner is well known; others have none.
+pub fn pool_owner(tag: &str) -> Option<&'static str> {
+    Some(match tag {
+        "FMfn" => "filter",
+        "Toke" => "tokens",
+        "File" => "files",
+        "Ntfc" => "watchers",
+        "Ntff" => "ntfs",
+        "MmSt" => "mm",
+        "IoNm" => "io",
+        "EtwB" => "etw",
+        _ => return None,
+    })
+}
+
+/// The owner id in English (CLI and logs); the app has its own texts.
+pub fn owner_text(owner: &str) -> &'static str {
+    match owner {
+        "filter" => "file-name cache of the filter manager (antivirus and other file filters)",
+        "tokens" => "security tokens (many processes started)",
+        "files" => "open file objects",
+        "watchers" => "folder change notifications (watchers)",
+        "ntfs" => "NTFS file structures",
+        "mm" => "memory manager",
+        "io" => "I/O name buffers",
+        "etw" => "event tracing (ETW) buffers",
+        _ => "",
+    }
+}
+
+const TOP_TAGS: usize = 8;
+
+/// The `pool_tags` of the breakdown: the 8 biggest tags, and what the pool counters hold beyond the sum of all tags
+/// (`sem_etiqueta_mb`: large allocations and special pools carry no tag). Always `partial`: it is an attribution, not a ledger.
+pub fn pool_tags_json(tags: &[PoolTag], kernel: Option<KernelMem>) -> Value {
+    let mut v: Vec<&PoolTag> = tags.iter().collect();
+    v.sort_by(|a, b| (b.paged + b.nonpaged).cmp(&(a.paged + a.nonpaged)).then(a.tag.cmp(&b.tag)));
+    let (tp, tn) = tags.iter().fold((0u64, 0u64), |a, t| (a.0 + t.paged, a.1 + t.nonpaged));
+    let (tp_mb, tn_mb) = (tp / MIB, tn / MIB);
+    let total = kernel.map(|k| k.total_mb());
+    json!({
+        "top": v.iter().take(TOP_TAGS).map(|t| json!({
+            "tag": t.tag, "paged_mb": t.paged / MIB, "nonpaged_mb": t.nonpaged / MIB, "owner": pool_owner(&t.tag),
+        })).collect::<Vec<_>>(),
+        "tagged_mb": tp_mb + tn_mb,
+        "sem_etiqueta_mb": total.map(|t| t.saturating_sub(tp_mb + tn_mb)),
+        "partial": true,
+    })
+}
+
+const MIB: u64 = 1024 * 1024;
+
 pub struct Inputs<'a> {
     pub total_mb: u64,
     pub free_mb: u64,
@@ -129,6 +219,10 @@ pub struct Inputs<'a> {
     pub classify: &'a dyn Fn(&ProcRow) -> Class,
     pub baseline_mb: Option<u64>,
     pub kernel_high: bool,
+    /// kernel pool per tag, when the OS gives it
+    pub pool_tags: Option<Vec<PoolTag>>,
+    /// what Axelstra itself adds: `own_json`
+    pub own: Value,
     /// `system_json` of the counters and rates now
     pub system: Value,
     /// (top_cpu, top_io) from `top_rates`, only measured while alerting
@@ -201,6 +295,8 @@ pub fn breakdown(i: &Inputs) -> Value {
             "paged_mb": k.paged_mb, "nonpaged_mb": k.nonpaged_mb, "total_mb": k.total_mb(),
             "baseline_mb": i.baseline_mb, "high": i.kernel_high,
         })),
+        "pool_tags": i.pool_tags.as_deref().map(|t| pool_tags_json(t, i.kernel)),
+        "own": i.own,
         "cache_mb": i.cache_mb,
         "compressed_mb": i.compressed_mb,
         "sessions": sessions,
@@ -212,6 +308,13 @@ pub fn breakdown(i: &Inputs) -> Value {
         "top_cpu": i.top.as_ref().map(|t| &t.0),
         "top_io": i.top.as_ref().map(|t| &t.1),
     })
+}
+
+/// What this daemon itself adds to the kernel pools: children started (each takes a security token and file objects) and
+/// directories watched (each is a change-notification handle). `spawns`/`secs` come from `core::proc::spawn_stats`.
+pub fn own_json(spawns: u64, secs: u64, watches: u64) -> Value {
+    let per_min = (secs >= 60).then(|| round1(spawns as f64 * 60.0 / secs as f64));
+    json!({"spawns": spawns, "uptime_secs": secs, "spawns_per_min": per_min, "watches": watches})
 }
 
 fn round1(x: f64) -> f64 {
@@ -564,6 +667,10 @@ impl CauseSource for OsCause {
         super::win::system_counters()
     }
 
+    fn pool_tags(&self) -> Option<Vec<PoolTag>> {
+        super::win::pool_tags()
+    }
+
     fn procs(&self) -> Vec<ProcRow> {
         let snap = axelstra_core::procs::snapshot();
         let all: std::collections::HashSet<u32> = snap.procs.iter().map(|p| p.pid).collect();
@@ -734,6 +841,8 @@ mod tests {
             classify: &classify,
             baseline_mb: Some(1900),
             kernel_high: true,
+            pool_tags: None,
+            own: Value::Null,
             system: Value::Null,
             top: None,
         };
@@ -779,6 +888,8 @@ mod tests {
             classify: &classify,
             baseline_mb: None,
             kernel_high: false,
+            pool_tags: None,
+            own: Value::Null,
             system: Value::Null,
             top: None,
         };
@@ -807,6 +918,8 @@ mod tests {
                 classify: &classify,
                 baseline_mb: None,
                 kernel_high: high,
+                pool_tags: None,
+                own: Value::Null,
                 system: Value::Null,
                 top: None,
             };
@@ -1002,5 +1115,63 @@ pgmajfault 77
                 OsCause.handle_total()
             );
         }
+    }
+
+    /// a class-22 buffer: count, pad, then 40-byte entries (tag at 0, PagedUsed at 16, NonPagedUsed at 32)
+    fn pool_buf(entries: &[(&[u8; 4], u64, u64)]) -> Vec<u8> {
+        let mut b = vec![0u8; 8 + entries.len() * 40];
+        b[0..4].copy_from_slice(&(entries.len() as u32).to_le_bytes());
+        for (i, (tag, paged, non)) in entries.iter().enumerate() {
+            let o = 8 + i * 40;
+            b[o..o + 4].copy_from_slice(*tag);
+            b[o + 16..o + 24].copy_from_slice(&paged.to_le_bytes());
+            b[o + 32..o + 40].copy_from_slice(&non.to_le_bytes());
+        }
+        b
+    }
+
+    #[test]
+    fn pool_tags_parse_from_a_synthetic_buffer_and_skip_empty_ones() {
+        const M: u64 = 1024 * 1024;
+        let b = pool_buf(&[(b"FMfn", 1541 * M, 0), (b"File", 0, 587 * M), (b"Zero", 0, 0)]);
+        let t = parse_pool_tags(&b).unwrap();
+        assert_eq!(t.len(), 2);
+        assert_eq!((t[0].tag.as_str(), t[0].paged, t[0].nonpaged), ("FMfn", 1541 * M, 0));
+        assert_eq!((t[1].tag.as_str(), t[1].nonpaged), ("File", 587 * M));
+        // a count larger than the buffer, or no buffer: nothing, never a panic
+        assert!(parse_pool_tags(&b[..b.len() - 1]).is_none());
+        assert!(parse_pool_tags(&[1, 0]).is_none());
+        let mut huge = b.clone();
+        huge[0..4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(parse_pool_tags(&huge).is_none());
+        // a non-printable tag byte is shown as ?
+        assert_eq!(parse_pool_tags(&pool_buf(&[(&[b'A', 1, b'b', b'c'], M, 0)])).unwrap()[0].tag, "A?bc");
+    }
+
+    #[test]
+    fn pool_tags_json_ranks_by_bytes_names_known_owners_and_shows_the_untagged_rest() {
+        const M: u64 = 1024 * 1024;
+        let mut tags: Vec<PoolTag> = (0..10).map(|i| PoolTag { tag: format!("T{i:03}"), paged: (i + 1) * M, nonpaged: 0 }).collect();
+        tags.push(PoolTag { tag: "FMfn".into(), paged: 1500 * M, nonpaged: 0 });
+        tags.push(PoolTag { tag: "File".into(), paged: 0, nonpaged: 500 * M });
+        let k = KernelMem { paged_mb: 1800, nonpaged_mb: 600, alert_mb: 2400 };
+        let j = pool_tags_json(&tags, Some(k));
+        let top = j["top"].as_array().unwrap();
+        assert_eq!(top.len(), 8);
+        assert_eq!((top[0]["tag"].as_str(), top[0]["owner"].as_str()), (Some("FMfn"), Some("filter")));
+        assert_eq!((top[1]["tag"].as_str(), top[1]["nonpaged_mb"].as_u64()), (Some("File"), Some(500)));
+        // an unknown tag has no owner: nothing invented
+        assert!(top[2]["owner"].is_null());
+        // 1500 + 500 + (1..=10 summed = 55) tagged; counters say 2400
+        assert_eq!((j["tagged_mb"].as_u64(), j["sem_etiqueta_mb"].as_u64(), j["partial"].as_bool()), (Some(2055), Some(345), Some(true)));
+        // no counters: the rest is unknown, not zero
+        assert!(pool_tags_json(&tags, None)["sem_etiqueta_mb"].is_null());
+    }
+
+    #[test]
+    fn own_rate_needs_a_minute_of_uptime() {
+        assert!(own_json(30, 59, 4)["spawns_per_min"].is_null());
+        let o = own_json(120, 120, 7);
+        assert_eq!((o["spawns_per_min"].as_f64(), o["watches"].as_u64()), (Some(60.0), Some(7)));
     }
 }

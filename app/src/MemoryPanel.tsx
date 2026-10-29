@@ -118,6 +118,40 @@ export function MemoryPanelBody(props: { close: () => void }) {
               </>
             )}
           </For>
+          <Show when={(m().breakdown?.pool_tags?.top ?? []).length > 0}>
+            <div class="sb-head">{G.breakdown.poolHead}</div>
+            <For each={m().breakdown?.pool_tags?.top ?? []}>
+              {(t) => (
+                <div class="mem-row">
+                  <span class="mem-name">
+                    {G.breakdown.pool(t.tag, fmtMb(t.paged_mb), fmtMb(t.nonpaged_mb))}
+                    <Show when={t.owner && G.breakdown.poolOwner[t.owner]}>
+                      <span class="lim-dim"> · {G.breakdown.poolOwner[t.owner ?? ""]}</span>
+                    </Show>
+                  </span>
+                </div>
+              )}
+            </For>
+            <Show when={m().breakdown?.pool_tags?.sem_etiqueta_mb != null}>
+              <div class="mem-row">
+                <span class="mem-name">
+                  {G.breakdown.poolNoTag(fmtMb(m().breakdown?.pool_tags?.sem_etiqueta_mb ?? 0))}
+                </span>
+              </div>
+            </Show>
+            <div class="auto-note">{G.breakdown.poolNote}</div>
+          </Show>
+          <Show when={m().breakdown?.own}>
+            {(o) => (
+              <div class="auto-note">
+                {G.breakdown.own(
+                  fmtNumber(o().spawns),
+                  o().spawns_per_min == null ? null : fmtFixed(o().spawns_per_min ?? 0, 1),
+                  fmtNumber(o().watches),
+                )}
+              </div>
+            )}
+          </Show>
           <Show when={(m().breakdown?.external ?? []).length > 0}>
             <div class="sb-head">{G.breakdown.externalHead}</div>
             <For each={m().breakdown?.external ?? []}>

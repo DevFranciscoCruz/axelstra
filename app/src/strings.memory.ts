@@ -56,6 +56,22 @@ export const ptG = {
     handles: (name: string, pid: number, n: string) => `${name} (${pid}): ${n} handles`,
     kernelHigh: (size: string) =>
       `A memória do kernel está alta (${size}): possível fuga de handles ou de um driver. Reiniciar liberta-a.`,
+    poolHead: "Memória do kernel por etiqueta",
+    poolNote: "Atribuição parcial: só as etiquetas que o Windows nomeia.",
+    pool: (tag: string, paged: string, nonpaged: string) => `${tag}: paginado ${paged}, não paginado ${nonpaged}`,
+    poolNoTag: (size: string) => `Sem etiqueta (alocações grandes, pools especiais): ${size}`,
+    poolOwner: {
+      filter: "cache de nomes do gestor de filtros (antivírus e outros filtros de ficheiros)",
+      tokens: "tokens de segurança (muitos processos lançados)",
+      files: "objetos de ficheiros abertos",
+      watchers: "notificações de alteração de pastas (vigias)",
+      ntfs: "estruturas de ficheiros do NTFS",
+      mm: "gestor de memória",
+      io: "buffers de nomes de E/S",
+      etw: "buffers de rastreio de eventos (ETW)",
+    } as Record<string, string>,
+    own: (spawns: string, perMin: string | null, watches: string) =>
+      `O Axelstra: ${spawns} processos lançados${perMin === null ? "" : ` (${perMin}/min)`}, ${watches} pastas vigiadas`,
   },
   dot: {
     memory: "Em pausa: pouca memória",

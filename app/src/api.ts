@@ -136,14 +136,11 @@ const run = <T>(cmd: string, method: string, params: Record<string, unknown>): P
   // limit / safety ceiling
   const other = new Promise<never>((_, rej) => {
     const limit = policyLimit(method);
-    timer = setTimeout(
-      () => {
-        alive = false;
-        const secs = Math.round((limit ?? CEILING_MS - 10_000) / 1000);
-        rej(new AppError(method, `${method} did not answer within ${secs} s`, "rpc.call_timeout", { method, secs }));
-      },
-      limit ?? CEILING_MS,
-    );
+    timer = setTimeout(() => {
+      alive = false;
+      const secs = Math.round((limit ?? CEILING_MS - 10_000) / 1000);
+      rej(new AppError(method, `${method} did not answer within ${secs} s`, "rpc.call_timeout", { method, secs }));
+    }, limit ?? CEILING_MS);
   });
   return Promise.race([
     settled(
@@ -1256,6 +1253,15 @@ export type MemBreakdown = {
     baseline_mb?: number | null;
     high: boolean;
   } | null;
+  /** Windows only; a partial attribution (`sem_etiqueta_mb` is what no tag explains) */
+  pool_tags?: {
+    top: { tag: string; paged_mb: number; nonpaged_mb: number; owner: string | null }[];
+    tagged_mb: number;
+    sem_etiqueta_mb: number | null;
+    partial: boolean;
+  } | null;
+  /** what the daemon itself adds: children started, directories watched */
+  own?: { spawns: number; uptime_secs: number; spawns_per_min: number | null; watches: number } | null;
   cache_mb?: number | null;
   compressed_mb?: number | null;
   sessions?: { tier: string; count: number; rss_mb: number }[];

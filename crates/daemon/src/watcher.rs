@@ -229,6 +229,7 @@ pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'sta
     wakers().lock().unwrap_or_else(|e| e.into_inner()).push((stop.clone(), wake_tx));
     std::thread::spawn(move || {
         let mut w = w; // the watcher lives as long as this thread
+        let mut tally = axelstra_core::proc::WatchTally::new(watched.len());
         let mut due: Option<Instant> = None;
         // leaves the list of wakers however the thread ends
         struct Unlist(Arc<AtomicBool>);
@@ -271,6 +272,7 @@ pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'sta
                                     && !ignore.is_ignored(&d, true)
                                     && w.watch(&d, RecursiveMode::NonRecursive).is_ok()
                                 {
+                                    tally.add(1);
                                     watched.insert(d);
                                 }
                             }

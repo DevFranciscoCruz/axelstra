@@ -67,6 +67,17 @@ panel shows one bar per category. Every size is in MB; a number the OS does not 
   CLI and the panel then show "kernel memory is high (X GB): possible handle or driver leak; restarting frees it", and
   the daemon notifies once per episode (`governor.kernel_pool_high`). The kernel pools are not charged to any process,
   so a leak there hides from the session list; `baseline_mb` (measured at daemon start) shows what is normal.
+- **Kernel memory by tag (Windows):** the kernel pools are split by allocation tag, read without admin from the system's pool
+  tag table. `axelstra mem` and the panel list the 8 biggest tags with paged and non-paged size and, for a few well known
+  tags, what they usually are: `FMfn` file-name cache of the filter manager (antivirus and other file filters), `Toke`
+  security tokens (many processes started), `File` open file objects, `Ntfc` folder change notifications (watchers),
+  `Ntff` NTFS file structures, `MmSt` memory manager, `IoNm` I/O name buffers, `EtwB` event tracing buffers. Any other tag
+  shows only its name. The list is **partial**: large allocations and special pools carry no tag, so a "no tag" line shows
+  how much of the pool counters no tag explains. The kernel notice names the biggest tag and what it usually means. Nothing
+  is done to the antivirus or any driver: this only reads and explains. On Linux only Slab / SReclaimable / SUnreclaim are used.
+- **What Axelstra itself adds:** one line with the child processes the daemon started since it began (and per minute once
+  it has run a minute) and the folders it watches. Each started process takes a security token and file objects (`Toke`,
+  `File`), each watched folder a change notification (`Ntfc`). The same numbers are in `debug.load`.
 - **Handles:** only filled when the kernel is high (or past 200000 handles): the total and the 5 processes holding most
   handles, which is where to look for the leak. The suggestion is advice only; nothing is closed or frozen for it.
 - **Thresholds:** the free-memory levels above are unchanged; the kernel pool limit is separate and does not change the
