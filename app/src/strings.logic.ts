@@ -195,11 +195,6 @@ export const ptL = {
       questionGeneric: (who: string, wt: string) => `${who} tem uma pergunta em ${wt} e espera a tua resposta.`,
     },
     stalledHead: (who: string, wt: string) => `${who} sem atividade e sem reportar · ${wt}`,
-    stopped: {
-      head: (who: string, wt: string) => `${who} parou · ${wt}`,
-      body: (who: string, wt: string) =>
-        `${who} ficou parado na worktree "${wt}" sem terminar. Abre para ver o que aconteceu.`,
-    },
     exitCode: (who: string, code: number) => `${who} terminou com o código de saída ${code}.`,
     ship: {
       merged: (pr: string, wt: string) => `Merge feito: ${pr} (${wt})`,
@@ -209,6 +204,10 @@ export const ptL = {
     janitor: (branch: string, into: string) => `worktree ${branch} removido (integrado em ${into})`,
     integrated: (branch: string, into: string) => `worktree ${branch} integrado em ${into} e removido`,
     emptyRemoved: (branch: string) => `Worktree vazio ${branch} removido`,
+    agg: {
+      done: (n: number) => `${count(n, "sessão concluiu", "sessões concluíram")} a tarefa`,
+      merged: (n: number) => `${count(n, "worktree integrado", "worktrees integrados")} e removidos`,
+    },
   },
   restore: {
     restored: (n: number) => count(n, "sessão restaurada", "sessões restauradas"),

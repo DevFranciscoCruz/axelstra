@@ -7,6 +7,7 @@ vi.mock("./notifications", () => ({ pushNotification: (...a: unknown[]) => pushN
 
 import type { BudgetEvent } from "./api";
 import { budgetText, handleBudgetEvents } from "./budgetEvents";
+import { DEFAULT_PREFS, setNotifyPref } from "./notifyPrefs";
 
 const ev = (over: Partial<BudgetEvent> = {}): BudgetEvent => ({
   worktree: "/wt/a",
@@ -24,6 +25,7 @@ const name = (p: string) => p.split("/").pop()!;
 beforeEach(() => {
   toast.mockReset();
   pushNotification.mockReset();
+  for (const k of ["need", "done", "info", "error", "dnd"] as const) setNotifyPref(k, DEFAULT_PREFS[k]);
 });
 
 describe("budgetText", () => {
@@ -40,7 +42,14 @@ describe("budgetText", () => {
 });
 
 describe("handleBudgetEvents", () => {
+  it("by default only the exceeded budget interrupts; the warning is recorded quietly", () => {
+    handleBudgetEvents([ev(), ev({ level: "over", period: "weekly" })], name);
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast.mock.calls[0][0]).toMatchObject({ kind: "error" });
+    expect(pushNotification).toHaveBeenCalledTimes(2);
+  });
   it("one toast and one bell entry per event, keyed so a repeat replaces", () => {
+    setNotifyPref("info", true);
     const n = handleBudgetEvents([ev(), ev({ level: "over", period: "weekly" })], name);
     expect(n).toBe(2);
     expect(toast).toHaveBeenCalledTimes(2);

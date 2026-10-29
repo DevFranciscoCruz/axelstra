@@ -37,14 +37,31 @@ export const ptBRS: Widen<typeof ptS> = {
   notifyNote: "Avisos do sistema quando um agente termina ou precisa de você.",
   notifySound: "Tocar um som com a notificação",
   notifyMode: {
-    all: { label: "Todas", hint: "Avisa quando um agente termina ou fica aguardando." },
+    all: { label: "Todas", hint: "Avisa conforme as categorias abaixo." },
     waiting: { label: "Só aguardando", hint: "Avisa apenas quando um agente fica aguardando resposta." },
     off: { label: "Nenhuma", hint: "Sem notificações do sistema." },
+  },
+  notifyCats: {
+    title: "O que avisa você",
+    note: "Cada categoria desligada fica só na central de notificações, já lida: sem aviso do sistema, som, aviso na tela nem contador.",
+    need: {
+      label: "Preciso de você",
+      hint: "Um agente aguarda sua resposta ou permissão, ou algo precisa de uma decisão sua.",
+    },
+    done: { label: "Concluído", hint: "Um agente terminou a tarefa ou um worktree foi integrado." },
+    info: { label: "Informativo", hint: "CI passando, avisos de orçamento, correções automáticas de CI." },
+    error: {
+      label: "Erros",
+      hint: "Falhas que ninguém está tratando: CI falhando, erro de um terminal, orçamento excedido.",
+    },
+    dnd: "Não perturbe",
+    dndHint:
+      "Sem aviso do sistema, som nem aviso na tela. Tudo continua registrado na central e «Preciso de você» mantém o ponto vermelho.",
   },
 
   stall: "Agente parado",
   stallNote:
-    "Se um agente ficar esse tempo sem atividade e sem chamar done ou escalate, passa a «parado»: o pai recebe uma mensagem e aparece uma notificação.",
+    "Se um agente ficar esse tempo sem atividade e sem chamar done ou escalate, passa a «parado»: o pai recebe uma mensagem. Você só é avisado se não houver agente pai cuidando disso.",
   stallOff: "Desligado",
   stallMin: (n: number) => `${n} min`,
 

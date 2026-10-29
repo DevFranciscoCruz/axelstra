@@ -4,6 +4,7 @@ import { coded } from "../msg";
 import { DispatchMeta, SessionExit, SessionInfo, callBg, flowTasks, listSessions, onDaemonEvent } from "../api";
 import { errorText } from "../appError";
 import { pushNotification } from "../notifications";
+import { mayInterrupt } from "../notifyPrefs";
 import { norm } from "../paths";
 import { readString, writeString } from "../persist";
 import { clearError, setError } from "./notify";
@@ -86,14 +87,15 @@ const trackAgents = (list: SessionInfo[]) => {
     if (state === "working" && prev !== "working") workingSince.set(s.id, Date.now());
     const wtPath = s.meta?.worktree;
     if (s.meta?.kind !== "agent" || !wtPath) continue;
-    // went quiet without reporting: one bell entry and one system notification per stall, whether or not it is on screen
+    // `stalled` is the daemon saying nobody handles it (no live agent parent, or the parent did not resolve it): one bell
+    // entry and one system notification per stall. `stall_parent` (a parent agent was told) is never an alert for the user.
     if (s.stalled && s.stall) {
       if (!stalledSeen.has(s.id)) {
         stalledSeen.add(s.id);
         const who = s.label ?? L.defaultAgent;
         const text = coded(s.stall.code, s.stall.params, s.stall.text);
-        pushNotification({ kind: "waiting", worktree: wtPath, session: s.id, text });
-        if (Date.now() - appStart >= NOTIFY_GRACE_MS)
+        pushNotification({ kind: "waiting", worktree: wtPath, session: s.id, text, key: `stall:${s.id}` });
+        if (Date.now() - appStart >= NOTIFY_GRACE_MS && mayInterrupt("need"))
           void notify(L.notify.stalledHead(who, wtPath.split(/[\\/]/).pop() ?? wtPath), text, wtPath, s.id, true);
       }
     } else stalledSeen.delete(s.id);
@@ -110,7 +112,8 @@ const trackAgents = (list: SessionInfo[]) => {
       if (d.text) {
         if (!viewing) setAttention((cur) => new Set(cur).add(norm(wtPath)));
         pushNotification({ kind: "waiting", worktree: wtPath, session: s.id, text: d.text });
-        if (d.os) void notify(L.notify.waiting.head(s.label ?? L.defaultAgent, name), d.text, wtPath, s.id, true);
+        if (d.os && mayInterrupt("need"))
+          void notify(L.notify.waiting.head(s.label ?? L.defaultAgent, name), d.text, wtPath, s.id, true);
       }
     }
     // back to work: the earlier "needs a look" flag is stale
@@ -133,13 +136,15 @@ const trackAgents = (list: SessionInfo[]) => {
     if (watching) continue;
     const since = workingSince.get(s.id);
     if (Date.now() - appStart < NOTIFY_GRACE_MS || !since || Date.now() - since < NOTIFY_MIN_WORK_MS) continue;
+    // An agent that merely went quiet (a finished turn) is state, never a notification. Only a process that ended is "done";
+    // one with a parent agent reports to it, so for the user that is informational.
+    if (state !== "done") continue;
     const name = wtPath.split(/[\\/]/).pop() ?? wtPath;
     const who = s.label ?? L.defaultAgent;
-    const T = state === "done" ? L.notify.done : L.notify.stopped;
-    const [head, body] = [T.head(who, name), T.body(who, name)];
-    void notify(head, body, wtPath, s.id, false);
-    // a session that merely went quiet is not worth a line in the centre (it is the common case, and not an error)
-    if (state === "done") pushNotification({ kind: "done", worktree: wtPath, session: s.id, text: body });
+    const [head, body] = [L.notify.done.head(who, name), L.notify.done.body(who, name)];
+    const category = s.meta?.parent !== undefined ? "info" : "done";
+    if (mayInterrupt(category)) void notify(head, body, wtPath, s.id, false);
+    pushNotification({ kind: "done", worktree: wtPath, session: s.id, text: body, category });
   }
 };
 
