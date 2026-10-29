@@ -1,7 +1,6 @@
 # Notifications
 
-Who tells whom what, and why. One section per layer; the host (Tauri) and frontend sections are added by the
-frontend review.
+Who tells whom what, and why. One section per layer: daemon, host (Tauri), frontend.
 
 ## Daemon
 
@@ -87,3 +86,70 @@ a message) or leaves. The user's alert is computed by one deadline per session (
   on all three platforms.
 - A stale `ask` pending after the asking agent was interrupted still shows as waiting until a reply or `done`.
 - The frontend must read `stall_parent` (additive; no PROTO bump) and keep alerting only on `stalled`; that is task 2/3.
+
+## Host (Tauri)
+
+The host adds no notification of its own: it only delivers what the frontend asks for. Nothing in `app/src-tauri/src`
+fires on its own account (no tray, no badge, no dock count).
+
+| Origem | Quando dispara | Quem recebe | Ação necessária? | Volume típico | Decisão |
+|---|---|---|---|---|---|
+| `notify_session` (`main.rs`): Windows toast with click-through, `MessageBeep` | Only when the frontend calls it (see Frontend) | Human | Depends on the caller; the frontend now calls it only for "Preciso de ti" and for categories the user switched on | Was one per agent that went quiet; now a few per day | **Manter**; gated by the frontend category and do-not-disturb before the call; `notify_mode` (`all`/`waiting`/`off`) and `notify_sound` stay as a global ceiling |
+| `request_user_attention` (taskbar flash) inside `notify_session` | Same call | Human | Same | Same | **Manter** (flashes only when a toast was really requested) |
+| `@tauri-apps/plugin-notification` fallback in `store/sessions.ts` | Non-Windows, or a toast without click callback | Human | Same | Same | **Manter** (same gate) |
+| `notification-click` event | The user clicks a toast | App (opens the session) | n/a | n/a | **Manter** |
+| Native dialogs (`native.rs`) | The user's own action | Human | n/a | n/a | Not a notification |
+
+## Frontend
+
+Principle: the human is interrupted (system notification, sound, toast, bell counter) only when an action is needed.
+Everything else is state (dots, sidebar) or a quiet entry in the notification centre.
+
+### Categories and defaults
+
+| Category | Label (pt-PT) | Kinds | Default | Contains |
+|---|---|---|---|---|
+| `need` | Preciso de ti | `waiting`, `attention` | **on** | permission/question from an agent's hook, `ask`/`escalate`, a stall nobody handles (`stalled`), a janitor `attention` (integration conflict) |
+| `done` | Concluído | `done` | off | a top-level agent whose process ended |
+| `info` | Informativo | `merged`, `ci-pass`, `budget` (warn), `done` of a session that has a parent agent, trigger `ci_fix` | off | worktree removals/integrations, CI passing, budget warning, automatic CI fix |
+| `error` | Erros | `error`, `ci-fail` | **on** | failed actions, a terminal exit code != 0, budget exceeded, trigger that could not act |
+
+A category that is **off** is still recorded in the centre, but already read: no system notification, sound, toast or
+bell counter. **Não incomodar** (do not disturb) records every enabled category as unread but suppresses the system
+notification, sound and event toasts (janitor, trigger, budget); "Preciso de ti" keeps the red dot and the sidebar
+state (state is not a notification). Failures of the user's own actions (`setError`) still toast, being the answer to
+what they just did. Preferences: `axelstra.notifyPrefs` (localStorage, mirrored to the daemon's settings `ui`; no new
+daemon method, no PROTO change). Policy in `app/src/notifyPrefs.ts`; recording in `notifications.ts` (`push`).
+
+### Inventory
+
+| Origem | Quando dispara | Quem recebe | Ação necessária? | Volume típico | Decisão |
+|---|---|---|---|---|---|
+| `store/sessions.ts`: `stalled` + `stall` | The daemon says nobody handles the stall (no live agent parent, or the parent did not resolve it) | Human: centre entry (`need`, episode key `stall:<id>`), system notification if `need` may interrupt | Yes | ~0 | **Manter**, one per episode |
+| `stall_parent` (session.list) | A parent agent was told | Nobody in the app | No | many | **Silenciar**: ignored (type added in `api.ts`; `dotOfSession` and trackers read only `stalled`). No sidebar hint added |
+| `store/sessions.ts`: `wait` (hook/ask/escalate) via `waitNotice.ts` | An explicit wait event, once per episode | Human: centre entry + system notification (`need`) | Yes | One per prompt | **Manter** |
+| `store/sessions.ts`: agent working then idle ("stopped") | A finished turn | Nobody | No | Was one per turn: the main false alarm | **Remover**: state only (sidebar dot / attention mark). `L.notify.stopped` deleted |
+| `store/sessions.ts`: agent process ended ("done") | `running` turned false | Human if `done` is on (category `info` when the session has a parent); centre entry | Rarely | Per task | **Agregar** ("N sessões concluíram") and off by default |
+| `session.exited` non-zero code | A terminal/agent ended with an error | Human: error toast + centre | Yes | Rare | **Manter** |
+| `janitorEvents.ts` removals | Worktree integrated/empty removed | Centre entry (aggregated); one toast per batch if `info` on | No | A few per day | **Agregar**, silent by default |
+| `janitorEvents.ts` attention | Integration needs a person | Toast + centre (`need`) | Yes | Rare | **Manter** |
+| `triggerEvents.ts` | CI-fix trigger fired / refused | `ci_fix`: `info` (silent); refusal: `error` | Refusal yes | Per CI failure | **Silenciar** the self-started fix, **manter** the refusal; one entry per sha |
+| `budgetEvents.ts` | Budget level crossed | warn: `info` (silent); over: `error` toast + centre | Over yes | Rare | **Manter** over, **silenciar** warn |
+| `toasts.ts` error/warn sticky | `setError`, any `toast` of kind error or sticky warn | Human toast; also recorded (`error`/`attention`) | Yes | Per failure | **Manter**; recorded read when the category is off |
+| `notifications.ts` `shipEvents` | PR merged / CI changed (polled status) | Centre (`info`/`error`) | CI fail yes | Per PR | **Manter**, categorised |
+| `NotificationBell.tsx` | Unread count in the sidebar header | Human | n/a | n/a | **Manter**; counts only unread (enabled categories) |
+| `UpdateToast.tsx`, `VersionSkew.tsx` | App/daemon update | Human | Yes (choose) | Rare | Not an agent notification, unchanged |
+| Document title, badge, tray, sounds | - | - | - | - | None exist; the only sound is the host beep in `notify_session` |
+
+### Aggregation and dedupe (`notifications.ts`)
+
+- A `done` or `merged` entry that follows another of its kind within 10 min (`AGGREGATE_MS`), same read state, folds into
+  it: "3 sessões concluíram a tarefa" (`n` counts them; worktree/session kept only when shared).
+- An identical entry (kind, worktree, text) within 2 min is dropped; an entry with an episode `key` (stall, trigger sha,
+  budget level) is the same notification for 30 min (`EPISODE_MS`).
+- Things that need a person (`waiting`, `attention`) and errors are never folded.
+
+### Not verified
+
+- No run of the real app (OS toasts, Windows focus/DND) here; covered by vitest with the Tauri `invoke` mocked.
+- `notify_mode` and the new categories overlap (the mode is the host-level ceiling); not merged to avoid migrating a daemon setting.
