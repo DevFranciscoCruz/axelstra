@@ -1,7 +1,5 @@
 import { createSignal } from "solid-js";
 import { friendlyError } from "../friendly";
-import { CANCELLED } from "../appError";
-import { msgText } from "../msg";
 import { dismissKey, dismissPrefix, latestText, toast } from "../toasts";
 
 /** The newest failure on screen ("" when none). Failures live in the toast list, one per key (see toasts.ts). */
@@ -17,7 +15,6 @@ const ACTION_KEY = "action:";
  *  `key` ties it to a poll, which clears only its own with `clearError(key)`. */
 export const setError = (m: string, key?: string) => {
   if (!m) return dismissPrefix(ACTION_KEY);
-  if (m === msgText(CANCELLED)) return; // the user cancelled a slow request: no failure to report
   const text = friendlyError(m);
   toast({ text, kind: "error", key: key ?? `${ACTION_KEY}${text}`, record: !key });
 };

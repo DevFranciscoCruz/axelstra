@@ -46,6 +46,8 @@ const PATHS: Record<string, JSX.Element> = {
   arrowUp: <path d="M8 13V3M4 7l4-4 4 4" />,
   arrowDown: <path d="M8 3v10M4 9l4 4 4-4" />,
   arrowRight: <path d="M3 8h10M9 4l4 4-4 4" />,
+  arrowLeft: <path d="M13 8H3M7 4 3 8l4 4" />,
+  search: <path d="M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM10.8 10.8 14 14" />,
   subArrow: <path d="M4 3v5a2 2 0 0 0 2 2h6M9 7l3 3-3 3" />,
   copy: (
     <>

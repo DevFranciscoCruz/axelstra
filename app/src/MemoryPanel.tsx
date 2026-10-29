@@ -16,6 +16,7 @@ import {
 } from "./memoryLogic";
 import { fmtMb } from "./memoryView";
 import { fmtNumber } from "./i18n";
+import { setSection } from "./settingsNav";
 import { memory, refreshMemory, sessions, setError, setShowSettings, showNotice, tabLabel } from "./store";
 import { G } from "./strings.memory";
 import { ago } from "./time";
@@ -176,6 +177,7 @@ export function MemoryPanelBody(props: { close: () => void }) {
             size="sm"
             onClick={() => {
               props.close();
+              setSection("memory");
               setShowSettings(true);
             }}
           >

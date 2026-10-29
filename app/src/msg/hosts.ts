@@ -58,7 +58,6 @@ export const pt = {
   "rpc.agent_forbidden": "{method} não é permitido a agentes: é o utilizador que o faz na app.",
   "rpc.agent_own_session": "{method} só é permitido para a sessão do próprio agente.",
   "rpc.call_timeout": "{method} não respondeu em {secs} s. O resto da app continua a funcionar; tenta outra vez.",
-  "rpc.cancelled": "Pedido cancelado.",
   "rpc.call_ceiling":
     "{method} ficou sem resposta durante {secs} s (limite de segurança) e a ligação foi largada. Tenta outra vez.",
   "rpc.connection_closed":
@@ -146,7 +145,6 @@ export const en: Widen<typeof pt> = {
   "rpc.agent_forbidden": "{method} is not allowed to agents: the user does it in the app.",
   "rpc.agent_own_session": "{method} is only allowed for the agent's own session.",
   "rpc.call_timeout": "{method} did not answer within {secs} s. The rest of the app keeps working; try again.",
-  "rpc.cancelled": "Request cancelled.",
   "rpc.call_ceiling": "{method} got no reply for {secs} s (safety ceiling) and the connection was dropped. Try again.",
   "rpc.connection_closed":
     "{method}: the daemon closed the connection. The app reconnects; check the state before repeating it.",
@@ -233,7 +231,6 @@ export const ptBR: Widen<typeof pt> = {
   "rpc.agent_forbidden": "{method} não é permitido a agentes: é o usuário que faz isso no app.",
   "rpc.agent_own_session": "{method} só é permitido para a sessão do próprio agente.",
   "rpc.call_timeout": "{method} não respondeu em {secs} s. O resto do app continua funcionando; tente novamente.",
-  "rpc.cancelled": "Pedido cancelado.",
   "rpc.call_ceiling":
     "{method} ficou sem resposta por {secs} s (limite de segurança) e a conexão foi derrubada. Tente novamente.",
   "rpc.connection_closed": "{method}: o daemon fechou a conexão. O app reconecta; confira o estado antes de repetir.",

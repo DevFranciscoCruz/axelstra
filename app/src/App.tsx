@@ -285,6 +285,14 @@ export function App() {
     },
   });
 
+  // the settings page covers the shell: what is under it takes no focus and is hidden from screen readers meanwhile
+  createEffect(() => {
+    const on = showSettings();
+    document.querySelectorAll<HTMLElement>(".app .main, .app .sidebar, .app .rightbar").forEach((el) => {
+      el.inert = on;
+    });
+  });
+
   // tab being renamed (double click); the palette starts it too
   const [renaming, setRenaming] = createSignal<number | null>(null);
 
@@ -319,7 +327,7 @@ export function App() {
     <div
       class="app"
       data-app-shell
-      classList={{ "with-right": current() !== null && showRightPanel(), "no-left": !showSidebar() }}
+      classList={{ "with-right": current() !== null && showRightPanel(), "no-left": !showSidebar(), "settings-on": showSettings() }}
       style={{ "--left-w": `${leftW()}px`, "--right-w": `${rightW()}px` }}
     >
       <Show when={showSidebar()}>
@@ -360,9 +368,6 @@ export function App() {
       </Show>
       <Show when={showOrchestra()}>
         <Orchestra />
-      </Show>
-      <Show when={showSettings()}>
-        <Settings />
       </Show>
       <Show when={showProjectSettings()} keyed>
         {(id) => <ProjectSettings projectId={id} onClose={() => setShowProjectSettings(null)} />}
@@ -528,6 +533,9 @@ export function App() {
             <FilesPanel />
           </Show>
         </Section>
+      </Show>
+      <Show when={showSettings()}>
+        <Settings />
       </Show>
       <StatusBar />
     </div>

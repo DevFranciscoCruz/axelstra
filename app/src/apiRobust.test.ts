@@ -95,8 +95,6 @@ import {
   writeSession,
   CEILING_MS,
 } from "./api";
-import { SLOW_NOTICE_MS, cancelSlow, slowMethods } from "./slowCalls";
-import { isCancelled } from "./appError";
 
 beforeEach(() => {
   calls.length = 0;
@@ -105,7 +103,6 @@ beforeEach(() => {
   state.hang = false;
   state.hangMethods.clear();
   state.gated.clear();
-  slowMethods().forEach(cancelSlow);
   state.fail = null;
   state.loadingFor.clear();
   state.loadingDelay = 0;
@@ -120,7 +117,7 @@ afterEach(() => {
 });
 
 describe("call", () => {
-  it("a reply after 90 s succeeds: slow was shown, no error", async () => {
+  it("a reply after 90 s succeeds, no error", async () => {
     vi.useFakeTimers();
     state.gated.set("worktree.overview", []);
     let out: unknown;
@@ -129,10 +126,7 @@ describe("call", () => {
       (r) => (out = r),
       (e) => (err = e),
     );
-    await vi.advanceTimersByTimeAsync(SLOW_NOTICE_MS - 100);
-    expect(slowMethods()).toEqual([]);
-    await vi.advanceTimersByTimeAsync(200);
-    expect(slowMethods()).toEqual(["worktree.overview"]);
+    await vi.advanceTimersByTimeAsync(6_000);
     await vi.advanceTimersByTimeAsync(90_000);
     expect(err).toBeUndefined();
     expect(out).toBeUndefined();
@@ -140,7 +134,6 @@ describe("call", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(out).toEqual({ ok: 1 });
     expect(err).toBeUndefined();
-    expect(slowMethods()).toEqual([]);
   });
 
   it("a connection closed mid-call fails at once, naming the method", async () => {
@@ -158,20 +151,6 @@ describe("call", () => {
     expect(String(e)).toContain("fechou a ligação");
   });
 
-  it("cancel drops the app-side request, clears the notice, and the next call works", async () => {
-    vi.useFakeTimers();
-    state.gated.set("git.log", []);
-    const p = call("git.log").catch((e: any) => e);
-    await vi.advanceTimersByTimeAsync(SLOW_NOTICE_MS + 10);
-    expect(slowMethods()).toEqual(["git.log"]);
-    cancelSlow("git.log");
-    const e = await p;
-    expect(isCancelled(e)).toBe(true);
-    expect(slowMethods()).toEqual([]);
-    state.gated.clear();
-    await expect(call("session.list")).resolves.toEqual([]);
-  });
-
   it("no ping and no timeout error before the safety ceiling, however slow", async () => {
     vi.useFakeTimers();
     state.hang = true;
@@ -179,19 +158,16 @@ describe("call", () => {
     void call("session.list").catch((e) => (err = e));
     await vi.advanceTimersByTimeAsync(CEILING_MS - 1_000);
     expect(err).toBeUndefined();
-    expect(slowMethods()).toEqual(["session.list"]);
     await vi.advanceTimersByTimeAsync(2_000);
     expect((err as AppError).code).toBe("rpc.call_timeout");
     expect((err as AppError).params).toEqual({ method: "session.list", secs: 600 });
-    expect(slowMethods()).toEqual([]);
   });
 
-  it("a cosmetic read keeps its own short limit and shows no slow notice", async () => {
+  it("a cosmetic read keeps its own short limit", async () => {
     vi.useFakeTimers();
     state.hangMethods.add("project.logo");
     const p = call("project.logo", { id: "x" }).catch((e: any) => e);
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(slowMethods()).toEqual([]);
     await vi.advanceTimersByTimeAsync(1_100);
     expect(((await p) as AppError).code).toBe("rpc.call_timeout");
   });
@@ -205,20 +181,6 @@ describe("call", () => {
   it("leaves {loading: true} alone for a method that is not a lane read", async () => {
     state.loadingFor.set("git.push", 1);
     expect(await call("git.push", {})).toEqual({ loading: true });
-  });
-
-  it("stops re-issuing once the call was cancelled", async () => {
-    vi.useFakeTimers();
-    state.loadingFor.set("git.changes", 1_000_000);
-    state.loadingDelay = 20_000;
-    const p = call("git.changes", {}).catch((e: any) => e);
-    await vi.advanceTimersByTimeAsync(SLOW_NOTICE_MS + 10);
-    cancelSlow("git.changes");
-    expect(isCancelled(await p)).toBe(true);
-    await vi.advanceTimersByTimeAsync(25_000);
-    const n = calls.length;
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(calls.length).toBeLessThanOrEqual(n + 1);
   });
 
   it("turns an object error into readable text, never [object Object]", async () => {

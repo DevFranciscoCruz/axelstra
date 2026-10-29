@@ -237,18 +237,15 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   `ServerAlive*`, which close the stream when the link dies). Slow methods keep their lane (`is_slow`) and the method name in
   `rpc.call_timeout`/`rpc.call_ceiling`/`rpc.connection_closed`. Tests: `crates/daemon/tests/client_events.rs` (gated fake
   daemon: late reply succeeds, close mid-call fails at once, ceiling, explicit limit) and `remote.rs` (process killed).
-- **Daemon calls, app side (`app/src/api.ts`, `slowCalls.ts`).** `call`/`callBg` have no elapsed-time failure either: a pending call
+- **Daemon calls, app side (`app/src/api.ts`).** `call`/`callBg` have no elapsed-time failure either: a pending call
   ends with the host's reply or error (`rpc.connection_closed`, `rpc.call_ceiling`, any coded error); the old 40 s / 130 s / 10 min
-  guards and the `ping` after a late call are gone (`ping`/`hello` never declare the daemon dead). Slowness is information: a call
-  still waiting after `SLOW_NOTICE_MS` (6 s) is listed in `slowMethods()` and `ErrorToast` shows a non-blocking "A carregar... o
-  sistema está lento (<method>)" notice with Cancelar; that button (`cancelSlow`) rejects only the app-side request with
-  `AppError` code `rpc.cancelled` (`isCancelled`), the daemon keeps working. `setError` ignores that text, `Section` (the
-  ErrorBoundary) rebuilds instead of showing the failure, and a panel's own inline error shows a plain "Pedido cancelado." with its retry.
-  Clocks kept as policy/net: `policyLimit` (cosmetic `project.logo`, 6 s, silent fallback in `logo.ts`, no slow notice) and
+  guards and the `ping` after a late call are gone (`ping`/`hello` never declare the daemon dead). Slowness is not shown globally: there
+  is no "system is slow" toast and no Cancel for a pending call; a view that loads slowly shows its own discreet loading state.
+  Clocks kept as policy/net: `policyLimit` (cosmetic `project.logo`, 6 s, silent fallback in `logo.ts`) and
   `CEILING_MS` (600 s + 10 s margin after the host's `AXELSTRA_CALL_CEILING_SECS`, a lost invoke handle only; `rpc.call_timeout`).
   Also kept: `hydrateUi` 2 s (first paint must not wait for a daemon; the sync goes on), `NUDGE_LIMIT_MS` (a one-shot wait for an
-  agent screen, not a call), UI debounces. The timeline panel's own 20 s `withTimeout` is gone (the slow notice covers it).
-  Tests: `apiRobust.test.ts` (fake transport: reply after 90 s succeeds, connection closed fails at once, cancel, ceiling, cosmetic).
+  agent screen, not a call), UI debounces. The timeline panel's own 20 s `withTimeout` is gone.
+  Tests: `apiRobust.test.ts` (fake transport: reply after 90 s succeeds, connection closed fails at once, ceiling, cosmetic).
 - **Sleeps kept on purpose.** The rest are bounded backoffs on external OS resources: AV/indexer rename locks (`fsops.rs`,
   `store.rs`), the git handle of a killed process (`git.rs`), cleanup in `sources.rs`, Windows `PeekRead` 1-10 ms (`client.rs`; the
   sync pipe has no readiness event), synthetic input settle (`computer.rs`), the runner trust menu (`runner.rs`), the docker events

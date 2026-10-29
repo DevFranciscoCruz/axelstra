@@ -27,10 +27,6 @@ export class AppError extends Error {
   }
 }
 
-/** The app dropped its own request (the "slow" notice's Cancel button): not a failure, so nothing shows it as one. */
-export const CANCELLED = "rpc.cancelled";
-export const isCancelled = (e: unknown): boolean => e instanceof AppError && e.code === CANCELLED;
-
 /** Readable text for whatever was thrown: never "[object Object]". */
 export const errorText = (e: unknown): string => {
   if (e instanceof Error) return e.message || e.name;

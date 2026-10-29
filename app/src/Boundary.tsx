@@ -1,6 +1,6 @@
 import { ErrorBoundary, Show, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
 import { copyDiagnostics, logFrontendError } from "./api";
-import { errorText, isCancelled } from "./appError";
+import { errorText } from "./appError";
 import { formatError } from "./errorHooks";
 import { Button } from "./ui";
 import { Icon } from "./Icon";
@@ -65,8 +65,6 @@ export function Section(props: { name: string; whole?: boolean; children: JSX.El
     <ErrorBoundary
       fallback={(error, reset) => {
         const again = () => (setAttempt((n) => n + 1), reset());
-        // a request the user cancelled is not a failure: build the section again, show no error
-        if (isCancelled(error)) return (queueMicrotask(again), null);
         return <Fallback name={props.name} error={error} reset={again} whole={props.whole} />;
       }}
     >
