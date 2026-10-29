@@ -4,6 +4,7 @@ import { errorText } from "./appError";
 import { Icon } from "./Icon";
 import { levelClass, parseAmount, thresholdProblem, type PausedItem, type Thresholds } from "./memoryLogic";
 import { fmtMb } from "./memoryView";
+import { setSection } from "./settingsNav";
 import { memory, refreshMemory, sessions, setError, setShowSettings, showNotice, tabLabel } from "./store";
 import { G } from "./strings.memory";
 import { ago } from "./time";
@@ -83,6 +84,7 @@ export function MemoryPanelBody(props: { close: () => void }) {
             size="sm"
             onClick={() => {
               props.close();
+              setSection("memory");
               setShowSettings(true);
             }}
           >

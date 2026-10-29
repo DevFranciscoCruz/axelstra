@@ -66,6 +66,71 @@ export const ptBRL: Widen<typeof ptL> = {
   },
   actionHint: "ação",
   lang: { title: "Idioma", note: "Muda na hora, sem reiniciar. Fica salvo nas configurações." },
+  settingsNav: {
+    back: "Voltar ao aplicativo",
+    search: "Pesquisar configurações",
+    navLabel: "Seções das configurações",
+    sections: "Seções",
+    noMatch: "Nenhuma configuração encontrada.",
+    groups: {
+      general: "Geral",
+      performance: "Desempenho",
+      integrations: "Conexões",
+      maintenance: "Manutenção",
+    },
+    items: {
+      general: {
+        title: "Geral",
+        sub: "Respostas dos agentes, gerenciador de pacotes, shell e detecção de agentes parados.",
+        kw: "terse respostas gerenciador pacotes npm pnpm shell powershell bash parado stall",
+      },
+      language: { title: "Idioma", sub: "O idioma do aplicativo.", kw: "língua português english pt en" },
+      appearance: {
+        title: "Aparência",
+        sub: "Tema do aplicativo, terminal e acessibilidade.",
+        kw: "tema escuro claro fonte letra terminal leitor tela acessibilidade",
+      },
+      notifications: {
+        title: "Notificações",
+        sub: "Sobre o que avisa, quando e com que som.",
+        kw: "avisos som não perturbe dnd",
+      },
+      memory: {
+        title: "Memória",
+        sub: "Pressão de memória, governor e pausa de sessões.",
+        kw: "governor ram pausa limite",
+      },
+      hibernate: {
+        title: "Hibernação",
+        sub: "Libera a memória dos agentes parados e os acorda quando for preciso.",
+        kw: "dormir acordar ram inativo",
+      },
+      build: {
+        title: "Build",
+        sub: "Ambiente de compilação das sessões novas.",
+        kw: "cargo jobs sccache cache target compilar",
+      },
+      budgets: { title: "Orçamentos", sub: "Limites de gasto dos agentes.", kw: "custo tokens limite gasto" },
+      connections: { title: "Máquinas", sub: "Máquinas remotas e conexões.", kw: "ssh wsl remoto host servidor" },
+      workspace: {
+        title: "Espaço de trabalho",
+        sub: "Exportar e importar o espaço de trabalho.",
+        kw: "exportar importar projetos",
+      },
+      hooks: { title: "Hooks", sub: "Hooks dos agentes que o Axelstra instala.", kw: "claude gemini codex hook" },
+      maintenance: {
+        title: "Manutenção",
+        sub: "Limpeza automática e backups.",
+        kw: "limpar worktrees backup cópia restaurar exportar",
+      },
+      diagnostics: {
+        title: "Diagnóstico",
+        sub: "Versões, pastas de dados e ferramentas ausentes.",
+        kw: "logs lag ferramentas dados",
+      },
+      about: { title: "Sobre", sub: "Versão do aplicativo e do daemon.", kw: "versão commit atualização" },
+    },
+  },
   cmd: {
     palette: { label: "Paleta de comandos (tudo o resto)" },
     settings: { label: "Configurações" },

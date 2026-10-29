@@ -65,6 +65,75 @@ export const enL: Widen<typeof ptL> = {
   },
   actionHint: "action",
   lang: { title: "Language", note: "Applies immediately, no restart. It is saved in the settings." },
+  settingsNav: {
+    back: "Back to the app",
+    search: "Search settings",
+    navLabel: "Settings sections",
+    sections: "Sections",
+    noMatch: "No settings found.",
+    groups: {
+      general: "General",
+      performance: "Performance",
+      integrations: "Connections",
+      maintenance: "Maintenance",
+    },
+    items: {
+      general: {
+        title: "General",
+        sub: "Agent replies, package manager, shell and stalled-agent detection.",
+        kw: "terse replies package manager npm pnpm shell powershell bash stalled stall",
+      },
+      language: { title: "Language", sub: "The language of the app.", kw: "portuguese english pt en locale" },
+      appearance: {
+        title: "Appearance",
+        sub: "App theme, terminal and accessibility.",
+        kw: "theme dark light font terminal screen reader accessibility",
+      },
+      notifications: {
+        title: "Notifications",
+        sub: "What it tells you about, when and with what sound.",
+        kw: "alerts sound do not disturb dnd",
+      },
+      memory: {
+        title: "Memory",
+        sub: "Memory pressure, governor and pausing sessions.",
+        kw: "governor ram pause limit",
+      },
+      hibernate: {
+        title: "Hibernation",
+        sub: "Frees the memory of idle agents and wakes them when needed.",
+        kw: "sleep wake ram idle",
+      },
+      build: {
+        title: "Builds",
+        sub: "Build environment of new sessions.",
+        kw: "cargo jobs sccache cache target compile",
+      },
+      budgets: { title: "Budgets", sub: "Spending limits for agents.", kw: "cost tokens limit spend" },
+      connections: { title: "Machines", sub: "Remote machines and connections.", kw: "ssh wsl remote host server" },
+      workspace: {
+        title: "Workspace",
+        sub: "Export and import the workspace.",
+        kw: "export import projects",
+      },
+      hooks: {
+        title: "Agent hooks",
+        sub: "Hooks of the agents that Axelstra installs.",
+        kw: "claude gemini codex hook notifications",
+      },
+      maintenance: {
+        title: "Maintenance",
+        sub: "Automatic cleanup and backups.",
+        kw: "clean worktrees backup restore export",
+      },
+      diagnostics: {
+        title: "Diagnostics",
+        sub: "Versions, data folders and missing tools.",
+        kw: "logs lag tools data",
+      },
+      about: { title: "About", sub: "App and daemon version.", kw: "version commit update" },
+    },
+  },
   cmd: {
     palette: { label: "Command palette (everything else)" },
     settings: { label: "Settings" },

@@ -39,6 +39,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { Settings } from "./Settings";
 import { loadHosts } from "./store";
+import { setSection } from "./settingsNav";
 import { P } from "./strings.panels";
 import { R } from "./strings.remote";
 
@@ -50,11 +51,17 @@ describe("Settings: remote hosts and per-agent hooks", () => {
   afterEach(cleanup);
   it("shows a remote host and the Gemini hooks block together", async () => {
     await loadHosts();
+    setSection("connections");
     render(() => createComponent(Settings, {}));
     await settle();
-    const text = document.body.textContent ?? "";
+    let text = document.body.textContent ?? "";
     expect(text).toContain(R.section);
     expect(text).toContain("Servidor");
+    cleanup();
+    setSection("hooks");
+    render(() => createComponent(Settings, {}));
+    await settle();
+    text = document.body.textContent ?? "";
     expect(text).toContain(P.hooks.title);
     expect(text).toContain(P.hooks.install("Gemini CLI"));
     expect(text).toContain(P.hooks.install("Claude Code"));
