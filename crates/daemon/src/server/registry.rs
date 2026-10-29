@@ -426,7 +426,15 @@ impl Registry {
         let mut pending = read_json::<Vec<Value>>(&saved).ok().flatten().unwrap_or_default();
         prune_dead_pending(&saved, &mut pending);
         let audit = crate::audit::Audit::new(Some(saved.with_file_name("audit.log")));
-        let governor = Arc::new(crate::governor::Governor::new(crate::governor::Config::from_settings(&read_settings(&saved))));
+        let settings = read_settings(&saved);
+        let mut gcfg = crate::governor::Config::from_settings(&settings);
+        // a test daemon (served by an integration test, `AXELSTRA_TESTING=1`) must not depend on the host's free memory:
+        // without its own `governor` settings the gate is off. The unit tests of the governor keep the defaults and inject
+        // their own `MemSource`; the integration tests that want it back set `enabled` through `mem.config`.
+        if std::env::var_os("AXELSTRA_TESTING").is_some_and(|v| v == "1") && settings.get("governor").is_none() {
+            gcfg.enabled = false;
+        }
+        let governor = Arc::new(crate::governor::Governor::new(gcfg));
         let pauser = pause::Pauser::new(Arc::new(crate::governor::suspend::OsSuspender), saved.with_file_name("paused.json"));
         Registry {
             next: AtomicU32::new(0),
@@ -883,6 +891,17 @@ pub(super) fn watch_exit(reg: &Arc<Registry>, id: u32, s: Arc<Session>) {
         let Some(reg) = reg.upgrade() else { return };
         // put to sleep (or already woken under the same id): this process ending is not the session ending
         if hibernate::superseded(&reg, id, &s) {
+            return;
+        }
+        // a resume that fails exits before `settle` looks: the wake handles it, so `wake_error` is stored before the retire
+        if !reg.closing.load(Ordering::SeqCst) && reg.hib.is_waking(id).is_some() {
+            let code = s.try_wait();
+            let why = match code {
+                Some(c) if c == crate::hibernate::RESUME_FAILED_EXIT => "the agent could not resume the conversation".to_string(),
+                Some(c) => format!("the process ended with code {c}"),
+                None => "the process ended".to_string(),
+            };
+            hibernate::fail_wake(&reg, id, code, &why);
             return;
         }
         if let Some(w) = reg.metas.lock_recover().get(&id).and_then(|m| m["worktree"].as_str().map(String::from)) {

@@ -359,14 +359,22 @@ fn settle(reg: Arc<Registry>, id: u32) {
             reg.deliver_untrusted(id, s, &text);
         }
     }
-    reg.hib.finish_waking(id);
+    if !reg.hib.finish_waking(id) {
+        // the process ended meanwhile and its failure was handled
+        return;
+    }
     reg.broadcast("session.changed");
     reg.broadcast_event(json!({"event": "session.woke", "id": id}));
     reg.pulse.bump();
 }
 
 /// The resume failed: the session becomes `exited` with a coded error (it never stays hibernated), and its parent is told.
-fn fail_wake(reg: &Arc<Registry>, id: u32, code: Option<i32>, detail: &str) {
+/// Both the settle thread and the exit watcher of the new process can see the failure first (a resume that fails exits
+/// at once); whoever ends the wake handles it, the other does nothing, and `wake_error` is stored before the retire.
+pub(super) fn fail_wake(reg: &Arc<Registry>, id: u32, code: Option<i32>, detail: &str) {
+    if !reg.hib.finish_waking(id) {
+        return;
+    }
     let label = reg.labels.lock_recover().get(&id).cloned().unwrap_or_else(|| crate::prompts::session_name(id));
     let c = Coded::new(
         "hibernate.wake_failed",
@@ -379,7 +387,6 @@ fn fail_wake(reg: &Arc<Registry>, id: u32, code: Option<i32>, detail: &str) {
     if let Some(s) = reg.get(id) {
         reg.tear_down(&[s]);
     }
-    reg.hib.finish_waking(id);
     if !reg.retire(id, code.or(Some(hib::RESUME_FAILED_EXIT))) {
         reg.forget_session(id);
         reg.persist();

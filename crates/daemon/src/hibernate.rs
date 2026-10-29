@@ -440,8 +440,10 @@ impl Hib {
     }
 
     /// A wake that could not even start puts the session back to the sleepers (the caller then fails it).
-    pub fn finish_waking(&self, id: u32) {
-        self.0.lock_recover().waking.remove(&id);
+    /// True for the one caller that ended the wake: it alone settles it (success or failure), so a failed resume is
+    /// recorded once, and before the session is retired.
+    pub fn finish_waking(&self, id: u32) -> bool {
+        self.0.lock_recover().waking.remove(&id).is_some()
     }
 
     pub fn note_reap(&self, id: u32, reap: Value) {
