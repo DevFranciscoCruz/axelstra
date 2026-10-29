@@ -123,12 +123,16 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             // `{queued, ticket, position}`; the caller comes back with its ticket and keeps its place
             let queue = p["queue"].as_bool() == Some(true);
             let mut ticket: Option<u64> = None;
+            // the place in line is given up when this call ends, not when the check passes: the session must be in
+            // `sessions` first, or the next in line would count a free slot that is already taken
+            let mut place = LinePlace { reg: reg.clone(), ticket: None };
             let chunk_end = Instant::now() + SPAWN_QUEUE_CHUNK;
             loop {
                 // taken before the check, so a pulse between the check and the sleep is not lost
                 let seen = reg.pulse.now();
                 if queue && (p["ticket"].is_u64() || !reg.spawnq.lock_recover().is_empty()) {
                     ticket = Some(reg.spawnq.lock_recover().enter(ticket.or(p["ticket"].as_u64()), Instant::now()));
+                    place.ticket = ticket;
                 }
                 let refusal: Result<()> = (|| {
                     if let Some(t) = ticket {
@@ -180,32 +184,21 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     Ok(())
                 })();
                 match refusal {
-                    Ok(()) => {
-                        if let Some(t) = ticket {
-                            reg.spawnq.lock_recover().leave(t);
-                            // the next in line looks again
-                            reg.pulse.bump();
-                        }
-                        break;
-                    }
+                    Ok(()) => break,
                     Err(e) if queue && is_queueable(&e) => {
                         let t = *ticket.get_or_insert_with(|| reg.spawnq.lock_recover().enter(None, Instant::now()));
+                        place.ticket = ticket;
                         let now = Instant::now();
                         if now >= chunk_end || reg.closing.load(Ordering::SeqCst) {
                             let position = reg.spawnq.lock_recover().position(t);
                             let reason = axelstra_core::msg::find(&e).map(|c| c.code.clone());
+                            // the caller comes back with the ticket: the place stays
+                            place.ticket = None;
                             return Ok(json!({"queued": true, "ticket": t, "position": position, "reason": reason}));
                         }
                         reg.pulse.wait(seen, Some(chunk_end - now));
                     }
-                    Err(e) => {
-                        if let Some(t) = ticket {
-                            if reg.spawnq.lock_recover().leave(t) {
-                                reg.pulse.bump();
-                            }
-                        }
-                        return Err(e);
-                    }
+                    Err(e) => return Err(e),
                 }
             }
             // the flag stays in the meta so a hibernated worker counts against the limit again when it wakes
@@ -619,4 +612,20 @@ const SPAWN_QUEUE_CHUNK: Duration = Duration::from_secs(20);
 fn is_queueable(e: &anyhow::Error) -> bool {
     axelstra_core::msg::find(e)
         .is_some_and(|c| matches!(c.code.as_str(), "session.worker_limit" | "governor.admission_denied" | "session.queued"))
+}
+
+/// A place in the spawn line, given up (and the next in line woken) when the `session.spawn` call ends, whichever way.
+struct LinePlace {
+    reg: Arc<Registry>,
+    ticket: Option<u64>,
+}
+
+impl Drop for LinePlace {
+    fn drop(&mut self) {
+        if let Some(t) = self.ticket {
+            if self.reg.spawnq.lock_recover().leave(t) {
+                self.reg.pulse.bump();
+            }
+        }
+    }
 }
