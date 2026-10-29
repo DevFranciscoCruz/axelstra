@@ -78,7 +78,7 @@ fn raise(reg: &Registry, alert: Alert) {
                 .pool_tags()
                 .and_then(|t| t.into_iter().max_by(|a, b| (a.paged + a.nonpaged).cmp(&(b.paged + b.nonpaged)).then(b.tag.cmp(&a.tag))));
             match top {
-                Some(t) => pool_notice(&gb, &handles, &t),
+                Some(t) => pool_notice(&gb, &handles, &t, defender_hint(reg)),
                 None => axelstra_core::coded!(
                     "governor.kernel_pool_high",
                     "kernel memory is high ({gb} GB): possible handle or driver leak; restarting frees it",
@@ -101,11 +101,19 @@ fn raise(reg: &Registry, alert: Alert) {
 
 /// The kernel-pool notice naming the biggest tag. One code per known owner so each language words what that tag usually
 /// means; a tag with no known owner gets the generic wording with just the tag.
-fn pool_notice(gb: &str, handles: &str, t: &cause::PoolTag) -> anyhow::Error {
+fn pool_notice(gb: &str, handles: &str, t: &cause::PoolTag, defender: Option<String>) -> anyhow::Error {
     let mb = (t.paged + t.nonpaged) / (1024 * 1024);
     let (tag, mb) = (t.tag.clone(), mb.to_string());
     let (gb, handles) = (gb.to_string(), handles.to_string());
-    match cause::pool_owner(&t.tag) {
+    let owner = cause::pool_owner(&t.tag);
+    if let (Some("filter"), Some(command)) = (owner, defender) {
+        return axelstra_core::coded!(
+            "governor.kernel_pool_filter_hint",
+            "kernel memory is high ({gb} GB); biggest pool tag {tag} ({mb} MB) is the file-name cache of the filter manager (antivirus and other file filters). To keep Windows Defender from scanning build folders, run this in an administrator PowerShell (Axelstra does not run it): {command}",
+            gb = gb, tag = tag, mb = mb, handles = handles, command = command
+        );
+    }
+    match owner {
         Some("filter") => axelstra_core::coded!(
             "governor.kernel_pool_filter",
             "kernel memory is high ({gb} GB); biggest pool tag {tag} ({mb} MB) is the file-name cache of the filter manager (antivirus and other file filters)",
@@ -152,6 +160,48 @@ fn pool_notice(gb: &str, handles: &str, t: &cause::PoolTag) -> anyhow::Error {
             gb = gb, tag = tag, mb = mb, handles = handles
         ),
     }
+}
+
+/// The folders worth excluding from Defender: for each project folder, itself when it holds a `target` or `node_modules`
+/// directory, and the `.axelstra-wt` folder beside it when that exists. Deduplicated, in order. Pure: `exists` is injected.
+pub(super) fn defender_folders(projects: &[String], exists: &dyn Fn(&std::path::Path) -> bool) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |p: String| {
+        if !out.contains(&p) {
+            out.push(p);
+        }
+    };
+    for p in projects {
+        let dir = std::path::Path::new(p);
+        if ["target", "node_modules"].iter().any(|d| exists(&dir.join(d))) {
+            add(p.clone());
+        }
+        if let Some(wt) = crate::scanx::root_of(dir).filter(|w| exists(w)) {
+            add(wt.to_string_lossy().into_owned());
+        }
+    }
+    out
+}
+
+/// `Add-MpPreference -ExclusionPath '<a>','<b>'` for those folders (single quotes doubled), or `None` when there are none.
+/// Only text: nothing runs it.
+pub(super) fn defender_command(folders: &[String]) -> Option<String> {
+    if folders.is_empty() {
+        return None;
+    }
+    let list: Vec<String> = folders.iter().map(|f| format!("'{}'", f.replace('\'', "''"))).collect();
+    Some(format!("Add-MpPreference -ExclusionPath {}", list.join(",")))
+}
+
+#[cfg(windows)]
+fn defender_hint(reg: &Registry) -> Option<String> {
+    let paths: Vec<String> = crate::projects::load(&reg.store).into_iter().map(|p| p.path).collect();
+    defender_command(&defender_folders(&paths, &|p| p.is_dir()))
+}
+
+#[cfg(not(windows))]
+fn defender_hint(_reg: &Registry) -> Option<String> {
+    None
 }
 
 /// How long the two process tables of an alerting `breakdown` are apart.
@@ -367,6 +417,28 @@ fn apply_config(reg: &Arc<Registry>, cfg: Config) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn defender_command_lists_project_folders_with_build_dirs_quoted_and_deduped() {
+        use std::path::Path;
+        let has: Vec<std::path::PathBuf> = vec![
+            Path::new("/w/a").join("target"),
+            Path::new("/w/b").join("node_modules"),
+            Path::new("/w").join(".axelstra-wt"),
+            Path::new("/w/it's").join("target"),
+        ];
+        let exists = |p: &Path| has.iter().any(|h| h == p);
+        let projects: Vec<String> = ["/w/a", "/w/b", "/w/c", "/w/a", "/w/it's"].iter().map(|s| s.to_string()).collect();
+        let f = defender_folders(&projects, &exists);
+        assert_eq!(f.len(), 4, "{f:?}");
+        assert_eq!(f[0], "/w/a");
+        assert!(!f.contains(&"/w/c".to_string()));
+        let cmd = defender_command(&f).unwrap();
+        assert!(cmd.starts_with("Add-MpPreference -ExclusionPath '/w/a',"), "{cmd}");
+        assert!(cmd.contains("'/w/it''s'"), "{cmd}");
+        assert_eq!(defender_command(&[]), None);
+        assert!(defender_folders(&projects, &|_| false).is_empty());
+    }
 
     #[test]
     fn config_is_saved_in_settings_and_survives_a_new_registry() {
