@@ -82,6 +82,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(
                 json!({"terse": terse, "rules": crate::skill::terse_rules(terse), "pm": pm, "installed": installed, "auto_install": saved["auto_install"] == json!(true),
                 "shell": shell, "notify_sound": notify_sound, "notify_mode": notify_mode, "stall_minutes": crate::stall::minutes(&saved), "hibernate": crate::hibernate::policy_json(&saved), "ui": saved["ui"].as_object().cloned().unwrap_or_default(),
+                "build": crate::buildenv::BuildSettings::from_settings(&saved).to_json(),
                 "budgets": crate::budget::validate(&saved["budgets"]).unwrap_or_else(|_| json!({})),
                 "hosts": crate::hosts::validate(&saved["hosts"]).unwrap_or_else(|_| json!([]))}),
             )
@@ -123,6 +124,19 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                         "hibernate takes enabled (true or false) and idle_minutes (a whole number from 1 to 1440)"
                     )
                 })?;
+            }
+            // replaces the whole build setting (sessions started afterwards use it); null resets it to the defaults
+            if let Some(b) = p.get("build") {
+                saved["build"] = if b.is_null() {
+                    json!({})
+                } else {
+                    crate::buildenv::validate(b).ok_or_else(|| {
+                        axelstra_core::coded!(
+                            "settings.bad_build",
+                            "build must be an object: enabled, shared_target and shared_js_cache booleans, sccache auto or off, jobs 1 to 256 and lock_budget_mb above 0 (or null for automatic)"
+                        )
+                    })?
+                };
             }
             // replaces the whole budgets setting; null removes it
             if let Some(b) = p.get("budgets") {

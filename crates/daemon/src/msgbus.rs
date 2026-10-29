@@ -171,7 +171,8 @@ impl Bus {
                 self.finished.lock_recover().insert(f, json!({"text": text, "id": id}));
                 self.pending.lock_recover().remove(&f);
             }
-            // any answer from the parent unblocks an escalated worker
+            // any answer from the parent unblocks an escalated worker. A `notice` (the daemon telling a parent that a
+            // child stalled or waits) is not an answer and not new work: it changes none of this state.
             ("reply" | "message", _) => {
                 let was_escalated = self.escalated.lock_recover().remove(&to);
                 // an `ask` is answered by a reply only: a status message from a child must not clear it
@@ -184,6 +185,12 @@ impl Bus {
             _ => {}
         }
         m
+    }
+
+    /// ms since the last message was put in the inbox of `session` (second resolution; `u64::MAX` when none).
+    pub fn since_msg_ms(&self, session: u32) -> u64 {
+        let last = self.inbox.lock_recover().get(&session).and_then(|v| v.last().map(|m| m.ts));
+        last.map_or(u64::MAX, |t| now().saturating_sub(t).saturating_mul(1000))
     }
 
     pub fn unread(&self, session: u32) -> usize {
@@ -236,6 +243,23 @@ impl Bus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The daemon's own notices to a parent (a child stalled or waits) were sent as plain messages, which wipe the
+    /// parent's pending question, its escalation and its report. A `notice` touches none of it.
+    #[test]
+    fn a_notice_changes_no_state_of_its_receiver() {
+        let b = Bus::new();
+        b.send(Some(1), 2, "ask", "q", None, None);
+        b.send(Some(1), 2, "done", "report", None, None);
+        b.send(Some(2), 1, "notice", "child waits", None, None);
+        b.send(Some(3), 1, "escalate", "help", None, None);
+        assert_eq!(b.since_msg_ms(3), u64::MAX);
+        b.send(None, 3, "notice", "n", None, None);
+        assert!(b.is_escalated(3) && b.pending_of(3).is_some(), "a notice is not an answer");
+        assert!(b.finished(1).is_some(), "a notice is not new work");
+        b.send(None, 3, "message", "answer", None, None);
+        assert!(!b.is_escalated(3) && b.pending_of(3).is_none());
+    }
 
     #[test]
     fn ask_reply_roundtrip() {

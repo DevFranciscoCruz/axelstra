@@ -37,16 +37,58 @@ export const ptBRS: Widen<typeof ptS> = {
   notifyNote: "Avisos do sistema quando um agente termina ou precisa de você.",
   notifySound: "Tocar um som com a notificação",
   notifyMode: {
-    all: { label: "Todas", hint: "Avisa quando um agente termina ou fica aguardando." },
+    all: { label: "Todas", hint: "Avisa conforme as categorias abaixo." },
     waiting: { label: "Só aguardando", hint: "Avisa apenas quando um agente fica aguardando resposta." },
     off: { label: "Nenhuma", hint: "Sem notificações do sistema." },
+  },
+  notifyCats: {
+    title: "O que avisa você",
+    note: "Cada categoria desligada fica só na central de notificações, já lida: sem aviso do sistema, som, aviso na tela nem contador.",
+    need: {
+      label: "Preciso de você",
+      hint: "Um agente aguarda sua resposta ou permissão, ou algo precisa de uma decisão sua.",
+    },
+    done: { label: "Concluído", hint: "Um agente terminou a tarefa ou um worktree foi integrado." },
+    info: { label: "Informativo", hint: "CI passando, avisos de orçamento, correções automáticas de CI." },
+    error: {
+      label: "Erros",
+      hint: "Falhas que ninguém está tratando: CI falhando, erro de um terminal, orçamento excedido.",
+    },
+    dnd: "Não perturbe",
+    dndHint:
+      "Sem aviso do sistema, som nem aviso na tela. Tudo continua registrado na central e «Preciso de você» mantém o ponto vermelho.",
   },
 
   stall: "Agente parado",
   stallNote:
-    "Se um agente ficar esse tempo sem atividade e sem chamar done ou escalate, passa a «parado»: o pai recebe uma mensagem e aparece uma notificação.",
+    "Se um agente ficar esse tempo sem atividade e sem chamar done ou escalate, passa a «parado»: o pai recebe uma mensagem. Você só é avisado se não houver agente pai cuidando disso.",
   stallOff: "Desligado",
   stallMin: (n: number) => `${n} min`,
+
+  build: {
+    title: "Compilação",
+    note: "Limita o custo de compilar com vários agentes na mesma máquina. Vale para as sessões iniciadas depois que você alterar; as que já estão abertas mantêm o ambiente com que começaram.",
+    enabled: "Preparar o ambiente de compilação das sessões",
+    jobs: "Jobs paralelos do cargo",
+    jobsManual: "Valor fixo",
+    jobsHint: (max: string) =>
+      `Número inteiro de 1 a ${max}. No automático usa metade dos núcleos, limitado pela memória livre.`,
+    sccache: "Usar o sccache quando estiver instalado",
+    sccacheHint: "Só é usado se o sccache estiver no PATH; não é preciso instalá-lo.",
+    sharedTarget: "Compartilhar a pasta target entre os worktrees do projeto",
+    sharedTargetWarn:
+      "Atenção: o cargo trava a pasta de compilação, então as compilações do projeto passam a esperar umas pelas outras em todos os worktrees; como o caminho de cada worktree é diferente, as crates do próprio projeto voltam a compilar (só as dependências são compartilhadas); e worktrees com perfis ou features diferentes estragam o trabalho uns dos outros. Fica desligado por padrão.",
+    sharedJsCache: "Compartilhar o cache de downloads do gerenciador de pacotes JS",
+    sharedJsCacheHint: "Só aponta o cache de downloads para uma pasta comum; o node_modules de cada worktree não muda.",
+    budget: "Memória para compilações simultâneas",
+    budgetManual: "Valor fixo (MB)",
+    budgetHint: (max: string) =>
+      `Orçamento do axelstra lock, em MB, de 1 a ${max}. No automático usa a memória física menos 2 GB.`,
+    margin: "Memória livre a manter depois de admitir uma compilação",
+    marginHint: (max: string) =>
+      `Em MB, de 1 a ${max}. No automático são 2048 MB: se a memória disponível não bastar, a compilação espera por uma liberação.`,
+    invalid: "Valor inválido.",
+  },
 
   shell: "Shell dos terminais",
   shellNote: "Vale para terminais e agentes novos. «Automático» usa o shell padrão do sistema.",
@@ -151,6 +193,8 @@ export const ptBRS: Widen<typeof ptS> = {
     close: "Fechar",
     reconnecting: "Reconectando ao daemon…",
     retryNow: "Tentar agora",
+    slow: (method: string) => `Carregando… o sistema está lento (${method})`,
+    slowCancel: "Cancelar",
   },
 
   update: {

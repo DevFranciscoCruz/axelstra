@@ -547,8 +547,9 @@ fn shell_run(program: &str, args: &mut Vec<String>, ps: bool, line: &str, keep_o
 /// What an ephemeral worker starts with: its task, how to report, and the rule against waiting silently for the human.
 fn worker_prompt(task: &str) -> String {
     format!(
-        "{task}\n\nWhen finished, run `axelstra done \"<summary: what you did, what is left>\"` (add `--status failed` or `--status blocked` when it applies). {}",
-        axelstra_core::waiting::NEVER_WAIT_RULE
+        "{task}\n\nWhen finished, run `axelstra done \"<summary: what you did, what is left>\"` (add `--status failed` or `--status blocked` when it applies). {} {}",
+        axelstra_core::waiting::NEVER_WAIT_RULE,
+        axelstra_daemon::prompts::BUILD_RULE
     )
 }
 
@@ -714,6 +715,7 @@ mod tests {
         assert!(p.contains("axelstra done"));
         assert!(p.contains("Never wait silently for the human"));
         assert!(p.contains("axelstra ask $AXELSTRA_PARENT") && p.contains("axelstra escalate"));
+        assert!(p.contains("axelstra lock verify") && p.contains("never raise it"));
     }
 
     fn scratch(tag: &str) -> PathBuf {

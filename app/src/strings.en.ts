@@ -34,16 +34,56 @@ export const enS: Widen<typeof ptS> = {
   notifyNote: "System alerts when an agent finishes or needs you.",
   notifySound: "Play a sound with the notification",
   notifyMode: {
-    all: { label: "All", hint: "Alerts when an agent finishes or is waiting." },
+    all: { label: "All", hint: "Alerts follow the categories below." },
     waiting: { label: "Waiting only", hint: "Alerts only when an agent is waiting for a reply." },
     off: { label: "None", hint: "No system notifications." },
+  },
+  notifyCats: {
+    title: "What alerts you",
+    note: "A category that is off stays in the notification centre only, already read: no system alert, sound, toast or counter.",
+    need: {
+      label: "Needs you",
+      hint: "An agent waits for your answer or permission, or something needs a decision from you.",
+    },
+    done: { label: "Finished", hint: "An agent finished its task or a worktree was merged." },
+    info: { label: "Informational", hint: "CI passing, budget warnings, automatic CI fixes." },
+    error: { label: "Errors", hint: "Failures nobody is handling: CI failing, a terminal error, budget exceeded." },
+    dnd: "Do not disturb",
+    dndHint:
+      'No system alert, sound or toast. Everything is still recorded in the centre and "Needs you" keeps the red dot.',
   },
 
   stall: "Stalled agent",
   stallNote:
-    "An agent that stays this long without activity and without calling done or escalate is marked stalled: its parent gets a message and a notification appears.",
+    "An agent that stays this long without activity and without calling done or escalate is marked stalled: its parent gets a message. You are alerted only when no parent agent is handling it.",
   stallOff: "Off",
   stallMin: (n: number) => `${n} min`,
+
+  build: {
+    title: "Build cost",
+    note: "Limits the cost of building with several agents on one machine. It applies to sessions started after you change it; sessions already open keep the environment they started with.",
+    enabled: "Prepare the build environment of sessions",
+    jobs: "Parallel cargo jobs",
+    jobsManual: "Manual",
+    jobsHint: (max: string) =>
+      `A whole number from 1 to ${max}. Automatic uses half the cores, limited by free memory.`,
+    sccache: "Use sccache when it is installed",
+    sccacheHint: "Only used if sccache is on the PATH; you do not need to install it.",
+    sharedTarget: "Share the target folder between the project's worktrees",
+    sharedTargetWarn:
+      "Careful: cargo locks the build directory, so builds of the project wait for each other across all worktrees; each worktree has a different path, so the project's own crates still rebuild (only dependencies are shared); and worktrees on different profiles or features thrash each other's artifacts. Off by default.",
+    sharedJsCache: "Share the JS package manager's download cache",
+    sharedJsCacheHint:
+      "Only points the download cache at a common folder; each worktree's node_modules does not change.",
+    budget: "Memory for simultaneous builds",
+    budgetManual: "Manual (MB)",
+    budgetHint: (max: string) =>
+      `Budget of axelstra lock, in MB, from 1 to ${max}. Automatic uses physical memory minus 2 GB.`,
+    margin: "Free memory to keep after admitting a build",
+    marginHint: (max: string) =>
+      `In MB, from 1 to ${max}. Automatic is 2048 MB: if available memory falls short, the build waits for a release.`,
+    invalid: "Invalid value.",
+  },
 
   shell: "Terminal shell",
   shellNote: "Applies to new terminals and agents. “Automatic” uses the system's default shell.",
@@ -153,6 +193,8 @@ export const enS: Widen<typeof ptS> = {
     close: "Close",
     reconnecting: "Reconnecting to the daemon…",
     retryNow: "Retry now",
+    slow: (method: string) => `Loading… the system is slow (${method})`,
+    slowCancel: "Cancel",
   },
 
   update: {

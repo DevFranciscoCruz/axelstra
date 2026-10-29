@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { nextRadio } from "./a11y";
-import { classifySettingsError, diagnosticRows, errorText, waitUntil } from "./settingsLogic";
+import { MAX_BUILD_JOBS, classifySettingsError, diagnosticRows, errorText, parseBuildNumber, waitUntil } from "./settingsLogic";
 import { DEFAULT_PREFS, clampFont, parsePrefs, zoomFont } from "./termprefs";
 
 describe("classifySettingsError", () => {
@@ -73,5 +73,17 @@ describe("terminal prefs", () => {
     expect(zoomFont(13, 1)).toBe(14);
     expect(zoomFont(8, -1)).toBe(8);
     expect(zoomFont(20, 0)).toBe(DEFAULT_PREFS.fontSize);
+  });
+});
+
+describe("parseBuildNumber", () => {
+  it("accepts whole numbers inside the range, with spaces around", () => {
+    expect(parseBuildNumber("4", MAX_BUILD_JOBS)).toBe(4);
+    expect(parseBuildNumber(" 256 ", MAX_BUILD_JOBS)).toBe(256);
+    expect(parseBuildNumber("1", 1)).toBe(1);
+  });
+  it("refuses empty, zero, too big, decimals, signs and text", () => {
+    for (const t of ["", "  ", "0", "257", "2.5", "-1", "+3", "1e2", "abc", "99999999999"])
+      expect(parseBuildNumber(t, MAX_BUILD_JOBS)).toBeNull();
   });
 });

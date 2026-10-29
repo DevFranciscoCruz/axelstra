@@ -41,6 +41,9 @@ pub fn wake_failed_report(label: &str, error: &str) -> String {
     format!("[axelstra] {label} was hibernated and could not be resumed, so it is gone: {error}. Its worktree keeps what it had done; start the task again if it is unfinished.")
 }
 
+/// Build-cost rules typed into every lead and worker prompt: many agents compile at once on one machine.
+pub const BUILD_RULE: &str = "Builds are expensive here: run every heavy cargo or npm command (full build, test suite, clippy, verify) through `axelstra lock verify -- <cmd>`, one at a time. Your environment already carries a CARGO_BUILD_JOBS derived from this machine's cores and free memory: keep it, never raise it. Run `cargo check` before `cargo test`, and use `node scripts/check.mjs --fast` (where the project has it) while iterating; run the full check once at the end.";
+
 /// Typed into a worker that went quiet without reporting: report through the bus instead of leaving a silent screen.
 pub const IDLE_NUDGE: &str = "[axelstra] you stopped without reporting. If you finished, run `axelstra done \"<report>\"` with the result (what changed, what failed, what is left). If you are blocked or have a question, run `axelstra escalate \"<reason>\"`.";
 
@@ -178,11 +181,21 @@ mod tests {
     }
 
     #[test]
+    fn the_build_rule_names_the_lock_the_jobs_and_check_before_test() {
+        for needle in
+            ["axelstra lock verify", "CARGO_BUILD_JOBS", "never raise it", "cargo check", "before `cargo test`", "check.mjs --fast"]
+        {
+            assert!(BUILD_RULE.contains(needle), "{needle}");
+        }
+    }
+
+    #[test]
     fn no_agent_text_is_left_in_portuguese() {
         let all = [
             notice(&msg("message", "x"), "a"),
             waiting_report(true, "x"),
             IDLE_NUDGE.to_string(),
+            BUILD_RULE.to_string(),
             worker_status(false, true, None),
             worker_report("a", "b", "c"),
             not_integrated("p", "b", "w"),

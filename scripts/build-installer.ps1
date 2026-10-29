@@ -3,14 +3,24 @@
 # Output: target/release/bundle/nsis/Axelstra_<version>_x64-setup.exe
 #
 #   -Version 0.1.19   installer version (default: the one in tauri.conf.json)
-#   -Jobs 4           parallel compile jobs (default: half the logical cores; fewer = lower memory peak)
+#   -Jobs 4           parallel compile jobs (default: half the logical cores, fewer when free memory is short, see below;
+#                     an explicit -Jobs always wins)
 param(
     [string]$Version,
-    [int]$Jobs = [Math]::Max(2, [int]([Environment]::ProcessorCount / 2))
+    [int]$Jobs
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $app = Join-Path $root "app"
+if (-not $PSBoundParameters.ContainsKey("Jobs")) {
+    # same arithmetic as jobsFor() in scripts/lib/jobs.mjs: min(cores / 2, (free memory - 2 GB reserve) / 1.5 GB per job).
+    # A release link with lto is the heavy part, so the floor here is 2 (a release build with one job takes too long), not 1.
+    $freeBytes = [uint64](Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB
+    $byCpu = [Math]::Max(1, [int]([Environment]::ProcessorCount / 2))
+    $byMem = [int][Math]::Floor([Math]::Max(0, [double]$freeBytes - 2GB) / 1.5GB)
+    $Jobs = [Math]::Max(2, [Math]::Min($byCpu, $byMem))
+    Write-Host "Jobs: $Jobs (derived from $([Environment]::ProcessorCount) logical cores and $([Math]::Round($freeBytes / 1GB, 1)) GB free memory; -Jobs overrides)"
+}
 $env:CARGO_BUILD_JOBS = "$Jobs"
 if (-not $env:LIBCLANG_PATH -and (Test-Path "C:\Program Files\LLVM\bin")) { $env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin" }
 

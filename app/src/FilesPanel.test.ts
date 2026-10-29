@@ -12,13 +12,21 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => undefined) }));
-vi.mock("@tauri-apps/plugin-opener", () => ({ revealItemInDir: vi.fn() }));
 vi.mock("./api", () => ({
-  fsList: vi.fn(async (_wt: string, path: string) => {
+  fsListStream: vi.fn(async (_wt: string, path: string) => {
     h.listCalls.push(path);
     if (h.failList) throw new Error("sem acesso");
-    return path === "" ? h.entries : [];
+    const entries = path === "" ? h.entries : [];
+    return { entries, total: entries.length, truncated: false };
   }),
+  fsListCancel: vi.fn(),
+  nextListReq: (() => {
+    let n = 0;
+    return () => ++n;
+  })(),
+  fsAct: vi.fn(async () => undefined),
+  fsWatchLocal: vi.fn(async () => undefined),
+  onLocalFsChanged: vi.fn(() => () => {}),
   fsSearch: vi.fn(async () => []),
   fsGrep: vi.fn(async () => []),
   fsCreate: vi.fn(),

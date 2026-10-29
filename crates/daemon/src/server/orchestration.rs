@@ -116,6 +116,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 let wt_root = repo.parent().unwrap_or(&repo).join(".axelstra-wt");
                 // the run's worktrees are Axelstra's own: the janitor may clean them up once they are integrated or empty
                 crate::orchend::mark_run(&reg2.store, &pid, &repo, &wt_root, &n2);
+                // the folder the run's worktrees go into is kept out of the indexers before the first one exists
+                let _ = std::fs::create_dir_all(&wt_root);
+                crate::scanx::on_root_ready(&wt_root);
                 let opts = axelstra_core::orch::Options {
                     wt_root,
                     repo,

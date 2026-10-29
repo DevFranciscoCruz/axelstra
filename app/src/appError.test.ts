@@ -30,3 +30,16 @@ describe("AppError", () => {
     expect(toAppError("x", e)).toBe(e);
   });
 });
+
+describe("cancelled request", () => {
+  it("is recognised and never shown as a failure", async () => {
+    const { CANCELLED, isCancelled } = await import("./appError");
+    const { setError } = await import("./store/notify");
+    const { toasts } = await import("./toasts");
+    const e = new AppError("git.log", "Request cancelled", CANCELLED);
+    expect(isCancelled(e)).toBe(true);
+    expect(isCancelled(new AppError("git.log", "x"))).toBe(false);
+    setError(errorText(e));
+    expect(toasts()).toHaveLength(0);
+  });
+});

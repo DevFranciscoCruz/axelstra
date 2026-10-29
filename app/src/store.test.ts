@@ -89,13 +89,13 @@ describe("attention flag and notifications", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("flags a worktree that finished while another one is open, and notifies", async () => {
+  it("flags a worktree that finished while another one is open, without a system notification", async () => {
     const store = await load();
     store.selectWorktree(OTHER);
     await tick(store, agent({ idle_ms: 100 }));
     await tick(store, agent({ idle_ms: 9000 }));
     expect(store.attention().has(WT.toLowerCase())).toBe(true);
-    expect(await notified()).toBe(1);
+    expect(await notified()).toBe(0);
   });
 
   it("does not flag the worktree on screen", async () => {
@@ -122,7 +122,9 @@ describe("attention flag and notifications", () => {
     await tick(store, agent({ idle_ms: 100 }));
     await tick(store, agent({ idle_ms: 9000 }));
     await settle();
-    expect(invoke.mock.calls.find((c) => c[0] === "notify_session" && (c[1] as { waiting: boolean }).waiting)).toBeUndefined();
+    expect(
+      invoke.mock.calls.find((c) => c[0] === "notify_session" && (c[1] as { waiting: boolean }).waiting),
+    ).toBeUndefined();
   });
 
   it("clears the flag when the agent starts working again", async () => {
@@ -169,16 +171,58 @@ describe("attention flag and notifications", () => {
     await tick(store, agent({ idle_ms: 100 }));
     await tick(store, agent({ idle_ms: 9000, waiting: true }));
     await settle();
-    expect(invoke.mock.calls.find((c) => c[0] === "notify_session" && (c[1] as { waiting: boolean }).waiting)).toBeUndefined();
+    expect(
+      invoke.mock.calls.find((c) => c[0] === "notify_session" && (c[1] as { waiting: boolean }).waiting),
+    ).toBeUndefined();
   });
 
-  it("does not claim waiting for an agent that just stopped", async () => {
+  it("an agent that just went quiet raises no system notification at all", async () => {
     const store = await load();
     store.selectWorktree(OTHER);
     await tick(store, agent({ idle_ms: 100 }));
     await tick(store, agent({ idle_ms: 9000 }));
     await settle();
-    expect((invoke.mock.calls.find((c) => c[0] === "notify_session")?.[1] as { waiting: boolean }).waiting).toBe(false);
+    expect(invoke.mock.calls.find((c) => c[0] === "notify_session")).toBeUndefined();
+  });
+
+  const stall = { minutes: 5, code: "stall.quiet", params: {}, text: "quiet for 5 min" };
+
+  it("a stall nobody handles (`stalled`) alerts the user once", async () => {
+    const store = await load();
+    store.selectWorktree(OTHER);
+    await tick(store, agent({ idle_ms: 9000, stalled: true, stall }));
+    await tick(store, agent({ idle_ms: 9000, stalled: true, stall }));
+    expect(await notified()).toBe(1);
+  });
+
+  it("a stall a parent agent handles (`stall_parent`) is not an alert", async () => {
+    const store = await load();
+    store.selectWorktree(OTHER);
+    await tick(store, agent({ idle_ms: 9000, stalled: false, stall_parent: true, stall }));
+    expect(await notified()).toBe(0);
+    expect(store.attention().size).toBe(0);
+  });
+
+  it("do not disturb silences the system notification of a stall", async () => {
+    const store = await load();
+    const prefs = await import("./notifyPrefs");
+    prefs.setNotifyPref("dnd", true);
+    store.selectWorktree(OTHER);
+    await tick(store, agent({ idle_ms: 9000, stalled: true, stall }));
+    expect(await notified()).toBe(0);
+  });
+
+  it("a finished top-level agent notifies only when the Finished category is on", async () => {
+    const store = await load();
+    const prefs = await import("./notifyPrefs");
+    store.selectWorktree(OTHER);
+    await tick(store, agent({ idle_ms: 100 }));
+    await tick(store, agent({ running: false }));
+    expect(await notified()).toBe(0);
+    prefs.setNotifyPref("done", true);
+    await tick(store, agent({ idle_ms: 100 }));
+    await tick(store, agent({ running: false }));
+    expect(await notified()).toBe(1);
   });
 
   it("ignores shells: only agents are flagged", async () => {

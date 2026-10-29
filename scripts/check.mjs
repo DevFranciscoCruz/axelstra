@@ -6,6 +6,14 @@
 //   --skip-fmt --skip-clippy --skip-test --skip-tsc --skip-lint --skip-format --skip-vitest   skip one step
 //   --skip-workflows                       (actionlint on .github/workflows; skipped with a notice when not on PATH)
 //   --engine                             Rust steps only for core, daemon and cli (no desktop toolkit needed)
+//   --fast                                 quick loop while working, NOT the gate (CI and the push gate run the full mode):
+//                                          clippy (which type-checks the tests, nothing is linked or run) only on the packages
+//                                          this branch touched plus their dependents, no cargo test; tsc, eslint (changed files)
+//                                          and vitest (--changed) only when app/ changed; actionlint only when workflows changed
+//   --self-test                            the pure helpers (jobs for this machine, affected packages), no compile
+//
+// CARGO_BUILD_JOBS: when it is not set (and CI is not), it is derived from the cores and the free memory
+// (scripts/lib/jobs.mjs) so a small machine does not run out of RAM; an explicit value always wins.
 //
 // Steps run in order and the first failure stops the run. Inside an Axelstra worktree, run it through
 // `axelstra lock verify -- node scripts/check.mjs` so heavy builds do not pile up.
@@ -15,6 +23,8 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as diffs from "./lib/changed.mjs";
+import * as jobs from "./lib/jobs.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const flags = new Set(process.argv.slice(2));
@@ -30,6 +40,8 @@ const known = new Set([
   "--skip-format",
   "--skip-vitest",
   "--skip-workflows",
+  "--fast",
+  "--self-test",
 ]);
 for (const f of flags) {
   if (!known.has(f)) {
@@ -37,7 +49,20 @@ for (const f of flags) {
     process.exit(2);
   }
 }
+if (flags.has("--self-test")) {
+  jobs.selfTest();
+  diffs.selfTest();
+  process.exit(0);
+}
 const engine = flags.has("--engine");
+const fast = flags.has("--fast");
+// CI machines and explicit settings are left alone; a local run adapts to the machine
+if (!process.env.CI && !process.env.CARGO_BUILD_JOBS) {
+  process.env.CARGO_BUILD_JOBS = String(jobs.defaultJobs());
+  console.log(
+    `CARGO_BUILD_JOBS=${process.env.CARGO_BUILD_JOBS} (derived from cores and free memory; set it to override)`,
+  );
+}
 const pkgs = engine
   ? ["-p", "axelstra-core", "-p", "axelstra-daemon", "-p", "axelstra"]
   : null;
@@ -128,6 +153,71 @@ const steps = [
   },
 ];
 
+// --fast: narrow the steps to what this branch touched. Returns a step, or {skipNote} to skip it.
+function narrow(s, ctx) {
+  const rust = ctx.pkgs;
+  switch (s.name) {
+    case "clippy": {
+      const hit = engine ? rust.filter((p) => p !== "axelstra-app") : rust;
+      if (!hit.length) return { skipNote: "no Rust package touched" };
+      return {
+        ...s,
+        cmd: [
+          "cargo",
+          "clippy",
+          ...hit.flatMap((p) => ["-p", p]),
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings",
+        ],
+      };
+    }
+    case "test":
+      return {
+        skipNote:
+          "--fast: clippy --all-targets already type-checks the tests; the full mode runs them",
+      };
+    case "tsc":
+    case "vitest": {
+      if (!diffs.touchesFrontend(ctx.files))
+        return { skipNote: "app/ not touched" };
+      return s.name === "vitest"
+        ? { ...s, cmd: [npx, "vitest", "run", "--changed", ctx.base] }
+        : s;
+    }
+    case "lint": {
+      const t = diffs.lintTargets(ctx.files);
+      return t.length
+        ? { ...s, cmd: [npx, "eslint", ...t] }
+        : { skipNote: "no app/src ts file touched" };
+    }
+    case "workflows":
+      return diffs.touchesWorkflows(ctx.files)
+        ? s
+        : { skipNote: "workflows not touched" };
+    default:
+      return s; // fmt, format and i18n are cheap and already look at the whole tree or only changed files
+  }
+}
+
+let fastCtx = null;
+if (fast) {
+  const base = diffs.baseCommit(root);
+  const pk = diffs.workspacePackages(root);
+  if (!base || !pk) {
+    console.error(
+      "--fast needs git with origin/main or main, and cargo metadata; run the full mode instead",
+    );
+    process.exit(2);
+  }
+  const files = diffs.gitChanged(root, base);
+  fastCtx = { base, files, pkgs: diffs.affectedPackages(files, pk) };
+  console.log(
+    `fast: ${files.length} changed file(s) since ${base.slice(0, 7)}; Rust packages: ${fastCtx.pkgs.join(", ") || "none"}`,
+  );
+}
+
 function onPath(cmd) {
   const r = spawnSync(cmd, ["-version"], { stdio: "ignore" });
   return !r.error && r.status === 0;
@@ -148,21 +238,42 @@ function realDataDir() {
   );
 }
 const GUARDED = ["hooks.json", "token", "projects.json", "settings.json"];
+// settings.json also holds the UI choices (`ui`) that the running app and daemon rewrite
+// on their own (selected worktree, ...), so a live app would trip the guard: hash it without them.
+function fileHash(f, p) {
+  let buf = readFileSync(p);
+  if (f === "settings.json") {
+    try {
+      const j = JSON.parse(buf.toString("utf8"));
+      const d = j && typeof j === "object" && j.data ? j.data : j;
+      if (d && typeof d === "object") delete d.ui;
+      buf = Buffer.from(JSON.stringify(j));
+    } catch {}
+  }
+  return createHash("sha256").update(buf).digest("hex");
+}
+
 function snapshot() {
   const dir = realDataDir();
   if (!dir || !existsSync(dir)) return null;
   const snap = {};
   for (const f of GUARDED) {
     const p = join(dir, f);
-    snap[f] = existsSync(p)
-      ? createHash("sha256").update(readFileSync(p)).digest("hex")
-      : "(absent)";
+    snap[f] = existsSync(p) ? fileHash(f, p) : "(absent)";
   }
   return snap;
 }
 
 const results = [];
-for (const s of steps) {
+for (const step of steps) {
+  let s = step;
+  if (fastCtx && !flags.has(s.skip) && !flags.has(s.also)) {
+    s = narrow(step, fastCtx);
+    if (s.skipNote) {
+      results.push(`skip  ${step.name} (${s.skipNote})`);
+      continue;
+    }
+  }
   if (flags.has(s.skip) || flags.has(s.also)) {
     results.push(`skip  ${s.name}`);
     continue;

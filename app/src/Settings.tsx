@@ -7,6 +7,7 @@ import {
   budgetCheck,
   ShellChoice,
   Terse,
+  BuildSettings,
   backupExport,
   worktreeSweepFull,
   SweepItem,
@@ -26,15 +27,26 @@ import { WorkspaceSection } from "./WorkspaceSection";
 import { HostsSection } from "./HostsSection";
 import { Modal } from "./Modal";
 import { S } from "./strings";
-import { classifySettingsError, diagnosticRows, errorText } from "./settingsLogic";
+import {
+  DEFAULT_BUILD_JOBS,
+  DEFAULT_BUILD_MARGIN_MB,
+  DEFAULT_BUILD_MB,
+  MAX_BUILD_JOBS,
+  MAX_BUILD_MB,
+  classifySettingsError,
+  diagnosticRows,
+  errorText,
+  parseBuildNumber,
+} from "./settingsLogic";
 import { refreshProjects, setError, setShowSettings, showNotice } from "./store";
 import { DEFAULT_FONT, MAX_FONT, MIN_FONT, TermTheme, setTermPrefs, termPrefs } from "./termprefs";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
-import { LOCALES, LOCALE_NAMES, locale, setLocale } from "./i18n";
+import { LOCALES, LOCALE_NAMES, fmtNumber, locale, setLocale } from "./i18n";
 import { L } from "./strings.logic";
 import { P } from "./strings.panels";
 import { ask } from "./Confirm";
 import "./termui.css";
+import { CATEGORIES, notifyPrefs, setNotifyPref } from "./notifyPrefs";
 import { Button, CheckboxField, Field, Input, RadioGroup } from "./ui";
 
 const TERSE: Terse[] = ["off", "short", "tiny"];
@@ -74,6 +86,113 @@ const Section = (props: { title: string; note?: string; children: JSX.Element })
     {props.children}
   </section>
 );
+
+const AUTO = "auto";
+const MANUAL = "manual";
+
+/** A number that is derived by the daemon (null) or fixed by the user: a choice plus, when fixed, a validated field. */
+function AutoNumber(props: {
+  label: string;
+  manualLabel: string;
+  hint: string;
+  value: number | null;
+  max: number;
+  fallback: number;
+  onSave: (v: number | null) => void;
+}) {
+  const [bad, setBad] = createSignal(false);
+  return (
+    <>
+      <Choices<string>
+        label={props.label}
+        value={props.value === null ? AUTO : MANUAL}
+        options={[
+          { value: AUTO, label: S.auto },
+          { value: MANUAL, label: props.manualLabel },
+        ]}
+        onPick={(v) => {
+          setBad(false);
+          props.onSave(v === AUTO ? null : (props.value ?? props.fallback));
+        }}
+      />
+      <Show when={props.value !== null}>
+        <Field label={props.label}>
+          <Input
+            type="number"
+            min={1}
+            max={props.max}
+            step={1}
+            value={props.value ?? ""}
+            aria-invalid={bad()}
+            onChange={(e) => {
+              const n = parseBuildNumber(e.currentTarget.value, props.max);
+              setBad(n === null);
+              if (n === null) e.currentTarget.value = String(props.value);
+              else props.onSave(n);
+            }}
+          />
+        </Field>
+        <Show when={bad()}>
+          <div class="auto-note">{S.build.invalid}</div>
+        </Show>
+      </Show>
+      <div class="auto-note">{props.hint}</div>
+    </>
+  );
+}
+
+/** Build environment of the sessions started from now on (`build` in the daemon's settings). */
+function BuildSection(props: { cfg: BuildSettings; save: (b: BuildSettings) => void }) {
+  const set = (patch: Partial<BuildSettings>) => props.save({ ...props.cfg, ...patch });
+  return (
+    <Section title={S.build.title} note={S.build.note}>
+      <CheckboxField checked={props.cfg.enabled} onChange={(v) => set({ enabled: v })}>
+        {S.build.enabled}
+      </CheckboxField>
+      <Show when={props.cfg.enabled}>
+        <AutoNumber
+          label={S.build.jobs}
+          manualLabel={S.build.jobsManual}
+          hint={S.build.jobsHint(fmtNumber(MAX_BUILD_JOBS))}
+          value={props.cfg.jobs}
+          max={MAX_BUILD_JOBS}
+          fallback={DEFAULT_BUILD_JOBS}
+          onSave={(jobs) => set({ jobs })}
+        />
+        <CheckboxField checked={props.cfg.sccache === "auto"} onChange={(v) => set({ sccache: v ? "auto" : "off" })}>
+          {S.build.sccache}
+        </CheckboxField>
+        <div class="auto-note">{S.build.sccacheHint}</div>
+        <CheckboxField checked={props.cfg.shared_target} onChange={(v) => set({ shared_target: v })}>
+          {S.build.sharedTarget}
+        </CheckboxField>
+        <div class="auto-note">{S.build.sharedTargetWarn}</div>
+        <CheckboxField checked={props.cfg.shared_js_cache} onChange={(v) => set({ shared_js_cache: v })}>
+          {S.build.sharedJsCache}
+        </CheckboxField>
+        <div class="auto-note">{S.build.sharedJsCacheHint}</div>
+        <AutoNumber
+          label={S.build.budget}
+          manualLabel={S.build.budgetManual}
+          hint={S.build.budgetHint(fmtNumber(MAX_BUILD_MB))}
+          value={props.cfg.lock_budget_mb}
+          max={MAX_BUILD_MB}
+          fallback={DEFAULT_BUILD_MB}
+          onSave={(lock_budget_mb) => set({ lock_budget_mb })}
+        />
+        <AutoNumber
+          label={S.build.margin}
+          manualLabel={S.build.budgetManual}
+          hint={S.build.marginHint(fmtNumber(MAX_BUILD_MB))}
+          value={props.cfg.lock_margin_mb}
+          max={MAX_BUILD_MB}
+          fallback={DEFAULT_BUILD_MARGIN_MB}
+          onSave={(lock_margin_mb) => set({ lock_margin_mb })}
+        />
+      </Show>
+    </Section>
+  );
+}
 
 /** Daemon version, data paths, lag log and missing tools. Every part is optional: an older build reports less. */
 function Diagnostics() {
@@ -255,6 +374,24 @@ export function Settings() {
                 <CheckboxField checked={cfg().notify_sound ?? true} onChange={(v) => void save({ notify_sound: v })}>
                   {S.notifySound}
                 </CheckboxField>
+                <div class="auto-note" id="notify-cats-title">
+                  {S.notifyCats.title}
+                </div>
+                <div class="grid gap-1.5" role="group" aria-labelledby="notify-cats-title">
+                  <For each={CATEGORIES}>
+                    {(c) => (
+                      <CheckboxField checked={notifyPrefs()[c]} onChange={(v) => setNotifyPref(c, v)}>
+                        <span class="font-medium">{S.notifyCats[c].label}</span>
+                        <span class="auto-note"> · {S.notifyCats[c].hint}</span>
+                      </CheckboxField>
+                    )}
+                  </For>
+                  <CheckboxField checked={notifyPrefs().dnd} onChange={(v) => setNotifyPref("dnd", v)}>
+                    <span class="font-medium">{S.notifyCats.dnd}</span>
+                    <span class="auto-note"> · {S.notifyCats.dndHint}</span>
+                  </CheckboxField>
+                </div>
+                <div class="auto-note">{S.notifyCats.note}</div>
               </Section>
 
               <Section title={S.stall} note={S.stallNote}>
@@ -267,6 +404,8 @@ export function Settings() {
                   onPick={(v) => void save({ stall_minutes: Number(v) })}
                 />
               </Section>
+
+              <Show when={cfg().build}>{(b) => <BuildSection cfg={b()} save={(build) => void save({ build })} />}</Show>
 
               <Section title={S.shell} note={S.shellNote}>
                 <Choices

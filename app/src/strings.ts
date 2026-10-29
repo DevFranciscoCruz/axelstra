@@ -46,16 +46,51 @@ export const ptS = {
   notifyNote: "Avisos do sistema quando um agente termina ou precisa de ti.",
   notifySound: "Tocar um som com a notificação",
   notifyMode: {
-    all: { label: "Todas", hint: "Avisa quando um agente termina ou fica à espera." },
+    all: { label: "Todas", hint: "Avisa segundo as categorias abaixo." },
     waiting: { label: "Só à espera", hint: "Avisa apenas quando um agente fica à espera de resposta." },
     off: { label: "Nenhuma", hint: "Sem notificações do sistema." },
+  },
+  notifyCats: {
+    title: "O que te avisa",
+    note: "Cada categoria desligada fica só no centro de notificações, já lida: sem aviso do sistema, som, aviso no ecrã nem contador.",
+    need: { label: "Preciso de ti", hint: "Um agente espera a tua resposta ou permissão, ou algo precisa de uma decisão tua." },
+    done: { label: "Concluído", hint: "Um agente terminou a tarefa ou um worktree foi integrado." },
+    info: { label: "Informativo", hint: "CI a passar, avisos de orçamento, correções automáticas de CI." },
+    error: { label: "Erros", hint: "Falhas que ninguém está a tratar: CI a falhar, erro de um terminal, orçamento excedido." },
+    dnd: "Não incomodar",
+    dndHint: "Sem aviso do sistema, som nem aviso no ecrã. Tudo continua registado no centro e «Preciso de ti» mantém o ponto vermelho.",
   },
 
   stall: "Agente parado",
   stallNote:
-    "Se um agente ficar este tempo sem atividade e sem chamar done ou escalate, passa a «parado»: o pai recebe uma mensagem e aparece uma notificação.",
+    "Se um agente ficar este tempo sem atividade e sem chamar done ou escalate, passa a «parado»: o pai recebe uma mensagem. Só és avisado se não houver agente pai a tratar disso.",
   stallOff: "Desligado",
   stallMin: (n: number) => `${n} min`,
+
+  build: {
+    title: "Compilação",
+    note: "Limita o custo de compilar com vários agentes na mesma máquina. Vale para as sessões iniciadas depois de alterares; as que já estão abertas mantêm o ambiente com que arrancaram.",
+    enabled: "Preparar o ambiente de compilação das sessões",
+    jobs: "Trabalhos paralelos do cargo",
+    jobsManual: "Valor fixo",
+    jobsHint: (max: string) =>
+      `Número inteiro de 1 a ${max}. Em automático usa metade dos núcleos, limitado pela memória livre.`,
+    sccache: "Usar o sccache quando estiver instalado",
+    sccacheHint: "Só é usado se o sccache existir no PATH; não é preciso instalá-lo.",
+    sharedTarget: "Partilhar a pasta target entre os worktrees do projeto",
+    sharedTargetWarn:
+      "Atenção: o cargo bloqueia a pasta de compilação, por isso as compilações do projeto passam a esperar umas pelas outras em todos os worktrees; como o caminho de cada worktree é diferente, as crates do próprio projeto voltam a compilar (só as dependências são partilhadas); e worktrees com perfis ou features diferentes estragam o trabalho uns dos outros. Fica desligado por omissão.",
+    sharedJsCache: "Partilhar a cache de downloads do gestor de pacotes JS",
+    sharedJsCacheHint: "Só aponta a cache de downloads para uma pasta comum; o node_modules de cada worktree não muda.",
+    budget: "Memória para compilações em simultâneo",
+    budgetManual: "Valor fixo (MB)",
+    budgetHint: (max: string) =>
+      `Orçamento do axelstra lock, em MB, de 1 a ${max}. Em automático usa a memória física menos 2 GB.`,
+    margin: "Memória livre a manter depois de admitir uma compilação",
+    marginHint: (max: string) =>
+      `Em MB, de 1 a ${max}. Em automático são 2048 MB: se a memória disponível não chegar, a compilação espera por uma libertação.`,
+    invalid: "Valor inválido.",
+  },
 
   shell: "Shell dos terminais",
   shellNote: "Vale para terminais e agentes novos. «Automático» usa o shell predefinido do sistema.",
@@ -153,6 +188,8 @@ export const ptS = {
     close: "Fechar",
     reconnecting: "A reconectar ao daemon…",
     retryNow: "Tentar agora",
+    slow: (method: string) => `A carregar… o sistema está lento (${method})`,
+    slowCancel: "Cancelar",
   },
 
   update: {

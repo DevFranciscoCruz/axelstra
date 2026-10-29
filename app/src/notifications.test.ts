@@ -16,7 +16,7 @@ describe("trim", () => {
 describe("addEntry", () => {
   it("puts the new one first and keeps the cap", () => {
     let l: NotifEntry[] = [];
-    for (let i = 0; i < 120; i++) l = addEntry(l, { kind: "done", worktree: "/w", text: `n${i}` }, 1000 + i, `id${i}`);
+    for (let i = 0; i < 120; i++) l = addEntry(l, { kind: "error", worktree: "/w", text: `n${i}` }, 1000 + i, `id${i}`);
     expect(l).toHaveLength(MAX_ENTRIES);
     expect(l[0].text).toBe("n119");
     expect(l[0].read).toBe(false);

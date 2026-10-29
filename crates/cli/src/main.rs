@@ -228,9 +228,17 @@ enum Cmd {
     /// Run a command when a slot of a named lock is free: agents work in parallel, the heavy command takes turns
     Lock {
         name: String,
-        /// how many may hold the lock at once
-        #[arg(long, default_value_t = 1)]
-        slots: usize,
+        /// how many may hold the lock at once (default 1 for other names). Bare `build`/`verify` do NOT mean one at a
+        /// time: they declare a memory need and several holders run while memory allows; `--slots 1` is strict
+        /// one-at-a-time
+        #[arg(long, conflicts_with = "mem_mb")]
+        slots: Option<usize>,
+        /// estimated memory of the command in MB: admitted while the holders' needs fit the budget (setting
+        /// `build.lock_budget_mb`, else physical memory minus 2 GB) and the memory available now minus the need
+        /// still leaves 2 GB (`build.lock_margin_mb`); short memory waits for a release (the only holder runs anyway,
+        /// with a warning); use it for every caller of the name
+        #[arg(long)]
+        mem_mb: Option<u64>,
         /// seconds to wait for a slot
         #[arg(long, default_value_t = 3600)]
         timeout: u64,
@@ -499,7 +507,7 @@ fn main() -> Result<()> {
             dispatch::run(cmd, c)?;
         }
         Cmd::Workspace { cmd } => workspace::run(cmd, host.as_deref())?,
-        Cmd::Lock { name, slots, timeout, command } => std::process::exit(lock::run(&name, slots, timeout, &command)?),
+        Cmd::Lock { name, slots, mem_mb, timeout, command } => std::process::exit(lock::run(&name, slots, mem_mb, timeout, &command)?),
         Cmd::StatuslineTee => statusline::tee()?,
         Cmd::Hook { agent, event } => hook::dispatch(&agent, &event)?,
         Cmd::Skills { .. } => print!("{}", axelstra_daemon::skill::guide()),
