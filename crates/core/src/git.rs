@@ -23,17 +23,6 @@ pub struct Out {
     pub stderr: String,
 }
 
-/// The daemon has no console, so a console child (git, gh, cmd) would flash a new window
-/// every time it starts. Call this on every Command the daemon spawns itself.
-pub fn quiet(cmd: &mut Command) -> &mut Command {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    cmd
-}
-
 /// Default deadline of `run`: generous for a big fetch or checkout, finite so a stuck git cannot block the caller forever.
 pub const RUN_TIMEOUT: Duration = Duration::from_secs(120);
 /// Most output of one git command that is kept; more is an error rather than a silently cut answer.
@@ -337,13 +326,12 @@ pub fn remove_tree(path: &Path) -> std::io::Result<()> {
     let empty = path.with_file_name(format!(".axelstra-empty-{}", std::process::id()));
     std::fs::create_dir_all(&empty)?;
     // exit codes 0-7 are some kind of success, 8 and up are failures
-    let _ = Command::new("robocopy")
-        .arg(&empty)
-        .arg(path)
-        .args(["/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NP", "/R:0", "/W:0"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    let _ = crate::proc::hidden(
+        Command::new("robocopy").arg(&empty).arg(path).args(["/MIR", "/NFL", "/NDL", "/NJH", "/NJS", "/NP", "/R:0", "/W:0"]),
+    )
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .status();
     let _ = std::fs::remove_dir(&empty);
     match std::fs::remove_dir_all(verbatim(path)) {
         Ok(()) => Ok(()),

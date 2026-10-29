@@ -102,7 +102,13 @@ fn find_git_bash(path_var: &str, env_root: Option<&str>, registry_roots: &[PathB
 fn registry_roots() -> Vec<PathBuf> {
     let mut out = vec![];
     for hive in ["HKLM", "HKCU"] {
-        let Ok(o) = Command::new("reg").args(["query", &format!(r"{hive}\SOFTWARE\GitForWindows"), "/v", "InstallPath"]).output() else {
+        let Ok(o) = axelstra_core::proc::hidden(Command::new("reg").args([
+            "query",
+            &format!(r"{hive}\SOFTWARE\GitForWindows"),
+            "/v",
+            "InstallPath",
+        ]))
+        .output() else {
             continue;
         };
         for line in String::from_utf8_lossy(&o.stdout).lines() {
@@ -165,7 +171,8 @@ fn shell_command(cmdline: &str) -> Command {
 
 /// Runs the user's command and returns its stdout, or why it gave none.
 fn run_user(cmdline: &str, input: &str) -> std::result::Result<String, String> {
-    let mut child = shell_command(cmdline)
+    let mut shell = shell_command(cmdline);
+    let mut child = axelstra_core::proc::hidden(&mut shell)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

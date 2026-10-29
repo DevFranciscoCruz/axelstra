@@ -108,7 +108,7 @@ impl Drain {
 /// Runs `cmd` to completion or until `timeout`, keeping at most `max_bytes` of each of stdout and stderr.
 /// See the module docs for the guarantees.
 pub fn run_capped(cmd: &mut Command, timeout: Duration, max_bytes: usize) -> Result<Captured> {
-    crate::git::quiet(cmd);
+    crate::proc::hidden(cmd);
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let job = Job::new()?;
     let mut child = job.spawn(cmd)?;

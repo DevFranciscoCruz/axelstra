@@ -151,8 +151,7 @@ fn start_daemon() -> Result<std::process::Child> {
     {
         use std::os::windows::process::CommandExt;
         const DETACHED_PROCESS: u32 = 0x0000_0008;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW);
+        cmd.creation_flags(DETACHED_PROCESS | axelstra_core::proc::NO_WINDOW);
     }
     #[cfg(unix)]
     {

@@ -524,12 +524,8 @@ fn spawn_child(program: &str, args: &[String], env: &[(String, String)], label: 
     use std::process::{Command, Stdio};
     let mut cmd = Command::new(program);
     cmd.args(args).envs(env.iter().map(|(k, v)| (k, v))).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: the app has no console, ssh/wsl must not flash one
-        cmd.creation_flags(0x0800_0000);
-    }
+    // the app has no console, ssh/wsl must not flash one
+    axelstra_core::proc::hidden(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| {
         axelstra_core::coded!(
             "host.spawn_failed",

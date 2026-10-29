@@ -10,11 +10,8 @@ mod imp {
     use super::*;
     use anyhow::bail;
     use std::os::windows::io::AsRawHandle;
-    use std::os::windows::process::CommandExt;
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::JobObjects::*;
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     pub struct Job(HANDLE);
     unsafe impl Send for Job {}
@@ -45,7 +42,7 @@ mod imp {
         }
 
         pub fn spawn(&self, cmd: &mut Command) -> Result<Child> {
-            cmd.creation_flags(CREATE_NO_WINDOW);
+            crate::proc::hidden(cmd);
             let mut child = cmd.spawn()?;
             let ok = unsafe { AssignProcessToJobObject(self.0, child.as_raw_handle() as HANDLE) };
             if ok == 0 {

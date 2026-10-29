@@ -113,7 +113,7 @@ fn save(p: &Path, v: &Value) -> Result<()> {
 }
 
 fn git(dir: &str, args: &[&str]) -> Option<String> {
-    let o = Command::new("git").args(args).current_dir(dir).output().ok()?;
+    let o = axelstra_core::proc::hidden(Command::new("git").args(args).current_dir(dir)).output().ok()?;
     o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
 
@@ -125,7 +125,7 @@ fn pr_merged(wt: &str, branch: &str) -> bool {
 }
 
 fn git_like(program: &str, dir: &str, args: &[&str]) -> Option<String> {
-    let o = Command::new(program).args(args).current_dir(dir).output().ok()?;
+    let o = axelstra_core::proc::hidden(Command::new(program).args(args).current_dir(dir)).output().ok()?;
     o.status.success().then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
 

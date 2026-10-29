@@ -54,7 +54,7 @@ fn ensure_docker_watch(reg: &Arc<Registry>) {
             let Some(reg) = weak.upgrade() else { break };
             let mut cmd = std::process::Command::new("docker");
             cmd.args(["events", "--format", "{{json .}}"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-            let mut child = match cmd.spawn() {
+            let mut child = match axelstra_core::proc::hidden(&mut cmd).spawn() {
                 Ok(c) => c,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
                 Err(_) => {

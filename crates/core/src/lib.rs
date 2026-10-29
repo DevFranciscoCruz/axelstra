@@ -7,6 +7,7 @@ pub mod job;
 pub mod msg;
 pub mod orch;
 pub mod paths;
+pub mod proc;
 pub mod procs;
 pub mod pty;
 pub mod runner;

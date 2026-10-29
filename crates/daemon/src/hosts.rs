@@ -149,7 +149,7 @@ fn wsl_distros() -> Vec<String> {
     cached(&SLOT, || {
         let mut cmd = std::process::Command::new("wsl");
         cmd.args(["-l", "-q"]);
-        axelstra_core::git::quiet(&mut cmd);
+        axelstra_core::proc::hidden(&mut cmd);
         match axelstra_core::exec::run_capped(&mut cmd, Duration::from_secs(5), 64 << 10) {
             Ok(o) if o.success() && !o.timed_out => parse_wsl_list(&o.stdout),
             _ => Vec::new(),

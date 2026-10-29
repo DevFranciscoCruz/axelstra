@@ -709,7 +709,7 @@ fn gh_repos(p: &Value) -> Result<Value> {
         "--limit",
         &fetch.to_string(),
     ]);
-    git::quiet(&mut cmd);
+    axelstra_core::proc::hidden(&mut cmd);
     let o = match axelstra_core::exec::run_capped(&mut cmd, Duration::from_secs(30), 4 << 20) {
         Ok(o) => o,
         Err(_) => return Ok(json!({"state": "no_gh", "repos": []})),

@@ -82,7 +82,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 "code" => crate::fsops::code_launch(&wt)?,
                 other => return Err(axelstra_core::coded!("fs.unknown_editor", "unknown editor {editor:?}", editor = other)),
             };
-            axelstra_core::git::quiet(&mut std::process::Command::new(&prog)).args(args).spawn().map_err(|e| {
+            axelstra_core::proc::hidden(&mut std::process::Command::new(&prog)).args(args).spawn().map_err(|e| {
                 axelstra_core::coded!("fs.editor_start_failed", "could not start {program}: {detail}", program = prog.display(), detail = e)
             })?;
             Ok(json!({}))

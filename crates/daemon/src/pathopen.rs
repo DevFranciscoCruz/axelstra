@@ -205,7 +205,7 @@ mod sys {
                 } else {
                     c.raw_arg(format!("/select,\"{}\"", info.path));
                 }
-                crate::pathopen::quiet(&mut c).spawn().map(|_| ()).map_err(|e| e.to_string())
+                axelstra_core::proc::hidden(&mut c).spawn().map(|_| ()).map_err(|e| e.to_string())
             }
             Action::Open | Action::Run => {
                 use windows_sys::Win32::UI::Shell::ShellExecuteW;
@@ -256,18 +256,13 @@ mod sys {
             }
         };
         c.current_dir(folder).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-        super::quiet(&mut c).spawn().map(|_| ()).map_err(|e| e.to_string())
+        axelstra_core::proc::hidden(&mut c).spawn().map(|_| ()).map_err(|e| e.to_string())
     }
 
     fn has_exec(p: &std::path::Path) -> bool {
         use std::os::unix::fs::PermissionsExt;
         std::fs::metadata(p).map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false)
     }
-}
-
-/// Keeps a console window from flashing on Windows; a no-op elsewhere.
-pub(crate) fn quiet(c: &mut std::process::Command) -> &mut std::process::Command {
-    axelstra_core::git::quiet(c)
 }
 
 #[cfg(test)]

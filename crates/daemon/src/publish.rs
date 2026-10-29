@@ -168,7 +168,7 @@ fn run_agent(prompt: &str) -> Result<String> {
     let mut cmd = Command::new(exe);
     cmd.args(agent_args());
     no_cwd_lookup(&mut cmd);
-    axelstra_core::git::quiet(&mut cmd);
+    axelstra_core::proc::hidden(&mut cmd);
     // outside the repo, so the agent works from the prompt alone and does not wander through the project
     // a Job holds the whole process tree, so the deadline kill also takes what the agent started
     let job = axelstra_core::job::Job::new()?;

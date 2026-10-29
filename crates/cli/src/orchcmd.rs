@@ -286,10 +286,7 @@ fn keep_reason(path: &str, is_main: bool) -> Option<String> {
         return Some("main worktree".into());
     }
     let git = |args: &[&str]| {
-        std::process::Command::new("git")
-            .arg("-C")
-            .arg(path)
-            .args(args)
+        axelstra_core::proc::hidden(std::process::Command::new("git").arg("-C").arg(path).args(args))
             .output()
             .ok()
             .filter(|o| o.status.success())
