@@ -22,7 +22,7 @@ use std::time::Duration;
 pub mod cause;
 #[cfg(target_os = "linux")]
 mod linux;
-mod mac;
+pub(crate) mod mac;
 mod sample;
 pub mod suspend;
 #[cfg(windows)]

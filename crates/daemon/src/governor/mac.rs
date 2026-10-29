@@ -27,9 +27,22 @@ pub struct VmCounts {
 
 /// Memory the system hands out without paging: free + inactive + speculative + purgeable (same rule as `parse_vm_stat`).
 pub fn mem_info(c: &VmCounts, page_bytes: u64, total_bytes: u64) -> MemInfo {
-    let free = (c.free + c.inactive + c.speculative + c.purgeable).saturating_mul(page_bytes) / MIB;
+    let (_, free) = avail_bytes(c, page_bytes, total_bytes);
     let total_mb = total_bytes / MIB;
-    MemInfo { total_mb, free_mb: free.min(total_mb), commit_pct: None }
+    MemInfo { total_mb, free_mb: (free / MIB).min(total_mb), commit_pct: None }
+}
+
+/// `(total, available)` in bytes, by the same rule as `mem_info`; available never exceeds total.
+pub fn avail_bytes(c: &VmCounts, page_bytes: u64, total_bytes: u64) -> (u64, u64) {
+    let pages = c.free.saturating_add(c.inactive).saturating_add(c.speculative).saturating_add(c.purgeable);
+    (total_bytes, pages.saturating_mul(page_bytes).min(total_bytes))
+}
+
+/// `(total, available)` bytes now through the Mach call, `None` off macOS or on failure (`buildenv::memory`).
+#[allow(dead_code)] // used on macOS
+pub fn memory_bytes() -> Option<(u64, u64)> {
+    let (c, page, total) = read_counts()?;
+    Some(avail_bytes(&c, page, total))
 }
 
 /// File cache in MB.
@@ -197,6 +210,14 @@ mod tests {
     }
 
     #[test]
+    fn counts_convert_to_bytes() {
+        let c = VmCounts { free: 1000, inactive: 2000, speculative: 500, purgeable: 500, ..Default::default() };
+        assert_eq!(avail_bytes(&c, 16384, 16 * 1024 * MIB), (16 * 1024 * MIB, 4000 * 16384));
+        let huge = VmCounts { free: u64::MAX, inactive: u64::MAX, ..Default::default() };
+        assert_eq!(avail_bytes(&huge, 4096, 8 * 1024 * MIB), (8 * 1024 * MIB, 8 * 1024 * MIB));
+    }
+
+    #[test]
     fn free_never_exceeds_total() {
         let c = VmCounts { free: u64::MAX / 2, ..Default::default() };
         let i = mem_info(&c, 4096, 8 * 1024 * MIB);
@@ -221,6 +242,8 @@ mod tests {
     #[test]
     fn the_real_call_reads_this_mac() {
         let i = read_now().expect("host_statistics64");
+        let (total, avail) = memory_bytes().expect("memory_bytes");
+        assert!(total > 0 && avail <= total);
         assert!(i.total_mb > 0 && i.free_mb <= i.total_mb, "{i:?}");
         let s = MacSource::new().unwrap();
         assert!(!s.has_events());
