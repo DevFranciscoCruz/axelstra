@@ -463,8 +463,11 @@ fn at_critical_an_idle_agent_is_hibernated_before_anything_is_paused() {
     ready(&mut c, id);
     std::thread::sleep(Duration::from_millis(900));
     // thresholds no machine meets: memory is Critical now
-    c.call("mem.config", json!({"patch": {"high_free_pct": 90, "crit_free_pct": 80, "high_free_mb": 4194304, "crit_free_mb": 4000000}}))
-        .unwrap();
+    c.call(
+        "mem.config",
+        json!({"patch": {"enabled": true, "high_free_pct": 90, "crit_free_pct": 80, "high_free_mb": 4194304, "crit_free_mb": 4000000}}),
+    )
+    .unwrap();
     until("hibernated by the memory governor", || row(&mut c, id).filter(|r| r["hibernated"].is_object()).map(|_| ()));
     let st = c.call("mem.status", json!({})).unwrap();
     assert!(st["paused"].as_array().is_some_and(|p| p.is_empty()), "nothing was frozen: {st}");
