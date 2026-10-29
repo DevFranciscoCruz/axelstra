@@ -1022,8 +1022,3 @@ button.icon, button.x, button.cbtn { display: inline-flex; align-items: center; 
 .wt-pending-meta { color: var(--muted); font-size: var(--fs-sm); }
 .wt-pending-reason { margin-top: 3px; color: var(--muted); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .wt-pending-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-.perf-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
-.perf-folder { display: flex; flex-direction: column; gap: 2px; }
-.perf-path { overflow-wrap: anywhere; font-size: var(--fs-md); }
-.perf-tradeoff { color: var(--text); }
-.perf-sec .set-err { color: var(--danger); font-size: var(--fs-md); }

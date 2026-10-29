@@ -29,8 +29,6 @@ pub fn lane_of(method: &str) -> Option<Lane> {
         | "git.timeline"
         | "worktree.status"
         | "worktree.overview"
-        | "scanx.status"
-        | "scanx.diag"
         | "dispatch.overlaps"
         | "dispatch.overlap_files"
         | "ports.list"

@@ -11,7 +11,6 @@ import * as janitor from "./janitor";
 import * as sources from "./sources";
 import * as projectRemoval from "./projectRemoval";
 import * as host from "./host";
-import * as scanx from "./scanx";
 
 /** one file per group of code prefixes, so parallel changes never touch the same file */
 export const parts = {
@@ -27,7 +26,6 @@ export const parts = {
   sources,
   projectRemoval,
   host,
-  scanx,
 };
 
 const merge = (k: "pt" | "en" | "ptBR"): Record<string, string> =>

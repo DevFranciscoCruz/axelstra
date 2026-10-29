@@ -17,8 +17,6 @@ import { W, ptW } from "./strings.welcome";
 import { ptBRW } from "./strings.welcome.ptbr";
 import { WS, ptWS } from "./strings.workspace";
 import { ptBRWS } from "./strings.workspace.ptbr";
-import { PF, ptPF } from "./strings.perf";
-import { ptBRPF } from "./strings.perf.ptbr";
 import { AP, ptAP } from "./strings.sources";
 import { ptBRAP } from "./strings.sources.ptbr";
 
@@ -32,7 +30,6 @@ const dicts: Entry[] = [
   ["R", R, ptR, ptBRR],
   ["W", W, ptW, ptBRW],
   ["WS", WS, ptWS, ptBRWS],
-  ["PF", PF, ptPF, ptBRPF],
   ["L", L, ptL, ptBRL],
   ["U", U, ptU, ptBRU],
   ["AP", AP, ptAP, ptBRAP],

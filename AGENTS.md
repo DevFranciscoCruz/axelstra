@@ -220,24 +220,13 @@ named locks in `locks/` (shared by all projects), the flow progress files (not t
 Every method the frontend calls must also be in `ALLOWED_METHODS` in `app/src-tauri/src/main.rs`; a unit test reads
 `app/src` (`call`, `callBg`, `callOr` with a string literal) and fails when the list and the sources drift apart.
 
-## Scan exclusions
+## Indexer exclusion
 
-Worktree folders (`.axelstra-wt`) are slow under real-time antivirus and indexers. `crates/daemon/src/scanx.rs` (logic) and
-`server/scanx.rs` (RPCs); the full API and JSON shapes are in `docs/SCANX-api.md`; design notes in `docs/SCANX-design.md`.
-
-- **Automatic, no admin, no prompt:** the indexer flags. Windows: `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED` on `.axelstra-wt` and each
-  worktree folder; macOS: empty `.metadata_never_index`; Linux: nothing. Set when a folder is created, when an orchestrator run
-  starts and at daemon start. Never touches Defender.
-- **Defender exclusion is opt-in:** only `scanx.defender_apply` / `scanx.defender_revert`, started by the user's click in
-  Settings > Desempenho (`PerformanceSection.tsx`), through an elevated PowerShell (UAC). Only `.axelstra-wt` paths are accepted
-  (`scanx.bad_path` otherwise), revert removes only what we recorded. The one-time notice (`ScanxHint.tsx`) only opens that
-  section; it never applies anything.
-- **App only:** every `scanx.*` method is in `agent_forbidden` and in `ALLOWED_METHODS`. Apply and revert write an audit entry.
-- **PROTO 31** adds `scanx.status`, `scanx.defender_apply`, `scanx.defender_revert`, `scanx.diag`, `scanx.hint_dismiss` and the
-  event `scanx.changed` (the `Current: 30` line above predates it).
-- **No polling:** the result of an apply/revert is the `scanx.changed` event; the panel and the notice reload on it (`createLive`,
-  no focus refresh since `scanx.status` costs a PowerShell call). `scanx.diag` is one reading per open or per Refresh click.
-- Texts: `app/src/strings.perf*.ts` (`PF`), codes `app/src/msg/scanx.ts`, view-model `app/src/scanxLogic.ts` (tested).
+Worktree folders (`.axelstra-wt`) are slow under file indexers. `crates/daemon/src/scanx.rs` keeps them out, with no admin, no
+prompt, no UI and no daemon method: Windows sets `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED` on `.axelstra-wt` and each worktree folder
+(new content below a flagged folder inherits it); macOS puts an empty `.metadata_never_index` in `.axelstra-wt`; Linux does nothing.
+Set by event: `projects::create_at` (`worktree.create`, `worktree.from_pr`), `orch.start`, and once at daemon start in a
+low-priority, capped thread (`scanx::spawn_sweep`; no locks, no polling). Tests use an in-memory `Fs` and temp dirs only.
 
 ## SECURITY_MIN
 

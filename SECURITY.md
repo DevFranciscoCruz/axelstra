@@ -68,23 +68,6 @@ program or script whose real path is inside the session's cwd, worktree or proje
 (`agent_forbidden`) and writes every run to the audit log. A path outside the project can only be shown in its folder;
 a remote (WSL/SSH) worktree only offers to copy the path. Anyone who clicks Run runs that program with their own permissions.
 
-## Antivirus exclusions of the worktree folders
-
-Excluding a folder from Windows Defender trades safety for speed: files in it are no longer scanned in real time, so
-malware written there is found later (or by a manual scan). Therefore:
-
-- It is **opt-in**. Nothing is excluded by default; the user ticks a consent box and clicks Apply in Settings > Desempenho,
-  after reading the trade-off, and Windows asks for administrator permission (UAC) before anything changes.
-- **Scope:** only the `.axelstra-wt` folders of registered projects. The daemon refuses any other path (`scanx.bad_path`),
-  never a drive, a process or a file type. The projects' own checkouts are never excluded.
-- **Never agent-triggerable:** every `scanx.*` method is in `agent_forbidden`; an agent cannot apply, revert or probe it.
-  (The limits in "Limits of the agent role" still apply to a hostile process outside the session tree.) Each apply and revert is
-  written to the audit log.
-- **Reversible:** Revert removes exactly the paths Axelstra added (recorded in `settings.json`), never exclusions the user
-  or the organization set. The elevated step re-reads Defender afterwards; a refused change (Tamper Protection, policy) is
-  reported as an error, never as success.
-- The automatic part (indexer flags, `.metadata_never_index`) only stops content indexing; it does not lower antivirus protection.
-
 ## Limits of the agent role
 
 The daemon tells the app from an agent by the connecting process (inside a session's Job Object on Windows, descendant
