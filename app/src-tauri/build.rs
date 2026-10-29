@@ -55,5 +55,12 @@ fn main() {
             println!("cargo:rustc-link-arg-bins=/NODEFAULTLIB:{lib}");
         }
     }
-    tauri_build::build()
+    // Our manifest replaces tauri-build's default one (never a second manifest: that is a link error); it keeps the
+    // Common-Controls v6 dependency and adds asInvoker, Windows 10/11 and long paths. Ignored off Windows.
+    println!("cargo:rerun-if-changed=windows-app-manifest.xml");
+    let windows = tauri_build::WindowsAttributes::new().app_manifest(include_str!("windows-app-manifest.xml"));
+    if let Err(error) = tauri_build::try_build(tauri_build::Attributes::new().windows_attributes(windows)) {
+        println!("{error:#}");
+        std::process::exit(1);
+    }
 }

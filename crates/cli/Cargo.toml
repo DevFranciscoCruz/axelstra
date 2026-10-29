@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[build-dependencies]
+embed-resource = "3"
+
 [dependencies]
 axelstra-core = { path = "../core" }
 axelstra-daemon = { path = "../daemon" }
