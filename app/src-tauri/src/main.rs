@@ -63,6 +63,7 @@ mod hosts;
 mod localfs;
 mod logging;
 mod native;
+mod stale;
 mod stats;
 #[cfg(not(target_os = "linux"))]
 mod voice;
@@ -86,35 +87,140 @@ async fn daemon_call_bg(state: tauri::State<'_, Arc<State>>, method: String, par
 }
 
 fn connect() -> Result<Client> {
-    let token = proto::load_or_create_token()?;
-    let pipe = proto::pipe_name();
-    if let Ok(c) = Client::connect(&pipe, &token) {
-        if c.proto >= proto::PROTO && c.security >= proto::SECURITY_MIN {
-            return Ok(c);
+    let link = Link {
+        pipe: proto::pipe_name(),
+        token: proto::load_or_create_token()?,
+        app: app_build(),
+        app_exe: std::env::current_exe().ok(),
+        daemon_exe: &|c: &Client| c.server_exe(),
+        start: &|| start_daemon().map(Some),
+        memo: &STALE,
+    };
+    let (c, fresh) = connect_via(&link)?;
+    if let Some(stale::Decision::Offer(_)) = fresh {
+        use tauri::Emitter;
+        if let Some(app) = APP.get() {
+            let _ = app.emit("daemon-stale", ());
         }
-        // A daemon from before an update keeps running (so terminals and agents survive it). One that
-        // is too old for this app, or older than the oldest one with the current security fixes (it reports
-        // no `security` at all before they existed), is replaced; its terminals come back through session restore.
-        wait_daemon_gone(c, &pipe, &token, None);
     }
-    let mut child = start_daemon()?;
+    Ok(c)
+}
+
+/// This app's build, as `stale::decide` compares it with the daemon's.
+fn app_build() -> stale::Build {
+    stale::Build { version: env!("CARGO_PKG_VERSION").into(), commit: env!("AXELSTRA_GIT_SHA").into() }
+}
+
+/// The daemon's build, from its `hello` (empty when it did not say).
+fn daemon_build(c: &Client) -> stale::Build {
+    stale::Build { version: c.version.clone(), commit: c.commit.clone() }
+}
+
+/// The last stale-daemon decision: the daemon run (`instance`) it was made for and what was decided. Every connection
+/// (the lanes, the input and bg slots, each attached tab) goes through `connect`, so this lock makes one of them decide
+/// per daemon run and the others reuse it: nobody replaces twice, nobody logs the same decision again.
+static STALE: Mutex<Option<(u64, stale::Decision)>> = Mutex::new(None);
+
+/// What `connect_via` needs, injectable so a test drives it against a fake daemon on a temp pipe.
+struct Link<'a> {
+    pipe: String,
+    token: String,
+    app: stale::Build,
+    app_exe: Option<std::path::PathBuf>,
+    /// where the daemon behind a connection runs from (`Client::server_exe`)
+    daemon_exe: &'a dyn Fn(&Client) -> Option<std::path::PathBuf>,
+    /// starts the app's own daemon; `None` when the test serves the pipe itself (no process to watch)
+    start: &'a dyn Fn() -> Result<Option<std::process::Child>>,
+    memo: &'a Mutex<Option<(u64, stale::Decision)>>,
+}
+
+/// Connects to the daemon on `link.pipe`, replacing one that is too old (`PROTO`, `SECURITY_MIN`) or stale (another
+/// commit, see `stale::decide`) and starting one when none answers. Returns the decision when this call made it (a
+/// daemon run seen for the first time), `None` when it was already made.
+fn connect_via(link: &Link) -> Result<(Client, Option<stale::Decision>)> {
+    let (pipe, token) = (link.pipe.as_str(), link.token.as_str());
+    let mut memo = link.memo.lock_recover();
+    if let Ok(mut c) = Client::connect(pipe, token) {
+        let daemon = daemon_build(&c);
+        if c.proto >= proto::PROTO && c.security >= proto::SECURITY_MIN {
+            match *memo {
+                Some((instance, d)) if instance == c.instance && d != stale::Decision::Replace => return Ok((c, None)),
+                _ => {}
+            }
+            let (d, why) = judge(link, &mut c, &daemon);
+            log_decision(d, &why, &link.app, &daemon);
+            if d != stale::Decision::Replace {
+                *memo = Some((c.instance, d));
+                return Ok((c, Some(d)));
+            }
+        } else {
+            // A daemon from before an update keeps running (so terminals and agents survive it). One that is too old
+            // for this app, or older than the oldest one with the current security fixes (it reports no `security` at
+            // all before they existed), is replaced; its terminals come back through session restore.
+            let why = format!("too old (proto {}, security {})", c.proto, c.security);
+            log_decision(stale::Decision::Replace, &why, &link.app, &daemon);
+        }
+        *memo = Some((c.instance, stale::Decision::Replace));
+        wait_daemon_gone(c, pipe, token, None);
+    }
+    let mut child = (link.start)()?;
     // no event announces a named pipe (or socket) appearing: bounded backoff between looks, for as long as the launched
     // process lives (its death is the event that ends the wait). Only a process that lives and never opens the pipe
     // reaches the safety ceiling.
     let mut nap = Duration::from_millis(10);
     let deadline = Instant::now() + axelstra_daemon::client::ceiling();
     while Instant::now() < deadline {
-        if let Ok(c) = Client::connect(&pipe, &token) {
-            return Ok(c);
+        if let Ok(c) = Client::connect(pipe, token) {
+            // the daemon just started is the app's own: not judged again, so an outdated exe beside the app cannot make
+            // every later connection replace it once more
+            *memo = Some((c.instance, stale::Decision::Keep));
+            return Ok((c, None));
         }
         // the launched process ended: it handed over to a daemon that already runs or failed; one last look, no more waiting
-        if child.try_wait().ok().flatten().is_some() {
-            return Client::connect(&pipe, &token).map_err(|_| axelstra_core::coded!("daemon.start_failed", "the daemon did not start"));
+        if child.as_mut().is_some_and(|ch| ch.try_wait().ok().flatten().is_some()) {
+            let c = Client::connect(pipe, token).map_err(|_| axelstra_core::coded!("daemon.start_failed", "the daemon did not start"))?;
+            *memo = Some((c.instance, stale::Decision::Keep));
+            return Ok((c, None));
         }
         std::thread::sleep(nap);
         nap = (nap * 2).min(Duration::from_millis(200));
     }
     Err(axelstra_core::coded!("daemon.start_failed", "the daemon did not start"))
+}
+
+/// The stale-daemon decision for a daemon that is new enough, and why (for the log line). Where the daemon runs from
+/// and what its sessions do are looked up only when the commits differ.
+fn judge(link: &Link, c: &mut Client, daemon: &stale::Build) -> (stale::Decision, String) {
+    use stale::{decide, Busy, Decision, Place, Reason};
+    if decide(&link.app, daemon, Place::Beside, Busy::Idle) == Decision::Keep {
+        let why = if link.app.known_commit().is_some() && daemon.known_commit().is_some() { "same commit" } else { "commit unknown" };
+        return (Decision::Keep, why.into());
+    }
+    let exe = (link.daemon_exe)(c);
+    let place = stale::place(link.app_exe.as_deref(), exe.as_deref());
+    if place != Place::Beside {
+        let at = exe.as_ref().map_or_else(|| "unknown".to_string(), |e| e.display().to_string());
+        return (decide(&link.app, daemon, place, Busy::Idle), format!("stale, daemon not beside the app (exe {at})"));
+    }
+    // a failed list counts as busy: replacing must never cost work
+    let busy = c.call("session.list", json!({})).map(|rows| stale::busy_of(&rows)).unwrap_or(Busy::Unknown);
+    let d = decide(&link.app, daemon, place, busy);
+    let why = match (d, busy) {
+        (Decision::Offer(Reason::Busy), Busy::Unknown) => "stale, session list unavailable",
+        (Decision::Offer(Reason::Busy), _) => "stale, sessions are busy",
+        _ => "stale, idle, beside the app",
+    };
+    (d, why.into())
+}
+
+/// The one line that says what the app did with the daemon it found, and why.
+fn log_decision(d: stale::Decision, why: &str, app: &stale::Build, daemon: &stale::Build) {
+    let what = match d {
+        stale::Decision::Keep => "kept",
+        stale::Decision::Replace => "replaced",
+        stale::Decision::Offer(_) => "kept, restart offered",
+    };
+    eprintln!("axelstra: daemon {what}: {why}; app {}, daemon {}", app.label(), daemon.label());
 }
 
 /// After `daemon.shutdown`, waits for the daemon to be gone. The event is the daemon closing our connection when its
@@ -1133,7 +1239,16 @@ fn windows_shell(setting: &str, has_pwsh: bool) -> (String, Vec<String>) {
 async fn diagnostics(state: tauri::State<'_, Arc<State>>) -> Result<Value, CallError> {
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let daemon = with_client(&st.bg, true, |c| Ok((c.proto, c.instance, c.build.clone(), c.security))).ok();
+        let daemon = with_client(&st.bg, true, |c| {
+            Ok((c.proto, c.instance, c.build.clone(), c.security, [c.version.clone(), c.commit.clone(), c.built.clone()]))
+        })
+        .ok();
+        let reported = |i: usize| daemon.as_ref().map(|d| d.4[i].clone()).filter(|s| !s.is_empty());
+        // the offer stands only for the daemon run it was made for
+        let offer = match (*STALE.lock_recover(), &daemon) {
+            (Some((instance, stale::Decision::Offer(r))), Some(d)) if d.1 == instance => json!({"reason": r.as_str()}),
+            _ => Value::Null,
+        };
         let lag = proto::data_dir().join("lag.log");
         json!({
             "app_version": env!("CARGO_PKG_VERSION"),
@@ -1147,6 +1262,10 @@ async fn diagnostics(state: tauri::State<'_, Arc<State>>) -> Result<Value, CallE
             "daemon_instance": daemon.as_ref().map(|d| d.1),
             "daemon_build": daemon.as_ref().map(|d| d.2.clone()),
             "daemon_security": daemon.as_ref().map(|d| d.3),
+            "daemon_version": reported(0),
+            "daemon_commit": reported(1),
+            "daemon_built": reported(2),
+            "daemon_offer": offer,
             "app_security_min": proto::SECURITY_MIN,
             "data_dir": proto::data_dir().to_string_lossy(),
             "lag_log": lag.to_string_lossy(),
@@ -1698,5 +1817,210 @@ file:///c%20d.html
         assert!(check_allowed("session.pending_clear").is_err());
         assert!(check_allowed("").is_err());
         assert!(check_allowed("flow.set").unwrap_err().message.contains("not allowed"));
+    }
+}
+
+/// `connect_via` against a fake daemon on a temp pipe: what it does with a stale daemon. Nothing real is started.
+#[cfg(test)]
+mod stale_connect {
+    use super::{connect_via, proto, stale, Link};
+    use serde_json::{json, Value};
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    const APP: &str = "aaaaaaa";
+
+    /// What the fake daemon answers and what it was asked.
+    struct Fake {
+        instance: AtomicU64,
+        commit: Mutex<Option<String>>,
+        rows: Value,
+        gone: AtomicBool,
+        shutdowns: AtomicUsize,
+        lists: AtomicUsize,
+    }
+
+    impl Fake {
+        fn new(commit: Option<&str>, rows: Value) -> Arc<Fake> {
+            Arc::new(Fake {
+                instance: AtomicU64::new(1),
+                commit: Mutex::new(commit.map(String::from)),
+                rows,
+                gone: AtomicBool::new(false),
+                shutdowns: AtomicUsize::new(0),
+                lists: AtomicUsize::new(0),
+            })
+        }
+    }
+
+    fn handle(mut conn: impl Read + Write, fake: Arc<Fake>) {
+        // a daemon that shut down answers nobody: the connection closes at once
+        if fake.gone.load(Ordering::SeqCst) {
+            return;
+        }
+        loop {
+            let mut len = [0u8; 4];
+            if conn.read_exact(&mut len).is_err() {
+                return;
+            }
+            let mut buf = vec![0u8; u32::from_le_bytes(len) as usize];
+            if conn.read_exact(&mut buf).is_err() {
+                return;
+            }
+            let req: Value = serde_json::from_slice(&buf[1..]).unwrap();
+            let result = match req["method"].as_str().unwrap_or_default() {
+                "hello" => {
+                    let mut h = json!({"proto": proto::PROTO, "security": proto::SECURITY_MIN,
+                        "instance": fake.instance.load(Ordering::SeqCst), "version": "1.0.0"});
+                    if let Some(c) = fake.commit.lock().unwrap().clone() {
+                        h["commit"] = json!(c);
+                    }
+                    h
+                }
+                "session.list" => {
+                    fake.lists.fetch_add(1, Ordering::SeqCst);
+                    fake.rows.clone()
+                }
+                "daemon.shutdown" => {
+                    fake.shutdowns.fetch_add(1, Ordering::SeqCst);
+                    fake.gone.store(true, Ordering::SeqCst);
+                    json!({})
+                }
+                _ => json!({}),
+            };
+            let body = json!({"id": req["id"], "result": result});
+            let _ = conn.write_all(&proto::encode(proto::JSON, body.to_string().as_bytes()));
+            if fake.gone.load(Ordering::SeqCst) {
+                return;
+            }
+        }
+    }
+
+    /// Serves `pipe` until the test process ends; returns once the first instance listens.
+    #[cfg(windows)]
+    fn serve(pipe: &str, fake: Arc<Fake>) {
+        use std::os::windows::io::FromRawHandle;
+        use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW};
+        let wide: Vec<u16> = pipe.encode_utf16().chain(std::iter::once(0)).collect();
+        // PIPE_ACCESS_DUPLEX, byte mode, blocking, unlimited instances
+        let create = move || unsafe { CreateNamedPipeW(wide.as_ptr(), 3, 0, 255, 65536, 65536, 0, std::ptr::null()) as usize };
+        let first = create();
+        assert_ne!(first, INVALID_HANDLE_VALUE as usize);
+        std::thread::spawn(move || {
+            let mut h = first;
+            loop {
+                // fails with ERROR_PIPE_CONNECTED when the client came first: connected all the same
+                unsafe { ConnectNamedPipe(h as HANDLE, std::ptr::null_mut()) };
+                let f = unsafe { std::fs::File::from_raw_handle(h as _) };
+                let fake = fake.clone();
+                std::thread::spawn(move || handle(f, fake));
+                h = create();
+                if h == INVALID_HANDLE_VALUE as usize {
+                    return;
+                }
+            }
+        });
+    }
+
+    #[cfg(unix)]
+    fn serve(pipe: &str, fake: Arc<Fake>) {
+        let l = std::os::unix::net::UnixListener::bind(pipe).unwrap();
+        std::thread::spawn(move || {
+            for s in l.incoming().flatten() {
+                let fake = fake.clone();
+                std::thread::spawn(move || handle(s, fake));
+            }
+        });
+    }
+
+    fn pipe_for(name: &str) -> String {
+        if cfg!(windows) {
+            format!(r"\\.\pipe\axelstra-stale-test-{}-{name}", std::process::id())
+        } else {
+            let p = std::env::temp_dir().join(format!("axs-{}-{name}.sock", std::process::id()));
+            let _ = std::fs::remove_file(&p);
+            p.to_string_lossy().into_owned()
+        }
+    }
+
+    type Seen = [(u64, Option<stale::Decision>); 2];
+
+    /// Runs `connect_via` twice against a fake daemon with `commit` and `rows`. The daemon exe is beside the app exe.
+    /// The start function plays the app's own daemon: a new run on the same pipe, with the app's commit.
+    fn run(name: &str, commit: Option<&str>, rows: Value) -> (Arc<Fake>, bool, Seen, Option<(u64, stale::Decision)>) {
+        let pipe = pipe_for(name);
+        let fake = Fake::new(commit, rows);
+        serve(&pipe, fake.clone());
+        let dir = std::env::temp_dir();
+        let started = AtomicBool::new(false);
+        let start = || {
+            started.store(true, Ordering::SeqCst);
+            fake.instance.store(2, Ordering::SeqCst);
+            *fake.commit.lock().unwrap() = Some(APP.into());
+            fake.gone.store(false, Ordering::SeqCst);
+            Ok(None)
+        };
+        let exe = dir.join("axelstra.exe");
+        let daemon_exe = |_: &axelstra_daemon::client::Client| Some(exe.clone());
+        let memo = Mutex::new(None);
+        let link = Link {
+            pipe,
+            token: "t".into(),
+            app: stale::Build { version: "1.0.1".into(), commit: APP.into() },
+            app_exe: Some(dir.join("axelstra-app.exe")),
+            daemon_exe: &daemon_exe,
+            start: &start,
+            memo: &memo,
+        };
+        let (a, fa) = connect_via(&link).unwrap();
+        let (b, fb) = connect_via(&link).unwrap();
+        let m = *memo.lock().unwrap();
+        (fake.clone(), started.load(Ordering::SeqCst), [(a.instance, fa), (b.instance, fb)], m)
+    }
+
+    fn idle() -> Value {
+        json!([{"id": 1, "running": true, "idle_ms": 600000, "waiting": false, "wait": null, "awaiting": null, "paused": null, "hibernated": null}])
+    }
+
+    #[test]
+    fn stale_and_idle_is_replaced_once() {
+        let (fake, started, seen, memo) = run("idle", Some("bbbbbbb"), idle());
+        assert_eq!(fake.shutdowns.load(Ordering::SeqCst), 1);
+        assert!(started, "the replacement was not started");
+        // the first connection lands on the new run; the second one reuses it without judging again
+        assert_eq!(seen, [(2, None), (2, None)]);
+        assert_eq!(fake.lists.load(Ordering::SeqCst), 1);
+        assert_eq!(memo, Some((2, stale::Decision::Keep)));
+    }
+
+    #[test]
+    fn stale_and_busy_is_kept_and_offered_once() {
+        let mut rows = idle();
+        rows[0]["awaiting"] = json!({"reason": "CI", "since": 1, "until": null});
+        let (fake, started, seen, memo) = run("busy", Some("bbbbbbb"), rows);
+        assert_eq!(fake.shutdowns.load(Ordering::SeqCst), 0);
+        assert!(!started);
+        let offer = stale::Decision::Offer(stale::Reason::Busy);
+        // only the first connection decides (and would log and emit); the second reuses the offer
+        assert_eq!(seen, [(1, Some(offer)), (1, None)]);
+        assert_eq!(fake.lists.load(Ordering::SeqCst), 1);
+        assert_eq!(memo, Some((1, offer)));
+    }
+
+    #[test]
+    fn same_commit_is_kept() {
+        let (fake, started, seen, memo) = run("same", Some(APP), idle());
+        assert_eq!((fake.shutdowns.load(Ordering::SeqCst), started, fake.lists.load(Ordering::SeqCst)), (0, false, 0));
+        assert_eq!(seen, [(1, Some(stale::Decision::Keep)), (1, None)]);
+        assert_eq!(memo, Some((1, stale::Decision::Keep)));
+    }
+
+    #[test]
+    fn an_old_daemon_without_a_commit_is_kept() {
+        let (fake, started, seen, _) = run("old", None, idle());
+        assert_eq!((fake.shutdowns.load(Ordering::SeqCst), started, fake.lists.load(Ordering::SeqCst)), (0, false, 0));
+        assert_eq!(seen, [(1, Some(stale::Decision::Keep)), (1, None)]);
     }
 }
