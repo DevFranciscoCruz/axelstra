@@ -40,7 +40,8 @@ export function Orchestra() {
   };
   onMount(() => {
     // a reading when the sessions change (and `resources.changed`, where the daemon sends it) and when the window shows again
-    const live = createLive(pollRes, ["session.changed", "resources.changed"]);
+    // (at most once per 2 s: the daemon sends both about once a second)
+    const live = createLive(pollRes, ["session.changed", "resources.changed"], { debounceMs: 2000 });
     live.now();
     onCleanup(live.stop);
   });

@@ -145,8 +145,8 @@ export function StatusBar() {
 
   onMount(() => {
     if (awake()) void invoke<boolean>("keep_awake", { on: true }).then(setAwakeOk).catch(() => 0);
-    // memory is read when sessions change and when the window shows again; the counts come from the events the sidebar shares (store.watchOverview)
-    const mem = createLive(poll, ["session.changed", "resources.changed"]);
+    // memory is read on `resources.changed` (at most once per 2 s) and when the window shows again; the counts come from the events the sidebar shares (store.watchOverview)
+    const mem = createLive(poll, ["resources.changed"], { debounceMs: 2000 });
     mem.now();
     const unwatch = watchOverview();
     onCleanup(() => {

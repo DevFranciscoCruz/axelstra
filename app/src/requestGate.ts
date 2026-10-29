@@ -48,6 +48,21 @@ export const coalesced = <T>(load: () => Promise<T>, minGapMs = 0): (() => Promi
   };
 };
 
+/**
+ * Runs `fn` once, `ms` after the FIRST call of a burst (later calls inside the window are covered by that run), so a steady
+ * stream of calls gives at most one run per window. The timer exists only while a call is pending; `skip()` true drops the call.
+ */
+export const debounced = (fn: () => unknown, ms: number, skip: () => boolean = () => false): (() => void) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return () => {
+    if (timer !== undefined || skip()) return;
+    timer = setTimeout(() => {
+      timer = undefined;
+      void fn();
+    }, ms);
+  };
+};
+
 /** In-flight dedupe by key: the same call made while one is running gets the same promise. */
 const inflight = new Map<string, Promise<unknown>>();
 export const singleFlight = <T>(key: string, fn: () => Promise<T>): Promise<T> => {

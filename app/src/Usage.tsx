@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js";
-import { createLive } from "./live";
+import { createLive, type Live } from "./live";
 import { TokenUsage, agentUsage, worktreeUsage } from "./api";
 import { activeSession, projects, sessions } from "./store";
 import { WtUsage, fmtTokens as fmt, ranked, spentOf, totalOf, usageTip } from "./usageFormat";
@@ -16,7 +16,7 @@ const [wtUsage, setWtUsage] = createSignal<WtUsage[]>([]);
 /** per-worktree totals are shared by this view and the status bar; `createLive` runs one load at a time */
 export const loadWtUsage = () => {
   if (document.hidden) return;
-  const paths = projects().flatMap((p) => p.worktrees.map((w) => w.path));
+  const paths = wtPaths();
   if (!paths.length) return;
   void loadBudgets(paths);
   void worktreeUsage(paths)
@@ -26,19 +26,40 @@ export const loadWtUsage = () => {
     });
 };
 
-/** keeps the totals fresh (daemon events, no timer) while the component that calls this is on screen */
+const wtPaths = () => projects().flatMap((p) => p.worktrees.map((w) => w.path));
+
+/** one loader for every caller (the status bar chip and the list share it): the subscription ends with the last one */
+let usageUsers = 0;
+let usageLive: Live | undefined;
+
+/**
+ * keeps the totals (and the budgets that ride with them) fresh while a component that calls this is on screen: daemon events,
+ * no timer. `session.changed` comes about once a second, so it only counts when the set of worktrees moved.
+ */
 export const pollWtUsage = () => {
   onMount(() => {
-    const t = createLive(loadWtUsage, ["usage.changed", "budget.events", "session.changed"]);
-    t.now();
-    onCleanup(t.stop);
+    if (usageUsers++ === 0) {
+      usageLive = createLive(loadWtUsage, ["usage.changed", "budget.events"], {
+        debounceMs: 400,
+        soft: { events: ["session.changed", "projects.changed"], sig: () => wtPaths().join("|") },
+      });
+      usageLive.now();
+    }
+    onCleanup(() => {
+      if (--usageUsers === 0) {
+        usageLive?.stop();
+        usageLive = undefined;
+      }
+    });
   });
   return wtUsage;
 };
 
 /** what the sidebar calls a worktree: its branch, else the folder name */
 export const wtName = (path: string) => {
-  const w = projects().flatMap((p) => p.worktrees).find((x) => x.path === path);
+  const w = projects()
+    .flatMap((p) => p.worktrees)
+    .find((x) => x.path === path);
   return w?.branch ?? path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 };
 
@@ -76,7 +97,21 @@ function WorktreeUsageList() {
   return (
     <Show when={rows().length}>
       <span class="wt-usage self-center">
-        <Button ref={btn} variant="link" size="bare" class={cn("cursor-default self-center px-2 text-xs hover:text-muted-foreground", level() === "over" && "text-[var(--danger)]", level() === "warn" && "text-[var(--warn)]")} title={[wtUsageTip(list()), chipNote()].filter(Boolean).join("\n")} aria-label={[P.usage.perWtTotal(fmt(spentOf(total()))), chipNote()].filter(Boolean).join(". ")} aria-haspopup="dialog" aria-expanded={open()} onClick={() => setOpen(!open())}>
+        <Button
+          ref={btn}
+          variant="link"
+          size="bare"
+          class={cn(
+            "cursor-default self-center px-2 text-xs hover:text-muted-foreground",
+            level() === "over" && "text-[var(--danger)]",
+            level() === "warn" && "text-[var(--warn)]",
+          )}
+          title={[wtUsageTip(list()), chipNote()].filter(Boolean).join("\n")}
+          aria-label={[P.usage.perWtTotal(fmt(spentOf(total()))), chipNote()].filter(Boolean).join(". ")}
+          aria-haspopup="dialog"
+          aria-expanded={open()}
+          onClick={() => setOpen(!open())}
+        >
           Σ {fmt(spentOf(total()))}
         </Button>
         <Show when={open()}>
@@ -85,15 +120,28 @@ function WorktreeUsageList() {
             <For each={rows()}>
               {(u) => (
                 <>
-                <div class="wup-row" title={P.usage.rowTip(u.worktree, fmtNumber(u.input), fmtNumber(u.output), fmtNumber(u.cache_write), fmtNumber(u.cache_read), u.claude_sessions, u.codex_sessions)}>
-                  <span class="wup-name">{wtName(u.worktree)}</span>
-                  <span>{fmt(spentOf(u))}</span>
-                </div>
-                <Show when={rowsFor(budgetRows(), u.worktree).length}>
-                  <div class="wup-bud">
-                    <For each={rowsFor(budgetRows(), u.worktree)}>{(r) => <BudgetMeter row={r} name={wtName(u.worktree)} />}</For>
+                  <div
+                    class="wup-row"
+                    title={P.usage.rowTip(
+                      u.worktree,
+                      fmtNumber(u.input),
+                      fmtNumber(u.output),
+                      fmtNumber(u.cache_write),
+                      fmtNumber(u.cache_read),
+                      u.claude_sessions,
+                      u.codex_sessions,
+                    )}
+                  >
+                    <span class="wup-name">{wtName(u.worktree)}</span>
+                    <span>{fmt(spentOf(u))}</span>
                   </div>
-                </Show>
+                  <Show when={rowsFor(budgetRows(), u.worktree).length}>
+                    <div class="wup-bud">
+                      <For each={rowsFor(budgetRows(), u.worktree)}>
+                        {(r) => <BudgetMeter row={r} name={wtName(u.worktree)} />}
+                      </For>
+                    </div>
+                  </Show>
                 </>
               )}
             </For>
@@ -119,35 +167,46 @@ export function UsageChip() {
     if (!s || s.meta?.kind !== "agent" || s.meta.agent !== "claude" || !cwd) return "";
     return JSON.stringify([cwd, s.meta?.resume ?? s.meta?.key ?? ""]);
   });
-  createEffect(on(target, (tgt) => {
-    const [cwd, conv] = tgt ? (JSON.parse(tgt) as [string, string]) : ["", ""];
-    setUsage(null);
-    if (!cwd) return;
-    let alive = true;
-    const load = () =>
-      agentUsage(cwd, conv)
-        .then((u) => alive && setUsage(u))
-        .catch(() => alive && setUsage(null));
-    const t = createLive(load, ["usage.changed", "session.changed"]);
-    if (!document.hidden) t.now();
-    onCleanup(() => {
-      alive = false;
-      t.stop();
-    });
-  }));
+  createEffect(
+    on(target, (tgt) => {
+      const [cwd, conv] = tgt ? (JSON.parse(tgt) as [string, string]) : ["", ""];
+      setUsage(null);
+      if (!cwd) return;
+      let alive = true;
+      const load = () =>
+        agentUsage(cwd, conv)
+          .then((u) => alive && setUsage(u))
+          .catch(() => alive && setUsage(null));
+      // the transcript grows only when `usage.changed` says so; a change of tab restarts this effect
+      const t = createLive(load, ["usage.changed"], { debounceMs: 400 });
+      if (!document.hidden) t.now();
+      onCleanup(() => {
+        alive = false;
+        t.stop();
+      });
+    }),
+  );
   const spent = () => (usage() ? usage()!.input + usage()!.output + usage()!.cache_write : 0);
   const ctx = () => usage()?.context ?? 0;
   return (
     <>
-    <WorktreeUsageList />
-    <Show when={usage() && usage()!.messages > 0}>
-      <span
-        class="usage-chip"
-        title={P.usage.chipTip(fmtNumber(ctx()), fmt(spent()), fmtNumber(usage()!.input), fmtNumber(usage()!.output), fmtNumber(usage()!.cache_write), fmtNumber(usage()!.cache_read), usage()!.messages)}
-      >
-        {fmt(ctx())} ctx
-      </span>
-    </Show>
+      <WorktreeUsageList />
+      <Show when={usage() && usage()!.messages > 0}>
+        <span
+          class="usage-chip"
+          title={P.usage.chipTip(
+            fmtNumber(ctx()),
+            fmt(spent()),
+            fmtNumber(usage()!.input),
+            fmtNumber(usage()!.output),
+            fmtNumber(usage()!.cache_write),
+            fmtNumber(usage()!.cache_read),
+            usage()!.messages,
+          )}
+        >
+          {fmt(ctx())} ctx
+        </span>
+      </Show>
     </>
   );
 }

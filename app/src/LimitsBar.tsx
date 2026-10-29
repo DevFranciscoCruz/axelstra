@@ -62,8 +62,8 @@ export function LimitsBar() {
       setNow(Date.now() / 1000);
       return key ? agentStatus(key).then((v) => alive && v && setClaude(v)).catch(() => 0) : undefined;
     };
-    // the status line file changes when the agent works (`limits.changed`); a session change or the window showing again also looks
-    const t = createLive(load, ["limits.changed", "session.changed"]);
+    // the status line file changes when the agent works (`limits.changed`); a new key restarts this effect, the window showing again also looks
+    const t = createLive(load, ["limits.changed"], { debounceMs: 300 });
     t.now();
     onCleanup(() => {
       alive = false;
@@ -72,7 +72,7 @@ export function LimitsBar() {
   }));
   createEffect(() => {
     const load = () => codexLimits().then((v) => v && setCodex(v)).catch(() => 0);
-    const t = createLive(load, ["limits.changed"]);
+    const t = createLive(load, ["limits.changed"], { debounceMs: 300 });
     t.now();
     onCleanup(t.stop);
   });

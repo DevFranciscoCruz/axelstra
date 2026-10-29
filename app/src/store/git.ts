@@ -19,7 +19,7 @@ import { createLive, type Live } from "../live";
 import { coalesced } from "../requestGate";
 import type { OverviewProject } from "../statusGroups";
 import { clearError, setError } from "./notify";
-import { refreshSessions, selectedWorktree } from "./sessions";
+import { refreshSessions, selectedWorktree, sessions } from "./sessions";
 import { showRightPanel } from "./layout";
 import { keepSame, openDiff, projectTerse } from "./ui";
 import { createEffect, createRoot } from "solid-js";
@@ -46,6 +46,11 @@ export const refreshOverview = coalesced(() =>
     },
   ),
 );
+/** which sessions exist, whether they run and where: what the overview's counts depend on (not their output or idle time) */
+const sessionSet = () =>
+  sessions()
+    .map((s) => `${s.id}:${s.running ? 1 : 0}:${s.meta?.worktree ?? ""}`)
+    .join("|");
 let overviewUsers = 0;
 let overviewLive: Live | undefined;
 let prLive: Live | undefined;
@@ -65,13 +70,16 @@ export const watchOverview = () => {
     );
     if (typeof window !== "undefined") window.addEventListener("focus", askPrRefresh);
     // the counts move with worktrees, sessions, the dispatcher, the janitor and PRs: the daemon says so
-    overviewLive = createLive(refreshOverview, [
-      "projects.changed",
-      "session.changed",
-      "dispatch.changed",
-      "janitor.events",
-      "pr.changed",
-    ]);
+    // `session.changed` comes about once a second and the overview runs git in every worktree: it only counts when a session
+    // started, ended or moved to another worktree
+    overviewLive = createLive(
+      refreshOverview,
+      ["projects.changed", "dispatch.changed", "janitor.events", "pr.changed"],
+      {
+        debounceMs: 500,
+        soft: { events: ["session.changed"], sig: sessionSet },
+      },
+    );
     overviewLive.now();
   }
   return () => {
@@ -89,7 +97,7 @@ export const [prByBranch, setPrByBranch] = createSignal<Record<string, GhItem>>(
 export const prKey = (project: string, branch: string | null | undefined) => `${project}:${branch ?? ""}`;
 let lastPrs = 0;
 
-/** `worktree.status` runs git in every worktree: one at a time, at most one per 2 s, always over the newest project list */
+/** `worktree.status` runs git in every worktree: one at a time, at most one per 5 s, always over the newest project list */
 // eslint-disable-next-line solid/reactivity -- reads the project list when it runs, not to track it
 const refreshWtStatus = coalesced(async () => {
   if (typeof document !== "undefined" && document.hidden) return;
@@ -102,7 +110,7 @@ const refreshWtStatus = coalesced(async () => {
   } catch {
     /* badges are a nicety; an old daemon without worktree.status just shows none */
   }
-}, 2000);
+}, 5000);
 
 /** gh is slow and rate limited: at most every 3 minutes, and only for projects that have a remote */
 const refreshPrs = async (list: Project[]) => {
@@ -201,13 +209,13 @@ const loadChanges = async () => {
   }
 };
 
-/** `git.changes` is the slowest read: one at a time per worktree and mode (another worktree does not wait), at most one per 300 ms, nothing while hidden */
+/** `git.changes` is the slowest read: one at a time per worktree and mode (another worktree does not wait), at most one per second, nothing while hidden */
 const changesGates = new Map<string, ReturnType<typeof coalesced<void>>>();
 export const refreshChanges = () => {
   const key = `${norm(selectedWorktree() ?? "")}|${baseRef() ?? ""}`;
   let gate = changesGates.get(key);
   if (!gate) {
-    gate = coalesced(loadChanges, 300);
+    gate = coalesced(loadChanges, 1000);
     changesGates.set(key, gate);
   }
   return gate();

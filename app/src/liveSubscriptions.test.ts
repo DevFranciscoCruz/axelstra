@@ -82,11 +82,15 @@ describe("Orchestra reads resources on events, not on a timer", () => {
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(h.resources).toBe(1);
+    // a burst of both events is one reading, 2 s after the first
     emit("session.changed");
-    await vi.advanceTimersByTimeAsync(0);
+    emit("resources.changed");
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(h.resources).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(h.resources).toBe(2);
     emit("resources.changed");
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
     expect(h.resources).toBe(3);
     r.unmount();
     expect(count("session.changed")).toBe(0);
@@ -106,7 +110,8 @@ describe("LimitsBar refreshes on limits.changed", () => {
     expect(h.agentStatus).toBe(1);
     expect(h.codex).toBe(1);
     emit("limits.changed");
-    await vi.advanceTimersByTimeAsync(0);
+    emit("session.changed");
+    await vi.advanceTimersByTimeAsync(300);
     expect(h.agentStatus).toBe(2);
     expect(h.codex).toBe(2);
     r.unmount();
@@ -116,6 +121,21 @@ describe("LimitsBar refreshes on limits.changed", () => {
 });
 
 describe("Usage refreshes on usage.changed", () => {
+  it("two callers share one subscription", async () => {
+    const C = () => {
+      pollWtUsage();
+      pollWtUsage();
+      return null;
+    };
+    const r = render(() => createComponent(C, {}));
+    await Promise.resolve();
+    expect(count("usage.changed")).toBe(1);
+    expect(h.wtUsage).toBe(1);
+    r.unmount();
+    expect(count("usage.changed")).toBe(0);
+    expect(count("session.changed")).toBe(0);
+  });
+
   it("the worktree totals are read on usage.changed and budget.events, not on a timer", async () => {
     vi.useFakeTimers();
     createRoot((dispose) => {
@@ -132,11 +152,15 @@ describe("Usage refreshes on usage.changed", () => {
     await vi.advanceTimersByTimeAsync(120_000);
     expect(h.wtUsage).toBe(1);
     emit("usage.changed");
-    await vi.advanceTimersByTimeAsync(0);
-    expect(h.wtUsage).toBe(2);
     emit("budget.events");
-    await vi.advanceTimersByTimeAsync(0);
-    expect(h.wtUsage).toBe(3);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(h.wtUsage).toBe(2);
+    // session.changed (about once a second) does nothing while the worktrees are the same
+    for (let i = 0; i < 5; i++) {
+      emit("session.changed");
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    expect(h.wtUsage).toBe(2);
     expect(typeof loadWtUsage).toBe("function");
     vi.useRealTimers();
   });

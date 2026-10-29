@@ -15,6 +15,7 @@ import {
   watchWorktree,
 } from "./api";
 import { errorText } from "./appError";
+import { debounced } from "./requestGate";
 import { handleBudgetEvents } from "./budgetEvents";
 import { handleJanitorEvents } from "./janitorEvents";
 import { handleTriggerEvents } from "./triggerEvents";
@@ -32,6 +33,7 @@ import {
   refreshSessions,
   retryDaemon,
   selectedWorktree,
+  sessionState,
   sessionsOf,
   setComputerOn,
   setDaemonReconnecting,
@@ -184,6 +186,8 @@ export function useBootstrap() {
     });
   });
 
+  // `projects.changed` read once per 500 ms burst, not while hidden (the window showing again reads the list)
+  const projectsSoon = debounced(refreshProjects, 500, () => document.hidden);
   // the daemon watches the selected worktree and tells us when files or git state changed
   createEffect(() => {
     const w = selectedWorktree();
@@ -195,21 +199,29 @@ export function useBootstrap() {
           void refreshChanges();
         }
       },
-      // a dev server that starts or stops prints, and printing then going quiet is a session change: no port polling
-      () => void refreshSessions().then(() => refreshPorts()),
-      () => void refreshProjects(),
+      // a dev server that starts or stops prints, and printing then going quiet is a session change: no port polling.
+      // The lookup only runs when a session of this worktree started, ended or changed state (`session.changed` comes about once a second).
+      () => void refreshSessions().then(() => refreshPorts(true)),
+      projectsSoon,
     );
   });
 
   // dev servers started in this worktree's terminals; a process lookup, so only while something runs and the window is seen.
   // A server that starts or stops prints, and printing then going quiet is a session change: no polling.
   let portsBusy = false;
-  const refreshPorts = async () => {
+  let portsSig = "";
+  const refreshPorts = async (onlyIfChanged = false) => {
     const w = selectedWorktree();
     if (!w || document.hidden || !sessionsOf(w).some((s) => s.running)) {
+      portsSig = "";
       if (ports().length) setPorts([]);
       return;
     }
+    const sig = `${w}|${sessionsOf(w)
+      .map((s) => `${s.id}:${s.running ? 1 : 0}:${sessionState(s)}`)
+      .join(",")}`;
+    if (onlyIfChanged && sig === portsSig) return;
+    portsSig = sig;
     // session events come in bursts: one lookup at a time is enough
     if (portsBusy) return;
     portsBusy = true;

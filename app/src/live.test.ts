@@ -26,6 +26,8 @@ afterEach(() => {
 });
 
 describe("createLive", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("runs the load on each event it subscribed to and on none of the others", () => {
     const load = vi.fn();
     const live = createLive(load, ["kanban.changed", "orch.changed"]);
@@ -119,6 +121,74 @@ describe("createLive", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     expect(load).not.toHaveBeenCalled();
     live.stop();
+  });
+
+  it("debounceMs: a burst gives one run after the first event, a steady stream one per window", () => {
+    vi.useFakeTimers();
+    const load = vi.fn();
+    const live = createLive(load, ["session.changed"], { debounceMs: 400 });
+    bus.emit("session.changed");
+    vi.advanceTimersByTime(300);
+    bus.emit("session.changed");
+    bus.emit("session.changed");
+    expect(load).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(100);
+    expect(load).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 10; i++) {
+      bus.emit("session.changed");
+      vi.advanceTimersByTime(100);
+    }
+    expect(load).toHaveBeenCalledTimes(3);
+    live.now();
+    expect(load).toHaveBeenCalledTimes(4);
+    live.stop();
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("stop cancels a pending debounced run", () => {
+    vi.useFakeTimers();
+    const load = vi.fn();
+    const live = createLive(load, ["session.changed"], { debounceMs: 400 });
+    bus.emit("session.changed");
+    live.stop();
+    vi.advanceTimersByTime(1000);
+    expect(load).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("events while the window is hidden run nothing; showing it runs once", () => {
+    const load = vi.fn();
+    const live = createLive(load, ["usage.changed"]);
+    const hidden = vi.spyOn(document, "hidden", "get");
+    hidden.mockReturnValue(true);
+    bus.emit("usage.changed");
+    bus.emit("usage.changed");
+    expect(load).not.toHaveBeenCalled();
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(load).toHaveBeenCalledTimes(1);
+    live.stop();
+  });
+
+  it("soft events run the load only when the signature moved since the last run", () => {
+    let sig = "a";
+    const load = vi.fn();
+    const live = createLive(load, ["usage.changed"], { soft: { events: ["session.changed"], sig: () => sig } });
+    live.now();
+    expect(load).toHaveBeenCalledTimes(1);
+    bus.emit("session.changed");
+    bus.emit("session.changed");
+    expect(load).toHaveBeenCalledTimes(1);
+    sig = "b";
+    bus.emit("session.changed");
+    expect(load).toHaveBeenCalledTimes(2);
+    bus.emit("session.changed");
+    expect(load).toHaveBeenCalledTimes(2);
+    bus.emit("usage.changed");
+    expect(load).toHaveBeenCalledTimes(3);
+    live.stop();
+    expect(bus.count("session.changed")).toBe(0);
   });
 
   it("stop unsubscribes and ignores a run that was waiting", async () => {

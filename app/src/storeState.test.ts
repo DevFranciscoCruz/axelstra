@@ -254,16 +254,29 @@ describe("shared overview refresh (event driven)", () => {
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(daemon.overview).toBe(1);
-    for (const ev of ["projects.changed", "session.changed", "dispatch.changed", "janitor.events", "pr.changed"]) {
+    for (const ev of ["projects.changed", "dispatch.changed", "janitor.events", "pr.changed"]) {
       const before = daemon.overview;
       emit(ev);
-      await vi.advanceTimersByTimeAsync(0);
+      emit(ev);
+      await vi.advanceTimersByTimeAsync(500);
       expect(daemon.overview, ev).toBe(before + 1);
     }
+    // session.changed (about once a second) only counts when a session started, ended or moved
+    const quiet = daemon.overview;
+    emit("session.changed");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(daemon.overview).toBe(quiet);
+    s.setSessions([{ id: 1, running: true, meta: { worktree: "C:/w" } } as unknown as SessionInfo]);
+    emit("session.changed");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(daemon.overview).toBe(quiet + 1);
+    emit("session.changed");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(daemon.overview).toBe(quiet + 1);
     stopA();
     const mid = daemon.overview;
     emit("projects.changed");
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(500);
     expect(daemon.overview).toBe(mid + 1);
     stopB();
     emit("projects.changed");
@@ -284,7 +297,7 @@ describe("pr.changed (event driven)", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(daemon.ghList).toBe(1);
     emit("pr.changed");
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(500);
     expect(daemon.ghList).toBe(2);
     expect(vi.getTimerCount()).toBe(0);
     stop();
