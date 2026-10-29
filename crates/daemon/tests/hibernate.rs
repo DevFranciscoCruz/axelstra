@@ -338,8 +338,12 @@ fn a_resume_that_fails_ends_the_session_with_a_coded_error() {
     let id = agent(&mut c, &wt, &k, json!({}), json!({}));
     // the first start is `--session-id`, which the stand-in accepts
     let _ = screen(&mut c, id);
-    std::thread::sleep(Duration::from_millis(1500));
-    hibernate(&mut c, id).unwrap();
+    // a slow machine prints the banner late: try again until the quiet time has passed
+    until("calm enough to sleep", || match hibernate(&mut c, id) {
+        Ok(_) => Some(()),
+        Err(e) if matches!(code_of(&e).as_str(), "hibernate.working" | "hibernate.recent") => None,
+        Err(e) => panic!("{e:#}"),
+    });
     c.call("session.wake", json!({"id": id})).unwrap();
     // it never stays hibernated: the row leaves, `status` says why
     until("row gone", || row(&mut c, id).is_none().then_some(()));
