@@ -164,6 +164,7 @@ fn pool_notice(gb: &str, handles: &str, t: &cause::PoolTag, defender: Option<Str
 
 /// The folders worth excluding from Defender: for each project folder, itself when it holds a `target` or `node_modules`
 /// directory, and the `.axelstra-wt` folder beside it when that exists. Deduplicated, in order. Pure: `exists` is injected.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(super) fn defender_folders(projects: &[String], exists: &dyn Fn(&std::path::Path) -> bool) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut add = |p: String| {
@@ -185,6 +186,7 @@ pub(super) fn defender_folders(projects: &[String], exists: &dyn Fn(&std::path::
 
 /// `Add-MpPreference -ExclusionPath '<a>','<b>'` for those folders (single quotes doubled), or `None` when there are none.
 /// Only text: nothing runs it.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(super) fn defender_command(folders: &[String]) -> Option<String> {
     if folders.is_empty() {
         return None;
