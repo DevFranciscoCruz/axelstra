@@ -1,8 +1,9 @@
-import { For, JSX, Show, createResource, createSignal } from "solid-js";
+import { For, JSX, Show, createEffect, createResource, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { K } from "./keyboard";
 import {
   NotifyMode,
+  Settings as SettingsData,
   SettingsPatch,
   budgetCheck,
   ShellChoice,
@@ -28,7 +29,8 @@ import { HostsSection } from "./HostsSection";
 import { MemorySection } from "./MemoryPanel";
 import { H } from "./strings.hibernate";
 import { idleChoices } from "./hibernateLogic";
-import { Modal } from "./Modal";
+import { SettingsPage } from "./SettingsPage";
+import { Caps, SectionId, setSection } from "./settingsNav";
 import { S } from "./strings";
 import {
   DEFAULT_BUILD_JOBS,
@@ -41,7 +43,7 @@ import {
   errorText,
   parseBuildNumber,
 } from "./settingsLogic";
-import { refreshProjects, setError, setShowSettings, showNotice } from "./store";
+import { refreshProjects, setError, setSettingsFocus, setShowSettings, settingsFocus, showNotice } from "./store";
 import { DEFAULT_FONT, MAX_FONT, MIN_FONT, TermTheme, setTermPrefs, termPrefs } from "./termprefs";
 import { APP_THEMES, appTheme, setAppTheme } from "./theme";
 import { LOCALES, LOCALE_NAMES, fmtNumber, locale, setLocale } from "./i18n";
@@ -308,235 +310,263 @@ export function Settings() {
     }
   };
   const restartDaemon = () => void restartDaemonFlow(setRestarting, () => void refetch());
-  return (
-    <Modal label={S.settings} class="modal settings" onClose={() => setShowSettings(false)}>
-      <div class="auto-head">
-        <strong>{S.settings}</strong>
-        <span class="grow" />
-        <Button onClick={() => setShowSettings(false)}>{S.close}</Button>
-      </div>
-      <Show
-        when={s.state !== "errored"}
-        fallback={
-          <div class="set-error">
-            <div class="auto-note">
-              {classifySettingsError(s.error) === "old-daemon" ? S.oldDaemon : S.loadFailed + errorText(s.error)}
-            </div>
-            <div class="m-actions">
-              <Show when={classifySettingsError(s.error) === "old-daemon"}>
-                <Button variant="default" disabled={restarting()} onClick={restartDaemon}>
-                  {restarting() ? S.restartingDaemon : S.restartDaemon}
-                </Button>
-              </Show>
-              <Button disabled={restarting()} onClick={() => void refetch()}>
-                {S.retry}
-              </Button>
-            </div>
-          </div>
-        }
-      >
-        <Show when={s()} fallback={<div class="auto-note">{S.loading}</div>}>
-          {(cfg) => (
-            <>
-              <AboutSection />
-
-              <Section title={S.replies} note={S.repliesNote}>
-                <Choices
-                  label={S.replies}
-                  value={cfg().terse}
-                  options={TERSE.map((v) => ({ value: v, label: S.terse[v].label, hint: S.terse[v].hint }))}
-                  onPick={(v) => void save({ terse: v })}
+  // an older daemon lacks some settings: their pages are not listed. While loading, nothing is hidden (the saved page stays)
+  const caps = (): Caps => ({ hibernate: !s() || !!s()?.hibernate, build: !s() || !!s()?.build });
+  // the status bar's version chip asks for the About page
+  createEffect(() => {
+    if (settingsFocus() !== "about") return;
+    setSettingsFocus(null);
+    setSection("about");
+  });
+  const page = (id: SectionId, cfg: () => SettingsData) => {
+    switch (id) {
+      case "general":
+        return (
+          <>
+            <Section title={S.replies} note={S.repliesNote}>
+              <Choices
+                label={S.replies}
+                value={cfg().terse}
+                options={TERSE.map((v) => ({ value: v, label: S.terse[v].label, hint: S.terse[v].hint }))}
+                onPick={(v) => void save({ terse: v })}
+              />
+              <div class="auto-note">{S.terse[cfg().terse].hint}</div>
+            </Section>
+            <Section title={S.pm} note={S.pmNote}>
+              <Show when={cfg().installed.length > 0} fallback={<div class="auto-note">{S.pmNone}</div>}>
+                <Choices<string | null>
+                  label={S.pm}
+                  value={cfg().pm}
+                  options={[
+                    { value: null, label: S.auto },
+                    ...cfg().installed.map((m) => ({ value: m as string | null, label: m })),
+                  ]}
+                  onPick={(v) => void save({ pm: v })}
                 />
-                <div class="auto-note">{S.terse[cfg().terse].hint}</div>
-              </Section>
-
-              <Section title={S.pm} note={S.pmNote}>
-                <Show when={cfg().installed.length > 0} fallback={<div class="auto-note">{S.pmNone}</div>}>
-                  <Choices<string | null>
-                    label={S.pm}
-                    value={cfg().pm}
-                    options={[
-                      { value: null, label: S.auto },
-                      ...cfg().installed.map((m) => ({ value: m as string | null, label: m })),
-                    ]}
-                    onPick={(v) => void save({ pm: v })}
+              </Show>
+              <CheckboxField checked={cfg().auto_install} onChange={(v) => void save({ auto_install: v })}>
+                {S.autoInstall}
+              </CheckboxField>
+            </Section>
+            <Section title={S.shell} note={S.shellNote}>
+              <Choices
+                label={S.shell}
+                value={cfg().shell ?? "auto"}
+                options={SHELLS.map((v) => ({ value: v, label: S.shells[v] }))}
+                onPick={(v) => void save({ shell: v })}
+              />
+            </Section>
+            <Section title={S.stall} note={S.stallNote}>
+              <Choices
+                label={S.stall}
+                value={String(cfg().stall_minutes ?? 5)}
+                options={[...new Set([...STALL_MINUTES, cfg().stall_minutes ?? 5])]
+                  .sort((a, b) => a - b)
+                  .map((v) => ({ value: String(v), label: v === 0 ? S.stallOff : S.stallMin(v) }))}
+                onPick={(v) => void save({ stall_minutes: Number(v) })}
+              />
+            </Section>
+          </>
+        );
+      case "language":
+        return (
+          <Section title={L.lang.title} note={L.lang.note}>
+            <Choices
+              label={L.lang.title}
+              value={locale()}
+              options={LOCALES.map((v) => ({ value: v, label: LOCALE_NAMES[v] }))}
+              onPick={setLocale}
+            />
+          </Section>
+        );
+      case "appearance":
+        return (
+          <>
+            <Section title={S.appearance} note={S.appearanceNote}>
+              <Choices
+                label={S.appTheme}
+                value={appTheme()}
+                options={APP_THEMES.map((v) => ({ value: v, label: S.appThemes[v] }))}
+                onPick={setAppTheme}
+              />
+            </Section>
+            <Section title={S.terminal} note={K(S.terminalNote)}>
+              <Choices
+                label={S.termTheme}
+                value={termPrefs().theme}
+                options={THEMES.map((v) => ({ value: v, label: S.termThemes[v] }))}
+                onPick={(v) => setTermPrefs({ theme: v })}
+              />
+              <div class="set-fields">
+                <Field label={S.termFont}>
+                  <Input
+                    type="text"
+                    value={termPrefs().fontFamily}
+                    placeholder={DEFAULT_FONT}
+                    spellcheck={false}
+                    onChange={(e) => setTermPrefs({ fontFamily: e.currentTarget.value })}
+                  />
+                </Field>
+                <Field label={S.termFontSize}>
+                  <Input
+                    type="number"
+                    min={MIN_FONT}
+                    max={MAX_FONT}
+                    value={termPrefs().fontSize}
+                    onChange={(e) => setTermPrefs({ fontSize: Number(e.currentTarget.value) })}
+                  />
+                </Field>
+              </div>
+            </Section>
+            <Section title={T.a11y} note={T.a11yNote}>
+              <CheckboxField checked={termPrefs().screenReader} onChange={(v) => setTermPrefs({ screenReader: v })}>
+                {T.screenReader}
+              </CheckboxField>
+            </Section>
+          </>
+        );
+      case "notifications":
+        return (
+          <Section title={S.notify} note={S.notifyNote}>
+            <Choices
+              label={S.notify}
+              value={cfg().notify_mode ?? "all"}
+              options={NOTIFY.map((v) => ({ value: v, label: S.notifyMode[v].label, hint: S.notifyMode[v].hint }))}
+              onPick={(v) => void save({ notify_mode: v })}
+            />
+            <CheckboxField checked={cfg().notify_sound ?? true} onChange={(v) => void save({ notify_sound: v })}>
+              {S.notifySound}
+            </CheckboxField>
+            <div class="auto-note" id="notify-cats-title">
+              {S.notifyCats.title}
+            </div>
+            <div class="grid gap-1.5" role="group" aria-labelledby="notify-cats-title">
+              <For each={CATEGORIES}>
+                {(c) => (
+                  <CheckboxField checked={notifyPrefs()[c]} onChange={(v) => setNotifyPref(c, v)}>
+                    <span class="font-medium">{S.notifyCats[c].label}</span>
+                    <span class="auto-note"> · {S.notifyCats[c].hint}</span>
+                  </CheckboxField>
+                )}
+              </For>
+              <CheckboxField checked={notifyPrefs().dnd} onChange={(v) => setNotifyPref("dnd", v)}>
+                <span class="font-medium">{S.notifyCats.dnd}</span>
+                <span class="auto-note"> · {S.notifyCats.dndHint}</span>
+              </CheckboxField>
+            </div>
+            <div class="auto-note">{S.notifyCats.note}</div>
+          </Section>
+        );
+      case "memory":
+        return <MemorySection />;
+      case "hibernate":
+        return (
+          <Show when={cfg().hibernate}>
+            {(h) => (
+              <Section title={H.settings.title} note={H.settings.note}>
+                <CheckboxField
+                  checked={h().enabled}
+                  onChange={(enabled) => void save({ hibernate: { ...h(), enabled } })}
+                >
+                  {H.settings.enabled}
+                </CheckboxField>
+                <Show when={h().enabled}>
+                  <Choices
+                    label={H.settings.idle}
+                    value={String(h().idle_minutes)}
+                    options={idleChoices(h().idle_minutes).map((v) => ({
+                      value: String(v),
+                      label: H.settings.idleMin(v),
+                    }))}
+                    onPick={(v) => void save({ hibernate: { ...h(), idle_minutes: Number(v) } })}
                   />
                 </Show>
-                <CheckboxField checked={cfg().auto_install} onChange={(v) => void save({ auto_install: v })}>
-                  {S.autoInstall}
-                </CheckboxField>
               </Section>
-
-              <Section title={S.notify} note={S.notifyNote}>
-                <Choices
-                  label={S.notify}
-                  value={cfg().notify_mode ?? "all"}
-                  options={NOTIFY.map((v) => ({ value: v, label: S.notifyMode[v].label, hint: S.notifyMode[v].hint }))}
-                  onPick={(v) => void save({ notify_mode: v })}
-                />
-                <CheckboxField checked={cfg().notify_sound ?? true} onChange={(v) => void save({ notify_sound: v })}>
-                  {S.notifySound}
-                </CheckboxField>
-                <div class="auto-note" id="notify-cats-title">
-                  {S.notifyCats.title}
-                </div>
-                <div class="grid gap-1.5" role="group" aria-labelledby="notify-cats-title">
-                  <For each={CATEGORIES}>
-                    {(c) => (
-                      <CheckboxField checked={notifyPrefs()[c]} onChange={(v) => setNotifyPref(c, v)}>
-                        <span class="font-medium">{S.notifyCats[c].label}</span>
-                        <span class="auto-note"> · {S.notifyCats[c].hint}</span>
-                      </CheckboxField>
-                    )}
-                  </For>
-                  <CheckboxField checked={notifyPrefs().dnd} onChange={(v) => setNotifyPref("dnd", v)}>
-                    <span class="font-medium">{S.notifyCats.dnd}</span>
-                    <span class="auto-note"> · {S.notifyCats.dndHint}</span>
-                  </CheckboxField>
-                </div>
-                <div class="auto-note">{S.notifyCats.note}</div>
-              </Section>
-
-              <Section title={S.stall} note={S.stallNote}>
-                <Choices
-                  label={S.stall}
-                  value={String(cfg().stall_minutes ?? 5)}
-                  options={[...new Set([...STALL_MINUTES, cfg().stall_minutes ?? 5])]
-                    .sort((a, b) => a - b)
-                    .map((v) => ({ value: String(v), label: v === 0 ? S.stallOff : S.stallMin(v) }))}
-                  onPick={(v) => void save({ stall_minutes: Number(v) })}
-                />
-              </Section>
-
-              <Show when={cfg().hibernate}>
-                {(h) => (
-                  <Section title={H.settings.title} note={H.settings.note}>
-                    <CheckboxField
-                      checked={h().enabled}
-                      onChange={(enabled) => void save({ hibernate: { ...h(), enabled } })}
-                    >
-                      {H.settings.enabled}
-                    </CheckboxField>
-                    <Show when={h().enabled}>
-                      <Choices
-                        label={H.settings.idle}
-                        value={String(h().idle_minutes)}
-                        options={idleChoices(h().idle_minutes).map((v) => ({
-                          value: String(v),
-                          label: H.settings.idleMin(v),
-                        }))}
-                        onPick={(v) => void save({ hibernate: { ...h(), idle_minutes: Number(v) } })}
-                      />
+            )}
+          </Show>
+        );
+      case "build":
+        return (
+          <Show when={cfg().build}>{(b) => <BuildSection cfg={b()} save={(build) => void save({ build })} />}</Show>
+        );
+      case "budgets":
+        return (
+          <BudgetsSection
+            budgets={cfg().budgets}
+            onSave={(b) => void save({ budgets: b }).then(() => budgetCheck().then(setBudgetRows, () => undefined))}
+          />
+        );
+      case "connections":
+        return <HostsSection />;
+      case "workspace":
+        return <WorkspaceSection />;
+      case "hooks":
+        return <HooksSection />;
+      case "maintenance":
+        return (
+          <>
+            <Section title={T.cleanTitle} note={T.cleanNote}>
+              <div class="m-actions start">
+                <Button onClick={() => void cleanNow()}>{T.cleanNow}</Button>
+              </div>
+              <Show when={swept()}>
+                {(list) => (
+                  <ul class="clean-list">
+                    <Show when={closedNote()}>
+                      <li>{closedNote()}</li>
                     </Show>
-                  </Section>
+                    <Show when={!list().length && !closedNote()}>
+                      <li>{T.cleanNothing}</li>
+                    </Show>
+                    <For each={list()}>{(i) => <li classList={{ warn: !!i.warning }}>{cleanLine(i)}</li>}</For>
+                  </ul>
                 )}
               </Show>
-
-              <Show when={cfg().build}>{(b) => <BuildSection cfg={b()} save={(build) => void save({ build })} />}</Show>
-
-              <Section title={S.shell} note={S.shellNote}>
-                <Choices
-                  label={S.shell}
-                  value={cfg().shell ?? "auto"}
-                  options={SHELLS.map((v) => ({ value: v, label: S.shells[v] }))}
-                  onPick={(v) => void save({ shell: v })}
-                />
-              </Section>
-
-              <Section title={L.lang.title} note={L.lang.note}>
-                <Choices
-                  label={L.lang.title}
-                  value={locale()}
-                  options={LOCALES.map((v) => ({ value: v, label: LOCALE_NAMES[v] }))}
-                  onPick={setLocale}
-                />
-              </Section>
-
-              <Section title={S.appearance} note={S.appearanceNote}>
-                <Choices
-                  label={S.appTheme}
-                  value={appTheme()}
-                  options={APP_THEMES.map((v) => ({ value: v, label: S.appThemes[v] }))}
-                  onPick={setAppTheme}
-                />
-              </Section>
-
-              <Section title={S.terminal} note={K(S.terminalNote)}>
-                <Choices
-                  label={S.termTheme}
-                  value={termPrefs().theme}
-                  options={THEMES.map((v) => ({ value: v, label: S.termThemes[v] }))}
-                  onPick={(v) => setTermPrefs({ theme: v })}
-                />
-                <div class="set-fields">
-                  <Field label={S.termFont}>
-                    <Input
-                      type="text"
-                      value={termPrefs().fontFamily}
-                      placeholder={DEFAULT_FONT}
-                      spellcheck={false}
-                      onChange={(e) => setTermPrefs({ fontFamily: e.currentTarget.value })}
-                    />
-                  </Field>
-                  <Field label={S.termFontSize}>
-                    <Input
-                      type="number"
-                      min={MIN_FONT}
-                      max={MAX_FONT}
-                      value={termPrefs().fontSize}
-                      onChange={(e) => setTermPrefs({ fontSize: Number(e.currentTarget.value) })}
-                    />
-                  </Field>
-                </div>
-              </Section>
-
-              <Section title={T.a11y} note={T.a11yNote}>
-                <CheckboxField checked={termPrefs().screenReader} onChange={(v) => setTermPrefs({ screenReader: v })}>
-                  {T.screenReader}
-                </CheckboxField>
-              </Section>
-
-              <Section title={T.cleanTitle} note={T.cleanNote}>
-                <div class="m-actions start">
-                  <Button onClick={() => void cleanNow()}>{T.cleanNow}</Button>
-                </div>
-                <Show when={swept()}>
-                  {(list) => (
-                    <ul class="clean-list">
-                      <Show when={closedNote()}>
-                        <li>{closedNote()}</li>
-                      </Show>
-                      <Show when={!list().length && !closedNote()}>
-                        <li>{T.cleanNothing}</li>
-                      </Show>
-                      <For each={list()}>{(i) => <li classList={{ warn: !!i.warning }}>{cleanLine(i)}</li>}</For>
-                    </ul>
-                  )}
+            </Section>
+            <Section title={T.backup} note={T.backupNote}>
+              <div class="m-actions start">
+                <Button onClick={() => void exportBackup()}>{T.export}</Button>
+                <Button onClick={() => void restoreBackup()}>{T.restore}</Button>
+              </div>
+            </Section>
+          </>
+        );
+      case "diagnostics":
+        return <Diagnostics />;
+      case "about":
+        return <AboutSection />;
+    }
+  };
+  return (
+    <SettingsPage
+      caps={caps()}
+      onClose={() => setShowSettings(false)}
+      page={(id) => (
+        <Show
+          when={s.state !== "errored"}
+          fallback={
+            <div class="set-error">
+              <div class="auto-note">
+                {classifySettingsError(s.error) === "old-daemon" ? S.oldDaemon : S.loadFailed + errorText(s.error)}
+              </div>
+              <div class="m-actions">
+                <Show when={classifySettingsError(s.error) === "old-daemon"}>
+                  <Button variant="default" disabled={restarting()} onClick={restartDaemon}>
+                    {restarting() ? S.restartingDaemon : S.restartDaemon}
+                  </Button>
                 </Show>
-              </Section>
-
-              <Section title={T.backup} note={T.backupNote}>
-                <div class="m-actions start">
-                  <Button onClick={() => void exportBackup()}>{T.export}</Button>
-                  <Button onClick={() => void restoreBackup()}>{T.restore}</Button>
-                </div>
-              </Section>
-
-              <BudgetsSection
-                budgets={cfg().budgets}
-                onSave={(b) => void save({ budgets: b }).then(() => budgetCheck().then(setBudgetRows, () => undefined))}
-              />
-              <MemorySection />
-              <HostsSection />
-              <WorkspaceSection />
-
-              <HooksSection />
-
-              <Diagnostics />
-            </>
-          )}
+                <Button disabled={restarting()} onClick={() => void refetch()}>
+                  {S.retry}
+                </Button>
+              </div>
+            </div>
+          }
+        >
+          <Show when={s()} fallback={<div class="auto-note">{S.loading}</div>}>
+            {(cfg) => page(id, cfg)}
+          </Show>
         </Show>
-      </Show>
-    </Modal>
+      )}
+    />
   );
 }
