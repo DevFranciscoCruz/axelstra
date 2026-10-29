@@ -70,7 +70,7 @@ fn rows(p: &Project, busy: &dyn Fn(&str) -> bool) -> Vec<Row> {
         let busy = busy(&w.path);
         // the same rule as the janitor: only Axelstra's own branches, and never one with changes or a session
         let merged = if crate::janitor::integrable_branch(&branch) && st.dirty == 0 && !busy {
-            crate::janitor::merged_reason_in(repo, &branch, &default, &live)
+            crate::janitor::merged_reason_cached(repo, &branch, &default, &live)
         } else {
             None
         };

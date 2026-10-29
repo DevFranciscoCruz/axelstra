@@ -959,6 +959,8 @@ fn may_change_answers(method: &str) -> bool {
             | "session.resources"
             | "session.usage"
             | "session.pending"
+            // a hook's state/wait/mode only shows in `session.list` (not kept): no kept answer reads it
+            | "session.hint"
             | "session.resize"
             | "session.subscribe"
             | "session.unsubscribe"
@@ -1120,6 +1122,18 @@ mod project_main_tests {
     fn agents_get_a_long_quiet_spell_before_the_reaper_closes_them() {
         assert_eq!(reaper_min_idle_secs(true), 120);
         assert_eq!(reaper_min_idle_secs(false), 3);
+    }
+}
+
+#[cfg(test)]
+mod memo_scope_tests {
+    use super::*;
+
+    #[test]
+    fn a_hook_hint_leaves_the_kept_answers_alone_but_a_commit_does_not() {
+        assert!(!may_change_answers("session.hint"));
+        assert!(may_change_answers("git.merge"));
+        assert!(may_change_answers("session.spawn"));
     }
 }
 

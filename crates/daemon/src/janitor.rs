@@ -38,6 +38,43 @@ pub fn merged_reason(repo: &Path, branch: &str, default: &str) -> Option<String>
 /// `merged_reason`, also counting the branch as integrated when its tip is inside one of `others` (the other live
 /// `ax/*` branches): its commits stay reachable from there, so removing it loses nothing.
 pub fn merged_reason_in(repo: &Path, branch: &str, default: &str, others: &[String]) -> Option<String> {
+    merged_reason_with(repo, branch, default, others, true)
+}
+
+/// `merged_reason_in` for readers that must never start a process for GitHub (the worktree overview, polled by the app):
+/// git only, plus the answer `gh` gave the last time a sweep or cleanup asked, if it was for this same tip.
+pub fn merged_reason_cached(repo: &Path, branch: &str, default: &str, others: &[String]) -> Option<String> {
+    merged_reason_with(repo, branch, default, others, false)
+}
+
+/// Branches whose merged PR `gh` reported, by repo and branch: the tip it was for and the PR number. Filled by the
+/// callers that may run `gh` (the sweep, cleanup), read by the overview; a branch that moved no longer matches.
+type GhMerged = std::collections::HashMap<(String, String), (String, u64)>;
+static GH_MERGED: Mutex<Option<GhMerged>> = Mutex::new(None);
+
+fn gh_key(repo: &Path, branch: &str) -> (String, String) {
+    (repo.to_string_lossy().into_owned(), branch.to_string())
+}
+
+fn gh_merged_note(repo: &Path, branch: &str, tip: &str, number: Option<u64>) {
+    let mut m = GH_MERGED.lock().unwrap_or_else(|e| e.into_inner());
+    let map = m.get_or_insert_with(Default::default);
+    match number {
+        Some(n) => {
+            map.insert(gh_key(repo, branch), (tip.to_string(), n));
+        }
+        None => {
+            map.remove(&gh_key(repo, branch));
+        }
+    }
+}
+
+fn gh_merged_known(repo: &Path, branch: &str, tip: &str) -> Option<u64> {
+    let m = GH_MERGED.lock().unwrap_or_else(|e| e.into_inner());
+    m.as_ref()?.get(&gh_key(repo, branch)).filter(|(t, _)| t == tip).map(|(_, n)| *n)
+}
+
+fn merged_reason_with(repo: &Path, branch: &str, default: &str, others: &[String], ask_gh: bool) -> Option<String> {
     // a branch nobody committed to is "inside" the default branch too, and must not be mistaken for merged work
     if !has_own_commits(repo, branch) {
         return None;
@@ -60,6 +97,9 @@ pub fn merged_reason_in(repo: &Path, branch: &str, default: &str, others: &[Stri
     if crate::cleanup::squash_merged(repo, branch, &upstream) || crate::cleanup::squash_merged(repo, branch, default) {
         return Some(format!("its changes are already in {default}"));
     }
+    if !ask_gh {
+        return gh_merged_known(repo, branch, &tip).map(|n| format!("PR #{n} merged"));
+    }
     let o = output_within(
         Command::new("gh").current_dir(repo).env("GH_PROMPT_DISABLED", "1").args([
             "pr",
@@ -80,9 +120,12 @@ pub fn merged_reason_in(repo: &Path, branch: &str, default: &str, others: &[Stri
     let pr = v.as_array()?.first()?.clone();
     // the merged PR must be exactly what is here: commits added after the merge would be lost with the branch
     if pr["headRefOid"].as_str() != Some(tip.as_str()) {
+        gh_merged_note(repo, branch, &tip, None);
         return None;
     }
-    pr["number"].as_u64().map(|n| format!("PR #{n} merged"))
+    let n = pr["number"].as_u64();
+    gh_merged_note(repo, branch, &tip, n);
+    n.map(|n| format!("PR #{n} merged"))
 }
 
 /// True for the branches Axelstra's own flows create and the janitor may clean up: agent worktrees (`ax/*`), an
@@ -355,6 +398,30 @@ pub fn sweep_with(store: &Path, env: &Env, dry: bool) -> Vec<Value> {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn the_cached_reason_never_asks_gh_and_follows_the_tip() {
+        let dir = std::env::temp_dir().join(format!("axl-jan-gh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let g = |args: &[&str]| assert!(git::run(&dir, args).unwrap().ok, "git {args:?}");
+        let commit = ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"];
+        g(&["init", "-q", "-b", "main"]);
+        g(&commit);
+        g(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        g(&["checkout", "-q", "-b", "ax/sq"]);
+        g(&commit);
+        g(&commit);
+        // no answer from gh yet: the overview's read says "not merged" without starting anything
+        assert!(merged_reason_cached(&dir, "ax/sq", "main", &[]).is_none());
+        let tip = git::run(&dir, &["rev-parse", "ax/sq"]).unwrap().stdout.trim().to_string();
+        gh_merged_note(&dir, "ax/sq", &tip, Some(7));
+        assert_eq!(merged_reason_cached(&dir, "ax/sq", "main", &[]).as_deref(), Some("PR #7 merged"));
+        // the branch moved after the PR: the kept answer no longer applies
+        g(&commit);
+        assert!(merged_reason_cached(&dir, "ax/sq", "main", &[]).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_hung_command_is_killed_at_the_limit() {
