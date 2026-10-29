@@ -10,7 +10,9 @@
 //!   get its result (a failure is not shared: each then runs its own, so errors keep their codes). A caller that
 //!   arrives after a bump does not join a run that started before it.
 //! - **Pressure.** With `stale_ok` (the memory governor is above Normal) any entry is served, old or not, and nothing
-//!   is recomputed; the first call after the level is back recomputes, since the generation moved on meanwhile.
+//!   is recomputed; the first call after the level is back recomputes, since the generation moved on meanwhile. Only
+//!   an entry from before the last `bump_hard` (a call that changed projects or worktrees) is never served: the caller
+//!   of that call must see its own change.
 //! - **Pool.** `Pool::run` holds one of N permits while it runs, waiting on a condvar (no polling). A thread that
 //!   already holds a permit of the pool runs nested work without another, so it cannot deadlock on itself.
 
@@ -36,6 +38,8 @@ pub struct Opts<'a> {
 
 struct Entry {
     snap: u64,
+    /// the hard epoch when the run started
+    hard: u64,
     at: Instant,
     value: Value,
 }
@@ -68,6 +72,8 @@ const MAX_ENTRIES: usize = 512;
 
 pub struct Memo {
     global: AtomicU64,
+    /// moved by calls that change what the user just did (projects, worktrees); stale answers never cross it
+    hard: AtomicU64,
     scopes: Mutex<HashMap<String, u64>>,
     entries: Mutex<HashMap<String, Entry>>,
     flights: Mutex<HashMap<String, Arc<Flight>>>,
@@ -99,6 +105,7 @@ impl Memo {
     pub fn new() -> Memo {
         Memo {
             global: AtomicU64::new(0),
+            hard: AtomicU64::new(0),
             scopes: Mutex::default(),
             entries: Mutex::default(),
             flights: Mutex::default(),
@@ -109,6 +116,12 @@ impl Memo {
     /// Everything the app, a flow or an event may have changed: drops every entry that depends on `*`.
     pub fn bump_all(&self) {
         self.global.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// A call changed projects or worktrees: also drops the entries a `stale_ok` lookup would still serve.
+    pub fn bump_hard(&self) {
+        self.hard.fetch_add(1, Ordering::SeqCst);
+        self.bump_all();
     }
 
     /// One scope changed (`usage`, `gh`, `fs`, a worktree path).
@@ -128,16 +141,16 @@ impl Memo {
         })
     }
 
-    fn lookup(&self, key: &str, snap: u64, o: &Opts) -> Option<Value> {
+    fn lookup(&self, key: &str, snap: u64, hard: u64, o: &Opts) -> Option<Value> {
         let map = self.entries.lock_recover();
         let e = map.get(key)?;
         let fresh = e.snap == snap && o.max_age.is_none_or(|m| e.at.elapsed() < m);
-        (fresh || o.stale_ok).then(|| e.value.clone())
+        (fresh || (o.stale_ok && e.hard == hard)).then(|| e.value.clone())
     }
 
     /// Keeps `value` for `snap`, unless a newer generation's answer is already there (a run that started before a
     /// bump finishing after the run that started after it).
-    fn store(&self, key: &str, snap: u64, value: &Value) {
+    fn store(&self, key: &str, snap: u64, hard: u64, value: &Value) {
         let mut map = self.entries.lock_recover();
         if map.len() >= MAX_ENTRIES && !map.contains_key(key) {
             map.clear();
@@ -146,14 +159,15 @@ impl Memo {
         if map.get(key).is_some_and(|e| e.snap > snap) {
             return;
         }
-        map.insert(key.to_string(), Entry { snap, at: Instant::now(), value: value.clone() });
+        map.insert(key.to_string(), Entry { snap, hard, at: Instant::now(), value: value.clone() });
     }
 
     /// The answer for `key`: the kept one while valid, else the result of the run another caller already started for
     /// this generation, else `compute`. Only successes are kept.
     pub fn cached(&self, key: &str, o: Opts, compute: impl FnOnce() -> Result<Value>) -> Result<Value> {
         let snap = self.snapshot(o.scopes);
-        if let Some(v) = self.lookup(key, snap, &o) {
+        let hard = self.hard.load(Ordering::SeqCst);
+        if let Some(v) = self.lookup(key, snap, hard, &o) {
             return Ok(v);
         }
         let fkey = format!("{key}@{snap}");
@@ -172,19 +186,19 @@ impl Memo {
             if let Some(v) = flight.wait() {
                 return Ok(v);
             }
-            return self.run(key, snap, compute);
+            return self.run(key, snap, hard, compute);
         }
         let _lead = Lead { memo: self, key: fkey, flight: flight.clone() };
-        let res = self.run(key, snap, compute);
+        let res = self.run(key, snap, hard, compute);
         flight.finish(res.as_ref().ok().cloned());
         res
     }
 
-    fn run(&self, key: &str, snap: u64, compute: impl FnOnce() -> Result<Value>) -> Result<Value> {
+    fn run(&self, key: &str, snap: u64, hard: u64, compute: impl FnOnce() -> Result<Value>) -> Result<Value> {
         self.runs.fetch_add(1, Ordering::SeqCst);
         let v = compute()?;
         // kept under the generation read BEFORE the work: a bump meanwhile makes it stale at once, which is right
-        self.store(key, snap, &v);
+        self.store(key, snap, hard, &v);
         Ok(v)
     }
 
@@ -419,6 +433,19 @@ mod tests {
         assert_eq!(m.cached("fresh", o, || Ok(json!("computed"))).unwrap(), json!("computed"));
         // back to normal: recomputed
         assert_eq!(m.cached("k", ALL, || Ok(json!("now"))).unwrap(), json!("now"));
+    }
+
+    #[test]
+    fn under_pressure_an_answer_from_before_a_hard_change_is_not_served() {
+        let m = Memo::new();
+        let o = Opts { stale_ok: true, ..ALL };
+        m.cached("k", o, || Ok(json!("before"))).unwrap();
+        m.bump_hard();
+        // the caller changed projects: it must see its own change even at High
+        assert_eq!(m.cached("k", o, || Ok(json!("after"))).unwrap(), json!("after"));
+        // and from then on the new answer is the stale one served
+        m.bump_all();
+        assert_eq!(m.cached("k", o, || panic!("must not compute at High")).unwrap(), json!("after"));
     }
 
     #[test]
