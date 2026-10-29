@@ -112,3 +112,33 @@ fn spawn_and_pending_are_idempotent_per_key() {
     let _ = c.call("session.kill", json!({"id": first}));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn pending_marks_an_agent_that_never_got_a_prompt_as_blank() {
+    let root = temp("never");
+    let wt = root.join("wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    let sid = root.join("sid");
+    std::fs::create_dir_all(&sid).unwrap();
+    // the hook of `used` names a transcript that exists, the one of `fresh` names a transcript Claude never wrote
+    let transcript = root.join("used.jsonl");
+    std::fs::write(&transcript, "{}\n").unwrap();
+    let hook = |id: &str, t: &Path| json!({"session_id": id, "transcript_path": t.to_string_lossy(), "hook_event_name": "SessionStart"});
+    std::fs::write(sid.join("used.json"), hook("aaaaaaaa-1111", &transcript).to_string()).unwrap();
+    std::fs::write(sid.join("fresh.json"), hook("bbbbbbbb-2222", &root.join("fresh.jsonl")).to_string()).unwrap();
+    let rec = |key: &str, lead: bool| {
+        json!({"program": "cmd", "args": ["/q"], "cwd": wt.to_string_lossy(), "label": key,
+               "meta": {"project": "p", "worktree": wt.to_string_lossy(), "kind": "agent", "agent": "claude", "key": key, "lead": lead}})
+    };
+    std::fs::write(
+        root.join("sessions.json"),
+        serde_json::to_string(&json!({"v": 1, "data": [rec("used", false), rec("fresh", true)]})).unwrap(),
+    )
+    .unwrap();
+    let (mut c, _) = start(&root, "never");
+    let v = c.call("session.pending", json!({})).unwrap();
+    let by = |k: &str| v.as_array().unwrap().iter().find(|r| r["meta"]["key"] == k).cloned().unwrap();
+    assert_ne!(by("used")["meta"]["blank"], true);
+    assert_eq!(by("fresh")["meta"]["blank"], true, "a lead nobody briefed has nothing to resume");
+    let _ = std::fs::remove_dir_all(&root);
+}

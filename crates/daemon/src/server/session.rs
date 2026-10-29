@@ -502,10 +502,14 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             for rec in v.iter_mut() {
                 // the agent may have started a new conversation (/clear) since: resume the latest one
                 let Some(key) = rec["meta"]["key"].as_str().map(String::from) else { continue };
-                let latest = std::fs::read_to_string(sid_dir.join(format!("{key}.json")))
-                    .ok()
-                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-                    .and_then(|j| j["session_id"].as_str().filter(|s| valid_resume_id(s)).map(String::from));
+                let hook =
+                    std::fs::read_to_string(sid_dir.join(format!("{key}.json"))).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
+                let latest = hook.as_ref().and_then(|j| j["session_id"].as_str().filter(|s| valid_resume_id(s)).map(String::from));
+                // Claude writes the transcript with the first prompt: the hook names the file, and a file that is not there
+                // means the agent never had a request (a fresh lead nobody briefed). Nothing to bring back.
+                if hook.as_ref().is_some_and(never_prompted) {
+                    rec["meta"]["blank"] = Value::Bool(true);
+                }
                 if let Some(id) = latest {
                     // a conversation with no replies (cleared, never used) is not worth resuming: start clean
                     let cwd = rec["cwd"].as_str().or(rec["meta"]["worktree"].as_str()).unwrap_or("");
@@ -599,6 +603,12 @@ fn valid_resume_id(id: &str) -> bool {
     (8..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
 }
 
+/// The hook of a Claude session named a transcript file that is not on disk: the agent started but was never given a
+/// prompt (Claude writes the file with the first one). A hook without `transcript_path` says nothing.
+fn never_prompted(hook: &Value) -> bool {
+    hook["transcript_path"].as_str().filter(|p| !p.is_empty()).is_some_and(|p| !std::path::Path::new(p).exists())
+}
+
 /// How long one `session.spawn` with `queue: true` sleeps before it answers `queued` (the caller then comes back with its ticket).
 const SPAWN_QUEUE_CHUNK: Duration = Duration::from_secs(20);
 
@@ -626,7 +636,21 @@ impl Drop for LinePlace {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_resume_id;
+    use super::{never_prompted, valid_resume_id};
+
+    #[test]
+    fn a_missing_transcript_means_no_request_was_ever_made() {
+        let dir = std::env::temp_dir().join(format!("axelstra-never-prompted-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let there = dir.join("a.jsonl");
+        std::fs::write(&there, "{}").unwrap();
+        let hook = |p: &std::path::Path| serde_json::json!({"session_id": "abcdef12", "transcript_path": p.to_string_lossy()});
+        assert!(never_prompted(&hook(&dir.join("missing.jsonl"))));
+        assert!(!never_prompted(&hook(&there)));
+        assert!(!never_prompted(&serde_json::json!({"session_id": "abcdef12"})), "no path, no verdict");
+        assert!(!never_prompted(&serde_json::json!({"transcript_path": ""})));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn only_uuid_shaped_resume_ids_pass() {
