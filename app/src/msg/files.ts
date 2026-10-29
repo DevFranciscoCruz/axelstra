@@ -136,8 +136,7 @@ export const pt = {
   "localfs.not_dir": "Não é uma pasta: {path}",
   "localfs.too_big": "O ficheiro tem mais de {mb} MB.",
   "localfs.cancelled": "Cancelado.",
-  "localfs.io_failed": "Não foi possível ler {path}.
-({detail})",
+  "localfs.io_failed": "Não foi possível ler {path}.\n({detail})",
   "localfs.invalid_action": "Ação desconhecida: {action}",
 } as const satisfies Record<string, string>;
 
@@ -265,8 +264,7 @@ export const en: Widen<typeof pt> = {
   "localfs.not_dir": "Not a folder: {path}",
   "localfs.too_big": "The file is larger than {mb} MB.",
   "localfs.cancelled": "Cancelled.",
-  "localfs.io_failed": "Could not read {path}.
-({detail})",
+  "localfs.io_failed": "Could not read {path}.\n({detail})",
   "localfs.invalid_action": "Unknown action: {action}",
 };
 
@@ -393,11 +391,10 @@ export const ptBR: Widen<typeof pt> = {
   "localfs.invalid_path": "Caminho inválido: {path}",
   "localfs.reserved_name": "Nome reservado do Windows: {path}",
   "localfs.permission_denied": "Sem permissão: {path}",
-  "localfs.not_found": "Não encontrado (apagado ou movido?): {path}",
+  "localfs.not_found": "Não encontrado (excluído ou movido?): {path}",
   "localfs.not_dir": "Não é uma pasta: {path}",
   "localfs.too_big": "O arquivo tem mais de {mb} MB.",
   "localfs.cancelled": "Cancelado.",
-  "localfs.io_failed": "Não foi possível ler {path}.
-({detail})",
+  "localfs.io_failed": "Não foi possível ler {path}.\n({detail})",
   "localfs.invalid_action": "Ação desconhecida: {action}",
 };

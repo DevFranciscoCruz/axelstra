@@ -130,7 +130,8 @@ describe("explorer without the daemon", () => {
   });
 
   it("a local error (outside roots) is final: shown, no daemon retry", async () => {
-    h.local = async () => Promise.reject({ message: "outside", code: "localfs.outside_roots", params: { path: "C:/wt" } });
+    h.local = async () =>
+      Promise.reject({ message: "outside", code: "localfs.outside_roots", params: { path: "C:/wt" } });
     const r = render(() => createComponent(FilesPanel, {}));
     await settle();
     expect(r.container.querySelector(".ferr")?.getAttribute("role")).toBe("alert");

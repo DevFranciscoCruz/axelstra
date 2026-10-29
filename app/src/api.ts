@@ -2,7 +2,7 @@ import type { Timeline } from "./timelineLogic";
 import type { OverlapFiles, RebaseResult } from "./rebase";
 import type { WorkspaceConflicts, WorkspaceMode, WorkspaceOutcome, WorkspacePreview } from "./workspaceLogic";
 import type { WtUsage } from "./usageFormat";
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AppError, toAppError } from "./appError";
 import { apiContext } from "./apiContext";

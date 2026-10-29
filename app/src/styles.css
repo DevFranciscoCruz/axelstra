@@ -1025,4 +1025,4 @@ button.icon, button.x, button.cbtn { display: inline-flex; align-items: center; 
 
 /* explorer: a folder read in progress, a failed read, a capped folder */
 .floading, .ferr { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.ftrunc { font-size: 12px; }
+.ftrunc { font-size: var(--fs-sm); }
