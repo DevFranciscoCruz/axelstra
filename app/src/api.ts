@@ -4,8 +4,7 @@ import type { WorkspaceConflicts, WorkspaceMode, WorkspaceOutcome, WorkspacePrev
 import type { WtUsage } from "./usageFormat";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AppError, CANCELLED, toAppError } from "./appError";
-import { watchSlow } from "./slowCalls";
+import { AppError, toAppError } from "./appError";
 import { apiContext } from "./apiContext";
 import { hostOf, isRemote, norm } from "./paths";
 import { coded } from "./msg";
@@ -50,9 +49,8 @@ export type Project = { id: string; name: string; path: string; worktrees: Workt
 /**
  * A daemon call ends by event only: the reply, or the host reporting the connection closed or broken
  * (`rpc.connection_closed`, the daemon process gone). Elapsed time never fails it, and `ping`/`hello` only detect an
- * outdated daemon, they never declare one dead. Slowness is information: after `SLOW_NOTICE_MS` the call is listed in
- * `slowCalls.ts` (a non-blocking "the system is slow (<method>)" notice with a Cancel button that drops only this app-side
- * request, as an `rpc.cancelled` AppError nobody shows as a failure; the daemon keeps working and the lanes keep their method name).
+ * outdated daemon, they never declare one dead. A slow call shows nothing global: a view that loads slowly shows its own
+ * loading state.
  *
  * The clocks kept are policy or net, not watchdogs:
  *  - `CEILING_MS`: a high safety ceiling for a lost handle, aligned with the host's `AXELSTRA_CALL_CEILING_SECS` (600 s;
@@ -79,7 +77,7 @@ const isLoading = (r: unknown) =>
 /**
  * Sends the call and, while a lane method answers `{loading: true}`, sends it again: an identical call joins the running
  * work on the daemon. No timer: each repeat answers the previous one; `live` stops the repeats once the call
- * settled or was cancelled.
+ * settled.
  */
 const settled = async <T>(method: string, live: () => boolean, send: () => Promise<T>): Promise<T> => {
   let r = await send();
@@ -90,14 +88,9 @@ const settled = async <T>(method: string, live: () => boolean, send: () => Promi
 const run = <T>(cmd: string, method: string, params: Record<string, unknown>): Promise<T> => {
   let alive = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let stopSlow = () => {};
-  // the race below ends with the reply, an error from the host (connection closed, daemon gone), the user's cancel or,
-  // last, the policy limit / safety ceiling
+  // the race below ends with the reply, an error from the host (connection closed, daemon gone) or, last, the policy
+  // limit / safety ceiling
   const other = new Promise<never>((_, rej) => {
-    const cancel = () => {
-      alive = false;
-      rej(new AppError(method, "Request cancelled", CANCELLED));
-    };
     const limit = policyLimit(method);
     timer = setTimeout(
       () => {
@@ -107,14 +100,12 @@ const run = <T>(cmd: string, method: string, params: Record<string, unknown>): P
       },
       limit ?? CEILING_MS,
     );
-    if (limit === null) stopSlow = watchSlow(method, cancel);
   });
   return Promise.race([settled(method, () => alive, () => invoke<T>(cmd, { method, params })), other])
     .catch((e) => Promise.reject(toAppError(method, e)))
     .finally(() => {
       alive = false;
       clearTimeout(timer);
-      stopSlow();
     });
 };
 

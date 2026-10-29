@@ -193,8 +193,6 @@ export const ptBRS: Widen<typeof ptS> = {
     close: "Fechar",
     reconnecting: "Reconectando ao daemon…",
     retryNow: "Tentar agora",
-    slow: (method: string) => `Carregando… o sistema está lento (${method})`,
-    slowCancel: "Cancelar",
   },
 
   update: {
