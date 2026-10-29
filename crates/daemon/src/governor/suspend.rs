@@ -190,7 +190,8 @@ mod tests {
     /// Whether the process is stopped, by what the OS says.
     #[cfg(target_os = "linux")]
     fn is_stopped(pid: u32) -> bool {
-        std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| s.rsplit_once(')').is_some_and(|r| r.1.trim_start().starts_with('T')))
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .is_ok_and(|s| s.rsplit_once(')').is_some_and(|r| r.1.trim_start().starts_with('T')))
     }
 
     #[cfg(all(unix, not(target_os = "linux")))]

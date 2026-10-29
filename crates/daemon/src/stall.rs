@@ -124,6 +124,9 @@ mod tests {
     #[test]
     fn typing_counts_as_activity() {
         assert!(!is_stalled(&Facts { since_input_ms: 10_000, ..quiet() }, 300_000));
+        // frozen by the memory governor: the silence is not the agent's
+        assert!(!is_stalled(&Facts { paused: true, ..quiet() }, 180_000));
+        assert_eq!(next_check_ms(&Facts { paused: true, ..quiet() }, 180_000, None), None);
     }
 
     #[test]

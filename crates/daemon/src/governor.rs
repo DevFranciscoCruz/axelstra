@@ -825,11 +825,9 @@ mod tests {
         assert!(admission_denied(&on, Critical, 6, worker(1)));
         assert_eq!((effective_worker_limit(1, High), effective_worker_limit(0, Critical), effective_worker_limit(6, Normal)), (1, 0, 6));
         // switched off, warn-only or admission off: nothing is refused
-        for cfg in [
-            Config { enabled: false, ..on.clone() },
-            Config { warn_only: true, ..on.clone() },
-            Config { admission: false, ..on.clone() },
-        ] {
+        for cfg in
+            [Config { enabled: false, ..on.clone() }, Config { warn_only: true, ..on.clone() }, Config { admission: false, ..on.clone() }]
+        {
             assert!(!admission_denied(&cfg, Critical, 6, agent_by_agent));
             assert!(!admission_denied(&cfg, Critical, 6, worker(9)));
         }

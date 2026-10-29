@@ -7,7 +7,9 @@
 //!   1. builds and tests running under `axelstra lock` (they register with `mem.hold`): cheapest to freeze, nobody talks to them;
 //!   2. idle workers (ephemeral, quiet for `IDLE_WORKER_MS`, no input for 2 minutes);
 //!   3. other agents, 4. leads, 5. the project main: each idle for longer, and only when nothing earlier is left.
+//!
 //! Never: the daemon, a terminal (a shell may host a server the user runs), a session the user typed into in the last 2 minutes.
+//!
 //! The network connections of a frozen agent may time out, which is why builds go first.
 //!
 //! Nothing stays frozen forever: the pause loop resumes by event when the level leaves Critical (or the governor / auto-pause
@@ -102,9 +104,7 @@ fn target_key(t: Target) -> (u8, u64) {
 /// The eligible candidates in the order to pause them: by tier, then the biggest first. Pure.
 pub(super) fn victims(c: &[Facts]) -> Vec<Target> {
     let mut v: Vec<&Facts> = c.iter().filter(|f| eligible(f)).collect();
-    v.sort_by(|a, b| {
-        tier(a.role).cmp(&tier(b.role)).then(b.rss_mb.cmp(&a.rss_mb)).then(target_key(a.target).cmp(&target_key(b.target)))
-    });
+    v.sort_by(|a, b| tier(a.role).cmp(&tier(b.role)).then(b.rss_mb.cmp(&a.rss_mb)).then(target_key(a.target).cmp(&target_key(b.target))));
     v.into_iter().map(|f| f.target).collect()
 }
 
@@ -261,7 +261,9 @@ impl Pauser {
         g.entries
             .iter()
             .map(|e| match e.target {
-                Target::Session(id) => json!({"kind": "session", "session": id, "reason": e.reason, "since": e.since, "pids": e.pids.len()}),
+                Target::Session(id) => {
+                    json!({"kind": "session", "session": id, "reason": e.reason, "since": e.since, "pids": e.pids.len()})
+                }
                 Target::Build(b) => {
                     let h = g.holds.get(&b);
                     json!({"kind": "build", "hold": b, "session": h.map(|h| h.session), "name": h.map(|h| h.name.clone()),
@@ -434,7 +436,13 @@ impl Registry {
             }
             let tree = snap.descendants(&[h.pid]);
             let kib: u64 = snap.procs.iter().filter(|p| tree.contains(&p.pid)).map(|p| p.rss_kib).sum();
-            out.push(Facts { target: Target::Build(id), role: Role::Build, rss_mb: kib / 1024, since_input_ms: u64::MAX, idle_ms: u64::MAX });
+            out.push(Facts {
+                target: Target::Build(id),
+                role: Role::Build,
+                rss_mb: kib / 1024,
+                since_input_ms: u64::MAX,
+                idle_ms: u64::MAX,
+            });
         }
         out
     }
@@ -493,7 +501,11 @@ pub(super) fn spawn(reg: &Arc<Registry>) {
     let weak = Arc::downgrade(reg);
     let gov = reg.governor.clone();
     let _ = std::thread::Builder::new().name("governor-pause".into()).spawn(move || {
+        // the level may have moved before this thread got going: look at it once
         let mut seen = gov.generation();
+        if let Some(reg) = weak.upgrade() {
+            react(&reg, gov.level());
+        }
         loop {
             let (level, gen) = gov.wait_change(seen, BACKSTOP);
             seen = gen;
@@ -593,7 +605,8 @@ mod tests {
         // a crashed run left two entries: our pid with its real start time, and the same pid with a start time it never had
         std::fs::write(
             dir.join("paused.json"),
-            json!({"v": 1, "data": [{"pid": me, "start": start}, {"pid": 4_000_000, "start": 1}, {"pid": me, "start": start + 1}]}).to_string(),
+            json!({"v": 1, "data": [{"pid": me, "start": start}, {"pid": 4_000_000, "start": 1}, {"pid": me, "start": start + 1}]})
+                .to_string(),
         )
         .unwrap();
         assert_eq!(p.recover_stale(), 1);

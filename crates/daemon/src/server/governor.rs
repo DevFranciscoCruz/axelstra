@@ -62,10 +62,16 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         // the user freezes a session's process tree; only `mem.resume` (or a kill) lets it go
         "mem.pause" => {
             let id = p["session"].as_u64().and_then(|x| u32::try_from(x).ok()).ok_or_else(|| missing("session"))?;
-            reg.get(id).filter(|s| s.try_wait().is_none()).ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = id))?;
+            reg.get(id)
+                .filter(|s| s.try_wait().is_none())
+                .ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = id))?;
             let done = tokio::task::block_in_place(|| reg.pause_session(id, pause::MANUAL));
             if !done {
-                return Err(axelstra_core::coded!("governor.pause_failed", "session {id} could not be paused (already paused, or nothing to stop)", id = id));
+                return Err(axelstra_core::coded!(
+                    "governor.pause_failed",
+                    "session {id} could not be paused (already paused, or nothing to stop)",
+                    id = id
+                ));
             }
             Ok(json!({"paused": [id]}))
         }
@@ -83,9 +89,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         // `axelstra lock` asks before it takes a new slot: answers at once when memory is fine, else waits (up to `wait_ms`,
         // at most a minute) for the level to return to Normal. It sleeps on the governor's change signal, no polling.
-        "mem.admit" => {
-            Ok(admit(reg, Duration::from_millis(p["wait_ms"].as_u64().unwrap_or(0).min(60_000))))
-        }
+        "mem.admit" => Ok(admit(reg, Duration::from_millis(p["wait_ms"].as_u64().unwrap_or(0).min(60_000)))),
         // a build/test under `axelstra lock` says its process: the pauser may freeze it. Only a process inside a session counts
         "mem.hold" => {
             let pid = p["pid"].as_u64().and_then(|x| u32::try_from(x).ok()).ok_or_else(|| missing("pid"))?;

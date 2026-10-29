@@ -639,13 +639,8 @@ impl Registry {
     /// kill (a process that broke out of its job), and counts sessions, processes and RAM released.
     pub(super) fn tear_down(&self, sessions: &[Arc<Session>]) {
         let snap = axelstra_core::procs::snapshot();
-        let ids: Vec<u32> = self
-            .sessions
-            .lock_recover()
-            .iter()
-            .filter(|(_, x)| sessions.iter().any(|s| Arc::ptr_eq(s, x)))
-            .map(|(id, _)| *id)
-            .collect();
+        let ids: Vec<u32> =
+            self.sessions.lock_recover().iter().filter(|(_, x)| sessions.iter().any(|s| Arc::ptr_eq(s, x))).map(|(id, _)| *id).collect();
         for id in ids {
             self.resume_before_kill(id);
         }

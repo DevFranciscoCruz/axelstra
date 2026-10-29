@@ -35,7 +35,14 @@ fn render(r: &Value) -> String {
     );
     let c = &r["config"];
     let on = |k: &str| if c[k].as_bool() == Some(true) { "on" } else { "off" };
-    let _ = writeln!(o, "governor {}, admission {}, auto-pause {}, warn-only {}", on("enabled"), on("admission"), on("auto_pause"), on("warn_only"));
+    let _ = writeln!(
+        o,
+        "governor {}, admission {}, auto-pause {}, warn-only {}",
+        on("enabled"),
+        on("admission"),
+        on("auto_pause"),
+        on("warn_only")
+    );
     let sessions = r["sessions"].as_array().cloned().unwrap_or_default();
     if !sessions.is_empty() {
         let _ = writeln!(o, "biggest sessions:");
