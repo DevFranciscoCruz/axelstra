@@ -48,9 +48,12 @@ Set them yourself only to reproduce a release build: `AXELSTRA_GIT_SHA=abc1234 A
 Every session the daemon spawns gets `CARGO_BUILD_JOBS` (derived from cores and free memory when it starts), `RUSTC_WRAPPER`
 and `CARGO_INCREMENTAL=0` only if `sccache` is on PATH, and a shared package-manager download cache for JS. It never overrides
 a variable you already set. Edit `build` in `settings.json` (keys: `enabled`, `jobs`, `sccache` `auto`|`off`, `shared_target`,
-`shared_js_cache`, `lock_budget_mb`; details and the risks of `shared_target`, which is off, in AGENTS.md > Build cost).
+`shared_js_cache`, `lock_budget_mb`, `lock_margin_mb`; details and the risks of `shared_target`, which is off, in AGENTS.md > Build cost).
 
-- `axelstra lock verify -- <cmd>`: with no flag, declares a memory need from the jobs and is admitted while the holders fit the budget.
+- `axelstra lock verify -- <cmd>`: with no flag, declares a memory need from the jobs and is admitted while the holders fit the budget
+  AND the memory available now minus that need leaves a 2 GB margin (`build.lock_margin_mb`). So several holders can run at once
+  when memory allows; short memory waits for a holder to finish (no polling). If nobody holds the lock and memory is still short,
+  it runs anyway after a warning. Use `--slots 1` for strict one-at-a-time.
 - `axelstra lock NAME --mem-mb 3000 -- <cmd>`: declares the need yourself. `--slots N`: plain count slots (the old behaviour).
   The two flags exclude each other; keep one mode per name.
 

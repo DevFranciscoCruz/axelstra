@@ -116,7 +116,7 @@ axelstra lock build --slots 2 -- cargo build    # two at a time
 
 `lock` waits for a free slot, runs the command, passes its exit code through, and frees the slot when the command ends (or the process dies). Tell every worker to run its full verify, build or test suite through `axelstra lock`.
 
-Build cost: many agents compile on one machine. Every session already carries a `CARGO_BUILD_JOBS` derived from the cores and the free memory (do not raise it), and `axelstra lock build|verify` declares a memory need from those jobs (`--mem-mb N` sets it by hand; the holders are admitted while their needs fit the budget, `--slots N` keeps plain count slots). Heavy cargo or npm goes through `axelstra lock verify -- <cmd>`; run `cargo check` before `cargo test`, and `node scripts/check.mjs --fast` while iterating, the full check once at the end.
+Build cost: many agents compile on one machine. Every session already carries a `CARGO_BUILD_JOBS` derived from the cores and the free memory (do not raise it), and `axelstra lock build|verify` declares a memory need from those jobs (`--mem-mb N` sets it by hand; the holders are admitted while their needs fit the budget, `--slots N` keeps plain count slots, `--slots 1` is strictly one at a time; bare `verify` lets several run when free memory allows). Heavy cargo or npm goes through `axelstra lock verify -- <cmd>`; run `cargo check` before `cargo test`, and `node scripts/check.mjs --fast` while iterating, the full check once at the end.
 
 ## Seeing and driving the desktop
 
