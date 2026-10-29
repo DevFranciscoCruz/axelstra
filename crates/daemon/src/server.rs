@@ -829,7 +829,9 @@ fn session_list(reg: &Registry) -> Vec<Value> {
             let waiting = wait.is_some();
             let awaiting = if running { reg.awaiting_of(id, view.since_input_ms(), idle) } else { None };
             let facts = stall_facts(reg, id, running, idle, view.since_input_ms(), meta.as_ref(), &busy);
-            let stalled = crate::stall::is_stalled(&facts, stall_ms);
+            // the user is told only when nobody handles the stall; `stall_parent` says a parent agent was told
+            let stalled = crate::stall::needs_human(&facts, stall_ms);
+            let stall_parent = !stalled && crate::stall::is_stalled(&facts, stall_ms);
             let stall = stalled.then(|| {
                 let line = crate::stall::last_line(&view.screen_tail(12));
                 let task = label.clone().unwrap_or_else(|| format!("session {id}"));
@@ -840,7 +842,7 @@ fn session_list(reg: &Registry) -> Vec<Value> {
                 );
                 json!({"minutes": stall_min, "code": c.code, "params": c.params_json(), "text": c.to_string()})
             });
-            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "wait": wait.map(|w| json!({"kind": w.kind.as_str(), "text": w.text})), "awaiting": awaiting.map(|a| json!({"reason": a.reason, "since": a.since, "until": a.until})), "stalled": stalled, "stall": stall, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
+            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "wait": wait.map(|w| json!({"kind": w.kind.as_str(), "text": w.text})), "awaiting": awaiting.map(|a| json!({"reason": a.reason, "since": a.since, "until": a.until})), "stalled": stalled, "stall_parent": stall_parent, "stall": stall, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
         })
         .collect();
     v.sort_by_key(|x| x["id"].as_u64());
