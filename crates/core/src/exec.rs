@@ -160,7 +160,9 @@ mod tests {
 
     #[test]
     fn captures_both_streams_and_status() {
-        let o = run_capped(&mut sh("echo out-1& echo err-1 1>&2"), Duration::from_secs(10), 1 << 16).unwrap();
+        // cmd's `&` chains; in sh it would background the first echo and race the shell's exit
+        let line = if cfg!(windows) { "echo out-1& echo err-1 1>&2" } else { "echo out-1; echo err-1 1>&2" };
+        let o = run_capped(&mut sh(line), Duration::from_secs(10), 1 << 16).unwrap();
         assert!(o.success());
         assert!(o.stdout_lossy().contains("out-1"));
         assert!(o.stderr_lossy().contains("err-1"));
