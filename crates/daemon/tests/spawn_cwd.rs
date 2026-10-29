@@ -33,9 +33,13 @@ fn start(root: &Path, tag: &str) -> Client {
 }
 
 fn agent(c: &mut Client, wt: &str, label: Option<&str>, cwd: &str) -> anyhow::Result<u64> {
+    agent_of(c, "pc", wt, label, cwd)
+}
+
+/// Task numbers are counted per project name for the whole test process, so a test that asserts "Tarefa 1" owns its project.
+fn agent_of(c: &mut Client, project: &str, wt: &str, label: Option<&str>, cwd: &str) -> anyhow::Result<u64> {
     let (prog, args) = shell();
-    let mut p =
-        json!({"program": prog, "args": args, "cwd": cwd, "meta": {"project": "pc", "worktree": wt, "kind": "agent", "agent": "claude"}});
+    let mut p = json!({"program": prog, "args": args, "cwd": cwd, "meta": {"project": project, "worktree": wt, "kind": "agent", "agent": "claude"}});
     if let Some(l) = label {
         p["label"] = json!(l);
     }
@@ -106,7 +110,7 @@ fn a_new_worktree_has_only_its_lead_and_a_finished_task_is_not_restored() {
     let setup = c
         .call(
             "session.spawn",
-            json!({"program": prog, "args": args, "cwd": wt, "label": "setup", "meta": {"project": "pc", "worktree": wt, "kind": "shell"}}),
+            json!({"program": prog, "args": args, "cwd": wt, "label": "setup", "meta": {"project": "pc-done", "worktree": wt, "kind": "shell"}}),
         )
         .unwrap()["id"]
         .as_u64()
@@ -115,7 +119,7 @@ fn a_new_worktree_has_only_its_lead_and_a_finished_task_is_not_restored() {
     let lead = c
         .call(
             "session.spawn",
-            json!({"program": prog, "args": args, "cwd": wt, "meta": {"project": "pc", "worktree": wt, "kind": "agent", "agent": "claude", "lead": true}}),
+            json!({"program": prog, "args": args, "cwd": wt, "meta": {"project": "pc-done", "worktree": wt, "kind": "agent", "agent": "claude", "lead": true}}),
         )
         .unwrap()["id"]
         .as_u64()
@@ -129,7 +133,7 @@ fn a_new_worktree_has_only_its_lead_and_a_finished_task_is_not_restored() {
         "no task exists until someone starts one"
     );
     // the lead starts a task; the task reports done
-    let task = agent(&mut c, &wt, None, &wt).unwrap();
+    let task = agent_of(&mut c, "pc-done", &wt, None, &wt).unwrap();
     assert_eq!(info(&mut c, task)["label"], "Tarefa 1");
     c.call("msg.send", json!({"from": task, "to": lead, "kind": "done", "text": "ok\nall green"})).unwrap();
     let data =
@@ -140,7 +144,7 @@ fn a_new_worktree_has_only_its_lead_and_a_finished_task_is_not_restored() {
     // a file saved before the report was recorded (the mark is in the record) is not handed out either
     let mut old: Value = saved.clone();
     let rec = json!({"program": shell().0, "args": shell().1, "cwd": wt, "label": "Tarefa 9",
-        "meta": {"project": "pc", "worktree": wt, "kind": "agent", "agent": "claude", "done": true}});
+        "meta": {"project": "pc-done", "worktree": wt, "kind": "agent", "agent": "claude", "done": true}});
     old["data"].as_array_mut().unwrap().push(rec);
     let root2 = std::env::temp_dir().join(format!("axelstra-cwd-done2-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root2);
