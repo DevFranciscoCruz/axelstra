@@ -922,7 +922,9 @@ pub(super) fn stall_tick(reg: &Arc<Registry>) -> Option<Duration> {
         // an episode ends when the session works again (output, typing, a message) or goes away
         seen.retain(|id, _| alive.contains(id) && !worked.contains(id));
         let now = Instant::now();
-        stalled.into_iter().filter(|x| seen.insert(x.0, now).is_none()).collect()
+        // the first look of an episode stamps the time the parent was told; a later look must not move it, or any pulse
+        // (output, a message, a resource sample) would restart the wait before the user is alerted
+        stalled.into_iter().filter(|x| seen.get(&x.0).is_none() && seen.insert(x.0, now).is_none()).collect()
     };
     if !fresh.is_empty() {
         // the alert of a session with a parent agent falls due a threshold after the parent was told
