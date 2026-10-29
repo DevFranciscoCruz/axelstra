@@ -76,6 +76,26 @@
   font-variant-numeric: tabular-nums;
   color: var(--muted);
 }
+.mem-bar {
+  height: 6px;
+  margin: 0 4px 4px;
+  border-radius: var(--r-sm);
+  background: var(--border);
+  overflow: hidden;
+}
+.mem-bar > i {
+  display: block;
+  height: 100%;
+  width: var(--w, 0%);
+  background: var(--accent);
+}
+.mem-bar.mem-kernel > i {
+  background: var(--warn);
+}
+.mem-hint {
+  padding: 2px 4px 6px;
+  color: var(--warn);
+}
 .mem-set-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

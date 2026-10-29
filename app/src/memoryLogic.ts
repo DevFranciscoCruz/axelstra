@@ -1,4 +1,4 @@
-import type { GovernorConfig, MemLevel, MemStatus } from "./api";
+import type { GovernorConfig, MemBreakdown, MemLevel, MemStatus } from "./api";
 
 /** One frozen session or build, as `mem.status` lists it (`session.paused` adds one, `session.resumed` takes it away). */
 export type PausedItem = MemStatus["paused"][number];
@@ -13,6 +13,8 @@ export type MemState = {
   top: TopSession[];
   paused: PausedItem[];
   config: GovernorConfig | null;
+  /** where the memory goes; null on a daemon that does not send it */
+  breakdown: MemBreakdown | null;
 };
 
 export const initialMem = (): MemState => ({
@@ -23,6 +25,7 @@ export const initialMem = (): MemState => ({
   top: [],
   paused: [],
   config: null,
+  breakdown: null,
 });
 
 const LEVELS: readonly MemLevel[] = ["normal", "high", "critical"];
@@ -62,6 +65,7 @@ export const applyStatus = (s: MemState, st: MemStatus): MemState => ({
   top: cleanTop(st.sessions),
   paused: st.paused ?? [],
   config: st.config ?? s.config,
+  breakdown: st.breakdown ?? null,
 });
 
 /** `session.paused {id, build, reason}`; a session that was already listed only has its reason refreshed. */
@@ -133,3 +137,52 @@ export const parseAmount = (raw: string): number | null => {
 /** Megabytes split for display: whole MB under a gigabyte, GB with one decimal above. */
 export const mbParts = (mb: number): { value: number; digits: number; unit: "MB" | "GB" } =>
   mb >= 1024 ? { value: mb / 1024, digits: 1, unit: "GB" } : { value: Math.round(mb), digits: 0, unit: "MB" };
+
+export type CategoryKey =
+  "sessions" | "builds" | "external" | "kernel_paged" | "kernel_nonpaged" | "cache" | "compressed" | "others";
+export type CategoryRow = { key: CategoryKey; mb: number; pct: number };
+
+const mbOf = (v: unknown): number => {
+  const n = num(v);
+  return n !== null && n > 0 ? n : 0;
+};
+
+/** One row per non-empty category of the breakdown, biggest first; `pct` is of the machine's total (0 when the total is unknown). */
+export const breakdownRows = (b: MemBreakdown | null, total_mb: number): CategoryRow[] => {
+  if (!b) return [];
+  const sum = (xs: { rss_mb: number }[] | undefined) => (xs ?? []).reduce((a, x) => a + mbOf(x.rss_mb), 0);
+  const raw: [CategoryKey, number][] = [
+    ["sessions", sum(b.sessions)],
+    ["builds", mbOf(b.builds?.rss_mb)],
+    ["external", sum(b.external)],
+    ["kernel_paged", mbOf(b.kernel?.paged_mb)],
+    ["kernel_nonpaged", mbOf(b.kernel?.nonpaged_mb)],
+    ["cache", mbOf(b.cache_mb)],
+    ["compressed", mbOf(b.compressed_mb)],
+    ["others", mbOf(b.others_mb)],
+  ];
+  return raw
+    .filter(([, mb]) => mb > 0)
+    .map(([key, mb]) => ({ key, mb, pct: total_mb > 0 ? Math.min(100, (mb / total_mb) * 100) : 0 }))
+    .sort((a, b2) => b2.mb - a.mb);
+};
+
+/** The kernel pools are over the limit: the daemon says so (`kernel.high`); the panel shows the cause suggestion only then. */
+export const kernelHigh = (b: MemBreakdown | null): boolean => b?.kernel?.high === true;
+
+/** The `kernel_pool_mb` setting the daemon accepts: whole megabytes, 256..=1048576. */
+export const kernelPoolProblem = (mb: number): boolean => !Number.isInteger(mb) || mb < 256 || mb > 1048576;
+
+/** CPU split of the machine, when the daemon reports both numbers. */
+export const cpuSplit = (b: MemBreakdown | null): { user: number; kernel: number } | null => {
+  const user = num(b?.system?.cpu_user_pct);
+  const kernel = num(b?.system?.cpu_kernel_pct);
+  return user === null || kernel === null ? null : { user, kernel };
+};
+
+/** Committed memory against its limit (MB), when both are known and the limit is positive. */
+export const commitPair = (b: MemBreakdown | null): { used: number; limit: number } | null => {
+  const used = num(b?.system?.commit_mb);
+  const limit = num(b?.system?.commit_limit_mb);
+  return used === null || limit === null || limit <= 0 ? null : { used, limit };
+};

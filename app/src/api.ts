@@ -13,7 +13,17 @@ import { createLogoLoader, type LogoAnswer } from "./logo";
 
 /** Mirrors the Rust `meta` of a session (crates/daemon). `blank`, `interrupted` and `lost_workers` are set on entries of `session.pending`. */
 export type SessionMeta = {
-  project?: string; worktree?: string; kind?: string; agent?: string; resume?: string; key?: string; note?: string; parent?: number; worker?: boolean; main?: boolean; /** first agent of a worktree: named "main", parent of its tasks */ lead?: boolean;
+  project?: string;
+  worktree?: string;
+  kind?: string;
+  agent?: string;
+  resume?: string;
+  key?: string;
+  note?: string;
+  parent?: number;
+  worker?: boolean;
+  main?: boolean;
+  /** first agent of a worktree: named "main", parent of its tasks */ lead?: boolean;
   /** a cleared / never used conversation: nothing to bring back */
   blank?: boolean;
   /** the agent was mid-task when the daemon stopped */
@@ -29,9 +39,38 @@ export type WaitInfo = { kind: "permission" | "question" | "idle_input"; text: s
 export type AwaitInfo = { reason: string; since: number; until: number | null };
 /** `hibernated` of a `session.list` row */
 export type HibernatedInfo = { since: number; saved_mb: number; waking: boolean; queued: boolean };
-export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; wait?: WaitInfo | null; stalled?: boolean; stall?: StallInfo | null; /** stalled, but a parent agent was told and handles it: never an alert for the user */ stall_parent?: boolean; paused?: { reason: string; since: number; build: boolean } | null; /** asleep: the process ended, the row stays (`waking`: coming back, `queued`: no free worker slot yet) */ hibernated?: HibernatedInfo | null; mem_level?: MemLevel; mem_free_mb?: number; awaiting?: AwaitInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
-export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean; /** worktree of the same project this one is grouped under */ parent?: string | null };
-export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
+export type SessionInfo = {
+  id: number;
+  running: boolean;
+  idle_ms?: number;
+  waiting?: boolean;
+  wait?: WaitInfo | null;
+  stalled?: boolean;
+  stall?: StallInfo | null;
+  /** stalled, but a parent agent was told and handles it: never an alert for the user */ stall_parent?: boolean;
+  paused?: { reason: string; since: number; build: boolean } | null;
+  /** asleep: the process ended, the row stays (`waking`: coming back, `queued`: no free worker slot yet) */ hibernated?: HibernatedInfo | null;
+  mem_level?: MemLevel;
+  mem_free_mb?: number;
+  awaiting?: AwaitInfo | null;
+  escalated?: boolean;
+  unread?: number;
+  finished?: boolean;
+  label: string | null;
+  meta: SessionMeta | null;
+};
+export type Worktree = {
+  path: string;
+  branch: string | null;
+  head: string;
+  is_main: boolean;
+  /** worktree of the same project this one is grouped under */ parent?: string | null;
+};
+export type Project = {
+  id: string;
+  name: string;
+  path: string;
+  worktrees: Worktree[];
   /** false for a plain folder that is not a git repository (yet) */
   git?: boolean;
   slug?: string;
@@ -72,9 +111,14 @@ export const policyLimit = (method: string): number | null => (COSMETIC.test(met
  * Slow reads the daemon runs in lanes (`lanes.rs`): after its answer limit it replies exactly `{"loading": true}` while the
  * work goes on. Keep this list equal to `lane_of`.
  */
-const LANE = /^(project\.list|git\.(changes|log|show|diff|timeline)|worktree\.(status|overview)|dispatch\.overlap(s|_files)|ports\.list|fs\.(list|search|grep))$/;
+const LANE =
+  /^(project\.list|git\.(changes|log|show|diff|timeline)|worktree\.(status|overview)|dispatch\.overlap(s|_files)|ports\.list|fs\.(list|search|grep))$/;
 const isLoading = (r: unknown) =>
-  typeof r === "object" && r !== null && !Array.isArray(r) && Object.keys(r).length === 1 && (r as { loading?: unknown }).loading === true;
+  typeof r === "object" &&
+  r !== null &&
+  !Array.isArray(r) &&
+  Object.keys(r).length === 1 &&
+  (r as { loading?: unknown }).loading === true;
 
 /**
  * Sends the call and, while a lane method answers `{loading: true}`, sends it again: an identical call joins the running
@@ -99,17 +143,21 @@ const run = <T>(cmd: string, method: string, params: Record<string, unknown>): P
       rej(new AppError(method, "Request cancelled", CANCELLED));
     };
     const limit = policyLimit(method);
-    timer = setTimeout(
-      () => {
-        alive = false;
-        const secs = Math.round((limit ?? CEILING_MS - 10_000) / 1000);
-        rej(new AppError(method, `${method} did not answer within ${secs} s`, "rpc.call_timeout", { method, secs }));
-      },
-      limit ?? CEILING_MS,
-    );
+    timer = setTimeout(() => {
+      alive = false;
+      const secs = Math.round((limit ?? CEILING_MS - 10_000) / 1000);
+      rej(new AppError(method, `${method} did not answer within ${secs} s`, "rpc.call_timeout", { method, secs }));
+    }, limit ?? CEILING_MS);
     if (limit === null) stopSlow = watchSlow(method, cancel);
   });
-  return Promise.race([settled(method, () => alive, () => invoke<T>(cmd, { method, params })), other])
+  return Promise.race([
+    settled(
+      method,
+      () => alive,
+      () => invoke<T>(cmd, { method, params }),
+    ),
+    other,
+  ])
     .catch((e) => Promise.reject(toAppError(method, e)))
     .finally(() => {
       alive = false;
@@ -118,14 +166,17 @@ const run = <T>(cmd: string, method: string, params: Record<string, unknown>): P
     });
 };
 
-export const call = <T = unknown>(method: string, params: Record<string, unknown> = {}) => run<T>("daemon_call", method, params);
+export const call = <T = unknown>(method: string, params: Record<string, unknown> = {}) =>
+  run<T>("daemon_call", method, params);
 
 /** same, on a second connection: for slow polling that must not hold up the interactive calls */
-export const callBg = <T = unknown>(method: string, params: Record<string, unknown> = {}) => run<T>("daemon_call_bg", method, params);
+export const callBg = <T = unknown>(method: string, params: Record<string, unknown> = {}) =>
+  run<T>("daemon_call_bg", method, params);
 
 /** true when the running daemon is older than the app and lacks `method` */
 export const isUnknownMethod = (e: unknown) =>
-  (e instanceof AppError && e.code === "rpc.unknown_method") || /unknown method/i.test(e instanceof Error ? e.message : String(e));
+  (e instanceof AppError && e.code === "rpc.unknown_method") ||
+  /unknown method/i.test(e instanceof Error ? e.message : String(e));
 /** `call` that answers `fallback` instead of failing when the daemon does not know the method yet */
 export const callOr = <T>(method: string, params: Record<string, unknown>, fallback: T): Promise<T> =>
   call<T>(method, params).catch((e) => (isUnknownMethod(e) ? fallback : Promise.reject(e)));
@@ -137,14 +188,27 @@ export type NotifyMode = "all" | "waiting" | "off";
 export type ShellChoice = "auto" | "pwsh" | "powershell" | "bash" | "wsl" | "cmd";
 /** `build` of settings.json: how sessions started afterwards compile (`null` = derived by the daemon) */
 export type BuildSettings = {
-  enabled: boolean; jobs: number | null; sccache: "auto" | "off"; shared_target: boolean; shared_js_cache: boolean; lock_budget_mb: number | null; lock_margin_mb: number | null;
+  enabled: boolean;
+  jobs: number | null;
+  sccache: "auto" | "off";
+  shared_target: boolean;
+  shared_js_cache: boolean;
+  lock_budget_mb: number | null;
+  lock_margin_mb: number | null;
 };
 /** `hibernate` of settings.json: put idle agents to sleep by themselves, after this many quiet minutes (1 to 1440) */
 export type HibernateSettings = { enabled: boolean; idle_minutes: number };
 export type Settings = {
-  terse: Terse; rules: string | null; pm: string | null; installed: string[]; auto_install: boolean;
+  terse: Terse;
+  rules: string | null;
+  pm: string | null;
+  installed: string[];
+  auto_install: boolean;
   /** absent on a daemon from before these keys existed */
-  notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice; stall_minutes?: number;
+  notify_sound?: boolean;
+  notify_mode?: NotifyMode;
+  shell?: ShellChoice;
+  stall_minutes?: number;
   /** absent on a daemon from before hibernation */
   hibernate?: HibernateSettings;
   /** absent on a daemon from before the build settings */
@@ -154,11 +218,23 @@ export type Settings = {
   /** token limits per day / week; absent on a daemon from before budgets */
   budgets?: Budgets;
 };
-export type SettingsPatch = { terse?: Terse; pm?: string | null; auto_install?: boolean; notify_sound?: boolean; notify_mode?: NotifyMode; shell?: ShellChoice; stall_minutes?: number; budgets?: Budgets; build?: BuildSettings; hibernate?: HibernateSettings };
+export type SettingsPatch = {
+  terse?: Terse;
+  pm?: string | null;
+  auto_install?: boolean;
+  notify_sound?: boolean;
+  notify_mode?: NotifyMode;
+  shell?: ShellChoice;
+  stall_minutes?: number;
+  budgets?: Budgets;
+  build?: BuildSettings;
+  hibernate?: HibernateSettings;
+};
 /** `terse` asks for the rules of that level (a project's own choice) instead of the saved one */
 export const getSettings = (terse?: Terse) => call<Settings>("settings.get", terse ? { terse } : {});
 /** `ui`: UI state to store (`null` removes a key), sent by uiState.ts only, so it is not part of what the Settings screen merges */
-export const setSettings = (patch: SettingsPatch & { ui?: Record<string, string | null> }) => call("settings.set", patch);
+export const setSettings = (patch: SettingsPatch & { ui?: Record<string, string | null> }) =>
+  call("settings.set", patch);
 
 /** Result of `fn`, remembered once it succeeded; a failure is not remembered, so the next call tries again. */
 const once = <T>(fn: () => Promise<T>) => {
@@ -208,7 +284,8 @@ export type Diagnostics = {
 };
 export const diagnostics = () => tauriInvoke<Diagnostics>("diagnostics");
 /** Sends a webview error to the Rust log file. */
-export const logFrontendError = (r: { kind: string; message: string; stack: string }) => tauriInvoke<void>("log_frontend_error", r);
+export const logFrontendError = (r: { kind: string; message: string; stack: string }) =>
+  tauriInvoke<void>("log_frontend_error", r);
 /** Text bundle for bug reports (version, OS, data dir, log tails). */
 export const diagnosticsBundle = () => tauriInvoke<string>("diagnostics_bundle");
 /** Copies the diagnostics bundle to the clipboard and returns it. */
@@ -236,17 +313,33 @@ export const geminiResumeId = (resume: string | undefined) => {
 };
 
 /** A Claude conversation id is a UUID; anything else (it can come from a file an agent wrote) is dropped, never run. */
-export const claudeResumeId = (resume: string | undefined) => (resume && /^[0-9a-fA-F-]{8,64}$/.test(resume) ? resume : null);
+export const claudeResumeId = (resume: string | undefined) =>
+  resume && /^[0-9a-fA-F-]{8,64}$/.test(resume) ? resume : null;
 
 /** Command line for an agent. On restore it resumes the earlier conversation, falling back to a fresh start. */
-export const agentLine = (cli: string, resume: string | undefined, restoring: boolean, ps: boolean, hooks: string, rules?: string | null) => {
+export const agentLine = (
+  cli: string,
+  resume: string | undefined,
+  restoring: boolean,
+  ps: boolean,
+  hooks: string,
+  rules?: string | null,
+) => {
   const style = rules ? ` --append-system-prompt ${shQuote(rules, ps)}` : "";
   const claude = (flags: string) => `claude --settings ${shQuote(hooks, ps)}${style} ${flags}`;
   const cid = cli === "claude" ? claudeResumeId(resume) : null;
-  const fresh = cid ? claude(`--session-id ${shQuote(cid, ps)}`) : cli === "claude" && resume ? claude("").trimEnd() : cli;
+  const fresh = cid
+    ? claude(`--session-id ${shQuote(cid, ps)}`)
+    : cli === "claude" && resume
+      ? claude("").trimEnd()
+      : cli;
   if (!restoring) return fresh;
   const gem = cli === "gemini" ? geminiResumeId(resume) : null;
-  const back = cid ? claude(`--resume ${shQuote(cid, ps)}`) : gem ? `gemini --resume ${gem}` : RESUME_LINE[cli] ?? cli;
+  const back = cid
+    ? claude(`--resume ${shQuote(cid, ps)}`)
+    : gem
+      ? `gemini --resume ${gem}`
+      : (RESUME_LINE[cli] ?? cli);
   return ps ? `${back}; if (!$?) { ${fresh} }` : `${back} || ${fresh}`;
 };
 
@@ -265,18 +358,46 @@ export const launchDefaultAgent = async (
   const [[program, args], dir, rules] = await Promise.all([
     defaultShell(worktree),
     dirOnce(),
-    pre ? pre.rules : getSettings(terse).then((x) => x.rules, () => null),
+    pre
+      ? pre.rules
+      : getSettings(terse).then(
+          (x) => x.rules,
+          () => null,
+        ),
   ]);
   const ps = /powershell|pwsh/i.test(program);
   // the main worktree is not a task: its agent gets no "Tarefa N" name and no task file
-  const main = apiContext.projects().find((p) => p.id === project)?.worktrees.some((w) => w.is_main && norm(w.path) === norm(worktree)) || undefined;
+  const main =
+    apiContext
+      .projects()
+      .find((p) => p.id === project)
+      ?.worktrees.some((w) => w.is_main && norm(w.path) === norm(worktree)) || undefined;
   // key is stable for the life of the tab; resume is the conversation id, which /clear replaces
   const key = restore ? restore.key : cli === "claude" ? crypto.randomUUID() : undefined;
-  const resume = restore ? restore.resume ?? key : key;
+  const resume = restore ? (restore.resume ?? key) : key;
   const line = agentLine(cli, resume, !!restore, ps, `${dir}/hooks.json`, rules);
-  const run = ps ? [...args, "-NoExit", "-Command", line] : [...args, "-c", `${line}; exec ${shQuote(program, false)} -l`];
+  const run = ps
+    ? [...args, "-NoExit", "-Command", line]
+    : [...args, "-c", `${line}; exec ${shQuote(program, false)} -l`];
   const env = key ? { AXELSTRA_KEY: key, AXELSTRA_DIR: dir } : undefined;
-  const { id } = await spawnSession(program, run, agent, worktree, { project, worktree, kind: "agent", agent: cli, resume, key, note: restore?.note, main, lead: restore?.lead || undefined }, env);
+  const { id } = await spawnSession(
+    program,
+    run,
+    agent,
+    worktree,
+    {
+      project,
+      worktree,
+      kind: "agent",
+      agent: cli,
+      resume,
+      key,
+      note: restore?.note,
+      main,
+      lead: restore?.lead || undefined,
+    },
+    env,
+  );
   // only claude takes the rules as a system prompt: type them into the others once they have booted
   if (rules && cli !== "claude" && !restore) void nudge(id, rules).catch((e) => console.debug("nudge", e));
   return id;
@@ -347,7 +468,10 @@ export const nudge = async (id: number, text: string) => {
 /** What an agent should be told about the restart: it was mid-task, and/or workers it started were stopped. */
 const restartNote = (interrupted: boolean, lost: string[]) => {
   const parts: string[] = [];
-  if (interrupted) parts.push("Axelstra was restarted and this conversation was resumed. You were in the middle of a task: continue where you left off.");
+  if (interrupted)
+    parts.push(
+      "Axelstra was restarted and this conversation was resumed. You were in the middle of a task: continue where you left off.",
+    );
   if (lost.length) {
     parts.push(
       `Workers you started were stopped by the restart and are gone: ${lost.join(", ")}. Their worktrees keep what they had already done. Run \`axelstra ls\` and relaunch what is unfinished (a running \`axelstra flow\` stopped too: run it again with \`--resume\` and it skips what finished).`,
@@ -357,7 +481,14 @@ const restartNote = (interrupted: boolean, lost: string[]) => {
 };
 
 export type RestoreResult = { restored: number; skipped: number; failed: string[] };
-type PendingRec = { program: string; args?: string[]; cwd?: string; label?: string; meta?: SessionMeta; env?: Record<string, string> };
+type PendingRec = {
+  program: string;
+  args?: string[];
+  cwd?: string;
+  label?: string;
+  meta?: SessionMeta;
+  env?: Record<string, string>;
+};
 
 /** A saved shell with no cwd and no worktree/project/key/kind in its meta: nobody opened it on purpose. */
 export const isBareShell = (r: PendingRec): boolean =>
@@ -371,7 +502,9 @@ const alreadyRunning = async (r: PendingRec): Promise<boolean> => {
   return live.some((s) => {
     if (!s.running) return false;
     if (key) return s.meta?.key === key;
-    return !s.meta?.key && (s.label ?? null) === (r.label ?? null) && !!r.cwd && norm(s.meta?.worktree ?? "") === norm(r.cwd);
+    return (
+      !s.meta?.key && (s.label ?? null) === (r.label ?? null) && !!r.cwd && norm(s.meta?.worktree ?? "") === norm(r.cwd)
+    );
   });
 };
 
@@ -383,7 +516,14 @@ const restoreOnce = async (): Promise<RestoreResult> => {
   // rules depend only on the reply style: read once per distinct level (the project's own, else the global one) for the whole batch
   const rulesByTerse = new Map<Terse | undefined, Promise<string | null>>();
   const rulesFor = (terse?: Terse) => {
-    if (!rulesByTerse.has(terse)) rulesByTerse.set(terse, getSettings(terse).then((x) => x.rules, () => null));
+    if (!rulesByTerse.has(terse))
+      rulesByTerse.set(
+        terse,
+        getSettings(terse).then(
+          (x) => x.rules,
+          () => null,
+        ),
+      );
     return rulesByTerse.get(terse)!;
   };
   for (const r of pending) {
@@ -405,7 +545,15 @@ const restoreOnce = async (): Promise<RestoreResult> => {
         } else {
           const terse = apiContext.terse(m.project);
           const rules = await rulesFor(terse);
-          const id = await launchDefaultAgent(m.project, m.worktree, r.label ?? m.agent, m.agent, { key: m.key, resume: m.resume, note: m.note, lead: m.lead }, { rules }, terse);
+          const id = await launchDefaultAgent(
+            m.project,
+            m.worktree,
+            r.label ?? m.agent,
+            m.agent,
+            { key: m.key, resume: m.resume, note: m.note, lead: m.lead },
+            { rules },
+            terse,
+          );
           const note = restartNote(!!m.interrupted, m.lost_workers ?? []);
           if (note) void nudge(id, note).catch((e) => console.debug("nudge", e));
           restored++;
@@ -481,7 +629,14 @@ export type DaemonEvent =
   | "session.wake_failed"
   | "session.input_dropped";
 /** What an event carries besides its name (`kanban.changed {project}`, `orch.changed {run, project}`, `clone.changed {id}`...). */
-export type DaemonEventData = { event?: string; project?: string; run?: string; id?: string | number; worktree?: string; [k: string]: unknown };
+export type DaemonEventData = {
+  event?: string;
+  project?: string;
+  run?: string;
+  id?: string | number;
+  worktree?: string;
+  [k: string]: unknown;
+};
 const eventSubs = new Map<string, Set<(d: DaemonEventData) => void>>();
 /** Runs `fn` each time the daemon announces `name` (and after the stream reconnects, in case one was missed); returns the unsubscribe.
  *  `fn` gets the event's payload (empty after a reconnect). */
@@ -517,8 +672,8 @@ const startWatch = () => {
     if (m?.event === "fs.changed" && m.worktree) {
       handlers.onChanged(m.worktree);
       fire(m.event, m);
-    }
-    else if (m?.event === "session.exited" && typeof m.id === "number") exitSubs.forEach((f) => f({ id: m.id as number, code: m.code ?? null }));
+    } else if (m?.event === "session.exited" && typeof m.id === "number")
+      exitSubs.forEach((f) => f({ id: m.id as number, code: m.code ?? null }));
     else if (m?.event) {
       if (m.event === "session.changed") handlers.onSessions?.();
       else if (m.event === "projects.changed") handlers.onProjects?.();
@@ -542,7 +697,12 @@ const rewatch = () => {
     for (const name of eventSubs.keys()) fire(name);
   });
 };
-export const watchWorktree = async (worktree: string | null, onChanged: (worktree: string) => void, onSessions?: () => void, onProjects?: () => void) => {
+export const watchWorktree = async (
+  worktree: string | null,
+  onChanged: (worktree: string) => void,
+  onSessions?: () => void,
+  onProjects?: () => void,
+) => {
   handlers = { onChanged, onSessions, onProjects };
   lastWorktree = worktree;
   wanted = true;
@@ -587,7 +747,10 @@ const startSize = () =>
   lastTerm.cols
     ? lastTerm
     : // nothing on screen yet (restoring at startup): the terminal area is roughly the window minus the side panels
-      { cols: Math.max(80, Math.floor((window.innerWidth * 0.7 - 16) / 7.8)), rows: Math.max(24, Math.floor((window.innerHeight - 110) / 15)) };
+      {
+        cols: Math.max(80, Math.floor((window.innerWidth * 0.7 - 16) / 7.8)),
+        rows: Math.max(24, Math.floor((window.innerHeight - 110) / 15)),
+      };
 
 export const spawnSession = (
   program: string,
@@ -599,25 +762,30 @@ export const spawnSession = (
 ) => call<{ id: number }>("session.spawn", { program, args, label, cwd, meta, env, ...startSize() });
 
 /** the task file of an agent: its text, path and name */
-export const notesRead = (session: number) => call<{ text: string; path: string; name: string }>("notes.read", { session });
+export const notesRead = (session: number) =>
+  call<{ text: string; path: string; name: string }>("notes.read", { session });
 /** copies the task file into the worktree's .axelstra folder; refuses to replace a file unless `overwrite` */
-export const notesExport = (session: number, overwrite = false) => call<{ path: string }>("notes.export", { session, overwrite });
+export const notesExport = (session: number, overwrite = false) =>
+  call<{ path: string }>("notes.export", { session, overwrite });
 /** worktree path -> the other worktrees that edit some of the same files */
 export const dispatchOverlaps = () => callBg<Record<string, string[]>>("dispatch.overlaps");
 export const dispatchOverlapFiles = () => callBg<OverlapFiles>("dispatch.overlap_files");
 /** the name of a worktree folder/branch as the daemon renames it */
-export const worktreeRename = (path: string, name: string) => call<{ path?: string }>("worktree.rename", { path, name });
+export const worktreeRename = (path: string, name: string) =>
+  call<{ path?: string }>("worktree.rename", { path, name });
 
 export const killSession = (id: number) => (cancelNudge(id), call("session.kill", { id }));
 
 /** Ends the process tree of an idle agent and keeps its row (state `hibernated` in `session.list`). Refused with a coded error when it is busy or cannot resume. */
-export const hibernateSession = (id: number) => call<{ id: number; hibernated: { since: number; saved_mb: number } }>("session.hibernate", { id });
+export const hibernateSession = (id: number) =>
+  call<{ id: number; hibernated: { since: number; saved_mb: number } }>("session.hibernate", { id });
 /** Brings a hibernated session back; `wait` answers once it is back. `state`: awake, waking or queued (no free worker slot). */
-export const wakeSession = (id: number, wait = false) => call<{ id: number; state: "awake" | "waking" | "queued" }>("session.wake", { id, wait });
+export const wakeSession = (id: number, wait = false) =>
+  call<{ id: number; state: "awake" | "waking" | "queued" }>("session.wake", { id, wait });
 export const removeSession = (id: number) => (cancelNudge(id), call("session.remove", { id }));
-export const resizeSession = (id: number, cols: number, rows: number) =>
-  call("session.resize", { id, cols, rows });
-const rawWrite = (id: number, data: string) => invoke("session_write", { id, data }).catch((e) => Promise.reject(toAppError("session_write", e)));
+export const resizeSession = (id: number, cols: number, rows: number) => call("session.resize", { id, cols, rows });
+const rawWrite = (id: number, data: string) =>
+  invoke("session_write", { id, data }).catch((e) => Promise.reject(toAppError("session_write", e)));
 /** Opens an .html/.htm path printed in a session's terminal in the system browser. The host resolves it through the daemon
  *  (`files.resolve_html`) and opens the result itself: the webview never passes a url to the opener. */
 export const openHtmlFile = (session: number, path: string) =>
@@ -627,14 +795,17 @@ export const writeSession = (id: number, data: string) => (cancelNudge(id), rawW
 
 export const listProjects = () => call<Project[]>("project.list");
 /** A host command that opens a native dialog first: no timeout, since the user may browse for a long time. */
-const nativePick = <T>(method: string, cmd: string, title: string) => invoke<T>(cmd, { title }).catch((e) => Promise.reject(toAppError(method, e)));
+const nativePick = <T>(method: string, cmd: string, title: string) =>
+  invoke<T>(cmd, { title }).catch((e) => Promise.reject(toAppError(method, e)));
 /** Native folder dialog on the Rust side, then `project.add` with the chosen folder; null when cancelled.
  *  The webview never supplies the path (`project.add` is not in the host's allow-list). */
-export const pickAndAddProject = (title: string) => nativePick<Project | null>("project.add", "project_add_pick", title);
+export const pickAndAddProject = (title: string) =>
+  nativePick<Project | null>("project.add", "project_add_pick", title);
 /** The logo of a project's repo or null: cosmetic, so it never rejects (see logo.ts); `project.logo` has a short client timeout. */
 export const projectLogo = createLogoLoader((id) => call<LogoAnswer>("project.logo", { id }));
 /** per-project integration settings; send only what changed */
-export const setProjectIntegrate = (id: string, s: { auto?: boolean; push?: boolean }) => call("project.integrate", { id, ...s });
+export const setProjectIntegrate = (id: string, s: { auto?: boolean; push?: boolean }) =>
+  call("project.integrate", { id, ...s });
 export type IntegrateResult = {
   integrated: boolean;
   into: string;
@@ -649,59 +820,137 @@ export type IntegrateResult = {
   branch_tip?: string;
 };
 /** integrates a worktree's branch into the default branch; fails with a coded error when it cannot */
-export const integrateWorktree = (project: string, path: string) => call<IntegrateResult>("worktree.integrate", { project, path });
-export type IntegrateUndoArgs = { project: string; default_branch: string; prev_tip: string; new_tip: string; branch: string; branch_tip: string };
+export const integrateWorktree = (project: string, path: string) =>
+  call<IntegrateResult>("worktree.integrate", { project, path });
+export type IntegrateUndoArgs = {
+  project: string;
+  default_branch: string;
+  prev_tip: string;
+  new_tip: string;
+  branch: string;
+  branch_tip: string;
+};
 /** takes back an integration: refused (coded error) when the default branch moved, was pushed or its checkout has changes */
-export const integrateUndo = (args: IntegrateUndoArgs) => call<{ branch_restored: boolean; worktree: string | null }>("integrate.undo", args);
+export const integrateUndo = (args: IntegrateUndoArgs) =>
+  call<{ branch_restored: boolean; worktree: string | null }>("integrate.undo", args);
 export const setProjectSetup = (id: string, setup: string) => call("project.setup", { id, setup });
-export const detectPackageManagers = (id: string) => call<{ installed: string[]; suggested: string | null; package_json?: boolean }>("pm.detect", { id });
-export type DispatchMeta = Record<string, { title?: string; archived?: boolean; requests?: string[]; updated?: number }>;
+export const detectPackageManagers = (id: string) =>
+  call<{ installed: string[]; suggested: string | null; package_json?: boolean }>("pm.detect", { id });
+export type DispatchMeta = Record<
+  string,
+  { title?: string; archived?: boolean; requests?: string[]; updated?: number }
+>;
 /** how a project leaves Axelstra: "list" only drops it from the list, "all" also closes its sessions and deletes its worktrees and branches */
 export type RemoveMode = "list" | "all";
 /** what removing a project would touch (read-only); `dirty`: uncommitted changes, `unmerged`: commits not in the default branch */
-export type RemovePreview = { sessions: number; terminals: number; worktrees: { path: string; branch: string | null; dirty: boolean; unmerged: boolean }[] };
-export type RemoveResult = { removed: boolean; sessions_closed: number; worktrees_removed: number; worktrees_pending: number; branches_deleted: number };
+export type RemovePreview = {
+  sessions: number;
+  terminals: number;
+  worktrees: { path: string; branch: string | null; dirty: boolean; unmerged: boolean }[];
+};
+export type RemoveResult = {
+  removed: boolean;
+  sessions_closed: number;
+  worktrees_removed: number;
+  worktrees_pending: number;
+  branches_deleted: number;
+};
 export const removeProjectPreview = (id: string) => call<RemovePreview>("project.remove_preview", { id });
-export const removeProject = (id: string, mode: RemoveMode = "list") => call<RemoveResult>("project.remove", { id, mode });
+export const removeProject = (id: string, mode: RemoveMode = "list") =>
+  call<RemoveResult>("project.remove", { id, mode });
 export type EnvSkip = { path: string; reason: string };
 /** worktree.create also says what .worktreeinclude copied into the new worktree and what it left out */
 export type WorktreeCreated = Worktree & { env_copied?: string[]; env_skipped?: EnvSkip[] };
-export const createWorktree = (project: string, name: string, parent?: string) => call<WorktreeCreated>("worktree.create", { project, name, parent, manual: true });
+export const createWorktree = (project: string, name: string, parent?: string) =>
+  call<WorktreeCreated>("worktree.create", { project, name, parent, manual: true });
 /** groups a worktree under another one of the same project; null puts it back at the top level */
-export const worktreeSetParent = (project: string, path: string, parent: string | null) => call("worktree.set_parent", { project, path, parent });
+export const worktreeSetParent = (project: string, path: string, parent: string | null) =>
+  call("worktree.set_parent", { project, path, parent });
 /** a task file (report) of an agent that worked in a worktree */
 export type WorktreeNote = { name: string; status: "ok" | "nota" | "aberto"; excerpt: string; modified: number };
-export const notesWorktree = (project: string, worktree: string) => call<{ items: WorktreeNote[] }>("notes.worktree", { project, worktree }).then((r) => r.items);
-export const notesReadFile = (project: string, name: string) => call<{ text: string; path: string; name: string }>("notes.read_file", { project, name });
+export const notesWorktree = (project: string, worktree: string) =>
+  call<{ items: WorktreeNote[] }>("notes.worktree", { project, worktree }).then((r) => r.items);
+export const notesReadFile = (project: string, name: string) =>
+  call<{ text: string; path: string; name: string }>("notes.read_file", { project, name });
 /** the ignored files .worktreeinclude would copy into the next worktree of the project */
 export type EnvPreview = { has_file: boolean; files: string[]; skipped: EnvSkip[] };
 export const projectEnvPreview = (project: string) => call<EnvPreview>("project.env_preview", { project });
-export type GhItem = { number: number; title: string; author: string; url: string; state: string; draft: boolean; branch: string; checks: string; review: string };
-export const ghList = (project: string, kind: "pr" | "issue") => call<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
+export type GhItem = {
+  number: number;
+  title: string;
+  author: string;
+  url: string;
+  state: string;
+  draft: boolean;
+  branch: string;
+  checks: string;
+  review: string;
+};
+export const ghList = (project: string, kind: "pr" | "issue") =>
+  call<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
 /** the window got focus: the daemon looks once at the PRs it follows that GitHub may have changed (`pr.changed` if one did) */
 export const prRefresh = () => callBg<Record<string, never>>("gh.pr_refresh", {});
-export const ghListBg =(project: string, kind: "pr" | "issue") => callBg<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
+export const ghListBg = (project: string, kind: "pr" | "issue") =>
+  callBg<{ items: GhItem[] }>("gh.list", { project, kind }).then((r) => r.items);
 /** An inline review comment of a PR. Every text field was written by a reviewer: untrusted. */
-export type ReviewComment = { id: number; path: string; line: number; body: string; author: string; diff_hunk: string; created: string; url: string; in_reply_to: number; outdated: boolean; pr: number };
+export type ReviewComment = {
+  id: number;
+  path: string;
+  line: number;
+  body: string;
+  author: string;
+  diff_hunk: string;
+  created: string;
+  url: string;
+  in_reply_to: number;
+  outdated: boolean;
+  pr: number;
+};
 /** A review as a whole (verdict plus its text); reviews without text are left out by the daemon. */
-export type ReviewSummary = { id: number; author: string; body: string; state: "approved" | "changes" | "commented" | "dismissed" | "pending"; created: string; url: string };
-export const ghComments = (project: string, number: number) => call<{ comments: ReviewComment[]; reviews: ReviewSummary[] }>("gh.comments", { project, number });
+export type ReviewSummary = {
+  id: number;
+  author: string;
+  body: string;
+  state: "approved" | "changes" | "commented" | "dismissed" | "pending";
+  created: string;
+  url: string;
+};
+export const ghComments = (project: string, number: number) =>
+  call<{ comments: ReviewComment[]; reviews: ReviewSummary[] }>("gh.comments", { project, number });
 /** `dryRun` only builds the text that would be sent (from GitHub's current version of the comment); nothing is delivered. */
 export const ghSendComment = (worktree: string, project: string, number: number, commentId: number, dryRun: boolean) =>
-  call<{ text: string; sent: boolean; session?: number }>("gh.send_comment", { worktree, project, number, comment_id: commentId, dry_run: dryRun });
-export const worktreeFromPr = (project: string, number: number) => call<Worktree>("worktree.from_pr", { project, number });
-export const listPorts = (worktree: string) => call<{ ports: { port: number; pid: number }[] }>("ports.list", { worktree }).then((r) => r.ports);
+  call<{ text: string; sent: boolean; session?: number }>("gh.send_comment", {
+    worktree,
+    project,
+    number,
+    comment_id: commentId,
+    dry_run: dryRun,
+  });
+export const worktreeFromPr = (project: string, number: number) =>
+  call<Worktree>("worktree.from_pr", { project, number });
+export const listPorts = (worktree: string) =>
+  call<{ ports: { port: number; pid: number }[] }>("ports.list", { worktree }).then((r) => r.ports);
 export type Schedule =
   | { kind: "interval"; minutes: number }
   | { kind: "daily"; time: string }
   | { kind: "weekly"; day: number; time: string };
-export type Automation = { id: string; name: string; project: string; agent: string; prompt: string; schedule: Schedule; enabled: boolean; last_run: number };
+export type Automation = {
+  id: string;
+  name: string;
+  project: string;
+  agent: string;
+  prompt: string;
+  schedule: Schedule;
+  enabled: boolean;
+  last_run: number;
+};
 export const listAutomations = () => call<{ automations: Automation[] }>("automation.list").then((r) => r.automations);
 export const saveAutomation = (a: Automation) => call<Automation>("automation.save", { ...a });
 export const deleteAutomation = (id: string) => call("automation.delete", { id });
 export const runAutomation = (id: string) => call<{ session: number; worktree: string }>("automation.run", { id });
 export const openInEditor = (worktree: string, app: "code") => call("open.editor", { worktree, app });
-export const worktreeRebase = (project: string, path: string) => call<RebaseResult>("worktree.rebase", { project, path });
+export const worktreeRebase = (project: string, path: string) =>
+  call<RebaseResult>("worktree.rebase", { project, path });
 export const removeWorktree = (project: string, path: string) => call("worktree.remove", { project, path });
 
 export type FileChange = {
@@ -730,9 +979,15 @@ export const fsList = (worktree: string, path: string) =>
 /** A folder read: `truncated` when it had more entries than the host reads (`total` = entries read). */
 export type FsListing = { entries: FsEntry[]; total: number; truncated: boolean };
 /** The host says the path is not a local folder (remote, UNC): the only code that sends a local call to the daemon. */
-export const isNotLocal = (e: unknown): boolean => (e instanceof AppError ? e.code : (e as { code?: unknown } | null)?.code) === "localfs.not_local";
+export const isNotLocal = (e: unknown): boolean =>
+  (e instanceof AppError ? e.code : (e as { code?: unknown } | null)?.code) === "localfs.not_local";
 /** Runs the local command; a `localfs.not_local` answer (and only that) goes to `fallback`, the daemon call. */
-const localOr = <T>(method: string, cmd: string, args: Record<string, unknown>, fallback: () => Promise<T>): Promise<T> =>
+const localOr = <T>(
+  method: string,
+  cmd: string,
+  args: Record<string, unknown>,
+  fallback: () => Promise<T>,
+): Promise<T> =>
   invoke<T>(cmd, args).catch((e) => (isNotLocal(e) ? fallback() : Promise.reject(toAppError(method, e))));
 
 let listReq = 0;
@@ -747,8 +1002,14 @@ export const fsListCancel = (req: number) => {
  * reads, and the answer (sorted) replaces them. A remote one (`@host:`) or a `localfs.not_local` answer uses the daemon
  * (`fs.list`), with no chunks. Any other failure is final. `req` comes from `nextListReq`.
  */
-export const fsListStream = (worktree: string, path: string, req: number, onChunk: (entries: FsEntry[]) => void): Promise<FsListing> => {
-  const viaDaemon = () => fsList(worktree, path).then((entries) => ({ entries, total: entries.length, truncated: false }));
+export const fsListStream = (
+  worktree: string,
+  path: string,
+  req: number,
+  onChunk: (entries: FsEntry[]) => void,
+): Promise<FsListing> => {
+  const viaDaemon = () =>
+    fsList(worktree, path).then((entries) => ({ entries, total: entries.length, truncated: false }));
   if (isRemote(worktree)) return viaDaemon();
   const ch = new Channel<FsEntry[]>();
   ch.onmessage = (c) => onChunk(c);
@@ -770,7 +1031,8 @@ export const onLocalFsChanged = (fn: (worktree: string) => void): (() => void) =
 export const fsSearch = (worktree: string, query: string) =>
   call<{ files: string[] }>("fs.search", { worktree, query }).then((r) => r.files);
 export type GrepHit = { path: string; line: number; text: string };
-export const fsGrep = (worktree: string, query: string) => call<{ matches: GrepHit[] }>("fs.grep", { worktree, query }).then((r) => r.matches);
+export const fsGrep = (worktree: string, query: string) =>
+  call<{ matches: GrepHit[] }>("fs.grep", { worktree, query }).then((r) => r.matches);
 export const fsCreate = (worktree: string, path: string, dir: boolean) => call("fs.create", { worktree, path, dir });
 export const fsRename = (worktree: string, path: string, to: string) => call("fs.rename", { worktree, path, to });
 export const fsDelete = (worktree: string, path: string) => call("fs.delete", { worktree, path });
@@ -780,42 +1042,73 @@ export const fsRead = (worktree: string, path: string) => {
 };
 export const fsStat = (worktree: string, path: string) => {
   const viaDaemon = () => call<{ hash: string | null }>("fs.stat", { worktree, path }).then((r) => r.hash);
-  return isRemote(worktree) ? viaDaemon() : localOr<string | null>("local_fs_stat", "local_fs_stat", { worktree, path }, viaDaemon);
+  return isRemote(worktree)
+    ? viaDaemon()
+    : localOr<string | null>("local_fs_stat", "local_fs_stat", { worktree, path }, viaDaemon);
 };
 
 /** What the daemon says about a path clicked in a terminal (`files.resolve_path`): canonical path and what may be done with it. */
-export type PathInfo = { path: string; is_dir: boolean; exec: boolean; inside: boolean; can_open: boolean; can_run: boolean };
+export type PathInfo = {
+  path: string;
+  is_dir: boolean;
+  exec: boolean;
+  inside: boolean;
+  can_open: boolean;
+  can_run: boolean;
+};
 export type PathAction = "reveal" | "open" | "run";
 /** Describes a path printed in a session's terminal (relative ones start at the session's folder). Throws `files.path_not_found` when it does not exist. */
 export const resolvePath = (session: number, path: string) => call<PathInfo>("files.resolve_path", { session, path });
 /** Reveals, opens or runs it. The daemon resolves the path again and refuses what `PathInfo` does not allow; a run is audited. */
-export const pathAction = (session: number, path: string, action: PathAction) => call<{ path: string }>("files.path_action", { session, path, action });
+export const pathAction = (session: number, path: string, action: PathAction) =>
+  call<{ path: string }>("files.path_action", { session, path, action });
 export const fsWrite = (worktree: string, path: string, text: string, eol: string, bom: boolean, base_hash?: string) =>
   call<Saved>("fs.write", { worktree, path, text, eol, bom, base_hash });
 
-export const gitCommit = (worktree: string, message: string) => call<{ sha: string }>("git.commit", { worktree, message });
+export const gitCommit = (worktree: string, message: string) =>
+  call<{ sha: string }>("git.commit", { worktree, message });
 /** Commit message the user's `claude` CLI proposes for the pending changes (nothing is staged or committed). */
-export const gitSuggest = (worktree: string) => call<{ message: string }>("git.suggest", { worktree }).then((r) => r.message);
+export const gitSuggest = (worktree: string) =>
+  call<{ message: string }>("git.suggest", { worktree }).then((r) => r.message);
 /** Title and markdown description the user's `claude` CLI proposes for a PR of this worktree's branch against `base` (default branch when omitted). */
-export const gitSuggestPr = (worktree: string, base?: string) => call<{ title: string; body: string }>("git.suggest_pr", { worktree, base });
+export const gitSuggestPr = (worktree: string, base?: string) =>
+  call<{ title: string; body: string }>("git.suggest_pr", { worktree, base });
 export const gitPush = (worktree: string) => call<{ output: string }>("git.push", { worktree });
 export const gitPr = (worktree: string, title: string, body: string, base?: string) =>
   call<{ url: string }>("git.pr", { worktree, title, body, base }).then((r) => r.url);
 export type CheckItem = { name: string; state: "pass" | "fail" | "pending" | "skipped"; link: string };
 /** CI and merge state of the PR behind a worktree's branch; `problem` is set when there is none or gh is unusable. */
 export type ShipStatus = {
-  problem: "" | "nopr" | "missing" | "auth" | "error"; detail: string;
-  number: number; title: string; url: string; pr_state: "open" | "merged" | "closed"; draft: boolean;
-  ci: "pass" | "fail" | "pending" | "none"; checks: CheckItem[];
-  review: "approved" | "changes" | "review" | ""; mergeable: "yes" | "no" | "unknown"; merge_state: string; can_merge: boolean;
+  problem: "" | "nopr" | "missing" | "auth" | "error";
+  detail: string;
+  number: number;
+  title: string;
+  url: string;
+  pr_state: "open" | "merged" | "closed";
+  draft: boolean;
+  ci: "pass" | "fail" | "pending" | "none";
+  checks: CheckItem[];
+  review: "approved" | "changes" | "review" | "";
+  mergeable: "yes" | "no" | "unknown";
+  merge_state: string;
+  can_merge: boolean;
 };
-export const gitTimeline = (worktree: string, project: string, ci = false) => callBg<Timeline>("git.timeline", { worktree, project, ci });
+export const gitTimeline = (worktree: string, project: string, ci = false) =>
+  callBg<Timeline>("git.timeline", { worktree, project, ci });
 export const gitChecks = (worktree: string) => callBg<ShipStatus>("git.checks", { worktree });
 export const gitMerge = (worktree: string, auto: boolean, deleteBranch: boolean) =>
   call<{ output: string }>("git.merge", { worktree, auto, delete_branch: deleteBranch }).then((r) => r.output);
 
 export type KCard = {
-  meta: { id: string; title: string; status: string; agent: string; depends_on: string[]; priority: number; acceptance?: string | null };
+  meta: {
+    id: string;
+    title: string;
+    status: string;
+    agent: string;
+    depends_on: string[];
+    priority: number;
+    acceptance?: string | null;
+  };
   body: string;
 };
 export type Board = {
@@ -824,7 +1117,8 @@ export type Board = {
 };
 
 export const kanbanList = (project: string) => call<Board>("kanban.list", { project });
-export const kanbanSave = (project: string, card: Record<string, unknown>) => call<KCard>("kanban.save", { project, ...card });
+export const kanbanSave = (project: string, card: Record<string, unknown>) =>
+  call<KCard>("kanban.save", { project, ...card });
 export const kanbanMove = (project: string, id: string, status: string) => call("kanban.move", { project, id, status });
 export const kanbanDelete = (project: string, id: string) => call("kanban.delete", { project, id });
 
@@ -851,7 +1145,13 @@ export const orchStart = (project: string, max = 3, trustAcceptance = false, pin
   call<OrchRun>("orch.start", { project, max, trust_acceptance: trustAcceptance, ...(pin ? { pin } : {}) });
 
 /** What the user must confirm before a run: each todo card's agent, permission mode and acceptance command (mirrors orch::TrustInfo). */
-export type OrchTrustCard = { id: string; agent: string; permission_mode: string; bypass: boolean; acceptance: string | null };
+export type OrchTrustCard = {
+  id: string;
+  agent: string;
+  permission_mode: string;
+  bypass: boolean;
+  acceptance: string | null;
+};
 export type OrchTrust = { pin: string; cards: OrchTrustCard[] };
 /** Trust info of the project's todo cards for the Kanban confirm; null while the running daemon has no `orch.trust_info`. */
 export const orchTrustInfo = (project: string) => callOr<OrchTrust | null>("orch.trust_info", { project }, null);
@@ -878,19 +1178,37 @@ export const gitShow = (worktree: string, sha: string) =>
   call<{ diff: string }>("git.show", { worktree, sha }).then((r) => r.diff);
 
 export type WtStatus = { path: string; dirty: number; ahead: number; behind: number; upstream: boolean };
-export const worktreeStatus = (paths: string[]) => callBg<{ status: WtStatus[] }>("worktree.status", { paths }).then((r) => r.status);
+export const worktreeStatus = (paths: string[]) =>
+  callBg<{ status: WtStatus[] }>("worktree.status", { paths }).then((r) => r.status);
 
 /** counts per project for the status bar (cached by the daemon for about 10 s) */
-export const worktreeOverview = () => callBg<{ projects: import("./statusGroups").OverviewProject[] }>("worktree.overview").then((r) => r.projects);
+export const worktreeOverview = () =>
+  callBg<{ projects: import("./statusGroups").OverviewProject[] }>("worktree.overview").then((r) => r.projects);
 /** removes the worktrees whose work is merged (the janitor's sweep) */
-export type SweepItem = { path: string; branch: string; removed: boolean; kind?: string; why?: string; warning?: string; closed?: string[]; pending?: boolean };
+export type SweepItem = {
+  path: string;
+  branch: string;
+  removed: boolean;
+  kind?: string;
+  why?: string;
+  warning?: string;
+  closed?: string[];
+  pending?: boolean;
+};
 /** what a manual run closed besides removing worktrees (absent from an older daemon) */
 export type SweepResult = { swept: SweepItem[]; closed_sessions?: number; closed_procs?: number; freed_bytes?: number };
 export const worktreeSweepFull = () => call<SweepResult>("worktree.sweep", {});
 export const worktreeSweep = () => worktreeSweepFull().then((r) => r.swept);
 
 /** `project` is Gemini's project hash (its logs keep no folder); `geminiPathVariants` + sha-256 map it back to a worktree. */
-export type AgentHit = { agent: "claude" | "codex" | "gemini"; session: string; cwd: string; ts: number; snippet: string; project?: string };
+export type AgentHit = {
+  agent: "claude" | "codex" | "gemini";
+  session: string;
+  cwd: string;
+  ts: number;
+  snippet: string;
+  project?: string;
+};
 /** Ways Gemini may have spelled a worktree path before hashing it (mirrors gemini_hashes in crates/daemon/src/agentlog.rs). */
 export const geminiPathVariants = (path: string) => {
   const t = path.replace(/^\\\\\?\\/, "").replace(/[\\/]+$/, "");
@@ -899,14 +1217,25 @@ export const geminiPathVariants = (path: string) => {
 /** What launchDefaultAgent gets as `resume` to reopen a hit's conversation; null when the agent cannot resume it. */
 export const hitResume = (h: Pick<AgentHit, "agent" | "session">) =>
   h.agent === "claude" ? h.session : h.agent === "gemini" ? `gemini:${h.session}` : null;
-export const agentSearch = (query: string, max = 30) => callBg<{ hits: AgentHit[] }>("agent.search", { query, max }).then((r) => r.hits);
+export const agentSearch = (query: string, max = 30) =>
+  callBg<{ hits: AgentHit[] }>("agent.search", { query, max }).then((r) => r.hits);
 
-export type TokenUsage = { input: number; output: number; cache_read: number; cache_write: number; messages: number; context: number };
-export const agentUsage = (cwd: string, session?: string) => callBg<{ usage: TokenUsage | null }>("agent.usage", { cwd, session }).then((r) => r.usage);
-export const worktreeUsage = (worktrees: string[]) => callBg<{ usage: WtUsage[] }>("agent.worktree_usage", { worktrees }).then((r) => r.usage);
+export type TokenUsage = {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+  messages: number;
+  context: number;
+};
+export const agentUsage = (cwd: string, session?: string) =>
+  callBg<{ usage: TokenUsage | null }>("agent.usage", { cwd, session }).then((r) => r.usage);
+export const worktreeUsage = (worktrees: string[]) =>
+  callBg<{ usage: WtUsage[] }>("agent.worktree_usage", { worktrees }).then((r) => r.usage);
 
 export const computerStatus = () => call<{ enabled: boolean }>("computer.status").then((r) => r.enabled);
-export const computerEnable = (on: boolean) => call<{ enabled: boolean }>("computer.enable", { on }).then((r) => r.enabled);
+export const computerEnable = (on: boolean) =>
+  call<{ enabled: boolean }>("computer.enable", { on }).then((r) => r.enabled);
 
 export type WorkerLimits = { max_workers: number; workers: number };
 export type SessionRes = { id: number; mem: number; cpu_100ns: number };
@@ -921,6 +1250,35 @@ export type GovernorConfig = {
   crit_free_pct: number;
   high_free_mb: number;
   crit_free_mb: number;
+  /** kernel pool (paged + nonpaged) above which the daemon warns of a leak; absent on a daemon without the breakdown */
+  kernel_pool_mb?: number;
+};
+/** `breakdown` of `mem.status`: where the memory goes. Every size is MB, null when the OS does not say. */
+export type MemBreakdown = {
+  kernel?: {
+    paged_mb: number;
+    nonpaged_mb: number;
+    total_mb: number;
+    baseline_mb?: number | null;
+    high: boolean;
+  } | null;
+  cache_mb?: number | null;
+  compressed_mb?: number | null;
+  sessions?: { tier: string; count: number; rss_mb: number }[];
+  builds?: { count: number; rss_mb: number };
+  external?: { name: string; count: number; rss_mb: number }[];
+  others_mb?: number;
+  handles?: { total: number; top: { name: string; pid: number; handles: number }[] } | null;
+  system?: {
+    cpu_user_pct?: number | null;
+    cpu_kernel_pct?: number | null;
+    commit_mb?: number | null;
+    commit_limit_mb?: number | null;
+    modified_mb?: number | null;
+    pages_per_sec?: number | null;
+  } | null;
+  top_cpu?: { name: string; pid: number; value: number }[];
+  top_io?: { name: string; pid: number; value: number }[];
 };
 export type MemStatus = {
   level: MemLevel;
@@ -932,6 +1290,8 @@ export type MemStatus = {
   sessions: { id: number; rss_mb: number }[];
   /** frozen sessions and builds: `kind` is "session" or "build" (a test run under `axelstra lock`) */
   paused: { kind: string; session: number | null; reason: string; since: number; name?: string | null }[];
+  /** additive: an older daemon does not send it */
+  breakdown?: MemBreakdown | null;
 };
 export const memStatus = () => callBg<MemStatus>("mem.status");
 export const memPause = (session: number) => call<{ paused: number[] }>("mem.pause", { session });
@@ -945,24 +1305,39 @@ export const sessionResources = () => callBg<{ sessions: SessionRes[]; cores: nu
 export type FlowTask = { id: string; worktree: string; state: string };
 export const flowTasks = () => callBg<{ tasks: FlowTask[] }>("flow.list").then((r) => r.tasks);
 
-export const workerLimits = (max?: number) => call<WorkerLimits>("orch.limits", max === undefined ? {} : { max_workers: max });
+export const workerLimits = (max?: number) =>
+  call<WorkerLimits>("orch.limits", max === undefined ? {} : { max_workers: max });
 
 /** What Claude Code's status line last reported for an agent tab (context window, 5 h and weekly limits). */
 export type ClaudeStatus = {
   context_window?: { context_window_size?: number; used_percentage?: number };
-  rate_limits?: { five_hour?: { used_percentage?: number; resets_at?: number }; seven_day?: { used_percentage?: number; resets_at?: number } };
+  rate_limits?: {
+    five_hour?: { used_percentage?: number; resets_at?: number };
+    seven_day?: { used_percentage?: number; resets_at?: number };
+  };
 };
-export const agentStatus = (key: string) => callBg<{ status: ClaudeStatus | null }>("agent.status", { key }).then((r) => r.status);
+export const agentStatus = (key: string) =>
+  callBg<{ status: ClaudeStatus | null }>("agent.status", { key }).then((r) => r.status);
 
 /** One entry of the daemon's agents table; `installed` says whether its executable is on the PATH. */
-export type AgentInfo = { id: string; name: string; installed: boolean; path: string | null; install: string; can_resume: boolean; interactive_prompt: boolean };
+export type AgentInfo = {
+  id: string;
+  name: string;
+  installed: boolean;
+  path: string | null;
+  install: string;
+  can_resume: boolean;
+  interactive_prompt: boolean;
+};
 /** Every agent the app knows (claude, codex, gemini) with its installed state. */
 export const agentsList = () => callBg<{ agents: AgentInfo[] }>("agents.list").then((r) => r.agents);
 
 /** Select options for the agent pickers: the installed agents, plus `current` when it is not (so a saved choice never vanishes). */
 export const agentOptions = (list: AgentInfo[], current?: string) => {
   const mark = (id: string) => (["claude", "codex", "gemini"].includes(id) ? id : undefined);
-  const out: { value: string; label: string; icon?: string }[] = list.filter((a) => a.installed).map((a) => ({ value: a.id, label: a.name, icon: mark(a.id) }));
+  const out: { value: string; label: string; icon?: string }[] = list
+    .filter((a) => a.installed)
+    .map((a) => ({ value: a.id, label: a.name, icon: mark(a.id) }));
   const cur = current && list.find((a) => a.id === current || (current === "chatgpt" && a.id === "codex"));
   if (current && !out.some((o) => o.value === current || (current === "chatgpt" && o.value === "codex"))) {
     out.push({ value: current, label: cur ? L.agent.notInstalled(cur.name) : L.agent.unknownInList(current) });
@@ -977,7 +1352,12 @@ export const agentWarning = (list: AgentInfo[], id: string) => {
   return a.installed ? "" : L.agent.notFound(a.name, a.install);
 };
 
-export type CodexWindow = { used_percent?: number; window_minutes?: number; resets_at?: number; resets_in_seconds?: number };
+export type CodexWindow = {
+  used_percent?: number;
+  window_minutes?: number;
+  resets_at?: number;
+  resets_in_seconds?: number;
+};
 export type CodexLimits = { primary?: CodexWindow; secondary?: CodexWindow; as_of?: number };
 export const codexLimits = () => callBg<{ limits: CodexLimits | null }>("codex.limits").then((r) => r.limits);
 
@@ -985,38 +1365,84 @@ export const codexLimits = () => callBg<{ limits: CodexLimits | null }>("codex.l
 export type DockerStatus = { installed: boolean; running: boolean; version: string; error: string };
 export type DockerPort = { host: number | null; container: number; proto: string };
 export type DockerContainer = {
-  id: string; name: string; image: string; state: string; status: string; ports: DockerPort[]; created: string;
-  project: string; working_dir: string; service: string; volumes: string[]; networks: string[];
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+  ports: DockerPort[];
+  created: string;
+  project: string;
+  working_dir: string;
+  service: string;
+  volumes: string[];
+  networks: string[];
 };
 export type DockerProject = { name: string; working_dir: string; running: number; total: number };
 export type DockerCompose = { file: string | null; project: string; services: DockerContainer[] };
 export type DockerStat = { id: string; name: string; cpu: number; mem: string; mem_pct: number };
-export type DockerImage = { id: string; tags: string[]; size: string; created: string; containers: number; dangling: boolean };
+export type DockerImage = {
+  id: string;
+  tags: string[];
+  size: string;
+  created: string;
+  containers: number;
+  dangling: boolean;
+};
 export type DockerVolume = { name: string; driver: string; mountpoint: string; used_by: string[] };
 export type DockerNetwork = { id: string; name: string; driver: string; scope: string; containers: string[] };
-export type DockerInspect = { command: string; workdir: string; restart: string; env: [string, string][]; mounts: [string, string, string, boolean][]; networks: [string, string][] };
+export type DockerInspect = {
+  command: string;
+  workdir: string;
+  restart: string;
+  env: [string, string][];
+  mounts: [string, string, string, boolean][];
+  networks: [string, string][];
+};
 export type DockerFsEntry = { name: string; dir: boolean };
 export type DockerAction =
-  | "container.start" | "container.stop" | "container.restart" | "container.pause" | "container.unpause" | "container.kill" | "container.remove"
-  | "image.remove" | "volume.remove" | "prune.containers" | "prune.images" | "prune.volumes" | "compose.up" | "compose.down";
+  | "container.start"
+  | "container.stop"
+  | "container.restart"
+  | "container.pause"
+  | "container.unpause"
+  | "container.kill"
+  | "container.remove"
+  | "image.remove"
+  | "volume.remove"
+  | "prune.containers"
+  | "prune.images"
+  | "prune.volumes"
+  | "compose.up"
+  | "compose.down";
 
 // queries go over the second connection: the 3 s poll must not hold up interactive calls
 export const dockerStatus = () => callBg<DockerStatus>("docker.status");
 export const dockerContainers = (worktree?: string | null) =>
-  callBg<{ projects: DockerProject[]; containers: DockerContainer[]; compose: DockerCompose | null }>("docker.containers", worktree ? { worktree } : {});
+  callBg<{ projects: DockerProject[]; containers: DockerContainer[]; compose: DockerCompose | null }>(
+    "docker.containers",
+    worktree ? { worktree } : {},
+  );
 export const dockerStats = () => callBg<{ stats: DockerStat[] }>("docker.stats").then((r) => r.stats);
 export const dockerImages = () => callBg<{ images: DockerImage[] }>("docker.images").then((r) => r.images);
 export const dockerVolumes = () => callBg<{ volumes: DockerVolume[] }>("docker.volumes").then((r) => r.volumes);
 export const dockerNetworks = () => callBg<{ networks: DockerNetwork[] }>("docker.networks").then((r) => r.networks);
 export const dockerInspect = (id: string) => callBg<DockerInspect>("docker.inspect", { id });
-export const dockerLogs = (id: string, tail = 500) => callBg<{ text: string }>("docker.logs", { id, tail }).then((r) => r.text);
-export const dockerFsList = (id: string, path: string) => callBg<{ entries: DockerFsEntry[] }>("docker.fs_list", { id, path }).then((r) => r.entries);
-export const dockerFsRead = (id: string, path: string) => callBg<{ text: string }>("docker.fs_read", { id, path }).then((r) => r.text);
-export const dockerAction = (action: DockerAction, o: { id?: string; force?: boolean; volumes?: boolean; worktree?: string } = {}) =>
-  call<{ output: string }>("docker.action", { action, ...o }).then((r) => r.output);
+export const dockerLogs = (id: string, tail = 500) =>
+  callBg<{ text: string }>("docker.logs", { id, tail }).then((r) => r.text);
+export const dockerFsList = (id: string, path: string) =>
+  callBg<{ entries: DockerFsEntry[] }>("docker.fs_list", { id, path }).then((r) => r.entries);
+export const dockerFsRead = (id: string, path: string) =>
+  callBg<{ text: string }>("docker.fs_read", { id, path }).then((r) => r.text);
+export const dockerAction = (
+  action: DockerAction,
+  o: { id?: string; force?: boolean; volumes?: boolean; worktree?: string } = {},
+) => call<{ output: string }>("docker.action", { action, ...o }).then((r) => r.output);
 /** Logs and shell are sessions the daemon starts with a fixed command in the worktree; the answer is the session id. */
-export const dockerOpenLogs = (worktree: string, id: string, project?: string) => call<{ id: number }>("docker.open_logs", { worktree, id, project }).then((r) => r.id);
-export const dockerOpenShell = (worktree: string, id: string, project?: string) => call<{ id: number }>("docker.open_shell", { worktree, id, project }).then((r) => r.id);
+export const dockerOpenLogs = (worktree: string, id: string, project?: string) =>
+  call<{ id: number }>("docker.open_logs", { worktree, id, project }).then((r) => r.id);
+export const dockerOpenShell = (worktree: string, id: string, project?: string) =>
+  call<{ id: number }>("docker.open_shell", { worktree, id, project }).then((r) => r.id);
 
 /** Hooks that report agent state (needs input, done) to Axelstra, kept in the agent's own settings (~/.claude or ~/.gemini). */
 export type HookAgent = "claude" | "gemini";
@@ -1036,7 +1462,11 @@ export const hookAgentsToShow = (list: AgentInfo[] | undefined): HookAgent[] =>
 // ---- daemon methods newer than some running daemons: each degrades (null / empty) on "unknown method" ----
 /** Messages the daemon's store recorded (a corrupt file it recovered from, ...), taken once. Empty on an older daemon. */
 export const storeNotices = () =>
-  callOr<{ notices: string[]; items?: { text: string; code?: string; params?: Record<string, unknown> }[] }>("notices.take", {}, { notices: [] }).then(
+  callOr<{ notices: string[]; items?: { text: string; code?: string; params?: Record<string, unknown> }[] }>(
+    "notices.take",
+    {},
+    { notices: [] },
+  ).then(
     // `items` pairs each English line with its message code, which is shown in the UI language
     (r) => (r.items ? r.items.map((i) => coded(i.code, i.params, i.text)) : r.notices),
   );
@@ -1058,20 +1488,41 @@ export type BudgetLimit = { daily?: number; weekly?: number; auto_pause?: boolea
 /** `default` applies to every worktree without an entry of its own in `worktrees` (keyed by path). */
 export type Budgets = { default?: BudgetLimit; worktrees?: Record<string, BudgetLimit> };
 export type BudgetLevel = "ok" | "warn" | "over";
-export type BudgetRow = { worktree: string; period: "daily" | "weekly"; used: number; limit: number; pct: number; level: BudgetLevel; auto_pause: boolean };
-export type BudgetEvent = { worktree: string; period: "daily" | "weekly"; level: "warn" | "over"; used: number; limit: number; pct: number; paused: number[]; at: number };
+export type BudgetRow = {
+  worktree: string;
+  period: "daily" | "weekly";
+  used: number;
+  limit: number;
+  pct: number;
+  level: BudgetLevel;
+  auto_pause: boolean;
+};
+export type BudgetEvent = {
+  worktree: string;
+  period: "daily" | "weekly";
+  level: "warn" | "over";
+  used: number;
+  limit: number;
+  pct: number;
+  paused: number[];
+  at: number;
+};
 /** Spending against the limits for the given worktrees (one row per worktree and period that has a limit); empty on an older daemon. */
-export const budgetStatus = (worktrees: string[]) => callBg<{ budgets: BudgetRow[] }>("budget.status", { worktrees })
-  .catch((e) => (isUnknownMethod(e) ? { budgets: [] as BudgetRow[] } : Promise.reject(e)))
-  .then((r) => r.budgets ?? []);
+export const budgetStatus = (worktrees: string[]) =>
+  callBg<{ budgets: BudgetRow[] }>("budget.status", { worktrees })
+    .catch((e) => (isUnknownMethod(e) ? { budgets: [] as BudgetRow[] } : Promise.reject(e)))
+    .then((r) => r.budgets ?? []);
 /** Evaluates the limits now (the daemon also does it on usage and limit changes); the rows after the check. */
-export const budgetCheck = () => callOr<{ budgets: BudgetRow[] }>("budget.check", {}, { budgets: [] }).then((r) => r.budgets ?? []);
+export const budgetCheck = () =>
+  callOr<{ budgets: BudgetRow[] }>("budget.check", {}, { budgets: [] }).then((r) => r.budgets ?? []);
 /** Level crossings since the last call (take semantics); an older daemon has none. */
-export const budgetEvents = () => callOr<{ events: BudgetEvent[] }>("budget.events", {}, { events: [] }).then((r) => r.events ?? []);
+export const budgetEvents = () =>
+  callOr<{ events: BudgetEvent[] }>("budget.events", {}, { events: [] }).then((r) => r.events ?? []);
 // ---- workspace export / import: files and folders come from native dialogs held by the host, never from the page ----
 type WsExported = { path: string; summary: { projects: number; automations: number; cards: number } };
 /** A host command that opens a native dialog first (no timeout), with extra arguments. */
-const hostCmd = <T>(method: string, cmd: string, args: Record<string, unknown> = {}) => invoke<T>(cmd, args).catch((e) => Promise.reject(toAppError(method, e)));
+const hostCmd = <T>(method: string, cmd: string, args: Record<string, unknown> = {}) =>
+  invoke<T>(cmd, args).catch((e) => Promise.reject(toAppError(method, e)));
 /** Save dialog, then `workspace.export`. `undefined` = cancelled; null = the daemon is too old. */
 export const pickAndExportWorkspace = (title: string): Promise<WsExported | null | undefined> =>
   hostCmd<WsExported | null>("workspace.export", "workspace_export_pick", { title }).then(
@@ -1086,15 +1537,26 @@ export const pickWorkspaceFile = (title: string): Promise<WorkspacePreview | nul
   );
 /** Folder dialog for where the projects under `old` (a path of the file) live here; the new preview, or undefined when cancelled. */
 export const mapWorkspaceFolder = (title: string, old: string): Promise<WorkspacePreview | undefined> =>
-  hostCmd<WorkspacePreview | null>("workspace.import_preview", "workspace_map_pick", { title, old }).then((r) => r ?? undefined);
+  hostCmd<WorkspacePreview | null>("workspace.import_preview", "workspace_map_pick", { title, old }).then(
+    (r) => r ?? undefined,
+  );
 export const clearWorkspaceMap = () => hostCmd<WorkspacePreview>("workspace.import_preview", "workspace_map_clear");
 /** `workspace.import` of the file picked before, with the folder map; the page only chooses how. */
-export const applyWorkspaceImport = (mode: WorkspaceMode, conflicts: WorkspaceConflicts) => hostCmd<WorkspaceOutcome>("workspace.import", "workspace_import_apply", { mode, conflicts });
+export const applyWorkspaceImport = (mode: WorkspaceMode, conflicts: WorkspaceConflicts) =>
+  hostCmd<WorkspaceOutcome>("workspace.import", "workspace_import_apply", { mode, conflicts });
 /** The dialog was closed: the host forgets the picked file. */
-export const cancelWorkspaceImport = () => hostCmd<void>("workspace.import", "workspace_import_cancel").catch((e) => console.debug("workspace_import_cancel", e));
+export const cancelWorkspaceImport = () =>
+  hostCmd<void>("workspace.import", "workspace_import_cancel").catch((e) =>
+    console.debug("workspace_import_cancel", e),
+  );
 
 export type JanitorEvent = {
-  project: string; path: string; branch: string; into: string; why: string; at: number;
+  project: string;
+  path: string;
+  branch: string;
+  into: string;
+  why: string;
+  at: number;
   /** absent = "removed" (an older daemon) */
   kind?: "removed" | "integrated" | "empty" | "attention";
   how?: "ff" | "merge";
@@ -1106,11 +1568,25 @@ export type JanitorEvent = {
   text?: string;
 };
 /** Worktrees the automatic sweep removed since the last call (take semantics); an older daemon has none. */
-export const janitorEvents = () => callOr<{ events: JanitorEvent[] }>("janitor.events", {}, { events: [] }).then((r) => r.events ?? []);
+export const janitorEvents = () =>
+  callOr<{ events: JanitorEvent[] }>("janitor.events", {}, { events: [] }).then((r) => r.events ?? []);
 
 // ---- CI-fix trigger (daemon: triggers.*) ----
-export type TriggerFiring = { ts: number; worktree: string; sha: string; checks: string[]; kind: "fired" | "limited" | "failed"; detail: string };
-export type TriggerLimits = { cooldown_secs: number; max_per_hour: number; poll_secs: number; cooldown_range: [number, number]; max_per_hour_range: [number, number] };
+export type TriggerFiring = {
+  ts: number;
+  worktree: string;
+  sha: string;
+  checks: string[];
+  kind: "fired" | "limited" | "failed";
+  detail: string;
+};
+export type TriggerLimits = {
+  cooldown_secs: number;
+  max_per_hour: number;
+  poll_secs: number;
+  cooldown_range: [number, number];
+  max_per_hour_range: [number, number];
+};
 export type TriggerState = {
   project: string;
   ci_fix: boolean;
@@ -1134,51 +1610,115 @@ export type TriggerPreview = {
   never_pr_worktrees: boolean;
   audit_method: string;
 };
-export type TriggerEvent = { kind: "ci_fix" | "ci_fix_limited" | "ci_fix_failed"; project: string; worktree: string; branch: string; sha?: string; detail?: string; detail_code?: string; detail_params?: Record<string, unknown> };
+export type TriggerEvent = {
+  kind: "ci_fix" | "ci_fix_limited" | "ci_fix_failed";
+  project: string;
+  worktree: string;
+  branch: string;
+  sha?: string;
+  detail?: string;
+  detail_code?: string;
+  detail_params?: Record<string, unknown>;
+};
 /** State, limits and prompt template of a project's CI-fix trigger; null on a daemon without `triggers.*`. */
 export const triggersGet = (project: string) => callOr<TriggerState | null>("triggers.get", { project }, null);
 /** What enabling would do (the prompt with an example failure, the limits); null on an older daemon. */
-export const triggersPreview = (project: string) => callOr<TriggerPreview | null>("triggers.preview", { project }, null);
+export const triggersPreview = (project: string) =>
+  callOr<TriggerPreview | null>("triggers.preview", { project }, null);
 /** Turns the trigger on/off and/or changes its limits. The first enabling needs `confirm` = the state's `confirm_word`. */
-export const triggersSet = (project: string, patch: { ci_fix?: boolean; confirm?: string; cooldown_secs?: number; max_per_hour?: number }) =>
-  call<TriggerState>("triggers.set", { project, ...patch });
+export const triggersSet = (
+  project: string,
+  patch: { ci_fix?: boolean; confirm?: string; cooldown_secs?: number; max_per_hour?: number },
+) => call<TriggerState>("triggers.set", { project, ...patch });
 /** What the trigger did since the last call (take semantics); an older daemon has none. */
-export const triggersEvents = () => callOr<{ events: TriggerEvent[] }>("triggers.events", {}, { events: [] }).then((r) => r.events ?? []);
+export const triggersEvents = () =>
+  callOr<{ events: TriggerEvent[] }>("triggers.events", {}, { events: [] }).then((r) => r.events ?? []);
 
 // ---- remote hosts (M7b): the registry lives in the Tauri host, not in the daemon ----
 export type HostState = "idle" | "connecting" | "ok" | "lost" | "auth";
-export type HostInfo = { id: string; name: string; spec: string; slot: number; state: HostState; error?: string; /** message code of `error` when it is a single coded message */ error_code?: string; error_params?: Record<string, unknown>; proto?: number; build?: string };
-export type HostInfoReport = { os: string; home: string; user: string; hostname: string; shell: string; sep: string; proto: number; build: string; /** additive: absent on a daemon from before they were reported */ version?: string; commit?: string; built?: string; /** absent on a daemon from before Add project sources */ wsl_distros?: string[]; ssh_hosts?: string[] };
+export type HostInfo = {
+  id: string;
+  name: string;
+  spec: string;
+  slot: number;
+  state: HostState;
+  error?: string;
+  /** message code of `error` when it is a single coded message */ error_code?: string;
+  error_params?: Record<string, unknown>;
+  proto?: number;
+  build?: string;
+};
+export type HostInfoReport = {
+  os: string;
+  home: string;
+  user: string;
+  hostname: string;
+  shell: string;
+  sep: string;
+  proto: number;
+  build: string;
+  /** additive: absent on a daemon from before they were reported */ version?: string;
+  commit?: string;
+  built?: string;
+  /** absent on a daemon from before Add project sources */ wsl_distros?: string[];
+  ssh_hosts?: string[];
+};
 export type BrowseEntry = { name: string; git: boolean };
-export type BrowseResult = { path: string; parent: string | null; home: string; entries: BrowseEntry[]; truncated?: boolean };
+export type BrowseResult = {
+  path: string;
+  parent: string | null;
+  home: string;
+  entries: BrowseEntry[];
+  truncated?: boolean;
+};
 export const hostsList = () => hostCmd<HostInfo[]>("hosts_list", "hosts_list");
-export const hostAdd = (name: string, spec: string, bin?: string) => hostCmd<HostInfo>("host_add", "host_add", { name, spec, ...(bin ? { bin } : {}) });
+export const hostAdd = (name: string, spec: string, bin?: string) =>
+  hostCmd<HostInfo>("host_add", "host_add", { name, spec, ...(bin ? { bin } : {}) });
 export const hostRemove = (id: string) => hostCmd<void>("host_remove", "host_remove", { id });
 export const hostReconnect = (id: string) => hostCmd<HostInfo>("host_reconnect", "host_reconnect", { id });
 /** the host shows its own confirmation and checks the path exists on the remote */
-export const projectAddRemote = (host: string, path: string) => hostCmd<Project>("project_add_remote", "project_add_remote", { host, path });
+export const projectAddRemote = (host: string, path: string) =>
+  hostCmd<Project>("project_add_remote", "project_add_remote", { host, path });
 export const hostInfo = (host: string) => call<HostInfoReport>("host.info", { host });
-export const hostBrowse = (host: string, path?: string) => call<BrowseResult>("host.browse", path ? { host, path } : { host });
+export const hostBrowse = (host: string, path?: string) =>
+  call<BrowseResult>("host.browse", path ? { host, path } : { host });
 
 // ---- Add project: more origins than a local folder (clone, GitHub, new, discovered) ----
 /** Native folder dialog on the Rust side (command `folder_pick`); the chosen path is for a folder the daemon creates (clone destination, new project parent). null = cancelled. */
 export const pickFolder = (title: string) => nativePick<string | null>("folder_pick", "folder_pick", title);
 export type Discovered = { path: string; name: string; branch?: string; source: "recent" | "scan" };
 /** git repositories found in the usual places that are not projects yet; an older daemon has none */
-export const projectDiscover = () => callOr<{ items: Discovered[] }>("project.discover", {}, { items: [] }).then((r) => r.items ?? []);
+export const projectDiscover = () =>
+  callOr<{ items: Discovered[] }>("project.discover", {}, { items: [] }).then((r) => r.items ?? []);
 /** adds one of the repositories `projectDiscover` listed (the daemon refuses any other path) */
 export const projectAddDiscovered = (path: string) => call<Project>("project.add_discovered", { path });
 export type CloneParams = { url: string; dest: string; branch?: string; depth?: number };
 /** starts a background `git clone`; poll `projectCloneStatus` with the id */
 export const projectClone = (p: CloneParams) => call<{ id: string }>("project.clone", p);
 export type CloneState = "running" | "done" | "failed" | "cancelled";
-export type CloneStatus = { state: CloneState; percent?: number; phase?: string; path?: string; project?: Project; error?: string; error_code?: string; error_params?: Record<string, unknown> };
+export type CloneStatus = {
+  state: CloneState;
+  percent?: number;
+  phase?: string;
+  path?: string;
+  project?: Project;
+  error?: string;
+  error_code?: string;
+  error_params?: Record<string, unknown>;
+};
 export const projectCloneStatus = (id: string) => callBg<CloneStatus>("project.clone_status", { id });
 export const projectCloneCancel = (id: string) => call<{ ok: boolean }>("project.clone_cancel", { id });
-export type GhRepo = { name_with_owner: string; description?: string | null; is_private: boolean; url: string; pushed_at?: string | null };
+export type GhRepo = {
+  name_with_owner: string;
+  description?: string | null;
+  is_private: boolean;
+  url: string;
+  pushed_at?: string | null;
+};
 export type GhRepos = { state: "ok" | "no_gh" | "not_authed"; repos: GhRepo[] };
 /** the user's GitHub repositories through `gh`; never fails for a missing or logged-out gh, it says so in `state` */
-export const ghRepos = (query?: string, limit = 100) => call<GhRepos>("gh.repos", { ...(query ? { query } : {}), limit });
+export const ghRepos = (query?: string, limit = 100) =>
+  call<GhRepos>("gh.repos", { ...(query ? { query } : {}), limit });
 export type InitParams = { parent: string; name: string; readme?: boolean; gitignore?: boolean; commit?: boolean };
 /** creates parent/name, `git init` and the optional first files, then registers the project */
 export const projectInit = (p: InitParams) => call<Project>("project.init", p);

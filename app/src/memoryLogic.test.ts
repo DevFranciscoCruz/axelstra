@@ -5,6 +5,11 @@ import {
   applyPressure,
   applyResumed,
   applyStatus,
+  breakdownRows,
+  commitPair,
+  cpuSplit,
+  kernelHigh,
+  kernelPoolProblem,
   chipVisible,
   initialMem,
   levelClass,
@@ -134,5 +139,68 @@ describe("threshold validation", () => {
     expect(parseAmount("abc")).toBeNull();
     expect(parseAmount("")).toBeNull();
     expect(parseAmount("-3")).toBeNull();
+  });
+});
+
+describe("memory breakdown", () => {
+  const b = {
+    kernel: { paged_mb: 300, nonpaged_mb: 4000, total_mb: 4300, baseline_mb: 800, high: true },
+    cache_mb: 1000,
+    compressed_mb: null,
+    sessions: [
+      { tier: "agent", count: 2, rss_mb: 1500 },
+      { tier: "worker", count: 1, rss_mb: 500 },
+    ],
+    builds: { count: 1, rss_mb: 2000 },
+    external: [{ name: "MsMpEng.exe", count: 1, rss_mb: 800 }],
+    others_mb: 0,
+    handles: { total: 300000, top: [{ name: "x.exe", pid: 7, handles: 90000 }] },
+  };
+
+  it("applyStatus keeps the breakdown, and none stays null", () => {
+    expect(applyStatus(initialMem(), status({ breakdown: b })).breakdown).toEqual(b);
+    expect(applyStatus(initialMem(), status()).breakdown).toBeNull();
+  });
+
+  it("rows are biggest first, empty categories are dropped, pct is of the total", () => {
+    const rows = breakdownRows(b, 16000);
+    expect(rows.map((r) => r.key)).toEqual([
+      "kernel_nonpaged",
+      "sessions",
+      "builds",
+      "cache",
+      "external",
+      "kernel_paged",
+    ]);
+    expect(rows[0].pct).toBeCloseTo(25, 5);
+    expect(breakdownRows(null, 16000)).toEqual([]);
+    expect(breakdownRows(b, 0)[0].pct).toBe(0);
+  });
+
+  it("the suggestion shows only when the kernel is high", () => {
+    expect(kernelHigh(b)).toBe(true);
+    expect(kernelHigh({ ...b, kernel: { ...b.kernel, high: false } })).toBe(false);
+    expect(kernelHigh({ ...b, kernel: null })).toBe(false);
+    expect(kernelHigh(null)).toBe(false);
+  });
+
+  it("kernel_pool_mb range is 256..=1048576", () => {
+    expect(kernelPoolProblem(255)).toBe(true);
+    expect(kernelPoolProblem(256)).toBe(false);
+    expect(kernelPoolProblem(1048576)).toBe(false);
+    expect(kernelPoolProblem(1048577)).toBe(true);
+    expect(kernelPoolProblem(300.5)).toBe(true);
+  });
+});
+
+describe("memory breakdown system numbers", () => {
+  it("cpu and commit need both numbers; absence gives null", () => {
+    const b = { system: { cpu_user_pct: 12, cpu_kernel_pct: 30, commit_mb: 20000, commit_limit_mb: 40000 } };
+    expect(cpuSplit(b)).toEqual({ user: 12, kernel: 30 });
+    expect(commitPair(b)).toEqual({ used: 20000, limit: 40000 });
+    expect(cpuSplit({ system: { cpu_user_pct: 1 } })).toBeNull();
+    expect(commitPair({ system: { commit_mb: 1, commit_limit_mb: 0 } })).toBeNull();
+    expect(cpuSplit(null)).toBeNull();
+    expect(commitPair({})).toBeNull();
   });
 });
