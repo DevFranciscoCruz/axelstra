@@ -185,8 +185,13 @@ export const enS: Widen<typeof ptS> = {
   },
 
   versionSkew: {
-    text: "The daemon is older than the app: restart it (terminals are restored).",
+    text: (app: string, daemon: string) => `The daemon runs an older build (${daemon}) than the app (${app}).`,
+    busy: "The old daemon was kept because work was in progress.",
+    dev: "The old daemon was kept because its version could not be confirmed.",
+    unknown: "unknown",
     restart: "Restart daemon",
+    confirm:
+      "Restart the daemon with the new build? Running agents resume from their saved conversation and the terminals come back.",
   },
 
   toast: {
