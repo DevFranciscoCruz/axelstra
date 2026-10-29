@@ -905,7 +905,7 @@ struct Ctx<'a> {
 /// Whether `method` changes projects or worktrees, which makes the cached project list stale.
 fn changes_projects(method: &str) -> bool {
     (method.starts_with("worktree.") && !matches!(method, "worktree.status" | "worktree.overview"))
-        || method == "integrate.undo"
+        || matches!(method, "integrate.undo" | "workspace.import" | "backup.restore")
         || (method.starts_with("project.")
             && !matches!(
                 method,
@@ -1034,6 +1034,8 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
         crate::memo::memo().bump_all();
     }
     if mutating {
+        // stale answers kept under memory pressure must not cross a change the caller just made
+        crate::memo::memo().bump_hard();
         forget_project_list(&reg);
     }
     let out = dispatch_call(c);
@@ -1041,6 +1043,7 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
         crate::memo::memo().bump_all();
     }
     if mutating {
+        crate::memo::memo().bump_hard();
         forget_project_list(&reg);
         // a change made from the CLI or a flow shows up in the app without it polling (once the reply is queued)
         let r = reg.clone();

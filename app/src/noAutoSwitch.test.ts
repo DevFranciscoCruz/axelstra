@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createEffect, createRoot } from "solid-js";
 import type { SessionInfo } from "./api";
 
 const invoke = vi.hoisted(() => vi.fn(async (cmd: string) => (cmd === "notify_session" ? true : undefined)));
@@ -171,5 +172,21 @@ describe("only the user changes the active session", () => {
     store.activate(2, "user");
     expect(store.activeSession()).toBe(2);
     expect(store.splitSession()).toBe(1);
+  });
+
+  it("selecting a worktree after an empty settle seats a tab through the live effect (e2e: terminal must mount)", async () => {
+    const { store, tabs } = await load();
+    await poll(store, [agent(1, { meta: { kind: "terminal", worktree: WT } })]);
+    const dispose = createRoot((d) => {
+      // same wiring as App.tsx: the effect reads the selected worktree's tabs
+      createEffect(() => store.settleActive(store.sortedTabs(store.sessionsOf(store.selectedWorktree()))));
+      return d;
+    });
+    await Promise.resolve();
+    expect(store.activeSession()).toBeNull(); // no worktree yet: the empty settle used the armed pick up
+    store.selectWorktree(WT);
+    expect(tabs().length).toBe(1);
+    expect(store.activeSession()).toBe(1);
+    dispose();
   });
 });
