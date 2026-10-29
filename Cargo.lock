@@ -321,6 +321,7 @@ dependencies = [
  "arboard",
  "axelstra-core",
  "axelstra-daemon",
+ "ignore",
  "png 0.17.16",
  "serde",
  "serde_json",

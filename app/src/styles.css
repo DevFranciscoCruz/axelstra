@@ -1022,3 +1022,7 @@ button.icon, button.x, button.cbtn { display: inline-flex; align-items: center; 
 .wt-pending-meta { color: var(--muted); font-size: var(--fs-sm); }
 .wt-pending-reason { margin-top: 3px; color: var(--muted); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .wt-pending-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+
+/* explorer: a folder read in progress, a failed read, a capped folder */
+.floading, .ferr { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ftrunc { font-size: var(--fs-sm); }

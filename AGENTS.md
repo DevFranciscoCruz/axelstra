@@ -220,6 +220,14 @@ named locks in `locks/` (shared by all projects), the flow progress files (not t
 Every method the frontend calls must also be in `ALLOWED_METHODS` in `app/src-tauri/src/main.rs`; a unit test reads
 `app/src` (`call`, `callBg`, `callOr` with a string literal) and fails when the list and the sources drift apart.
 
+## Indexer exclusion
+
+Worktree folders (`.axelstra-wt`) are slow under file indexers. `crates/daemon/src/scanx.rs` keeps them out, with no admin, no
+prompt, no UI and no daemon method: Windows sets `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED` on `.axelstra-wt` and each worktree folder
+(new content below a flagged folder inherits it); macOS puts an empty `.metadata_never_index` in `.axelstra-wt`; Linux does nothing.
+Set by event: `projects::create_at` (`worktree.create`, `worktree.from_pr`), `orch.start`, and once at daemon start in a
+low-priority, capped thread (`scanx::spawn_sweep`; no locks, no polling). Tests use an in-memory `Fs` and temp dirs only.
+
 ## SECURITY_MIN
 
 `SECURITY_MIN` in `proto.rs` is the oldest daemon the app accepts for security reasons, whatever its `PROTO`. `hello` and

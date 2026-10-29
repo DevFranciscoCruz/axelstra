@@ -17,6 +17,7 @@ axelstra-core = { path = "../../crates/core" }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 anyhow = "1"
+ignore = "0.4"
 arboard = "3"
 png = "0.17"
 tauri-plugin-notification = "2"

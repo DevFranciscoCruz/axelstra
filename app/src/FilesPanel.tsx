@@ -3,12 +3,12 @@ import { ask } from "./Confirm";
 import { Button, Input, Tabs, TabsList, TabsTrigger } from "./ui";
 import { Icon } from "./Icon";
 import { invoke } from "@tauri-apps/api/core";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { For, Show, createEffect, createMemo, createResource, createSignal, on, onCleanup } from "solid-js";
 import { PAGE, capList, sameListing } from "./listing";
 import { press } from "./a11y";
 import { isRemote, remotePathOf } from "./paths";
-import { FsEntry, GrepHit, fsCreate, fsDelete, fsGrep, fsList, fsRename, fsSearch } from "./api";
+import { FsEntry, GrepHit, fsAct, fsCreate, fsDelete, fsGrep, fsListCancel, fsListStream, fsRename, fsSearch, fsWatchLocal, nextListReq, onLocalFsChanged } from "./api";
+import { errorText } from "./appError";
 import { MenuItem, menuKey, showMenu } from "./ContextMenu";
 import { RightTabs } from "./RightTabs";
 import { changes, findWorktree, fsTick, guarded, openFile, selectedWorktree, setError, setOpenCommit, setOpenDiff, setOpenFile, setShowKanban, rightTab, showNotice } from "./store";
@@ -85,31 +85,57 @@ function NameInput(props: { initial: string; depth: number; dir: boolean; onSubm
   );
 }
 
+/** rows shown while the host is still reading: folders first, then by name */
+const sortRaw = (l: FsEntry[]): FsEntry[] => [...l].sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+
+/** bumped when the host's own watcher reports a change in the local worktree */
+const [localTick, setLocalTick] = createSignal(0);
+
 function Dir(props: { wt: string; path: string; depth: number }) {
   const [entries, setEntries] = createSignal<FsEntry[] | null>(null);
+  // raw entries that arrived while the host is still reading (local worktrees only)
+  const [partial, setPartial] = createSignal<FsEntry[]>([]);
+  const [loading, setLoading] = createSignal(false);
+  const [truncated, setTruncated] = createSignal<number | null>(null);
   const [err, setErr] = createSignal("");
   // only the newest listing counts: a slow older answer must not overwrite a newer one
   let req = 0;
+  let hostReq = 0;
+  const stop = () => {
+    if (hostReq) fsListCancel(hostReq);
+    hostReq = 0;
+  };
   const load = () => {
     const r = ++req;
-    void fsList(props.wt, props.path)
+    stop();
+    const id = (hostReq = nextListReq());
+    setLoading(true);
+    setPartial([]);
+    void fsListStream(props.wt, props.path, id, (c) => r === req && setPartial((p) => p.concat(c)))
       .then((list) => {
         if (r !== req) return;
         setErr("");
+        setTruncated(list.truncated ? list.total : null);
         // an unchanged listing keeps its rows (and their open folders) as they are
-        if (!sameListing(entries(), list)) setEntries(list);
+        if (!sameListing(entries(), list.entries)) setEntries(list.entries);
       })
-      .catch((e) => r === req && setErr(String(e)));
+      .catch((e) => r === req && setErr(errorText(e)))
+      .finally(() => {
+        if (r !== req) return;
+        hostReq = 0;
+        setLoading(false);
+        setPartial([]);
+      });
   };
   // eslint-disable-next-line solid/reactivity -- runs from events (load) and from a key handler
   load();
-  // the daemon reports file changes: keep the visible folders current. A burst of events asks once, and a hidden window not at all
+  // the watchers report file changes: keep the visible folders current. A burst of events asks once, and a hidden window not at all
   // (it asks again when the window is shown).
   let tickTimer: ReturnType<typeof setTimeout> | undefined;
   let stale = false;
   createEffect(
     on(
-      [fsTick, gen],
+      [fsTick, localTick, gen],
       () => {
         clearTimeout(tickTimer);
         tickTimer = setTimeout(() => (document.hidden ? (stale = true) : load()), 250);
@@ -127,9 +153,15 @@ function Dir(props: { wt: string; path: string; depth: number }) {
   onCleanup(() => {
     clearTimeout(tickTimer);
     document.removeEventListener("visibilitychange", onVisible);
+    req++;
+    stop();
   });
+  // the user stops a long read: the host fails the listing with localfs.cancelled, shown as the error with a way to retry
+  const cancelLoad = () => stop();
+  // what is drawn: the final listing, or what the host has read so far
+  const shown = () => entries() ?? (loading() && partial().length ? sortRaw(partial()) : null);
   const [limit, setLimit] = createSignal(PAGE);
-  const page = () => capList(entries() ?? [], limit());
+  const page = () => capList(shown() ?? [], limit());
 
   const newHere = () => {
     const e = editing();
@@ -150,13 +182,31 @@ function Dir(props: { wt: string; path: string; depth: number }) {
   return (
     <>
       <Show when={err()}>
-        <div class="empty">{err()}</div>
+        <div class="empty ferr" role="alert">
+          <span>{err()}</span>
+          <Button size="sm" onClick={load}>
+            {P.files.refresh}
+          </Button>
+        </div>
       </Show>
-      <Show when={entries() === null && !err()}>
-        <Loading class="empty" />
+      <Show when={entries() === null && !err() && partial().length === 0}>
+        <Loading class="empty" onRetry={load} />
       </Show>
       <Show when={newHere()}>{(e) => <NameInput initial="" depth={props.depth} dir={e().mode === "dir"} onSubmit={(n) => void submitNew(n)} />}</Show>
       <For each={page().shown}>{(e) => <Node wt={props.wt} dir={props.path} e={e} depth={props.depth} />}</For>
+      <Show when={loading() && entries() === null && partial().length > 0}>
+        <div class="empty floading" role="status" aria-busy="true" style={{ "padding-left": `${8 + props.depth * 12}px` }}>
+          <span>{P.files.loadingMore(partial().length)}</span>
+          <Button size="sm" variant="outline" onClick={cancelLoad}>
+            {P.files.cancelLoad}
+          </Button>
+        </div>
+      </Show>
+      <Show when={truncated() !== null}>
+        <div class="empty ftrunc" role="status" style={{ "padding-left": `${8 + props.depth * 12}px` }}>
+          {P.files.truncated(truncated()!)}
+        </div>
+      </Show>
       <Show when={page().hidden > 0}>
         <Button variant="outline" size="sm" class="show-more" style={{ "margin-left": `${8 + props.depth * 12}px` }} onClick={() => setLimit(limit() + PAGE)}>
           {P.files.showMore(page().hidden)}
@@ -185,7 +235,12 @@ function fileMenu(wt: string, path: string, dir: boolean): MenuItem[] {
     { label: P.files.copyPath, icon: "copy", run: () => copy(remote ? remotePathOf(abs) : abs.replace(/\//g, "\\")) },
     { label: P.files.copyRelative, icon: "copy", run: () => copy(path) },
     // a remote folder has no Explorer on this machine
-    ...(remote ? [] : [{ label: P.files.reveal, icon: "folder", run: () => revealItemInDir(abs.replace(/\//g, "\\")).catch((e) => setError(String(e))) } as MenuItem]),
+    ...(remote
+      ? []
+      : [
+          { label: P.files.reveal, icon: "folder", run: () => fsAct(wt, path, "reveal").catch((e) => setError(errorText(e))) } as MenuItem,
+          ...(dir ? [] : [{ label: P.files.openDefault, icon: "external", run: () => fsAct(wt, path, "open").catch((e) => setError(errorText(e))) } as MenuItem]),
+        ]),
     { separator: true },
     { label: P.files.rename, icon: "pencil", run: () => setEditing({ mode: "rename", parent: parentOf(path), target: path }) },
     {
@@ -343,6 +398,19 @@ export function FilesPanel() {
     for (const h of hits() ?? []) g.set(h.path, [...(g.get(h.path) ?? []), h]);
     return [...g.entries()];
   };
+
+  // the host's own watcher refreshes the local tree (event driven; the daemon's fsTick still covers the rest). If it cannot
+  // start, the Refresh button stays.
+  createEffect(() => {
+    const w = wt();
+    if (!w || isRemote(w)) return;
+    const off = onLocalFsChanged((changed) => changed === w && setLocalTick((n) => n + 1));
+    void fsWatchLocal(w).catch((e) => console.debug("local watch", e));
+    onCleanup(() => {
+      off();
+      void fsWatchLocal(null).catch(() => {});
+    });
+  });
 
   const rootName = () => info()?.wt.path.split(/[\\/]/).pop() ?? "";
 
