@@ -95,6 +95,10 @@ fn check(reg: &Arc<Registry>, id: u32) -> Result<Plan> {
     {
         return Err(axelstra_core::coded!("hibernate.working", "the agent is working"));
     }
+    // a frozen tree (or a frozen build in it) is the governor's: it ends only by `mem.resume`, never by sleeping
+    if reg.pauser.paused_of(id).is_some() {
+        return Err(axelstra_core::coded!("hibernate.paused", "the session is paused by the memory governor: resume it first"));
+    }
     if reg.wait_of(id, input, idle).is_some() {
         return Err(axelstra_core::coded!("hibernate.waiting", "the agent waits for an answer or a permission"));
     }
@@ -170,6 +174,8 @@ pub(super) fn hibernate(reg: &Arc<Registry>, id: u32) -> Result<Value> {
         }
     }
     reg.persist();
+    // paused after the check: continue the tree first, a stopped process would not leave the table cleanly
+    reg.resume_before_kill(id);
     reg.tear_down(&[plan.s]);
     reg.hints.clear(id);
     reg.modes.lock_recover().remove(&id);

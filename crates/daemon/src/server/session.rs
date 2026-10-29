@@ -118,6 +118,27 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             // a dispatched lead is ephemeral like a worker but owns its worktree: it does not count against the worker limit
             let is_worker =
                 !lead && ((p["reap"].is_object() && p["reap"]["lead"].as_bool() != Some(true)) || p["worker"].as_bool() == Some(true));
+            {
+                // memory pressure: an agent started by an agent waits, and the worker limit drops (High: half, Critical: 1)
+                let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
+                let kind = crate::governor::SpawnKind {
+                    worker: is_worker,
+                    by_agent: agent.is_some(),
+                    agent: meta.as_ref().is_some_and(|m| m["kind"] == "agent"),
+                    live_workers: if is_worker { reg.bus.live_workers(alive) } else { 0 },
+                };
+                let (lv, info) = reg.governor.state();
+                let (cfg, limit) = (reg.governor.config(), reg.bus.limit());
+                if crate::governor::admission_denied(&cfg, lv, limit, kind) {
+                    return Err(axelstra_core::coded!(
+                        "governor.admission_denied",
+                        "not started: memory is {level} ({free_mb} MB free). Agents wait until it recovers; workers are limited to {max}",
+                        level = lv.as_str(),
+                        free_mb = info.free_mb,
+                        max = crate::governor::effective_worker_limit(limit, lv)
+                    ));
+                }
+            }
             if is_worker {
                 let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
                 let (live, max) = (reg.bus.live_workers(alive), reg.bus.limit());
@@ -397,7 +418,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 stop.store(true, Ordering::SeqCst);
                 wake_streams();
             }
-            if let Some(s) = reg.sessions.lock_recover().remove(&id) {
+            reg.resume_before_kill(id);
+            let removed = reg.sessions.lock_recover().remove(&id);
+            if let Some(s) = removed {
                 s.kill();
             }
             reg.labels.lock_recover().remove(&id);
@@ -483,6 +506,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let s = session()?;
             let id = sid()?;
             own_tree(id)?;
+            reg.resume_before_kill(id);
             s.kill();
             // a killed session leaves the list and sessions.json right away (the exit watcher only ends its stream)
             reg.forget_session(id);

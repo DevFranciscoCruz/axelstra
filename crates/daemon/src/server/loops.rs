@@ -113,6 +113,10 @@ impl ReaperTask {
         }
         let Some(s) = reg.get(self.id) else { return Step::Drop };
         let exited = s.try_wait();
+        // frozen by the memory governor (or its builds): the silence is ours, it is not finished. Resuming wakes the pulse.
+        if exited.is_none() && reg.pauser.paused_of(self.id).is_some() {
+            return Step::Wait(None);
+        }
         let idle = s.idle_ms();
         if idle < 3000 {
             self.worked = true;
@@ -171,6 +175,7 @@ impl ReaperTask {
             };
             crate::msgbus::deliver(parent.1.clone(), data);
         }
+        reg.resume_before_kill(id);
         s.kill();
         // the report went to the parent above; now the session leaves the registry (and the watchers hear it)
         reg.retire(id, code);
@@ -309,10 +314,11 @@ pub(super) fn kill_sessions_where(reg: &Registry, pred: impl Fn(&str) -> bool) {
             .iter()
             .filter(|(_, s)| s.try_wait().is_none())
             .filter(|(id, _)| metas.get(id).and_then(|m| m["worktree"].as_str()).is_some_and(&pred))
-            .map(|(_, s)| s.clone())
+            .map(|(id, s)| (*id, s.clone()))
             .collect()
     };
-    for s in doomed {
+    for (id, s) in doomed {
+        reg.resume_before_kill(id);
         s.kill();
     }
 }
@@ -705,7 +711,7 @@ pub(super) fn spawn_session_monitor(reg: Arc<Registry>) {
                 last = now;
                 reg.broadcast("session.changed");
                 // sessions started, ended or went quiet/working: what they cost in memory and tokens moved with them
-                reg.broadcast("resources.changed");
+                reg.broadcast_resources();
                 reg.budget_wake.notify_one();
                 save_histories_of(&reg, &settled);
             }
@@ -830,6 +836,7 @@ pub(super) fn stall_facts(
         escalated: reg.bus.is_escalated(id),
         awaiting: reg.awaiting_of(id, since_input_ms, idle_ms).is_some(),
         live_children: busy.contains(&id),
+        paused: reg.pauser.paused_of(id).is_some(),
         idle_ms,
         since_input_ms,
         since_msg_ms: reg.bus.since_msg_ms(id),

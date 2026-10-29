@@ -164,6 +164,8 @@ fn hibernate_and_wake_keep_resume_id_inbox_and_role() {
     hibernate(&mut c, lead).unwrap();
     // what the terminal needs is refused with a coded error, not a "not found"
     assert_eq!(code_of(&c.call("session.screen", json!({"id": lead})).unwrap_err()), "hibernate.sleeping");
+    // the governor has nothing to freeze in a sleeper: pausing it says so instead of "not found"
+    assert_eq!(code_of(&c.call("mem.pause", json!({"session": lead})).unwrap_err()), "hibernate.sleeping");
 
     // a message wakes it and waits in the inbox until the agent is back
     c.call("msg.send", json!({"from": other, "to": lead, "text": "hello-from-test", "kind": "message"})).unwrap();

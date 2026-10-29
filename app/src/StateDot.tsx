@@ -14,6 +14,7 @@ export function StateDot(props: { state: DotState; tip?: string | null }) {
         stall: props.state === "stalled",
         attn: props.state === "attention",
         queued: props.state === "queued",
+        paused: props.state === "paused",
         done: props.state === "done",
       }}
       role={label() ? "img" : undefined}

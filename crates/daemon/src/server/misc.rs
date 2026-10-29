@@ -314,6 +314,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         // used by the app updater: the installer cannot replace a running axelstra.exe.
         // Sessions die with the daemon (Job Objects), so the UI warns before calling this.
         "daemon.shutdown" => {
+            reg.governor.stop();
             // remember what was going on, so the next start can pick it up: agents that were working, and the
             // ephemeral workers that die with this daemon (they are not restored) per coordinator
             let live: Vec<(u32, bool)> = reg
@@ -351,6 +352,9 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 }
             }
             reg.closing.store(true, Ordering::SeqCst);
+            // nothing may stay frozen behind the daemon
+            reg.resume_paused(None);
+            crate::governor::suspend::resume_all_tracked();
             // a save still waiting out its debounce must not be lost with the process
             reg.persist_now();
             // keep what each agent terminal showed, so the restored tab is not empty

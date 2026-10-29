@@ -74,6 +74,10 @@ Tests that print or compare the version must not hard-code the commit or date: t
 against `axelstra_core::buildinfo::{VERSION, COMMIT, BUILT}`, or set `AXELSTRA_GIT_SHA`/`AXELSTRA_BUILD_DATE` for the build
 under test (see `docs/TOOLS.md`).
 
+## Memory governor in tests
+
+The governor's tests drive the levels with the fake `MemSource` (`governor::fake::FakeSource`) and freeze nothing real: pause tests inject `FakeSuspender`. Never suspend a process the test does not own: the only real freeze (`governor/suspend.rs`) is of a child the test starts and kills itself, and it never targets the daemon or pids 0/1. A test must not push the machine into real memory pressure.
+
 ## Opening HTML from a terminal
 
 `files.resolve_html` (daemon) turns a path clicked in a terminal into a `file://` URL; the host command `open_html_file`

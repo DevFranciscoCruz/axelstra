@@ -8,6 +8,8 @@ import { DOT_LABEL, dotOfSession, dotTip } from "../agentState";
 import { agentRowInfo, agentRowLabel } from "../agentRow";
 import { isLead, lacksLead, leadFirst } from "../leadRole";
 import { P } from "../strings.panels";
+import { G } from "../strings.memory";
+import { fmtMb } from "../memoryView";
 import { MenuItem, isMenuKey, showMenu, showMenuAt } from "../ContextMenu";
 import { createSidebarActions } from "./actions";
 import { agentMenu } from "./menus";
@@ -17,12 +19,13 @@ import {
   norm,
   openSession,
   renameTab,
+  rssOf,
   selectedWorktree,
   sessionsLoaded,
   sessionsOf,
   tabLabel,
 } from "../store";
-import type { SessionInfo } from "../api";
+import { memPause, memResume, type SessionInfo } from "../api";
 
 const T = P.sidebar;
 
@@ -40,10 +43,23 @@ export function AgentList(props: {
 }) {
   const [renaming, setRenaming] = createSignal<number | null>(null);
   const actions = createSidebarActions();
+  // a lead is never paused from here (its workers answer to it); an ended session has nothing to freeze
+  const pausable = (a: SessionInfo) => a.running && (!!a.paused || !isLead(a));
+  const togglePause = (a: SessionInfo) => void actions.run(() => (a.paused ? memResume(a.id) : memPause(a.id)));
+  const rssTip = (a: SessionInfo) => {
+    const mb = rssOf(a.id);
+    return mb === undefined ? "" : ` · ${G.sidebar.rss(fmtMb(mb))}`;
+  };
   const menuOf = (a: SessionInfo): MenuItem[] => {
     const wt = a.meta?.worktree ?? props.path;
     return agentMenu(
-      { run: actions.run, copy: actions.copy, open: () => openSession(wt, a.id), end: () => void closeSessionTab(a) },
+      {
+        run: actions.run,
+        copy: actions.copy,
+        open: () => openSession(wt, a.id),
+        end: () => void closeSessionTab(a),
+        pause: pausable(a) ? { paused: !!a.paused, run: () => togglePause(a) } : undefined,
+      },
       a.id,
       wt,
     );
@@ -129,7 +145,7 @@ export function AgentList(props: {
                       data-agent-row={a.id}
                       aria-label={agentRowLabel(info(), state())}
                       aria-current={active() ? "true" : undefined}
-                      title={T.agentRenameTip(info().name)}
+                      title={T.agentRenameTip(info().name) + rssTip(a)}
                       onClick={() => openSession(a.meta?.worktree ?? props.path, a.id)}
                       onMouseDown={(e) => e.button === 1 && e.preventDefault()}
                       onAuxClick={(e) => {
@@ -181,6 +197,19 @@ export function AgentList(props: {
                           <Icon name="branch" size={12} />
                         </span>
                       </Show>
+                    </Button>
+                  </Show>
+                  <Show when={a.running && a.paused && renaming() !== a.id}>
+                    <Button
+                      type="button"
+                      variant="chip"
+                      size="chip"
+                      class="mr-1 flex-none px-[6px]"
+                      aria-label={G.sidebar.resumeLabel(info().name)}
+                      title={G.menu.resume}
+                      onClick={() => togglePause(a)}
+                    >
+                      <Icon name="play" size={12} />
                     </Button>
                   </Show>
                   <Show when={info().hasReport && renaming() !== a.id}>

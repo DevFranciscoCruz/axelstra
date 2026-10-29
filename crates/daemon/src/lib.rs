@@ -13,6 +13,7 @@ pub mod docker;
 pub mod envtools;
 pub mod fsops;
 pub mod gh;
+pub mod governor;
 pub mod hibernate;
 pub mod hooks;
 pub mod hosts;

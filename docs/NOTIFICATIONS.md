@@ -135,6 +135,7 @@ daemon method, no PROTO change). Policy in `app/src/notifyPrefs.ts`; recording i
 | `janitorEvents.ts` attention | Integration needs a person | Toast + centre (`need`) | Yes | Rare | **Manter** |
 | `triggerEvents.ts` | CI-fix trigger fired / refused | `ci_fix`: `info` (silent); refusal: `error` | Refusal yes | Per CI failure | **Silenciar** the self-started fix, **manter** the refusal; one entry per sha |
 | `budgetEvents.ts` | Budget level crossed | warn: `info` (silent); over: `error` toast + centre | Over yes | Rare | **Manter** over, **silenciar** warn |
+| `store/memory.ts`: `memory.pressure`, `session.paused`/`resumed` | Memory level changed; the governor froze or resumed sessions | Human: centre entry (`attention`) | Critical and a freeze: yes | Rare | **Manter** critical and freeze as `error` (toast only if `error` may interrupt), high and the way back as `info` (silent by default); episode keys `memory:level:<level>`, `memory:paused`; no new category |
 | `toasts.ts` error/warn sticky | `setError`, any `toast` of kind error or sticky warn | Human toast; also recorded (`error`/`attention`) | Yes | Per failure | **Manter**; recorded read when the category is off |
 | `notifications.ts` `shipEvents` | PR merged / CI changed (polled status) | Centre (`info`/`error`) | CI fail yes | Per PR | **Manter**, categorised |
 | `NotificationBell.tsx` | Unread count in the sidebar header | Human | n/a | n/a | **Manter**; counts only unread (enabled categories) |

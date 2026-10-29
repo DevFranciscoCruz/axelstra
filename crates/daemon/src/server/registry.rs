@@ -97,6 +97,10 @@ pub(super) struct Registry {
     pub(super) settings: Mutex<Option<Value>>,
     /// hibernated sessions, wake queue, event counters (see `hibernate.rs`): a leaf lock
     pub(super) hib: crate::hibernate::Hib,
+    /// memory pressure (`crate::governor`); its thread starts with `server::governor::spawn`
+    pub(super) governor: Arc<crate::governor::Governor>,
+    /// what the governor froze (and the builds under `axelstra lock` it may freeze): see `server/pause.rs`
+    pub(super) pauser: pause::Pauser,
 }
 
 #[derive(Default)]
@@ -230,6 +234,12 @@ impl Registry {
         self.watchers.lock_recover().retain(|(stop, tx)| {
             !stop.load(Ordering::SeqCst) && !matches!(tx.try_send(frame.clone()), Err(mpsc::error::TrySendError::Closed(_)))
         });
+    }
+
+    /// `resources.changed`, with the machine's memory level and free memory riding along (additive).
+    pub(super) fn broadcast_resources(&self) {
+        let (level, info) = self.governor.state();
+        self.broadcast_event(json!({"event": "resources.changed", "level": level.as_str(), "free_mb": info.free_mb}));
     }
 
     /// Tells the app there is something to take for its toasts and notification center (`janitor.events`,
@@ -414,6 +424,8 @@ impl Registry {
         let mut pending = read_json::<Vec<Value>>(&saved).ok().flatten().unwrap_or_default();
         prune_dead_pending(&saved, &mut pending);
         let audit = crate::audit::Audit::new(Some(saved.with_file_name("audit.log")));
+        let governor = Arc::new(crate::governor::Governor::new(crate::governor::Config::from_settings(&read_settings(&saved))));
+        let pauser = pause::Pauser::new(Arc::new(crate::governor::suspend::OsSuspender), saved.with_file_name("paused.json"));
         Registry {
             next: AtomicU32::new(0),
             sessions: Default::default(),
@@ -461,6 +473,8 @@ impl Registry {
             save_gen: AtomicU64::new(0),
             settings: Default::default(),
             hib: Default::default(),
+            governor,
+            pauser,
         }
     }
 
@@ -656,6 +670,11 @@ impl Registry {
     /// kill (a process that broke out of its job), and counts sessions, processes and RAM released.
     pub(super) fn tear_down(&self, sessions: &[Arc<Session>]) {
         let snap = axelstra_core::procs::snapshot();
+        let ids: Vec<u32> =
+            self.sessions.lock_recover().iter().filter(|(_, x)| sessions.iter().any(|s| Arc::ptr_eq(s, x))).map(|(id, _)| *id).collect();
+        for id in ids {
+            self.resume_before_kill(id);
+        }
         let roots: Vec<u32> = sessions.iter().filter_map(|s| s.pid()).collect();
         let tree = snap.descendants(&roots);
         let bytes: u64 = sessions.iter().map(|s| s.memory_now_in(&snap)).sum();

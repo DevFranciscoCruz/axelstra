@@ -3,7 +3,7 @@ import { createPersistedFlag } from "./persist";
 import { createLive } from "./live";
 import { S } from "./strings";
 import { invoke } from "@tauri-apps/api/core";
-import { findWorktree, openSession, overview, refreshOverview, refreshProjects, selectWorktree, selectedWorktree, sessionState, setShowShortcuts, sessions, showNotice, tabLabel, watchOverview } from "./store";
+import { memory, findWorktree, openSession, overview, refreshOverview, refreshProjects, selectWorktree, selectedWorktree, sessionState, setShowShortcuts, sessions, showNotice, tabLabel, watchOverview } from "./store";
 import { worktreeSweep } from "./api";
 import { errorText } from "./appError";
 import { ask } from "./Confirm";
@@ -17,6 +17,9 @@ import { NotificationBell } from "./NotificationBell";
 import { pollWtUsage, wtUsageTip } from "./Usage";
 import { ranked, spentOf, totalOf, fmtTokens } from "./usageFormat";
 import { Button, cn } from "./ui";
+import { MemoryPanelBody } from "./MemoryPanel";
+import { chipVisible, levelClass } from "./memoryLogic";
+import { G } from "./strings.memory";
 import { K } from "./keyboard";
 import "./shell.css";
 import { fmtFixed, fmtNumber } from "./i18n";
@@ -175,6 +178,19 @@ export function StatusBar() {
         <Icon name="memory" size={14} />
         <span>{usage() ? fmt(total()) : "–"}</span>
       </span>
+      <Show when={chipVisible(memory())}>
+        <Popover
+          label={memory().level === "normal" ? G.chip.pausedLabel(memory().paused.length) : G.chip.label(G.level[memory().level], G.size(memory().free_mb))}
+          chip={
+            <span class={cn("inline-flex items-center gap-1", levelClass(memory().level))}>
+              <Icon name="memory" size={14} />
+              <span>{G.chip.text(G.size(memory().free_mb))}</span>
+            </span>
+          }
+        >
+          {(close) => <MemoryPanelBody close={close} />}
+        </Popover>
+      </Show>
       <Show when={usage()?.cpu != null}>
         <span class="sb-item" title={S.status.cpuTip}>
           <Icon name="cpu" size={14} />

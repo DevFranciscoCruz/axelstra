@@ -108,6 +108,7 @@ policy thread and the list rows are in `server/hibernate.rs`.
 - **Restart.** A sleeper's spec has `meta.hibernated`; `adopt` (at start) moves such records out of `pending` into new sleepers
   (new ids, lead/worker roles kept, parent and inbox lost like all bus state), so the app does not restore them.
 - **Janitor.** `worktree_busy`/`worktree_touched` count a sleeper in the worktree, so its worktree is not cleaned.
+- **Memory governor.** Hibernate is not pause: hibernate ends the process tree (RAM is freed, the agent resumes from its saved conversation), pause (`mem.pause`, `Suspender`) only freezes it and frees nothing. A paused session (or one running a frozen build) is refused with `hibernate.paused` (`Pauser::paused_of`); a commit that raced a pause continues the tree first (`resume_before_kill`). `mem.pause` on a sleeper answers `hibernate.sleeping`. A sleeper is not in `pause_candidates` (no `Session`), so the governor never picks it. The governor does not hibernate by itself yet: at Critical it only pauses.
 - **Not done on purpose.** Triggers (CI fix) still see a worktree with only a sleeper as having no agent. The "focused tab" is
   approximated by recent input/subscribe events; the app does not tell the daemon which tab is focused.
 
@@ -116,7 +117,7 @@ policy thread and the list rows are in `server/hibernate.rs`.
 `PROTO` in `crates/daemon/src/proto.rs` is the app <-> daemon contract version. A daemon outlives
 app updates, and the app only restarts a daemon older than `PROTO`. Bump it (and add the new method
 to the doc comment above it) whenever the app starts calling a daemon method an old daemon lacks.
-Do not bump it for changes an old daemon already tolerates. Current: 31 (`session.hibernate {id}`, `session.wake {id, wait?}`, `hibernated` in session.list, `hibernate` in settings, events `session.hibernated`/`session.woke`/`session.wake_failed`; app only), before that 30 (`orch.cancel {project}`: stops the run, the thread wakes by event, kills the workers' sessions, the unfinished cards go back to `todo`, `orchend::finish` never integrates a cancelled run (`orch.kept` when it left work); `integrate.undo {project, default_branch, prev_tip, new_tip, branch, branch_tip}`: takes back a `worktree.integrate` by compare-and-swap, only while the default branch is still at `new_tip`, not pushed and its checkout clean; both app only), before that 29 (`gh.pr_refresh`; events `pr.changed {worktree, number, state, ci}`, `usage.changed`, `limits.changed`, `resources.changed` now emitted), before that 28 (events `clone.changed {id}` and `docker.changed {}` on the watch stream, the latter from a lazy `docker events` child; no new method), before that 27 (events `kanban.changed {project}`, `orch.changed {run, project}`, `automations.changed` on the watch stream; no new method), before that 26 (files.resolve_path, files.path_action), before that 25 (project.remove_preview and `mode` in project.remove), before that 24 (files.resolve_html), before that 23 (project.discover, project.add_discovered, project.clone, project.clone_status, project.clone_cancel,
+Do not bump it for changes an old daemon already tolerates. Current: 32 (`session.hibernate {id}`, `session.wake {id, wait?}`, `hibernated` in session.list, `hibernate` in settings, events `session.hibernated`/`session.woke`/`session.wake_failed`; app only), before that 31 (memory governor: `mem.status`, `mem.config`, `mem.pause`, `mem.resume`, events `memory.pressure`, `session.paused`, `session.resumed`; app only for the config/pause ones), before that 30 (`orch.cancel {project}`: stops the run, the thread wakes by event, kills the workers' sessions, the unfinished cards go back to `todo`, `orchend::finish` never integrates a cancelled run (`orch.kept` when it left work); `integrate.undo {project, default_branch, prev_tip, new_tip, branch, branch_tip}`: takes back a `worktree.integrate` by compare-and-swap, only while the default branch is still at `new_tip`, not pushed and its checkout clean; both app only), before that 29 (`gh.pr_refresh`; events `pr.changed {worktree, number, state, ci}`, `usage.changed`, `limits.changed`, `resources.changed` now emitted), before that 28 (events `clone.changed {id}` and `docker.changed {}` on the watch stream, the latter from a lazy `docker events` child; no new method), before that 27 (events `kanban.changed {project}`, `orch.changed {run, project}`, `automations.changed` on the watch stream; no new method), before that 26 (files.resolve_path, files.path_action), before that 25 (project.remove_preview and `mode` in project.remove), before that 24 (files.resolve_html), before that 23 (project.discover, project.add_discovered, project.clone, project.clone_status, project.clone_cancel,
 project.init, gh.repos, wsl_distros/ssh_hosts in host.info, notices.take, audit.list, backup.export,
 backup.restore, orch.trust_info, env.tools, janitor.events, workspace.export, workspace.import_preview,
 workspace.import, host.info, host.browse, stalled in session.list, stall_minutes, and the watch-stream events janitor.events, triggers.events, budget.events, dispatch.changed).
@@ -244,6 +245,74 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   reattach backoff (`containers.rs`), the `daemon.shutdown` 300 ms flush (`misc.rs`; no ack exists), the pipe-appearance wait on
   daemon start (Tauri `main.rs`; no OS event) and the diagnostics `try_wait` 300 ms. Debounces (`sweep_soon`, `SAVE_DEBOUNCE`,
   `data_watch`, the budget 500 ms coalesce) are coalescing, not polling.
+- **Memory governor (`governor.rs`).** One thread waits on the OS memory signal (`MemSource::wait_change`); its only clock is ONE
+  computed deadline (`next_deadline`: Normal = headroom to the High line divided by a worst-case 1 GB/s burn, clamped to 1 s..60 s
+  with an OS event, 1 s..15 s without; not Normal = 1 s doubling to 10 s while nothing changes, reset on a level change). Admission
+  waiters (`Governor::wait_change`, `mem.admit`) and the pause loop (`server/pause.rs`, `SETTLE` 2 s = the longest it waits to see
+  whether the last pause helped, `BACKSTOP` 1 h = never blocks unbounded) sleep on the governor's generation counter, never on a
+  tick. Details in "Memory governor" below.
+
+## Memory governor
+
+Code: `crates/daemon/src/governor.rs` (levels, config, `MemSource`, admission), `governor/{win,linux,sample,suspend}.rs` (one OS
+source each, plus the `Suspender`), `server/governor.rs` (`mem.*` methods, the `memory.pressure` notifier), `server/pause.rs`
+(victims, the table of what is frozen, the resume guarantees). CLI: `crates/cli/src/memcmd.rs` (`axelstra mem`, `axelstra resume`),
+`wait_for_memory` in `crates/cli/src/lock.rs`. App: `app/src/store/memory.ts`, `memoryLogic.ts`, `MemoryPanel.tsx`, `strings.memory*.ts`.
+User guide: `docs/MEMORY.md`. PROTO 31.
+
+- **Levels.** `Normal < High < Critical`, from `MemInfo {total_mb, free_mb, commit_pct}` (`free_mb` = Windows `ullAvailPhys`, Linux
+  `MemAvailable`). A level is entered when free memory is at or below the percentage OR the megabytes, and left only when it is above
+  BOTH plus a margin (hysteresis, `next_level`, pure). Defaults: High at 20% or 3072 MB free, Critical at 10% or 1536 MB, margin 5% and
+  512 MB (the margin is fixed, not configurable). `commit_pct` is reported, not used for the level. A failed read keeps the level.
+  `enabled: false` pins Normal and announces nothing. Each change: `memory.pressure` + `resources.changed` (`server/governor.rs::notifier`).
+- **Event sources.** Windows: `CreateMemoryResourceNotification` low/high objects plus a stop event in `WaitForMultipleObjects`, waiting on
+  ONE object at a time (they stay signaled while the condition holds). Linux: PSI trigger `some 150000 1000000` on
+  `/proc/pressure/memory` + `poll(2)` with a socketpair as the stop wake. macOS, and any OS whose event cannot be set up (`os_source`
+  falls back to `Sampler`, logs to stderr): no event, the computed deadline is the only wake (`has_events() == false`, 15 s cap in
+  Normal). The OS signals fire later than our lines (near exhaustion / on stall), so the deadline is what catches the lines; while
+  the level is not Normal the deadline is short (1..10 s) because it is also the way back to Normal.
+- **Config.** `settings.json` key `governor` (flat object, `Config`): `enabled`, `admission`, `auto_pause`, `warn_only` (bools),
+  `high_free_pct`/`crit_free_pct` (1..90), `high_free_mb`/`crit_free_mb` (1..4194304); crit must be below high in both pairs.
+  `mem.config {patch}` validates (`governor.bad_config`), saves, applies at once to the last reading and pokes the pause loop. A
+  missing or broken `governor` key, or a bad single field, falls back to the default for that field. Unknown keys are errors.
+- **Admission (`admission_denied`, pure; called in `session.spawn`).** Only at High and Critical, only when `gate_active()` (enabled,
+  `admission`, not `warn_only`). Refused (`governor.admission_denied`): an AGENT started by an agent over an agent connection (not a
+  worker); a worker once `live_workers >= effective_worker_limit` (High: half the `axelstra limit`, at least 1; Critical: 1). Never
+  refused: terminals, anything the app or the user's CLI starts, workers under the limit. `axelstra lock` calls `mem.admit {wait_ms}`
+  BEFORE taking a slot (a slot held while waiting would block builds already running) in chunks of 20 s; the daemon sleeps on the
+  governor's generation and answers `{ok, level, free_mb}` the moment the level returns to Normal (or the gate goes off, the daemon
+  closes); `lock` gives up with its usual `--timeout`. A daemon that cannot answer never holds a build back. Slots already held are untouched.
+- **Pausing (`server/pause.rs`).** At Critical with `pause_active()` (enabled, `auto_pause`, not `warn_only`) one victim at a time is
+  frozen, then the loop waits for a level change (`SETTLE` at most) before the next. Order (`victims`, pure): tier, then biggest RSS:
+  1 builds/tests under `axelstra lock` (registered with `mem.hold {name, pid}`, only for a pid inside a session; an agent only for
+  its own tree), 2 idle workers (quiet 20 s), 3 other agents (60 s), 4 leads (5 min), 5 the project main (5 min). Eligible only with
+  RSS >= 32 MB and, for sessions, no input from the user in the last 2 min. Never: the daemon itself (and pids 0/1, in
+  `OsSuspender`), terminals (a shell may host a server), a session the user typed into recently. A build ignores the input rule
+  (nobody talks to it) and is preferred because a frozen agent's own network calls (API, git, MCP) can time out. A build whose
+  process is gone or whose pid start time changed is not touched. `mem.pause {session}` is the user's manual freeze (reason
+  `manual`); a level change never resumes it, only `mem.resume` or a kill does. Reason `memory` entries are resumed by event when
+  the level leaves Critical, or the governor / `auto_pause` is switched off (`react`, `config` poke). `warn_only` at Critical
+  broadcasts `memory.would_pause {targets}` and freezes nothing.
+- **Suspender (`governor/suspend.rs`).** Trait so tests inject `FakeSuspender`. Unix `SIGSTOP`/`SIGCONT` per pid of the process tree (never
+  the process group: the `axelstra lock` process and the agent's shell share it and must keep running); Windows `NtSuspendProcess`/
+  `NtResumeProcess` (not `DebugActiveProcess`: it kills the target when the daemon dies). The tree comes from
+  `procs::snapshot().descendants`. **Suspension frees no RAM**: it stops growth and lets the OS page the frozen processes out;
+  the panel and docs must not promise otherwise.
+- **Resume guarantees (nothing stays frozen).** Every pid `OsSuspender` stops is recorded first in a process-wide set;
+  `resume_all_tracked()` continues all of them and is called by (1) `daemon.shutdown` after `reg.closing` is set, (2) the `ResumeGuard`
+  `Drop` on `serve` (any exit), (3) the daemon's panic hook (`crates/cli/src/main.rs`; leaf lock only). Also `paused.json` in the data
+  dir (pid + process start time, rewritten under a sequence number on each change, removed when empty): `Pauser::recover_stale` at
+  start continues the pids a crashed daemon left frozen, only when the start time still matches (a reused pid is left alone).
+  `session.kill`/`session.remove`, the done-closer reaper, `kill_sessions_where` (orphan reaper) and `tear_down` (project removal)
+  call `resume_before_kill` (continues the session and the builds it runs) BEFORE killing, so a kill never waits on a frozen tree.
+- **RPC.** `mem.status` (level, free/total, commit_pct, thresholds with margins, config, per-session RSS, `paused` list), `mem.config {patch}`,
+  `mem.pause {session}`, `mem.resume {session | all}`, `mem.admit {wait_ms<=60000}`, `mem.hold {name, pid}`, `mem.unhold {id}`.
+  Events on the watch stream: `memory.pressure {level, from, free_mb, total_mb, top: [{session, rss_mb}]}`, `memory.would_pause`,
+  `session.paused {id, build, reason}`, `session.resumed {id}`, plus `resources.changed`. `session.list` rows carry
+  `paused: {reason, since, build} | null`, `mem_level`, `mem_free_mb`. CLI: `axelstra mem [--json]`, `axelstra resume <session> | --all`.
+- **`agent_forbidden`.** `mem.config`, `mem.pause`, `mem.resume`: an agent must not switch the governor off, move its lines, or freeze
+  or unfreeze sessions (including a sibling or its own lead). `mem.status`, `mem.admit`, `mem.hold`, `mem.unhold` stay open because
+  `axelstra lock` runs inside agents; `mem.hold` refuses a pid outside the agent's own tree (`not_own_tree`).
 
 ## Removing a project
 
@@ -339,9 +408,11 @@ pure `buildenv::mem_gate`); short memory waits for the next release, and with no
 So bare `lock verify/build` admits several holders when memory allows; `--slots 1` is strict one-at-a-time.
 `--slots` keeps plain count slots; `lock build`/`lock verify` with neither flag declare `mem_mb_for_jobs(CARGO_BUILD_JOBS)`.
 Use one mode per lock name. Lead and worker prompts (`prompts::BUILD_RULE`) and the axelstration guide tell agents to use
-`axelstra lock verify`, keep the jobs value, `cargo check` before `cargo test`, `check.mjs --fast` while iterating. The
-resource governor (branch `ax/resource-governor`) hooks in by feeding its free-memory limit into `Facts::free_mem_bytes`
-(`facts_now`) and `lock_budget_mb`; this topic does not depend on it.
+`axelstra lock verify`, keep the jobs value, `cargo check` before `cargo test`, `check.mjs --fast` while iterating. Two
+memory gates apply to `axelstra lock`, in this order: first the governor's level gate (`wait_for_memory`, `mem.admit`: a new
+build waits while the level is High or Critical, only when a daemon answers), then the memory-need gate above
+(`acquire_mem`/`mem_gate`: budget and available memory). Both must pass; neither depends on the other. The governor
+does not feed `Facts::free_mem_bytes` or `lock_budget_mb`.
 
 ## Git hygiene
 

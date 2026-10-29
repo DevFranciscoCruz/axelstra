@@ -4,6 +4,8 @@ import { parts } from "./msg";
 import { S, ptS } from "./strings";
 import { ptBRS } from "./strings.ptbr";
 import { B, ptB } from "./strings.budget";
+import { G, ptG } from "./strings.memory";
+import { ptBRG } from "./strings.memory.ptbr";
 import { ptBRB } from "./strings.budget.ptbr";
 import { L, ptL } from "./strings.logic";
 import { ptBRL } from "./strings.logic.ptbr";
@@ -27,6 +29,7 @@ const dicts: Entry[] = [
   ["S", S, ptS, ptBRS],
   ["P", P, ptP, ptBRP],
   ["B", B, ptB, ptBRB],
+  ["G", G, ptG, ptBRG],
   ["R", R, ptR, ptBRR],
   ["W", W, ptW, ptBRW],
   ["WS", WS, ptWS, ptBRWS],

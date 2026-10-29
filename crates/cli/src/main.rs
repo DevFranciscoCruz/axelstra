@@ -152,6 +152,17 @@ enum Cmd {
         #[command(subcommand)]
         cmd: workspace::WsCmd,
     },
+    /// Memory pressure: level, free memory, thresholds, the biggest sessions and what is paused
+    Mem {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Continue sessions paused for memory (one session, or --all)
+    Resume {
+        session: Option<u32>,
+        #[arg(long)]
+        all: bool,
+    },
     /// Show or set the maximum number of workers running at once
     Limit { n: Option<usize> },
     /// Run a task graph from a JSON file: {"tasks":[{"id","worktree","agent"|"cmd","prompt","after":[..]}]}
@@ -424,6 +435,7 @@ mod dispatch;
 mod events;
 mod hook;
 mod lock;
+mod memcmd;
 mod orchcmd;
 mod remote;
 mod startconfirm;
@@ -431,7 +443,17 @@ mod statusline;
 mod version;
 mod workspace;
 
+/// The command match below has a big debug-build frame; the 1 MB main thread stack of Windows is not enough for it.
 fn main() -> Result<()> {
+    std::thread::Builder::new()
+        .name("main".into())
+        .stack_size(16 << 20)
+        .spawn(real_main)?
+        .join()
+        .unwrap_or_else(|p| std::panic::resume_unwind(p))
+}
+
+fn real_main() -> Result<()> {
     let cli = Cli::parse();
     let host = cli.host;
     match cli.cmd {
@@ -444,6 +466,8 @@ fn main() -> Result<()> {
             let _ = axelstra_daemon::skill::install();
             // a panic anywhere leaves a trace (the daemon's stderr goes nowhere)
             std::panic::set_hook(Box::new(|info| {
+                // nothing the governor froze stays frozen behind a panic
+                axelstra_daemon::governor::suspend::resume_all_tracked();
                 let line = format!(
                     "{} panic: {info}\n",
                     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
@@ -507,6 +531,8 @@ fn main() -> Result<()> {
             dispatch::run(cmd, c)?;
         }
         Cmd::Workspace { cmd } => workspace::run(cmd, host.as_deref())?,
+        Cmd::Mem { json } => memcmd::status(remote::connect(host.as_deref())?, json)?,
+        Cmd::Resume { session, all } => memcmd::resume(remote::connect(host.as_deref())?, session, all)?,
         Cmd::Lock { name, slots, mem_mb, timeout, command } => std::process::exit(lock::run(&name, slots, mem_mb, timeout, &command)?),
         Cmd::StatuslineTee => statusline::tee()?,
         Cmd::Hook { agent, event } => hook::dispatch(&agent, &event)?,

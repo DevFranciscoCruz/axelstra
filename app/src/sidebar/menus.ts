@@ -7,6 +7,7 @@ import { isRemote, remotePathOf } from "../paths";
 import { R } from "../strings.remote";
 import { P } from "../strings.panels";
 import { S } from "../strings";
+import { G } from "../strings.memory";
 import { agentLabel } from "../agentLabel";
 import {
   canonAgent,
@@ -156,6 +157,8 @@ export type AgentMenuDeps = Pick<MenuDeps, "run" | "copy"> & {
   open: () => void;
   /** closes the session the way its tab closes (with the same confirmation) */
   end: () => void;
+  /** pause / resume entry of the governor; absent when the session cannot be paused (a lead, an ended one) */
+  pause?: { paused: boolean; run: () => void };
 };
 
 /** Right-click menu of an agent row in the sidebar; `wt` is the worktree the session works in. */
@@ -164,6 +167,15 @@ export const agentMenu = (d: AgentMenuDeps, id: number, wt: string): MenuItem[] 
   { label: T.agentCopyId, icon: "copy", run: () => d.copy(String(id)) },
   { label: T.agentCopyWt, icon: "copy", run: () => d.copy(remotePathOf(wt)) },
   { label: T.agentReveal, icon: "folder", disabled: isRemote(wt), run: () => d.run(() => revealItemInDir(wt)) },
+  ...(d.pause
+    ? [
+        {
+          label: d.pause.paused ? G.menu.resume : G.menu.pause,
+          icon: d.pause.paused ? "play" : "pause",
+          run: d.pause.run,
+        },
+      ]
+    : []),
   { separator: true },
   { label: T.agentEnd, icon: "x", danger: true, run: d.end },
 ];

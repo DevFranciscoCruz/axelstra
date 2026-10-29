@@ -116,6 +116,7 @@ export const ptBRL: Widen<typeof ptL> = {
     stalled: "Parado: sem reportar, precisa de atenção",
     attention: "Parou: precisa de atenção",
     queued: "Na fila: o plano ainda não chegou a esta tarefa",
+    paused: "Pausada",
     running: "Terminal ativo",
     none: "",
   },

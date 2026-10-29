@@ -117,6 +117,7 @@ export const ptL = {
     stalled: "Parada: sem reportar, precisa de atenção",
     attention: "Parou: precisa de atenção",
     queued: "Na fila: o plano ainda não chegou a esta tarefa",
+    paused: "Em pausa",
     running: "Terminal ativo",
     none: "",
   },
