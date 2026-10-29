@@ -109,7 +109,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 }
                 let project_main = project_main_in(&sessions, &metas, &project);
                 let worker = p["worker"].as_bool() == Some(true);
-                crate::notes::pick_role(&m, p["label"].as_str(), worker, &here, project_main, parent)
+                crate::notes::pick_role(&m, worker, &here, project_main, parent)
             };
             if lead {
                 meta.get_or_insert_with(|| json!({}))["lead"] = json!(true);
@@ -230,6 +230,14 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             };
             let label = crate::notes::on_spawn(&crate::notes::root(&data_dir), p["label"].as_str(), &mut meta, p["goal"].as_str(), alone);
             let note = meta.as_ref().and_then(|m| m.get("note").cloned());
+            // a lead started by hand with no prompt, no dispatch and no conversation to resume has no request yet: the stall
+            // watchdog leaves it alone until someone writes to it. Live meta only; `spec` below is cut from `p`, so a
+            // restart does not keep the flag
+            if lead && p["goal"].as_str().is_none_or(|g| g.trim().is_empty()) && !p["reap"].is_object() && p["meta"]["note"].is_null() {
+                if let Some(m) = meta.as_mut().filter(|m| m.is_object()) {
+                    m["unrequested"] = json!(true);
+                }
+            }
             let id = reg.spawn(&s, label.as_deref(), meta)?;
             // a restored agent shows what its terminal said before the restart, dimmed, above its own output
             if let (Some(key), Some(sess)) = (history_key, reg.get(id)) {

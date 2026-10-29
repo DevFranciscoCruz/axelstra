@@ -1,5 +1,5 @@
-//! The lead of a worktree: its first agent is named "main", takes no "Tarefa N" number, reports to the project main
-//! and is the default parent of every task started in that worktree. A restart keeps the roles.
+//! The lead of a request (`meta.lead`, never implied): named "main", takes no "Tarefa N" number, reports to the project
+//! main and is the default parent of every task started in that worktree. A restart keeps the roles.
 mod common;
 use axelstra_daemon::client::Client;
 use axelstra_daemon::server;
@@ -52,7 +52,7 @@ fn info(c: &mut Client, id: u64) -> Value {
 }
 
 #[test]
-fn the_first_agent_of_a_worktree_leads_and_tasks_report_to_it() {
+fn only_an_explicit_lead_leads_and_tasks_report_to_it() {
     let root = std::env::temp_dir().join(format!("axelstra-lead-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     // the worktrees exist: sessions.json does not keep a session of a deleted one
@@ -64,9 +64,10 @@ fn the_first_agent_of_a_worktree_leads_and_tasks_report_to_it() {
     let (r_main, wt_a, wt_b, wt_c) = (dir("main"), dir("wt-a"), dir("wt-b"), dir("wt-c"));
     let mut c = start(&root, "a");
     let main = spawn(&mut c, &r_main, "claude", json!({"meta": {"main": true}}));
-    let lead = spawn(&mut c, &wt_a, "claude", json!({}));
+    let lead = spawn(&mut c, &wt_a, "claude", json!({"meta": {"lead": true}}));
     let t1 = spawn(&mut c, &wt_a, "claude", json!({}));
     let t2 = spawn(&mut c, &wt_a, "claude", json!({}));
+    // no lead in this worktree: its first agent is a plain task under the project main
     let other = spawn(&mut c, &wt_b, "claude", json!({}));
     // a worker explicitly asked for in an empty worktree is a task, not its lead
     let w = spawn(&mut c, &wt_c, "claude", json!({"worker": true}));
@@ -84,8 +85,10 @@ fn the_first_agent_of_a_worktree_leads_and_tasks_report_to_it() {
     // the project main is untouched
     let m = info(&mut c, main);
     assert!(m["meta"]["lead"].is_null() && m["meta"]["parent"].is_null());
-    // another worktree has its own lead
-    assert_eq!(info(&mut c, other)["meta"]["lead"], true);
+    // a worktree without a lead: the agent is a task under the project main
+    let o = info(&mut c, other);
+    assert!(o["meta"]["lead"].is_null());
+    assert_eq!(o["meta"]["parent"], main);
     assert!(info(&mut c, w)["meta"]["lead"].is_null());
 
     // sessions.json keeps the roles

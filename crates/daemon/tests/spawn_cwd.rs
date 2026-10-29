@@ -111,7 +111,15 @@ fn a_new_worktree_has_only_its_lead_and_a_finished_task_is_not_restored() {
         .unwrap()["id"]
         .as_u64()
         .unwrap();
-    let lead = agent(&mut c, &wt, None, &wt).unwrap();
+    let (prog, args) = shell();
+    let lead = c
+        .call(
+            "session.spawn",
+            json!({"program": prog, "args": args, "cwd": wt, "meta": {"project": "pc", "worktree": wt, "kind": "agent", "agent": "claude", "lead": true}}),
+        )
+        .unwrap()["id"]
+        .as_u64()
+        .unwrap();
     let l = info(&mut c, lead);
     assert_eq!((l["label"].as_str(), l["meta"]["lead"].as_bool()), (Some("main"), Some(true)));
     assert!(info(&mut c, setup)["meta"]["lead"].is_null());

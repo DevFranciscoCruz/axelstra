@@ -25,7 +25,12 @@ fn spawn(c: &mut Client, project: &str, wt: &Value, extra: Value) -> u64 {
     let (prog, args) = shell();
     let mut p = json!({"program": prog, "args": args, "label": "claude", "meta": {"project": project, "worktree": wt, "kind": "agent", "agent": "claude"}});
     for (k, v) in extra.as_object().unwrap() {
-        p[k] = v.clone();
+        // `lead` belongs to the meta: only an explicit lead leads
+        if k == "lead" {
+            p["meta"][k] = v.clone();
+        } else {
+            p[k] = v.clone();
+        }
     }
     c.call("session.spawn", p).unwrap()["id"].as_u64().unwrap()
 }
@@ -81,9 +86,9 @@ fn sending_a_comment_needs_a_live_lead_and_a_known_worktree() {
     assert!(e.contains("missing number"), "{e}");
 
     // with a lead the request goes on to GitHub (no remote here, so gh fails): the lead check is not what stops it
-    spawn(&mut c, &project, &wt, json!({}));
+    spawn(&mut c, &project, &wt, json!({"lead": true}));
     let lead = c.call("session.list", json!({})).unwrap().as_array().unwrap().iter().any(|s| s["meta"]["lead"] == true);
-    assert!(lead, "the first agent of a worktree leads");
+    assert!(lead, "an explicit lead leads");
     let e = send(&mut c, &wt);
     assert!(!e.contains("no live lead"), "{e}");
 

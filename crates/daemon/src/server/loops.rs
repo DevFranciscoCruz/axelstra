@@ -828,6 +828,7 @@ pub(super) fn stall_facts(
         let alive = |i: u32| reg.get(i).is_some_and(|s| s.try_wait().is_none());
         reg.bus.live_workers(alive) >= reg.bus.limit()
     };
+    let since_msg_ms = reg.bus.since_msg_ms(id);
     crate::stall::Facts {
         agent: meta.is_some_and(|m| m["kind"] == "agent"),
         main: meta.is_some_and(|m| m["main"] == true),
@@ -839,10 +840,11 @@ pub(super) fn stall_facts(
         paused: reg.pauser.paused_of(id).is_some(),
         idle_ms,
         since_input_ms,
-        since_msg_ms: reg.bus.since_msg_ms(id),
+        since_msg_ms,
         bg_work: reg.work.busy(id),
         slot_wait: reg.work.slot_waiting(id, full),
         parent_idle_ms,
+        unasked: crate::stall::never_asked(meta.is_some_and(|m| m["unrequested"] == true), since_input_ms, since_msg_ms),
         notified_ms: reg.stall_notified.lock_recover().get(&id).map(|t| t.elapsed().as_millis() as u64),
     }
 }

@@ -47,12 +47,12 @@ pub const LEAD_NAME: &str = "main";
 
 /// Role of a new agent session: is it the lead of its worktree, and which session is its parent when none was given.
 /// `agents` are the running agents of the same worktree as (id, is_lead); `project_main` is the running agent of the
-/// project's main checkout, if any. A lead is the agent the client says is one (a restored lead), or the first fresh
-/// agent of a worktree that has none (a task started with `worker` never is). A restored agent that was named
-/// ("Tarefa 3") is never promoted: sessions saved before leads existed come back as they were.
+/// project's main checkout, if any. A lead exists per request, not per worktree: an agent leads only when the client
+/// says so (`meta.lead`, a restored lead or a dispatched one) and never when it is a `worker`. The first agent of a
+/// worktree is a plain task. Parent default: a lead reports to the project main; any other agent to the live lead of
+/// its worktree, else to the project main, else nobody.
 pub fn pick_role(
     meta: &Value,
-    label: Option<&str>,
     worker: bool,
     agents: &[(u32, bool)],
     project_main: Option<u32>,
@@ -61,11 +61,9 @@ pub fn pick_role(
     if meta["kind"] != "agent" || meta["main"] == true {
         return (false, parent);
     }
-    let agent = meta["agent"].as_str().unwrap_or_default();
-    let fresh = label.map(str::trim).filter(|l| !l.is_empty() && *l != agent).is_none();
     let live_lead = agents.iter().find(|(_, lead)| *lead).map(|(id, _)| *id);
-    let lead = !worker && (meta["lead"] == true || (fresh && live_lead.is_none()));
-    let parent = parent.or(if lead { project_main } else { live_lead });
+    let lead = !worker && meta["lead"] == true;
+    let parent = parent.or(if lead { project_main } else { live_lead.or(project_main) });
     (lead, parent)
 }
 
@@ -426,25 +424,25 @@ mod tests {
     #[test]
     fn roles_follow_the_worktree() {
         let fresh = json!({"kind": "agent", "agent": "claude", "worktree": "w"});
-        // no lead in the worktree: the first fresh agent leads and reports to the project main
-        assert_eq!(pick_role(&fresh, Some("claude"), false, &[], Some(1), None), (true, Some(1)));
-        assert_eq!(pick_role(&fresh, None, false, &[], None, None), (true, None));
+        // no lead in the worktree: the first agent is a plain task, under the project main
+        assert_eq!(pick_role(&fresh, false, &[], Some(1), None), (false, Some(1)));
+        assert_eq!(pick_role(&fresh, false, &[], None, None), (false, None));
         // a lead is running: a new agent is a task under it, unless it already has a parent
-        assert_eq!(pick_role(&fresh, Some("claude"), false, &[(5, true)], Some(1), None), (false, Some(5)));
-        assert_eq!(pick_role(&fresh, Some("claude"), false, &[(5, true)], Some(1), Some(9)), (false, Some(9)));
-        // only tasks running (an old session): the next agent becomes the lead
-        assert_eq!(pick_role(&fresh, Some("claude"), false, &[(5, false)], Some(1), None), (true, Some(1)));
-        // a worker asked for as such, a named (restored) task and the main checkout are never promoted
-        assert_eq!(pick_role(&fresh, Some("claude"), true, &[], Some(1), None), (false, None));
-        assert_eq!(pick_role(&fresh, Some("Tarefa 4"), false, &[], Some(1), None), (false, None));
+        assert_eq!(pick_role(&fresh, false, &[(5, true)], Some(1), None), (false, Some(5)));
+        assert_eq!(pick_role(&fresh, false, &[(5, true)], Some(1), Some(9)), (false, Some(9)));
+        // only tasks running: the next agent is still a task
+        assert_eq!(pick_role(&fresh, false, &[(5, false)], Some(1), None), (false, Some(1)));
+        // a worker is never a lead, even when flagged; the main checkout neither
+        let mut flagged = fresh.clone();
+        flagged["lead"] = json!(true);
+        assert_eq!(pick_role(&flagged, true, &[], Some(1), None), (false, Some(1)));
         let main = json!({"kind": "agent", "agent": "claude", "main": true});
-        assert_eq!(pick_role(&main, Some("claude"), false, &[], None, None), (false, None));
-        // a restored lead stays the lead
-        let mut lead = fresh.clone();
-        lead["lead"] = json!(true);
-        assert_eq!(pick_role(&lead, Some("main"), false, &[(5, false)], Some(1), None), (true, Some(1)));
+        assert_eq!(pick_role(&main, false, &[], None, None), (false, None));
+        // an explicit lead (restored or dispatched) leads and reports to the project main
+        assert_eq!(pick_role(&flagged, false, &[(5, false)], Some(1), None), (true, Some(1)));
+        assert_eq!(pick_role(&flagged, false, &[(5, true)], Some(1), None), (true, Some(1)));
         // terminals are no agents
-        assert_eq!(pick_role(&json!({"kind": "terminal"}), None, false, &[], Some(1), None), (false, None));
+        assert_eq!(pick_role(&json!({"kind": "terminal"}), false, &[], Some(1), None), (false, None));
     }
 
     #[test]

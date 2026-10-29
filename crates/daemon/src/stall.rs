@@ -71,6 +71,14 @@ pub struct Facts {
     pub parent_idle_ms: Option<u64>,
     /// ms since the watchdog told the parent about this stall (`None`: not told)
     pub notified_ms: Option<u64>,
+    /// a lead that never got a request (see `never_asked`): it has nothing to stall on
+    pub unasked: bool,
+}
+
+/// True for a lead that was started with no prompt, task or restored conversation (`meta.unrequested`, set at spawn)
+/// and that nobody has typed into or messaged since: it only sits at its banner, waiting for its first request.
+pub fn never_asked(unrequested: bool, since_input_ms: u64, since_msg_ms: u64) -> bool {
+    unrequested && since_input_ms == u64::MAX && since_msg_ms == u64::MAX
 }
 
 impl Facts {
@@ -94,6 +102,7 @@ pub fn is_stalled(f: &Facts, threshold_ms: u64) -> bool {
         && !f.paused
         && !f.bg_work
         && !f.slot_wait
+        && !f.unasked
         && f.quiet_ms() >= threshold_ms
 }
 
@@ -126,7 +135,7 @@ pub fn next_human_ms(f: &Facts, threshold_ms: u64) -> Option<u64> {
 /// threshold, or (while it awaits something) the moment the await expires. `None`: nothing time alone can change, an
 /// event (pulse) will say. This is what lets the watchdog sleep instead of ticking.
 pub fn next_check_ms(f: &Facts, threshold_ms: u64, await_left_ms: Option<u64>) -> Option<u64> {
-    if threshold_ms == 0 || !f.agent || f.main || !f.running || f.reported || f.escalated || f.live_children || f.paused {
+    if threshold_ms == 0 || !f.agent || f.main || !f.running || f.reported || f.escalated || f.live_children || f.paused || f.unasked {
         return None;
     }
     if f.awaiting {
@@ -289,10 +298,23 @@ mod tests {
             Facts { running: false, ..quiet() },
             Facts { main: true, ..quiet() },
             Facts { agent: false, ..quiet() },
+            // a lead that never got a request
+            Facts { unasked: true, ..quiet() },
         ] {
             assert!(!is_stalled(&f, 300_000), "{f:?}");
         }
         assert!(!is_stalled(&quiet(), 0), "0 turns the watchdog off");
+    }
+
+    #[test]
+    fn a_lead_without_a_request_is_never_asked_until_someone_writes() {
+        assert!(never_asked(true, u64::MAX, u64::MAX));
+        assert!(!never_asked(true, 5_000, u64::MAX), "typed into");
+        assert!(!never_asked(true, u64::MAX, 5_000), "got a message");
+        assert!(!never_asked(false, u64::MAX, u64::MAX), "not flagged: it had a request");
+        let f = Facts { unasked: true, ..quiet() };
+        assert!(!needs_human(&f, 300_000));
+        assert_eq!(next_check_ms(&f, 300_000, None), None);
     }
 
     #[test]
