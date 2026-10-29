@@ -181,49 +181,95 @@ impl std::error::Error for CallTimeout {
     }
 }
 
-/// A timeout for `method` after `limit`: the English text and a coded error (`rpc.call_timeout {method, secs}`) the UI
-/// shows in its language, so the user sees which call was slow instead of a global "the daemon did not answer".
-fn call_timeout(method: &str, limit: Duration, text: String) -> CallTimeout {
-    let coded = axelstra_core::coded!(
-        "rpc.call_timeout",
-        "{method} did not answer within {secs} s",
-        method = method,
-        secs = limit.as_secs().max(1)
-    )
+/// A call that ran into a limit. `rpc.call_timeout {method, secs}` is a limit chosen as policy (an explicit `Client::timeout`,
+/// or the cosmetic methods of `policy_limit`); `rpc.call_ceiling {method, secs}` is the high safety ceiling for a lost
+/// handle. Either way the UI shows which call it was, in its language, instead of a global "the daemon did not answer".
+fn call_timeout(method: &str, limit: Duration, text: String, ceiling: bool) -> CallTimeout {
+    let secs = limit.as_secs().max(1);
+    let coded = if ceiling {
+        axelstra_core::coded!(
+            "rpc.call_ceiling",
+            "{method} got no reply within the safety ceiling of {secs} s; the connection was dropped",
+            method = method,
+            secs = secs
+        )
+    } else {
+        axelstra_core::coded!("rpc.call_timeout", "{method} did not answer within {secs} s", method = method, secs = secs)
+    }
     .downcast::<axelstra_core::msg::Coded>()
     .ok();
     CallTimeout(text, coded)
 }
 
-/// How long `call` waits for the reply, by method (mirrored, plus a margin, by `timeoutFor` in app/src/api.ts): quick
-/// methods fail early so a hung daemon shows up fast; git/worktree scans get longer because they run git on every worktree;
-/// pushes, merges, clones and whole agent runs get the longest. None wait forever.
-pub fn default_timeout(method: &str) -> Duration {
+/// The daemon (or the `ssh`/`wsl.exe` child that carries the connection) went away while a call was pending: the event
+/// that ends a call, with no waiting on a clock.
+fn connection_closed(method: &str) -> anyhow::Error {
+    axelstra_core::coded!("rpc.connection_closed", "{method}: the daemon closed the connection", method = method)
+}
+
+/// A pending call never fails by elapsed time: it ends with the reply or with the connection closing. This is only the
+/// safety ceiling for a handle that lost its peer without telling (10 min by default, `AXELSTRA_CALL_CEILING_SECS` to
+/// change it, at least 1 s).
+pub const DEFAULT_CEILING_SECS: u64 = 600;
+
+pub fn ceiling() -> Duration {
+    static CEILING: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *CEILING.get_or_init(|| {
+        let secs =
+            std::env::var("AXELSTRA_CALL_CEILING_SECS").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_CEILING_SECS);
+        Duration::from_secs(secs.max(1))
+    })
+}
+
+/// A limit chosen per method as policy, not as a watchdog: only cosmetic reads (a project logo) that the UI drops silently
+/// when they are slow. Every other method has none, so it ends by event (the reply, the connection closing) or, as a last
+/// resort, at the ceiling.
+pub fn policy_limit(method: &str) -> Option<Duration> {
     match method {
-        "git.push" | "git.pr" | "git.suggest" | "git.commit" | "worktree.create" | "worktree.from_pr" | "worktree.sweep"
-        | "project.add" | "project.remove" | "project.init" | "project.clone" | "automation.run" | "orch.start" | "gh.list"
-        | "gh.comments" | "gh.send_comment" | "git.suggest_pr" | "agent.search" | "git.merge" | "git.checks" | "diagnostics" => {
-            Duration::from_secs(600)
-        }
-        m if ["git.", "gh.", "docker.", "pm.", "orch.", "worktree.", "project.", "dispatch.", "ports.", "agent.", "fs.", "files."]
-            .iter()
-            .any(|p| m.starts_with(p)) =>
-        {
-            Duration::from_secs(120)
-        }
-        _ => Duration::from_secs(30),
+        "project.logo" => Some(Duration::from_secs(8)),
+        _ => None,
     }
 }
+
+/// Methods that may run long (pushes, merges, clones, whole agent runs), listed because they are kept off the quick lane.
+const LONG_METHODS: &[&str] = &[
+    "git.push",
+    "git.pr",
+    "git.suggest",
+    "git.commit",
+    "worktree.create",
+    "worktree.from_pr",
+    "worktree.sweep",
+    "project.add",
+    "project.remove",
+    "project.init",
+    "project.clone",
+    "automation.run",
+    "orch.start",
+    "gh.list",
+    "gh.comments",
+    "gh.send_comment",
+    "git.suggest_pr",
+    "agent.search",
+    "git.merge",
+    "git.checks",
+    "diagnostics",
+];
 
 /// True for methods that may run long (git on many worktrees, gh, docker, scans): the app keeps them off the connection
 /// reserved for quick calls (`Lanes`), so a slow scan never holds up `project.list` or `session.list`.
 pub fn is_slow(method: &str) -> bool {
     const SLOW_PREFIX: &[&str] = &["git.", "gh.", "docker.", "pm.", "orch.", "worktree.", "dispatch.", "ports.", "fs."];
     // `project.list` and the like read the project file and must stay quick; the project operations that run git or clone do not
-    SLOW_PREFIX.iter().any(|p| method.starts_with(p))
-        || default_timeout(method) >= Duration::from_secs(600)
-        || method == "agent.search"
-        || method == "watch.subscribe"
+    SLOW_PREFIX.iter().any(|p| method.starts_with(p)) || LONG_METHODS.contains(&method) || method == "watch.subscribe"
+}
+
+/// True when `e` is the end of the stream or a reset: the peer is gone.
+fn is_closed(e: &anyhow::Error) -> bool {
+    use std::io::ErrorKind::*;
+    e.chain()
+        .filter_map(|c| c.downcast_ref::<std::io::Error>())
+        .any(|io| matches!(io.kind(), UnexpectedEof | BrokenPipe | ConnectionReset | ConnectionAborted) || io.raw_os_error() == Some(109))
 }
 
 /// True for the error a read gets when its deadline fires: a socket timeout (Unix) or the pipe read cancelled by
@@ -381,8 +427,10 @@ pub struct Client {
     pub proto: u64,
     /// which daemon run answered `hello`; a different value on reconnect means the daemon restarted
     pub instance: u64,
-    /// when set, every `call` waits this long for its reply instead of the per-method default
+    /// when set, every `call` is limited to this long (an explicit choice of the caller); else only `policy_limit` and `ceiling` apply
     pub timeout: Option<Duration>,
+    /// the safety ceiling for a call with no other limit (see `ceiling()`)
+    pub ceiling: Duration,
     /// a call timed out: the stream may hold a late reply, so this connection must not be reused
     broken: bool,
     /// build id the daemon reported in `hello` (empty for a daemon from before it existed)
@@ -392,9 +440,6 @@ pub struct Client {
     /// the whole `hello` result, for the bridge to hand on to its own client
     hello: Value,
 }
-
-/// How long one write to the daemon may block (a daemon that stopped reading with a full pipe).
-const WRITE_LIMIT: Duration = Duration::from_secs(30);
 
 #[cfg(windows)]
 fn open(pipe: &str) -> Result<Conn> {
@@ -550,6 +595,7 @@ impl Client {
             proto: 0,
             instance: 0,
             timeout: None,
+            ceiling: ceiling(),
             broken: false,
             build: String::new(),
             security: 0,
@@ -589,6 +635,7 @@ impl Client {
             proto: 0,
             instance: 0,
             timeout: Some(connect_timeout),
+            ceiling: ceiling(),
             broken: false,
             build: String::new(),
             security: 0,
@@ -671,6 +718,7 @@ impl Client {
             proto: self.proto,
             instance: self.instance,
             timeout: self.timeout,
+            ceiling: self.ceiling,
             broken: self.broken,
             build: self.build.clone(),
             security: self.security,
@@ -678,43 +726,52 @@ impl Client {
         })
     }
 
-    /// Sends a request and waits for its reply, at most `timeout` (or the method's default): a hung daemon
-    /// gives a `CallTimeout` error instead of freezing the caller. Streaming reads (`read`) are not bounded.
+    /// Sends a request and waits for its reply. The call ends by event: the reply, or the connection closing (the daemon
+    /// or the `ssh`/`wsl.exe` child went away: `rpc.connection_closed`). No elapsed time fails it, except an explicit
+    /// `timeout`, the cosmetic `policy_limit` of a method, or, for a lost handle, the high `ceiling` (`CallTimeout`, after
+    /// which the connection is not reused). Streaming reads (`read`) are not bounded.
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value> {
         if self.broken {
-            return Err(anyhow::Error::new(call_timeout(
-                method,
-                Duration::ZERO,
-                format!("{method}: the connection to the daemon timed out earlier; reconnect"),
-            )));
+            // an earlier call ended this connection (closed or past the ceiling): it is not reused, the caller reconnects
+            return Err(connection_closed(method));
         }
         self.next += 1;
         let id = self.next;
         let req = json!({"id": id, "method": method, "params": params});
         self.write_bounded(&encode(JSON, req.to_string().as_bytes())).map_err(|e| self.explain(anyhow::Error::new(NotSent(e))))?;
-        let limit = self.timeout.unwrap_or_else(|| default_timeout(method));
+        let policy = self.timeout.or_else(|| policy_limit(method));
+        let limit = policy.unwrap_or(self.ceiling);
         let deadline = Deadline::start(&self.rd, limit).ok();
         let res = self.reply(method, id);
         let fired = deadline.map(Deadline::finish).unwrap_or(false);
         match res {
             Err(e) if fired || is_timeout(&e) => {
                 self.broken = true;
-                let msg = format!("{method}: the daemon did not answer within {limit:?} (it may be hung); reconnect or restart it");
-                Err(self.explain(anyhow::Error::new(call_timeout(method, limit, msg))))
+                let ceiling = policy.is_none();
+                let msg = if ceiling {
+                    format!("{method}: no reply within the safety ceiling of {limit:?}; the connection was dropped (AXELSTRA_CALL_CEILING_SECS changes it)")
+                } else {
+                    format!("{method}: the daemon did not answer within {limit:?}")
+                };
+                Err(self.explain(anyhow::Error::new(call_timeout(method, limit, msg, ceiling))))
+            }
+            Err(e) if is_closed(&e) => {
+                self.broken = true;
+                Err(self.explain(connection_closed(method)))
             }
             Err(e) => Err(self.explain(e)),
             r => r,
         }
     }
 
-    /// Writes a whole frame within `WRITE_LIMIT`. A write that fails or is cut off may leave half a frame on the wire, so
-    /// the connection is not used again.
+    /// Writes a whole frame. A write blocked on a full pipe (a daemon that stopped reading) ends with the connection or at
+    /// the ceiling. A write that fails or is cut off may leave half a frame on the wire, so the connection is not used again.
     fn write_bounded(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-        let deadline = Deadline::start(&self.wr, WRITE_LIMIT).ok();
+        let deadline = Deadline::start(&self.wr, self.ceiling).ok();
         let mut r = self.wr.write_all(bytes);
         let fired = deadline.map(Deadline::finish).unwrap_or(false);
         if fired && r.is_err() {
-            r = Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "the write to the daemon did not finish in time"));
+            r = Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "the write to the daemon did not finish within the safety ceiling"));
         }
         if r.is_err() {
             self.broken = true;
@@ -753,7 +810,7 @@ impl Client {
 
     /// `read` for a connection another thread writes to at the same time (the app's event stream). On Windows a pending
     /// `ReadFile` on the synchronous pipe handle keeps a write on its duplicate waiting until a frame arrives, so a
-    /// request sent on a quiet stream would not reach the daemon (and the watchdog would cancel the read 30 s later).
+    /// request sent on a quiet stream would not reach the daemon (and a deadline would cancel the read).
     /// This waits for data with `PeekNamedPipe`, like `PeekRead`, and reads only once a frame has started.
     pub fn read_shared(&mut self) -> Result<Frame> {
         #[cfg(windows)]

@@ -8,13 +8,10 @@ import { RightTabs } from "./RightTabs";
 import { findWorktree, rightTab, selectedWorktree, setError, showNotice } from "./store";
 import { S } from "./strings";
 import { P } from "./strings.panels";
-import { ciLine, eventTitle, stamp, toMarkdown, tokenLine, withTimeout } from "./timelineLogic";
+import { ciLine, eventTitle, stamp, toMarkdown, tokenLine } from "./timelineLogic";
 import { Badge, Button, cn } from "./ui";
 
 const T = P.timeline;
-/** the daemon scans every agent log for the token total: when that drags, say so instead of waiting for ever */
-const TIMEOUT_MS = 20_000;
-
 /** What happened in the selected worktree: commits, merges, agent reports, with the tokens and CI as totals; copyable as markdown. */
 export function TimelinePanel() {
   const [withCi, setWithCi] = createSignal(false);
@@ -24,7 +21,7 @@ export function TimelinePanel() {
       const c = current();
       return c ? { wt: c.wt.path, project: c.project.id, ci: withCi() } : null;
     },
-    (k) => withTimeout(gitTimeline(k.wt, k.project, k.ci), TIMEOUT_MS, () => T.timedOut(TIMEOUT_MS / 1000)),
+    (k) => gitTimeline(k.wt, k.project, k.ci),
   );
 
   const copy = async () => {

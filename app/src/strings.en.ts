@@ -179,6 +179,8 @@ export const enS: Widen<typeof ptS> = {
     close: "Close",
     reconnecting: "Reconnecting to the daemon…",
     retryNow: "Retry now",
+    slow: (method: string) => `Loading… the system is slow (${method})`,
+    slowCancel: "Cancel",
   },
 
   update: {

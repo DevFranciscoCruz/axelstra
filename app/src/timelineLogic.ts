@@ -56,12 +56,3 @@ export function toMarkdown(t: Timeline, worktree: string): string {
   }
   return out.join("\n") + "\n";
 }
-
-/** `p`, or a rejection with `message` once `ms` pass: the timeline must show an error and a retry, not "loading" for ever. */
-export const withTimeout = <T>(p: Promise<T>, ms: number, message: () => string): Promise<T> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<never>((_, rej) => {
-    timer = setTimeout(() => rej(new Error(message())), ms);
-  });
-  return Promise.race([p, late]).finally(() => clearTimeout(timer));
-};
