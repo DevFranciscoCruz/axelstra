@@ -6,6 +6,7 @@ vi.mock("./toasts", () => ({ toast: (...a: unknown[]) => toast(...a) }));
 vi.mock("./notifications", () => ({ pushNotification: (...a: unknown[]) => pushNotification(...a) }));
 
 import { handleJanitorEvents, janitorText } from "./janitorEvents";
+import { DEFAULT_PREFS, setNotifyPref } from "./notifyPrefs";
 
 const ev = (branch: string, into = "main", path = `/wt/${branch}`) => ({
   project: "p",
@@ -19,6 +20,7 @@ const ev = (branch: string, into = "main", path = `/wt/${branch}`) => ({
 beforeEach(() => {
   toast.mockReset();
   pushNotification.mockReset();
+  for (const k of ["need", "done", "info", "error", "dnd"] as const) setNotifyPref(k, DEFAULT_PREFS[k]);
 });
 
 describe("janitorText", () => {
@@ -31,13 +33,27 @@ describe("janitorText", () => {
 });
 
 describe("handleJanitorEvents", () => {
-  it("toasts and notifies once per event, keyed by path", () => {
-    expect(handleJanitorEvents([ev("ax/a"), ev("ax/b", "ax/a")])).toBe(2);
-    expect(toast).toHaveBeenCalledTimes(2);
-    expect(toast).toHaveBeenNthCalledWith(1, {
+  it("is silent by default: removals reach the centre but raise no toast", () => {
+    expect(handleJanitorEvents([ev("ax/a")])).toBe(1);
+    expect(toast).not.toHaveBeenCalled();
+    expect(pushNotification).toHaveBeenCalledTimes(1);
+  });
+  it("one event gets one toast keyed by path, a batch gets a single aggregate toast", () => {
+    setNotifyPref("info", true);
+    handleJanitorEvents([ev("ax/a")]);
+    expect(toast).toHaveBeenCalledWith({
       text: "worktree a removido (integrado em main)",
       kind: "info",
       key: "janitor:/wt/ax/a",
+    });
+    toast.mockReset();
+    pushNotification.mockReset();
+    expect(handleJanitorEvents([ev("ax/a"), ev("ax/b", "ax/a")])).toBe(2);
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith({
+      text: "2 worktrees integrados e removidos",
+      kind: "info",
+      key: "janitor:batch",
     });
     expect(pushNotification).toHaveBeenNthCalledWith(2, {
       kind: "merged",
@@ -50,21 +66,23 @@ describe("handleJanitorEvents", () => {
     expect(toast).not.toHaveBeenCalled();
     expect(pushNotification).not.toHaveBeenCalled();
   });
-  it("integrated and empty events get their own text and info toast", () => {
+  it("integrated and empty events get their own text", () => {
+    setNotifyPref("info", true);
     handleJanitorEvents([
       { ...ev("ax/a"), kind: "integrated", how: "ff", pushed: null },
       { ...ev("ax/b"), kind: "empty" },
     ]);
-    expect(toast).toHaveBeenNthCalledWith(1, {
-      text: "worktree a integrado em main e removido",
-      kind: "info",
-      key: "janitor:/wt/ax/a",
-    });
     expect(pushNotification).toHaveBeenNthCalledWith(2, {
       kind: "merged",
       worktree: "/wt/ax/b",
       text: "Worktree vazio b removido",
     });
+  });
+  it("do not disturb keeps the entry but raises no toast, even for an attention", () => {
+    setNotifyPref("dnd", true);
+    handleJanitorEvents([{ ...ev("ax/c"), kind: "attention", code: "integrate.busy", params: {}, text: "x" }]);
+    expect(toast).not.toHaveBeenCalled();
+    expect(pushNotification).toHaveBeenCalledTimes(1);
   });
   it("attention shows the coded text as a warning keyed by path and code", () => {
     handleJanitorEvents([

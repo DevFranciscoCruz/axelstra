@@ -34,14 +34,28 @@ export const enS: Widen<typeof ptS> = {
   notifyNote: "System alerts when an agent finishes or needs you.",
   notifySound: "Play a sound with the notification",
   notifyMode: {
-    all: { label: "All", hint: "Alerts when an agent finishes or is waiting." },
+    all: { label: "All", hint: "Alerts follow the categories below." },
     waiting: { label: "Waiting only", hint: "Alerts only when an agent is waiting for a reply." },
     off: { label: "None", hint: "No system notifications." },
+  },
+  notifyCats: {
+    title: "What alerts you",
+    note: "A category that is off stays in the notification centre only, already read: no system alert, sound, toast or counter.",
+    need: {
+      label: "Needs you",
+      hint: "An agent waits for your answer or permission, or something needs a decision from you.",
+    },
+    done: { label: "Finished", hint: "An agent finished its task or a worktree was merged." },
+    info: { label: "Informational", hint: "CI passing, budget warnings, automatic CI fixes." },
+    error: { label: "Errors", hint: "Failures nobody is handling: CI failing, a terminal error, budget exceeded." },
+    dnd: "Do not disturb",
+    dndHint:
+      'No system alert, sound or toast. Everything is still recorded in the centre and "Needs you" keeps the red dot.',
   },
 
   stall: "Stalled agent",
   stallNote:
-    "An agent that stays this long without activity and without calling done or escalate is marked stalled: its parent gets a message and a notification appears.",
+    "An agent that stays this long without activity and without calling done or escalate is marked stalled: its parent gets a message. You are alerted only when no parent agent is handling it.",
   stallOff: "Off",
   stallMin: (n: number) => `${n} min`,
 

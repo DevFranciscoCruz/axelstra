@@ -1,5 +1,6 @@
 import type { BudgetEvent } from "./api";
 import { pushNotification } from "./notifications";
+import { mayInterrupt } from "./notifyPrefs";
 import { B } from "./strings.budget";
 import { toast } from "./toasts";
 import { fmtTokens } from "./usageFormat";
@@ -17,13 +18,22 @@ export const budgetText = (e: BudgetEvent, nameOf: (path: string) => string): st
 export const handleBudgetEvents = (events: BudgetEvent[], nameOf: (path: string) => string): number => {
   for (const e of events) {
     const text = budgetText(e, nameOf);
-    toast({
+    const category = e.level === "over" ? "error" : "info";
+    if (mayInterrupt(category))
+      toast({
+        text,
+        kind: e.level === "over" ? "error" : "warn",
+        key: `budget:${e.worktree}:${e.period}:${e.level}`,
+        record: false,
+      });
+    pushNotification({
+      kind: "budget",
+      worktree: e.worktree,
       text,
-      kind: e.level === "over" ? "error" : "warn",
+      at: e.at,
+      category,
       key: `budget:${e.worktree}:${e.period}:${e.level}`,
-      record: false,
     });
-    pushNotification({ kind: "budget", worktree: e.worktree, text, at: e.at });
   }
   return events.length;
 };

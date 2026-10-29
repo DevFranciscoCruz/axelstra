@@ -48,7 +48,9 @@ pub(super) struct Registry {
     /// sessions that said they only wait for something external (`session.await`)
     pub(super) awaits: axelstra_core::waiting::Awaits,
     /// sessions the stall watchdog already told their parent about (until they work again)
-    pub(super) stall_notified: Mutex<std::collections::HashSet<u32>>,
+    pub(super) stall_notified: Mutex<HashMap<u32, std::time::Instant>>,
+    /// work a quiet session has that no screen shows (processes it started, a wish for a worker slot)
+    pub(super) work: crate::stall::Work,
     /// bumped when a request changed projects or worktrees; watchers hear it as `projects.changed`
     pub(super) wt_gen: AtomicU64,
     /// what agents asked the daemon to do (`audit.list`)
@@ -447,6 +449,7 @@ impl Registry {
             modes: Default::default(),
             awaits: Default::default(),
             stall_notified: Default::default(),
+            work: Default::default(),
             wt_gen: AtomicU64::new(0),
             audit,
             bad_hellos: AtomicU32::new(0),
@@ -553,7 +556,8 @@ impl Registry {
         let Some(ps) = self.get(pid) else { return };
         let label = self.labels.lock_recover().get(&id).cloned().unwrap_or_else(|| crate::prompts::session_name(id));
         let text = crate::prompts::waiting_report(wait.kind == axelstra_core::waiting::WaitKind::Permission, &wait.text);
-        let m = self.bus.send(Some(id), pid, "message", &text, None, None);
+        // a `notice`, not a `message`: a message would clear the parent's own pending question and report
+        let m = self.bus.send(Some(id), pid, "notice", &text, None, None);
         let agent = self.metas.lock_recover().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
         if agent {
             self.deliver_untrusted(pid, ps, &crate::msgbus::notice(&m, &format!("{label} ({})", crate::prompts::session_name(id))));

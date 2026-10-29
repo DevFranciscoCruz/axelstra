@@ -188,11 +188,6 @@ export const enL: Widen<typeof ptL> = {
       questionGeneric: (who: string, wt: string) => `${who} has a question in ${wt} and waits for your answer.`,
     },
     stalledHead: (who: string, wt: string) => `${who} stalled, not reporting · ${wt}`,
-    stopped: {
-      head: (who: string, wt: string) => `${who} stopped · ${wt}`,
-      body: (who: string, wt: string) =>
-        `${who} stopped in worktree "${wt}" without finishing. Open it to see what happened.`,
-    },
     exitCode: (who: string, code: number) => `${who} exited with code ${code}.`,
     ship: {
       merged: (pr: string, wt: string) => `Merged: ${pr} (${wt})`,
@@ -202,6 +197,10 @@ export const enL: Widen<typeof ptL> = {
     janitor: (branch: string, into: string) => `worktree ${branch} removed (merged into ${into})`,
     integrated: (branch: string, into: string) => `worktree ${branch} integrated into ${into} and removed`,
     emptyRemoved: (branch: string) => `empty worktree ${branch} removed`,
+    agg: {
+      done: (n: number) => `${count(n, "session finished", "sessions finished")} the task`,
+      merged: (n: number) => `${count(n, "worktree merged", "worktrees merged")} and removed`,
+    },
   },
   restore: {
     restored: (n: number) => count(n, "session restored", "sessions restored"),

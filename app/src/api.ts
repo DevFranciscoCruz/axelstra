@@ -27,7 +27,7 @@ export type StallInfo = { minutes: number; code: string; params: Record<string, 
 export type WaitInfo = { kind: "permission" | "question" | "idle_input"; text: string };
 /** The agent said it only waits for something external (CI, deploy): `since`/`until` are Unix ms, `until` null = no deadline. */
 export type AwaitInfo = { reason: string; since: number; until: number | null };
-export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; wait?: WaitInfo | null; stalled?: boolean; stall?: StallInfo | null; paused?: { reason: string; since: number; build: boolean } | null; mem_level?: MemLevel; mem_free_mb?: number; awaiting?: AwaitInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
+export type SessionInfo = { id: number; running: boolean; idle_ms?: number; waiting?: boolean; wait?: WaitInfo | null; stalled?: boolean; stall?: StallInfo | null; /** stalled, but a parent agent was told and handles it: never an alert for the user */ stall_parent?: boolean; paused?: { reason: string; since: number; build: boolean } | null; mem_level?: MemLevel; mem_free_mb?: number; awaiting?: AwaitInfo | null; escalated?: boolean; unread?: number; finished?: boolean; label: string | null; meta: SessionMeta | null };
 export type Worktree = { path: string; branch: string | null; head: string; is_main: boolean; /** worktree of the same project this one is grouped under */ parent?: string | null };
 export type Project = { id: string; name: string; path: string; worktrees: Worktree[];
   /** false for a plain folder that is not a git repository (yet) */

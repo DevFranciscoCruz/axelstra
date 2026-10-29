@@ -813,6 +813,17 @@ pub(super) fn stall_facts(
     meta: Option<&Value>,
     busy: &std::collections::HashSet<u32>,
 ) -> crate::stall::Facts {
+    let parent = meta.and_then(|m| m["parent"].as_u64()).map(|p| p as u32);
+    // a parent that is a live agent session handles a stall of its child; anything else leaves it to the user
+    let parent_idle_ms = parent.and_then(|p| {
+        let agent = reg.metas.lock_recover().get(&p).is_some_and(|m| m["kind"] == "agent");
+        let s = reg.get(p)?;
+        (agent && s.try_wait().is_none()).then(|| s.idle_ms())
+    });
+    let full = || {
+        let alive = |i: u32| reg.get(i).is_some_and(|s| s.try_wait().is_none());
+        reg.bus.live_workers(alive) >= reg.bus.limit()
+    };
     crate::stall::Facts {
         agent: meta.is_some_and(|m| m["kind"] == "agent"),
         main: meta.is_some_and(|m| m["main"] == true),
@@ -824,12 +835,18 @@ pub(super) fn stall_facts(
         paused: reg.pauser.paused_of(id).is_some(),
         idle_ms,
         since_input_ms,
+        since_msg_ms: reg.bus.since_msg_ms(id),
+        bg_work: reg.work.busy(id),
+        slot_wait: reg.work.slot_waiting(id, full),
+        parent_idle_ms,
+        notified_ms: reg.stall_notified.lock_recover().get(&id).map(|t| t.elapsed().as_millis() as u64),
     }
 }
 
-/// An agent that became stalled gets one message to its parent (until it works again). No tick: it looks when the pulse
-/// moves (a session changed, a message, a hint, the settings) and at the one moment the quietest agent would reach the
-/// threshold (`stall::next_check_ms`).
+/// An agent that became stalled gets one message to its parent per episode (until it works again); the user hears of
+/// it (`session.list` `stalled`) only when nobody handles it. No tick: it looks when the pulse moves (a session
+/// changed, a message, a hint, the settings) and at the one computed moment the next decision falls due
+/// (`stall::next_check_ms`, `stall::next_human_ms`).
 pub(super) fn spawn_stall_watchdog(reg: Arc<Registry>) {
     std::thread::spawn(move || {
         let mut seen = reg.pulse.now();
@@ -840,7 +857,7 @@ pub(super) fn spawn_stall_watchdog(reg: Arc<Registry>) {
     });
 }
 
-/// One pass of the watchdog. Returns how long until time alone could make another session stalled.
+/// One pass of the watchdog. Returns how long until time alone could change a decision.
 pub(super) fn stall_tick(reg: &Arc<Registry>) -> Option<Duration> {
     let threshold = reg.with_settings(crate::stall::threshold_ms);
     let minutes = crate::stall::display_minutes(threshold);
@@ -850,36 +867,90 @@ pub(super) fn stall_tick(reg: &Arc<Registry>) -> Option<Duration> {
         let metas = reg.metas.lock_recover();
         l.iter().map(|(id, s)| (*id, s.clone(), s.view(), labels.get(id).cloned(), metas.get(id).cloned())).collect()
     };
+    // the processes each running agent started, so a background shell or a build is not mistaken for silence
+    if threshold > 0 {
+        let agents: Vec<_> =
+            picked.iter().filter(|(_, s, _, _, m)| m.as_ref().is_some_and(|m| m["kind"] == "agent") && s.try_wait().is_none()).collect();
+        if !agents.is_empty() {
+            let snap = axelstra_core::procs::snapshot_cached(Duration::from_secs(5));
+            let now = Instant::now();
+            for (id, s, ..) in agents {
+                let Some(root) = s.pid() else { continue };
+                let mut below = snap.descendants(&[root]);
+                below.remove(&root);
+                reg.work.observe(*id, now, &below);
+            }
+        }
+    }
+    reg.work.retain(&picked.iter().map(|p| p.0).collect());
     let busy = busy_parents(reg, &picked);
     let mut stalled = Vec::new();
+    let mut human = std::collections::HashSet::new();
+    let mut worked = std::collections::HashSet::new();
     let mut next: Option<u64> = None;
+    let mut soonest = |ms: Option<u64>| {
+        if let Some(ms) = ms {
+            next = Some(next.map_or(ms, |n| n.min(ms)));
+        }
+    };
     let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
     for (id, s, view, label, meta) in &picked {
         let facts = stall_facts(reg, *id, s.try_wait().is_none(), view.idle_ms(), view.since_input_ms(), meta.as_ref(), &busy);
         let await_left = reg.awaiting_of(*id, view.since_input_ms(), view.idle_ms()).map(|a| a.until.saturating_sub(now_ms));
-        if let Some(ms) = crate::stall::next_check_ms(&facts, threshold, await_left) {
-            next = Some(next.map_or(ms, |n| n.min(ms)));
+        soonest(crate::stall::next_check_ms(&facts, threshold, await_left));
+        soonest(crate::stall::next_human_ms(&facts, threshold));
+        if facts.quiet_ms() < threshold {
+            worked.insert(*id);
         }
         if crate::stall::is_stalled(&facts, threshold) {
             let parent = meta.as_ref().and_then(|m| m["parent"].as_u64()).map(|p| p as u32);
             stalled.push((*id, label.clone(), parent, view.screen_tail(12)));
+            if crate::stall::needs_human(&facts, threshold) {
+                human.insert(*id);
+            }
         }
     }
-    let ids: std::collections::HashSet<u32> = stalled.iter().map(|x| x.0).collect();
     let fresh: Vec<_> = {
+        let alive: std::collections::HashSet<u32> = picked.iter().map(|p| p.0).collect();
         let mut seen = reg.stall_notified.lock_recover();
-        seen.retain(|id| ids.contains(id));
-        stalled.into_iter().filter(|x| seen.insert(x.0)).collect()
+        // an episode ends when the session works again (output, typing, a message) or goes away
+        seen.retain(|id, _| alive.contains(id) && !worked.contains(id));
+        let now = Instant::now();
+        stalled.into_iter().filter(|x| seen.insert(x.0, now).is_none()).collect()
     };
+    if !fresh.is_empty() {
+        // the alert of a session with a parent agent falls due a threshold after the parent was told
+        soonest(Some(threshold + 20));
+    }
+    // one message per parent and pass, however many of its children stalled together
+    type Child = (String, u32, Vec<String>);
+    let mut by_parent: Vec<(u32, Vec<Child>)> = Vec::new();
     for (id, label, parent, screen) in fresh {
-        let Some((pid, ps)) = parent.and_then(|p| reg.get(p).map(|s| (p, s))) else { continue };
-        let label = label.unwrap_or_else(|| format!("session {id}"));
-        let text = crate::stall::parent_text(&label, id, minutes, &crate::stall::last_line(&screen));
-        let m = reg.bus.send(Some(id), pid, "message", &text, None, None);
+        let Some(pid) = parent.filter(|p| reg.get(*p).is_some()) else { continue };
+        let item = (label.unwrap_or_else(|| format!("session {id}")), id, screen);
+        match by_parent.iter_mut().find(|(p, _)| *p == pid) {
+            Some((_, v)) => v.push(item),
+            None => by_parent.push((pid, vec![item])),
+        }
+    }
+    for (pid, items) in by_parent {
+        let Some(ps) = reg.get(pid) else { continue };
+        let text = match items.as_slice() {
+            [(label, id, screen)] => crate::stall::parent_text(label, *id, minutes, &crate::stall::last_line(screen)),
+            _ => crate::stall::parent_text_many(&items.iter().map(|(l, id, _)| (l.clone(), *id)).collect::<Vec<_>>(), minutes),
+        };
+        // a `notice` leaves the parent's own state (its pending question, its report) alone
+        let from = if let [(_, id, _)] = items.as_slice() { Some(*id) } else { None };
+        let m = reg.bus.send(from, pid, "notice", &text, None, None);
         let agent = reg.metas.lock_recover().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
         if agent {
-            reg.deliver_untrusted(pid, ps, &crate::msgbus::notice(&m, &format!("{label} ({})", crate::prompts::session_name(id))));
+            reg.deliver_untrusted(pid, ps, &crate::msgbus::notice(&m, "axelstra watchdog"));
         }
+    }
+    // the user's alert moved: watchers learn it now (the session monitor does not look at stalls)
+    let changed = std::mem::replace(&mut *reg.work.human.lock_recover(), human.clone()) != human;
+    if changed {
+        reg.broadcast("session.changed");
     }
     next.map(Duration::from_millis)
 }

@@ -238,15 +238,28 @@ function realDataDir() {
   );
 }
 const GUARDED = ["hooks.json", "token", "projects.json", "settings.json"];
+// settings.json also holds the UI choices (`ui`) that the running app and daemon rewrite
+// on their own (selected worktree, ...), so a live app would trip the guard: hash it without them.
+function fileHash(f, p) {
+  let buf = readFileSync(p);
+  if (f === "settings.json") {
+    try {
+      const j = JSON.parse(buf.toString("utf8"));
+      const d = j && typeof j === "object" && j.data ? j.data : j;
+      if (d && typeof d === "object") delete d.ui;
+      buf = Buffer.from(JSON.stringify(j));
+    } catch {}
+  }
+  return createHash("sha256").update(buf).digest("hex");
+}
+
 function snapshot() {
   const dir = realDataDir();
   if (!dir || !existsSync(dir)) return null;
   const snap = {};
   for (const f of GUARDED) {
     const p = join(dir, f);
-    snap[f] = existsSync(p)
-      ? createHash("sha256").update(readFileSync(p)).digest("hex")
-      : "(absent)";
+    snap[f] = existsSync(p) ? fileHash(f, p) : "(absent)";
   }
   return snap;
 }

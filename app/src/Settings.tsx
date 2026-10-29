@@ -47,6 +47,7 @@ import { L } from "./strings.logic";
 import { P } from "./strings.panels";
 import { ask } from "./Confirm";
 import "./termui.css";
+import { CATEGORIES, notifyPrefs, setNotifyPref } from "./notifyPrefs";
 import { Button, CheckboxField, Field, Input, RadioGroup } from "./ui";
 
 const TERSE: Terse[] = ["off", "short", "tiny"];
@@ -374,6 +375,24 @@ export function Settings() {
                 <CheckboxField checked={cfg().notify_sound ?? true} onChange={(v) => void save({ notify_sound: v })}>
                   {S.notifySound}
                 </CheckboxField>
+                <div class="auto-note" id="notify-cats-title">
+                  {S.notifyCats.title}
+                </div>
+                <div class="grid gap-1.5" role="group" aria-labelledby="notify-cats-title">
+                  <For each={CATEGORIES}>
+                    {(c) => (
+                      <CheckboxField checked={notifyPrefs()[c]} onChange={(v) => setNotifyPref(c, v)}>
+                        <span class="font-medium">{S.notifyCats[c].label}</span>
+                        <span class="auto-note"> · {S.notifyCats[c].hint}</span>
+                      </CheckboxField>
+                    )}
+                  </For>
+                  <CheckboxField checked={notifyPrefs().dnd} onChange={(v) => setNotifyPref("dnd", v)}>
+                    <span class="font-medium">{S.notifyCats.dnd}</span>
+                    <span class="auto-note"> · {S.notifyCats.dndHint}</span>
+                  </CheckboxField>
+                </div>
+                <div class="auto-note">{S.notifyCats.note}</div>
               </Section>
 
               <Section title={S.stall} note={S.stallNote}>

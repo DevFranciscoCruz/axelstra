@@ -136,12 +136,20 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 let alive = |i: u32| reg.get(i).map(|s| s.try_wait().is_none()).unwrap_or(false);
                 let (live, max) = (reg.bus.live_workers(alive), reg.bus.limit());
                 if live >= max {
+                    // the caller waits for a slot: that is work, not silence, for the stall watchdog
+                    if let Some(me) = agent {
+                        reg.work.want_slot(me);
+                        reg.pulse.bump();
+                    }
                     return Err(axelstra_core::coded!(
                         "session.worker_limit",
                         "worker limit reached ({live} running, max {max}): wait for one to finish or raise it with `axelstra limit N`",
                         live = live,
                         max = max
                     ));
+                }
+                if let Some(me) = agent {
+                    reg.work.got_slot(me);
                 }
             }
             if let Some(par) = parent {

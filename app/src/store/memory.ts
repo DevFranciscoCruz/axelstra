@@ -1,6 +1,7 @@
 import { createSignal, untrack } from "solid-js";
 import { memStatus, onDaemonEvent } from "../api";
 import { pushNotification } from "../notifications";
+import { mayInterrupt, type NotifCategory } from "../notifyPrefs";
 import { G } from "../strings.memory";
 import { toast } from "../toasts";
 import {
@@ -29,19 +30,29 @@ const move = (next: MemState) => {
   const level = levelTransition(prev, next);
   if (level) {
     const text = G.notify.level(level, next.free_mb);
-    toast({ text, kind: level === "critical" ? "error" : level === "high" ? "warn" : "info", key: LEVEL_KEY });
-    if (level !== "normal") pushNotification({ kind: "attention", worktree: "", text });
+    // critical asks the user to free memory (an error); high and the way back are information
+    const category: NotifCategory = level === "critical" ? "error" : "info";
+    if (mayInterrupt(category))
+      toast({
+        text,
+        kind: level === "critical" ? "error" : level === "high" ? "warn" : "info",
+        key: LEVEL_KEY,
+        record: false,
+      });
+    if (level !== "normal")
+      pushNotification({ kind: "attention", worktree: "", text, category, key: `${LEVEL_KEY}:${level}` });
   }
   if (!prev.loaded) return;
   const d = pausedDelta(prev, next);
   const frozen = d.paused.filter((p) => p.reason === "memory");
   if (frozen.length) {
     const text = G.notify.paused(frozen.length);
-    toast({ text, kind: "warn", key: "memory:paused" });
-    pushNotification({ kind: "attention", worktree: "", text });
+    if (mayInterrupt("error")) toast({ text, kind: "warn", key: "memory:paused", record: false });
+    pushNotification({ kind: "attention", worktree: "", text, category: "error", key: "memory:paused" });
   }
   const back = d.resumed.filter((p) => p.reason === "memory");
-  if (back.length) toast({ text: G.notify.resumed(back.length), kind: "info", key: "memory:resumed" });
+  if (back.length && mayInterrupt("info"))
+    toast({ text: G.notify.resumed(back.length), kind: "info", key: "memory:resumed", record: false });
 };
 
 /** Reads `mem.status` (an older daemon has none: the state stays empty and nothing is shown). */
