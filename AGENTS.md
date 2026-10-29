@@ -337,6 +337,34 @@ agree; CI checks it. Push a `vX.Y.Z` tag on a commit that is already on `main`: 
 the whole CI, stamps the tag into the three files, builds, uploads to a draft release, merges
 `latest.json` and only then publishes. The workflow's dry-run input does everything except publish.
 
+## Build cost
+
+Many agents compile on one machine, so every session the daemon starts (`Registry::spawn`) gets a build environment from
+`crates/daemon/src/buildenv.rs`, computed once at spawn from the free memory (no timer; pure functions with injected facts).
+It carries `CARGO_BUILD_JOBS` (half the cores, limited by free memory, same formula as `scripts/lib/jobs.mjs`), and, only when
+`sccache` is on PATH, `RUSTC_WRAPPER` plus `CARGO_INCREMENTAL=0`. A variable the user's environment or the spawn request already
+sets is never overridden. Settings (`settings.json`, object `build`, additive, read by the existing `settings.get/set`; no
+new method, no PROTO bump): `enabled` (true), `jobs` (null = derived), `sccache` (`auto`|`off`), `shared_target` (false),
+`shared_js_cache` (true), `lock_budget_mb` (null = derived), `lock_margin_mb` (null = 2048). `shared_target` gives each project one `CARGO_TARGET_DIR`
+(`<data_dir>/target/<project-id>`) and stays off because cargo's build-directory lock serializes every build of that project
+across its worktrees, fingerprints include the path (workspace crates of another worktree still rebuild; only dependencies are
+shared) and worktrees on other profiles thrash each other. `shared_js_cache` only points the package manager's download cache at
+`<data_dir>/cache` (`npm_config_cache`, pnpm `npm_config_store_dir`, `BUN_INSTALL_CACHE_DIR`, chosen by the lockfile in the
+session's folder), never the manager or the `node_modules` layout.
+`axelstra lock NAME --mem-mb N` admits a holder while the declared needs fit a budget (`build.lock_budget_mb`, else physical
+memory minus 2 GB): the budget is cut into 512 MB lock files (`NAME-mem-<i>.lock`), a holder takes `ceil(N/512)` free ones, a
+waiter blocks in the OS call of one busy unit and rescans on its release (no polling, nobody holds units while waiting).
+Admission also needs the memory available now minus the need to leave `LOCK_MARGIN_MB` (2 GB, `build.lock_margin_mb`;
+pure `buildenv::mem_gate`); short memory waits for the next release, and with nobody holding it admits anyway after a warning.
+So bare `lock verify/build` admits several holders when memory allows; `--slots 1` is strict one-at-a-time.
+`--slots` keeps plain count slots; `lock build`/`lock verify` with neither flag declare `mem_mb_for_jobs(CARGO_BUILD_JOBS)`.
+Use one mode per lock name. Lead and worker prompts (`prompts::BUILD_RULE`) and the axelstration guide tell agents to use
+`axelstra lock verify`, keep the jobs value, `cargo check` before `cargo test`, `check.mjs --fast` while iterating. Two
+memory gates apply to `axelstra lock`, in this order: first the governor's level gate (`wait_for_memory`, `mem.admit`: a new
+build waits while the level is High or Critical, only when a daemon answers), then the memory-need gate above
+(`acquire_mem`/`mem_gate`: budget and available memory). Both must pass; neither depends on the other. The governor
+does not feed `Facts::free_mem_bytes` or `lock_budget_mb`.
+
 ## Git hygiene
 
 Add paths explicitly (`git add <paths>`), never `git add -A`. `.kanban/` and `.axelstra/` are

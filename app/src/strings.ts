@@ -57,6 +57,31 @@ export const ptS = {
   stallOff: "Desligado",
   stallMin: (n: number) => `${n} min`,
 
+  build: {
+    title: "Compilação",
+    note: "Limita o custo de compilar com vários agentes na mesma máquina. Vale para as sessões iniciadas depois de alterares; as que já estão abertas mantêm o ambiente com que arrancaram.",
+    enabled: "Preparar o ambiente de compilação das sessões",
+    jobs: "Trabalhos paralelos do cargo",
+    jobsManual: "Valor fixo",
+    jobsHint: (max: string) =>
+      `Número inteiro de 1 a ${max}. Em automático usa metade dos núcleos, limitado pela memória livre.`,
+    sccache: "Usar o sccache quando estiver instalado",
+    sccacheHint: "Só é usado se o sccache existir no PATH; não é preciso instalá-lo.",
+    sharedTarget: "Partilhar a pasta target entre os worktrees do projeto",
+    sharedTargetWarn:
+      "Atenção: o cargo bloqueia a pasta de compilação, por isso as compilações do projeto passam a esperar umas pelas outras em todos os worktrees; como o caminho de cada worktree é diferente, as crates do próprio projeto voltam a compilar (só as dependências são partilhadas); e worktrees com perfis ou features diferentes estragam o trabalho uns dos outros. Fica desligado por omissão.",
+    sharedJsCache: "Partilhar a cache de downloads do gestor de pacotes JS",
+    sharedJsCacheHint: "Só aponta a cache de downloads para uma pasta comum; o node_modules de cada worktree não muda.",
+    budget: "Memória para compilações em simultâneo",
+    budgetManual: "Valor fixo (MB)",
+    budgetHint: (max: string) =>
+      `Orçamento do axelstra lock, em MB, de 1 a ${max}. Em automático usa a memória física menos 2 GB.`,
+    margin: "Memória livre a manter depois de admitir uma compilação",
+    marginHint: (max: string) =>
+      `Em MB, de 1 a ${max}. Em automático são 2048 MB: se a memória disponível não chegar, a compilação espera por uma libertação.`,
+    invalid: "Valor inválido.",
+  },
+
   shell: "Shell dos terminais",
   shellNote: "Vale para terminais e agentes novos. «Automático» usa o shell predefinido do sistema.",
   shells: { auto: "Automático", pwsh: "PowerShell 7", powershell: "Windows PowerShell", bash: "Bash", wsl: "WSL", cmd: "CMD" },

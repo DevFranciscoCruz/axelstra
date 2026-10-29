@@ -48,6 +48,31 @@ export const ptBRS: Widen<typeof ptS> = {
   stallOff: "Desligado",
   stallMin: (n: number) => `${n} min`,
 
+  build: {
+    title: "Compilação",
+    note: "Limita o custo de compilar com vários agentes na mesma máquina. Vale para as sessões iniciadas depois que você alterar; as que já estão abertas mantêm o ambiente com que começaram.",
+    enabled: "Preparar o ambiente de compilação das sessões",
+    jobs: "Jobs paralelos do cargo",
+    jobsManual: "Valor fixo",
+    jobsHint: (max: string) =>
+      `Número inteiro de 1 a ${max}. No automático usa metade dos núcleos, limitado pela memória livre.`,
+    sccache: "Usar o sccache quando estiver instalado",
+    sccacheHint: "Só é usado se o sccache estiver no PATH; não é preciso instalá-lo.",
+    sharedTarget: "Compartilhar a pasta target entre os worktrees do projeto",
+    sharedTargetWarn:
+      "Atenção: o cargo trava a pasta de compilação, então as compilações do projeto passam a esperar umas pelas outras em todos os worktrees; como o caminho de cada worktree é diferente, as crates do próprio projeto voltam a compilar (só as dependências são compartilhadas); e worktrees com perfis ou features diferentes estragam o trabalho uns dos outros. Fica desligado por padrão.",
+    sharedJsCache: "Compartilhar o cache de downloads do gerenciador de pacotes JS",
+    sharedJsCacheHint: "Só aponta o cache de downloads para uma pasta comum; o node_modules de cada worktree não muda.",
+    budget: "Memória para compilações simultâneas",
+    budgetManual: "Valor fixo (MB)",
+    budgetHint: (max: string) =>
+      `Orçamento do axelstra lock, em MB, de 1 a ${max}. No automático usa a memória física menos 2 GB.`,
+    margin: "Memória livre a manter depois de admitir uma compilação",
+    marginHint: (max: string) =>
+      `Em MB, de 1 a ${max}. No automático são 2048 MB: se a memória disponível não bastar, a compilação espera por uma liberação.`,
+    invalid: "Valor inválido.",
+  },
+
   shell: "Shell dos terminais",
   shellNote: "Vale para terminais e agentes novos. «Automático» usa o shell padrão do sistema.",
   shells: {

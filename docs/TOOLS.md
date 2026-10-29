@@ -10,6 +10,8 @@ Helpers outside the Rust and TypeScript sources. Run everything from the repo ro
 | `node scripts/check.mjs --engine` | same, but the Rust steps cover only core, daemon and cli (no desktop toolkit needed) |
 | `node scripts/check.mjs --skip-rust` / `--skip-frontend` | run one half |
 | `--skip-fmt --skip-clippy --skip-test --skip-tsc --skip-vitest` | skip one step |
+| `node scripts/check.mjs --fast` | quick loop, not the gate: clippy only on touched packages + dependents, no `cargo test`, frontend steps only when `app/` changed (vitest `--changed`, eslint on changed files) |
+| `node scripts/check.mjs --self-test` | pure helpers only (`scripts/lib/jobs.mjs`, `scripts/lib/changed.mjs`), no compile |
 
 In an Axelstra worktree wrap it: `axelstra lock verify -- node scripts/check.mjs`.
 
@@ -27,8 +29,9 @@ purpose and fix the new lints in the same change.
 - `check-i18n-static.mjs`: finds dictionary texts copied into module-level constants (part of `check.mjs`).
 - `write-latest-json.mjs`: builds the updater manifest (`latest.json`) in the release workflow.
 - `prepare-sidecar.sh` / `prepare-sidecar.ps1`: build the daemon binary and place it as the Tauri sidecar.
+- `lib/jobs.mjs`: `jobsFor({cores, freeMemBytes, perJobBytes})`, the compile-job count for a machine; `check.mjs` sets `CARGO_BUILD_JOBS` from it when unset (never on CI). `node scripts/lib/jobs.mjs` prints today's value, `--self-test` tests it. `lib/changed.mjs`: which files and Rust packages a branch touched (for `--fast`).
 - `build-installer.ps1`: **Windows only.** One command for the NSIS installer in steps (sidecar, frontend, bundle),
-  printing time and peak memory per step. `-Version` overrides the version, `-Jobs` limits compile jobs.
+  printing time and peak memory per step. `-Version` overrides the version, `-Jobs` limits compile jobs (when omitted it is derived from the cores and the free memory, floor 2; an explicit value wins).
   It also sets `AXELSTRA_GIT_SHA` and `AXELSTRA_BUILD_DATE` (unless already set) so the sidecar and the app embed the same
   commit and date; the installer name does not change. Output: `target/release/bundle/nsis/Axelstra_<version>_x64-setup.exe`. Slow and heavy; do not run it for a code check.
 
@@ -40,7 +43,23 @@ fallback today). Cargo reruns the script when either variable changes. Shallow c
 sets the sha from `github.sha`. Shown by `axelstra --version` / `-V`, `axelstra version --json` and Settings > About.
 Set them yourself only to reproduce a release build: `AXELSTRA_GIT_SHA=abc1234 AXELSTRA_BUILD_DATE=2026-01-31 cargo build`.
 
+## Build environment of sessions and `lock --mem-mb`
+
+Every session the daemon spawns gets `CARGO_BUILD_JOBS` (derived from cores and free memory when it starts), `RUSTC_WRAPPER`
+and `CARGO_INCREMENTAL=0` only if `sccache` is on PATH, and a shared package-manager download cache for JS. It never overrides
+a variable you already set. Edit `build` in `settings.json` (keys: `enabled`, `jobs`, `sccache` `auto`|`off`, `shared_target`,
+`shared_js_cache`, `lock_budget_mb`, `lock_margin_mb`; details and the risks of `shared_target`, which is off, in AGENTS.md > Build cost).
+
+- `axelstra lock verify -- <cmd>`: with no flag, declares a memory need from the jobs and is admitted while the holders fit the budget
+  AND the memory available now minus that need leaves a 2 GB margin (`build.lock_margin_mb`). So several holders can run at once
+  when memory allows; short memory waits for a holder to finish (no polling). If nobody holds the lock and memory is still short,
+  it runs anyway after a warning. Use `--slots 1` for strict one-at-a-time.
+- `axelstra lock NAME --mem-mb 3000 -- <cmd>`: declares the need yourself. `--slots N`: plain count slots (the old behaviour).
+  The two flags exclude each other; keep one mode per name.
+
 ## tools/
+
+- `measure-build.mjs [--label L] [--jobs 2,default] [--steps check,test-build,relink] [--json F]`: wall time and peak memory (process-tree sum, sampled every 500 ms, so a floor) of `cargo check --workspace`, `cargo test --no-run` for core/daemon/cli, and a relink, each from an empty `CARGO_TARGET_DIR` under the temp dir so runs are comparable. Run it inside the lock: `axelstra lock verify -- node tools/measure-build.mjs --label base --jobs 2`.
 
 - `fake-agent.sh` / `fake-agent.ps1`: stand-in for a coding agent in tests. Behaviour is keyed on `AXELSTRA_TASK`:
   writes `<id>.txt` in the cwd and `.axelstra/result.json` (`{"status":"done",...}`); task `a` and `conflict` both write
@@ -61,10 +80,29 @@ Set them yourself only to reproduce a release build: `AXELSTRA_GIT_SHA=abc1234 A
 - `make-icons.py`: regenerates the app icons from `assets/logo.png` (crop, black glow to alpha). Needs Python 3 and
   Pillow (`pip install pillow`). Only run it when the logo changes.
 
-- `axelstra mem [--json]` / `axelstra resume <session>|--all`: memory pressure, the biggest sessions and what the governor paused; continue paused sessions. `axelstra lock` also waits for memory before taking a slot. See [`MEMORY.md`](MEMORY.md).
+- `axelstra mem [--json]` / `axelstra resume <session>|--all`: memory pressure, the biggest sessions and what the governor paused; continue paused sessions. `axelstra lock` applies both memory gates: first it waits while the governor level is High or Critical (before taking a slot), then the memory-need gate above (budget and available memory). See [`MEMORY.md`](MEMORY.md).
 
 ## Dependencies and policy
 
 - `deny.toml`: cargo-deny policy (advisories, licenses, bans, sources). CI runs `cargo deny check`. Locally:
   `cargo install cargo-deny --locked --version 0.20.2 && cargo deny check`.
 - `.github/dependabot.yml`: weekly updates for cargo, npm (`app/`) and GitHub Actions.
+
+## Dev/test profile (measured)
+
+`[profile.dev]` in the root `Cargo.toml` has `debug = "line-tables-only"` and `[profile.dev.package."*"]` has `debug = false`
+(`cargo test` uses the dev profile). Release is untouched. Measured with `tools/measure-build.mjs --jobs 2`, one run each, from an
+empty target dir, Windows MSVC, rustc 1.98.1:
+
+| step | before | after |
+|---|---|---|
+| `cargo test --no-run` (core, daemon, cli): time | 174.1 s | 91.9 s |
+| same: peak memory (process tree) | 2.06 GB | 1.18 GB |
+| same: target dir | 8.31 GB | 3.78 GB |
+| `cargo check --workspace`: time | 196.7 s | 225.9 s (noise: check emits no debuginfo; a shared machine) |
+| same: peak memory / target dir | 2.42 GB / 1.53 GB | 2.46 GB / 1.52 GB |
+
+Not applied: `split-debuginfo` (MSVC always writes a separate .pdb; the setting only matters on macOS/Linux, where the new
+default is already good), and `rust-lld`/`lld-link` as linker (it would change the link of the statically linked sherpa-onnx
+and is not safely optional across contributors' toolchains; not measured). Cost: a debugger shows no local variables in
+dependencies and no types in our crates; backtraces and panics keep file:line. Use `CARGO_PROFILE_DEV_DEBUG=2` to get full debuginfo for a session.

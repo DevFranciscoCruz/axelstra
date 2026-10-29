@@ -793,6 +793,18 @@ impl Registry {
                 s.env.push(("PATH".into(), joined.to_string_lossy().into_owned()));
             }
         }
+        // build cost: a derived job count, optional sccache and shared caches, computed now from the free memory
+        // (no timer); a variable the user or the spawn request already sets is left alone
+        if let Some(data) = self.saved.parent() {
+            let settings = self.with_settings(crate::buildenv::BuildSettings::from_settings);
+            let project = meta.as_ref().and_then(|m| m["project"].as_str());
+            let facts = crate::buildenv::facts_now(s.cwd.as_deref(), data);
+            let given = s.env.clone();
+            let extra = crate::buildenv::build_env(&settings, project, &facts, |k| {
+                std::env::var_os(k).is_some() || given.iter().any(|(g, _)| g.eq_ignore_ascii_case(k))
+            });
+            s.env.extend(extra);
+        }
         let sess = Arc::new(Session::spawn(&s)?);
         // working again after a quiet spell: the session monitor hears it without polling (weak: no cycle through the hook)
         let weak = Arc::downgrade(self);

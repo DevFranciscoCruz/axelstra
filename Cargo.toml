@@ -16,3 +16,13 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "unwind"
+
+# Dev and test builds: full debuginfo (the default, debug = 2) is the biggest part of target/ and of link time. Line tables
+# keep backtraces and panic locations with file:line; only stepping through locals in a debugger is lost.
+# Dev profile also feeds `cargo test`. Does not touch [profile.release].
+[profile.dev]
+debug = "line-tables-only"
+
+# Dependencies are rarely debugged: no debuginfo at all for them.
+[profile.dev.package."*"]
+debug = false
