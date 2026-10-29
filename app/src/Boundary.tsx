@@ -1,8 +1,9 @@
-import { ErrorBoundary, Show, createSignal, onCleanup, untrack, type JSX } from "solid-js";
+import { ErrorBoundary, Show, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
 import { copyDiagnostics, logFrontendError } from "./api";
-import { errorText } from "./appError";
+import { errorText, isCancelled } from "./appError";
 import { formatError } from "./errorHooks";
 import { Button } from "./ui";
+import { Icon } from "./Icon";
 import { S } from "./strings";
 import { U } from "./strings.ui";
 import { P } from "./strings.panels";
@@ -28,22 +29,29 @@ export function Fallback(props: { name: string; error: unknown; reset: () => voi
     clearTimeout(reset);
     reset = setTimeout(() => setCopy("idle"), 2000);
   };
+  let root: HTMLDivElement | undefined;
+  // the keyboard lands on the main action: Enter retries
+  onMount(() => root?.querySelector<HTMLButtonElement>("[data-retry]")?.focus());
   return (
-    <div class="placeholder" classList={{ whole: props.whole }} role="alert">
-      <div>
-        {props.whole ? U.boundary.whole : U.boundary.part(props.name)} {U.boundary.terminalsKeep}
-      </div>
-      <div class="hints boundary-msg">{errorText(props.error)}</div>
-      <div class="empty-actions">
-        <Button variant="default" onClick={props.reset}>
-          {S.retry}
-        </Button>
-        <Button onClick={copyDiag} aria-live="polite">
-          {copy() === "ok" ? P.confirm.copied : copy() === "failed" ? U.boundary.copyDiagFailed : U.boundary.copyDiag}
-        </Button>
-        <Show when={props.whole}>
-          <Button onClick={() => location.reload()}>{U.boundary.reload}</Button>
-        </Show>
+    <div ref={root} class="boundary" classList={{ whole: props.whole }} role="alert">
+      <div class="boundary-card">
+        <Icon name="warning" size={32} class="boundary-icon" />
+        <h2 class="boundary-title">{props.whole ? U.boundary.whole : U.boundary.part(props.name)}</h2>
+        <p class="boundary-note">{U.boundary.terminalsKeep}</p>
+        <div class="boundary-msg">{errorText(props.error)}</div>
+        <div class="empty-actions">
+          <Button variant="default" data-retry onClick={props.reset}>
+            {S.retry}
+          </Button>
+          <Button variant="secondary" onClick={copyDiag} aria-live="polite">
+            {copy() === "ok" ? P.confirm.copied : copy() === "failed" ? U.boundary.copyDiagFailed : U.boundary.copyDiag}
+          </Button>
+          <Show when={props.whole}>
+            <Button variant="secondary" onClick={() => location.reload()}>
+              {U.boundary.reload}
+            </Button>
+          </Show>
+        </div>
       </div>
     </div>
   );
@@ -51,11 +59,18 @@ export function Fallback(props: { name: string; error: unknown; reset: () => voi
 
 /** A boundary around one section of the screen (sidebar, right panel, terminal area) or, with `whole`, the app. */
 export function Section(props: { name: string; whole?: boolean; children: JSX.Element }) {
+  // "Tentar de novo" bumps this so the children are built again (their resources fetch again), not just the error cleared
+  const [attempt, setAttempt] = createSignal(0);
   return (
     <ErrorBoundary
-      fallback={(error, reset) => <Fallback name={props.name} error={error} reset={reset} whole={props.whole} />}
+      fallback={(error, reset) => {
+        const again = () => (setAttempt((n) => n + 1), reset());
+        // a request the user cancelled is not a failure: build the section again, show no error
+        if (isCancelled(error)) return (queueMicrotask(again), null);
+        return <Fallback name={props.name} error={error} reset={again} whole={props.whole} />;
+      }}
     >
-      {props.children}
+      {(attempt(), props.children)}
     </ErrorBoundary>
   );
 }

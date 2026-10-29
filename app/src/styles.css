@@ -993,7 +993,14 @@ button.icon, button.x, button.cbtn { display: inline-flex; align-items: center; 
 /* toast stack: the wrapper positions, the cards flow; the empty stack must not catch clicks meant for the app below it */
 .toast-stack { position: fixed; left: 50%; bottom: calc(var(--status-h) + 12px); /* above the status bar */ transform: translateX(-50%); z-index: var(--z-top); display: flex; flex-direction: column; gap: 8px; align-items: stretch; max-width: min(560px, 92vw); pointer-events: none; }
 .toast-stack-in { display: contents; pointer-events: auto; }
-.boundary-msg { max-width: 480px; word-break: break-word; }
+.boundary { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; height: 100%; min-height: 240px; padding: 32px 24px; overflow: auto; }
+.boundary.whole { height: 100vh; }
+.boundary-card { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 480px; text-align: center; }
+.boundary-icon { color: var(--danger); }
+.boundary-title { margin: 0; font-size: var(--fs-lg); font-weight: 600; color: var(--text); }
+.boundary-note { margin: 0; font-size: var(--fs-md); color: var(--muted); }
+.boundary-msg { max-width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-lg); font-size: var(--fs-md); color: var(--muted); word-break: break-word; user-select: text; }
+.boundary .empty-actions { margin-top: 6px; flex-wrap: wrap; justify-content: center; }
 .kids-root { --gx: 14px; }
 .m-actions.start { justify-content: flex-start; }
 .wup-bud { display: flex; gap: 12px; justify-content: flex-end; margin-bottom: 4px; }

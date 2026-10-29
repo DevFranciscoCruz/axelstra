@@ -4,10 +4,12 @@ import type { WorkspaceConflicts, WorkspaceMode, WorkspaceOutcome, WorkspacePrev
 import type { WtUsage } from "./usageFormat";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AppError, toAppError } from "./appError";
+import { AppError, CANCELLED, toAppError } from "./appError";
+import { watchSlow } from "./slowCalls";
 import { apiContext } from "./apiContext";
 import { hostOf, norm } from "./paths";
 import { coded } from "./msg";
+import { createLogoLoader, type LogoAnswer } from "./logo";
 
 /** Mirrors the Rust `meta` of a session (crates/daemon). `blank`, `interrupted` and `lost_workers` are set on entries of `session.pending`. */
 export type SessionMeta = {
@@ -44,53 +46,25 @@ export type Project = { id: string; name: string; path: string; worktrees: Workt
 };
 
 /**
- * Backstop for a call that gets no answer. The host (`default_timeout` in client.rs) times a call out by method first
- * (30 s quick, 120 s git/worktree reads, 600 s long runs) and names it in a coded error; these are the same limits plus a
- * margin, so only a host that is itself stuck ends here. The error names the method: one slow call is not "the daemon is gone".
+ * A daemon call ends by event only: the reply, or the host reporting the connection closed or broken
+ * (`rpc.connection_closed`, the daemon process gone). Elapsed time never fails it, and `ping`/`hello` only detect an
+ * outdated daemon, they never declare one dead. Slowness is information: after `SLOW_NOTICE_MS` the call is listed in
+ * `slowCalls.ts` (a non-blocking "the system is slow (<method>)" notice with a Cancel button that drops only this app-side
+ * request, as an `rpc.cancelled` AppError nobody shows as a failure; the daemon keeps working and the lanes keep their method name).
+ *
+ * The clocks kept are policy or net, not watchdogs:
+ *  - `CEILING_MS`: a high safety ceiling for a lost handle, aligned with the host's `AXELSTRA_CALL_CEILING_SECS` (600 s;
+ *    the host's coded `rpc.call_ceiling` normally arrives first, this one is the margin after it).
+ *  - `COSMETIC`: reads whose failure is invisible (the daemon answers `project.logo` within 5 s by itself) have their own
+ *    short limit; the caller falls back silently.
  */
-export const CALL_TIMEOUT_MS = 40_000;
-/** git/worktree/gh/docker reads and scans: they run git on every worktree and can take a while with many sessions open */
-export const MEDIUM_TIMEOUT_MS = 130_000;
-/** Methods that legitimately run a whole agent run, a push, a build or a clone. */
-export const SLOW_TIMEOUT_MS = 10 * 60_000 + 10_000;
-const SLOW = /^(git\.(push|pr|suggest|commit|suggest_pr|merge|checks)|gh\.(list|comments|send_comment)|worktree\.(create|from_pr|sweep)|project\.(add|remove|init|clone)|orch\.start|agent\.search|automation\.run|diagnostics)/;
-const MEDIUM = /^(git\.|gh\.|docker\.|pm\.|orch\.|worktree\.|project\.|dispatch\.|ports\.|agent\.|fs\.|files\.)/;
-export const timeoutFor = (method: string) => (SLOW.test(method) ? SLOW_TIMEOUT_MS : MEDIUM.test(method) ? MEDIUM_TIMEOUT_MS : CALL_TIMEOUT_MS);
-
-/** How long the liveness check after a late call waits for `ping` (it goes on a quick connection, see `Lanes`). */
-export const PING_WAIT_MS = 5_000;
-const daemonAlive = (): Promise<boolean> =>
-  new Promise((done) => {
-    const t = setTimeout(() => done(false), PING_WAIT_MS);
-    invoke("daemon_call", { method: "ping", params: {} }).then(
-      () => (clearTimeout(t), done(true)),
-      () => (clearTimeout(t), done(false)),
-    );
-  });
-
-/**
- * `p`, but failing with a readable AppError (naming the method) when it rejects or takes longer than the method's timeout.
- * A late call is followed by a `ping` on another connection: if the daemon answers it, only this method was slow
- * (`rpc.call_timeout`, an error of that call); only when the ping is silent too is it "the daemon did not answer".
- */
-const guard = <T>(method: string, p: Promise<T>): Promise<T> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<never>((_, rej) => {
-    const secs = Math.round(timeoutFor(method) / 1000);
-    timer = setTimeout(
-      () =>
-        void daemonAlive().then((alive) =>
-          rej(
-            alive
-              ? new AppError(method, `${method} did not answer within ${secs} s`, "rpc.call_timeout", { method, secs })
-              : new AppError(method, `Sem resposta do daemon (${method}) ao fim de ${secs} s.`),
-          ),
-        ),
-      timeoutFor(method),
-    );
-  });
-  return Promise.race([p, late]).catch((e) => Promise.reject(toAppError(method, e))).finally(() => clearTimeout(timer));
-};
+export const CEILING_SECS = 600;
+export const CEILING_MS = CEILING_SECS * 1000 + 10_000;
+/** Cosmetic reads: a short wait, the caller falls back silently. */
+export const COSMETIC_TIMEOUT_MS = 6_000;
+const COSMETIC = /^project\.logo$/;
+/** The per-method limit, if the method has one (policy); every other call waits for its event up to the safety ceiling. */
+export const policyLimit = (method: string): number | null => (COSMETIC.test(method) ? COSMETIC_TIMEOUT_MS : null);
 
 /**
  * Slow reads the daemon runs in lanes (`lanes.rs`): after its answer limit it replies exactly `{"loading": true}` while the
@@ -102,8 +76,8 @@ const isLoading = (r: unknown) =>
 
 /**
  * Sends the call and, while a lane method answers `{loading: true}`, sends it again: an identical call joins the running
- * work on the daemon. No timer: each repeat answers the previous one; `guard` ends the wait at the method's timeout and
- * `live` then stops the repeats.
+ * work on the daemon. No timer: each repeat answers the previous one; `live` stops the repeats once the call
+ * settled or was cancelled.
  */
 const settled = async <T>(method: string, live: () => boolean, send: () => Promise<T>): Promise<T> => {
   let r = await send();
@@ -111,9 +85,35 @@ const settled = async <T>(method: string, live: () => boolean, send: () => Promi
   return r;
 };
 
-const run = <T>(cmd: string, method: string, params: Record<string, unknown>) => {
+const run = <T>(cmd: string, method: string, params: Record<string, unknown>): Promise<T> => {
   let alive = true;
-  return guard(method, settled(method, () => alive, () => invoke<T>(cmd, { method, params }))).finally(() => (alive = false));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopSlow = () => {};
+  // the race below ends with the reply, an error from the host (connection closed, daemon gone), the user's cancel or,
+  // last, the policy limit / safety ceiling
+  const other = new Promise<never>((_, rej) => {
+    const cancel = () => {
+      alive = false;
+      rej(new AppError(method, "Request cancelled", CANCELLED));
+    };
+    const limit = policyLimit(method);
+    timer = setTimeout(
+      () => {
+        alive = false;
+        const secs = Math.round((limit ?? CEILING_MS - 10_000) / 1000);
+        rej(new AppError(method, `${method} did not answer within ${secs} s`, "rpc.call_timeout", { method, secs }));
+      },
+      limit ?? CEILING_MS,
+    );
+    if (limit === null) stopSlow = watchSlow(method, cancel);
+  });
+  return Promise.race([settled(method, () => alive, () => invoke<T>(cmd, { method, params })), other])
+    .catch((e) => Promise.reject(toAppError(method, e)))
+    .finally(() => {
+      alive = false;
+      clearTimeout(timer);
+      stopSlow();
+    });
 };
 
 export const call = <T = unknown>(method: string, params: Record<string, unknown> = {}) => run<T>("daemon_call", method, params);
@@ -607,7 +607,8 @@ const nativePick = <T>(method: string, cmd: string, title: string) => invoke<T>(
 /** Native folder dialog on the Rust side, then `project.add` with the chosen folder; null when cancelled.
  *  The webview never supplies the path (`project.add` is not in the host's allow-list). */
 export const pickAndAddProject = (title: string) => nativePick<Project | null>("project.add", "project_add_pick", title);
-export const projectLogo = (id: string) => call<{ data_url: string | null }>("project.logo", { id }).then((r) => r.data_url);
+/** The logo of a project's repo or null: cosmetic, so it never rejects (see logo.ts); `project.logo` has a short client timeout. */
+export const projectLogo = createLogoLoader((id) => call<LogoAnswer>("project.logo", { id }));
 /** per-project integration settings; send only what changed */
 export const setProjectIntegrate = (id: string, s: { auto?: boolean; push?: boolean }) => call("project.integrate", { id, ...s });
 export type IntegrateResult = {

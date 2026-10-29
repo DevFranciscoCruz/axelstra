@@ -3,6 +3,7 @@ import { Icon } from "./Icon";
 import { daemonReconnecting, dismissToast, retryDaemon, toasts } from "./store";
 import { pauseToast, resumeToast, type Toast } from "./toasts";
 import { Button } from "./ui";
+import { cancelSlow, slowMethods } from "./slowCalls";
 import { S } from "./strings";
 
 // .error-toast is position:fixed on its own; inside the stack the wrapper positions, the toasts flow
@@ -72,6 +73,16 @@ export function ErrorToast(props: { children?: JSX.Element }) {
               </Button>
             </div>
           </Show>
+          <For each={slowMethods().slice(0, 3)}>
+            {(m) => (
+              <div class="error-toast notice flow" role="status">
+                <span class="et-msg">{S.toast.slow(m)}</span>
+                <Button size="sm" class="flex-none" onClick={() => cancelSlow(m)}>
+                  {S.toast.slowCancel}
+                </Button>
+              </div>
+            )}
+          </For>
           <For each={toasts()}>{(t) => <ToastCard t={t} />}</For>
           {props.children}
         </div>

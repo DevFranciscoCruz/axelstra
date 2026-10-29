@@ -77,6 +77,7 @@ fn projects_worktrees_and_session_meta() {
     // a logo file in the repo wins over the host avatar
     assert!(c.call("project.logo", json!({"id": id})).unwrap()["data_url"].is_null());
     std::fs::create_dir_all(repo.join("assets")).unwrap();
+    axelstra_daemon::projects::forget_logos();
     std::fs::write(repo.join("assets/logo.png"), [137u8, 80, 78, 71]).unwrap();
     let logo = c.call("project.logo", json!({"id": id})).unwrap();
     assert!(logo["data_url"].as_str().unwrap().starts_with("data:image/png;base64,"));

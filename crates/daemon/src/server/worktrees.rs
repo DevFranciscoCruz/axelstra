@@ -114,7 +114,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         }
         "project.logo" => {
             let pr = crate::projects::find(&reg.store, p["id"].as_str().unwrap_or_default())?;
-            let logo = tokio::task::block_in_place(|| crate::projects::logo_data_url(std::path::Path::new(&pr.path)));
+            // runs in the logo lane (own pool, single flight, 5 s answer limit); the cache spares repeat disk reads
+            let logo = crate::projects::logo_cached(std::path::Path::new(&pr.path));
             Ok(json!({"data_url": logo}))
         }
         "project.add" => {

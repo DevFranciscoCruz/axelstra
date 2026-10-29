@@ -13,12 +13,15 @@ use tokio::sync::{oneshot, Semaphore};
 pub enum Lane {
     Git,
     Projects,
+    /// `project.logo`: disk reads of a repo's logo files, which can hang on a dead mount; two at a time, never the git pool
+    Logo,
 }
 
 /// The lane of a method that only reads and may be slow, or `None` for a method that runs in order on the worker.
 pub fn lane_of(method: &str) -> Option<Lane> {
     match method {
         "project.list" => Some(Lane::Projects),
+        "project.logo" => Some(Lane::Logo),
         "git.changes"
         | "git.log"
         | "git.show"
@@ -45,18 +48,22 @@ pub fn answer_limit(lane: Lane) -> Duration {
     match lane {
         Lane::Git => Duration::from_secs(20),
         Lane::Projects => Duration::from_secs(3),
+        Lane::Logo => Duration::from_secs(5),
     }
 }
 
 const GIT_PERMITS: usize = 6;
 const PROJECT_PERMITS: usize = 2;
+const LOGO_PERMITS: usize = 2;
 
 pub fn gate(lane: Lane) -> &'static Semaphore {
     static GIT: OnceLock<Semaphore> = OnceLock::new();
     static PROJECTS: OnceLock<Semaphore> = OnceLock::new();
+    static LOGO: OnceLock<Semaphore> = OnceLock::new();
     match lane {
         Lane::Git => GIT.get_or_init(|| Semaphore::new(GIT_PERMITS)),
         Lane::Projects => PROJECTS.get_or_init(|| Semaphore::new(PROJECT_PERMITS)),
+        Lane::Logo => LOGO.get_or_init(|| Semaphore::new(LOGO_PERMITS)),
     }
 }
 
