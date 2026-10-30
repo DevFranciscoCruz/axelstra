@@ -14,14 +14,13 @@ export const escapeLeaves = (e: Pick<KeyboardEvent, "key" | "defaultPrevented">)
   !document.querySelector('[role="dialog"], [role="alertdialog"], .pal-back');
 
 /**
- * The settings as a page of the app, not an overlay: a side list of sections (grouped, searchable, collapsing in a narrow
- * window) and one section at a time on the right. It changes no session: closing only hides the page, and focus goes back
- * to where it was. `page` draws the section asked for.
+ * The settings as a page of the app, not an overlay: a side list of sections (grouped, searchable, always shown; a narrow
+ * window only narrows it, down to icons) and one section at a time on the right. It changes no session: closing only
+ * hides the page, and focus goes back to where it was. `page` draws the section asked for.
  */
 export function SettingsPage(props: { caps: Caps; onClose: () => void; page: (id: SectionId) => JSX.Element }) {
   const T = L.settingsNav;
   const [query, setQuery] = createSignal("");
-  const [navOpen, setNavOpen] = createSignal(false);
   const items = createMemo(() => visibleItems(props.caps, query()));
   const current = createMemo(() => effectiveSection(section(), props.caps));
   const head = createMemo(() => visibleItems(props.caps, "").find((i) => i.id === current()));
@@ -31,7 +30,6 @@ export function SettingsPage(props: { caps: Caps; onClose: () => void; page: (id
 
   const pick = (id: SectionId) => {
     setSection(id);
-    setNavOpen(false);
     document.getElementById("set-content")?.scrollTo?.({ top: 0 });
   };
   const onKey = (e: KeyboardEvent) => {
@@ -42,7 +40,6 @@ export function SettingsPage(props: { caps: Caps; onClose: () => void; page: (id
     } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
       e.preventDefault();
       e.stopPropagation();
-      setNavOpen(true);
       search?.focus();
       search?.select();
     }
@@ -64,8 +61,8 @@ export function SettingsPage(props: { caps: Caps; onClose: () => void; page: (id
   return (
     <div class="set-page" data-testid="settings-page">
       <div class="set-side">
-        <Button variant="ghost" class="set-back" onClick={props.onClose}>
-          <Icon name="arrowLeft" size={14} inline /> {T.back}
+        <Button variant="ghost" class="set-back" title={T.back} onClick={props.onClose}>
+          <Icon name="arrowLeft" size={14} inline /> <span class="set-label">{T.back}</span>
         </Button>
         <div class="set-search">
           <Icon name="search" size={14} />
@@ -85,16 +82,7 @@ export function SettingsPage(props: { caps: Caps; onClose: () => void; page: (id
           />
           <kbd>{K("Ctrl+F")}</kbd>
         </div>
-        <Button
-          variant="outline"
-          class="set-nav-toggle"
-          aria-expanded={navOpen()}
-          aria-controls="set-nav"
-          onClick={() => setNavOpen(!navOpen())}
-        >
-          <Icon name={navOpen() ? "chevDown" : "chevRight"} size={12} inline /> {T.sections}: {head()?.title}
-        </Button>
-        <nav id="set-nav" class="set-nav" classList={{ open: navOpen() }} aria-label={T.navLabel} ref={nav}>
+        <nav class="set-nav" aria-label={T.navLabel} ref={nav}>
           <Show when={items().length} fallback={<p class="auto-note">{T.noMatch}</p>}>
             <For each={GROUPS}>
               {(g) => (
@@ -110,9 +98,10 @@ export function SettingsPage(props: { caps: Caps; onClose: () => void; page: (id
                             variant="row"
                             class={cn("set-nav-item", i.id === current() && "on")}
                             aria-current={i.id === current() ? "page" : undefined}
+                            title={i.title}
                             onClick={() => pick(i.id)}
                           >
-                            <Icon name={i.icon} size={14} /> {i.title}
+                            <Icon name={i.icon} size={14} /> <span class="set-label">{i.title}</span>
                           </Button>
                         </li>
                       )}

@@ -50,19 +50,44 @@ The setup of the Apple secrets is in the README ("Signing and notarizing the mac
 
 ### Windows Authenticode (optional)
 
-The Windows installer can be Authenticode-signed through **Azure Trusted Signing**. It is off until all of
-these exist as `release` Environment secrets: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`
-(a service principal with the *Trusted Signing Certificate Profile Signer* role), `TS_ENDPOINT` (for example
-`https://eus.codesigning.azure.net`), `TS_ACCOUNT` and `TS_PROFILE`.
+The Windows release can be Authenticode-signed: the `axelstra.exe` sidecar and `axelstra-app.exe` before the
+installer packs them, then the NSIS installer. The provider comparison, the recommendation (SignPath
+Foundation) and the owner's one-time setup are in `docs/SIGNING.md`. Unsigned builds trip machine-learning
+antivirus engines more easily; reporting a false positive is in `docs/ANTIVIRUS.md`.
 
-- With the secrets absent the step is skipped. If signing itself fails it is logged and ignored: the release
-  still ships, unsigned (SmartScreen warns, nothing else changes).
+The workflow picks the provider from the `release` Environment secrets (step *Authenticode provider*):
+
+| Provider | Secrets (`release` Environment) | Variables (optional) |
+| --- | --- | --- |
+| SignPath Foundation (preferred when both are set) | `SIGNPATH_API_TOKEN`, `SIGNPATH_ORGANIZATION_ID` | `SIGNPATH_PROJECT_SLUG` (default `axelstra`), `SIGNPATH_POLICY_SLUG` (default `release-signing`) |
+| Azure Artifact Signing (formerly Trusted Signing) | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `TS_ENDPOINT`, `TS_ACCOUNT`, `TS_PROFILE` | none |
+
+SignPath also needs two artifact configurations in the SignPath project, slugs `binaries` and `installer`
+(sketch in `docs/SIGNING.md`).
+
+**To turn it on:** add the secrets of one provider to the `release` Environment, then run the workflow by hand
+with *dry run* on and check the *Verify the Authenticode signatures* step. With SignPath, approve the two
+signing requests (binaries, then installer) in SignPath while the job waits; each waits up to 30 minutes, and
+a dry run submits them too.
+
+**Without the secrets** nothing changes: one `tauri build` as before, an unsigned installer, a notice in the
+log. SmartScreen warns on first runs, and ML antivirus engines are more likely to flag the files.
+
+**With a provider configured:**
+- The build is split: `tauri build --no-bundle`, sign `axelstra-app.exe` and the sidecar
+  (`app/src-tauri/binaries/axelstra-x86_64-pc-windows-msvc.exe`) and check them, `tauri bundle --bundles nsis`,
+  sign the installer. `bundle.windows.signCommand` is not used because SignPath signs asynchronously with a
+  human approval, which does not fit a per-file hook inside `tauri build`.
+- Signing is fail-closed: a configured provider that fails, times out or is refused fails the release job, so
+  nothing ships half signed. To ship unsigned on purpose, remove the secrets.
+- *Verify the Authenticode signatures* requires `Get-AuthenticodeSignature` status `Valid` on the installer
+  and on `axelstra-app.exe` and `axelstra.exe` read back out of it with 7-Zip (a warning only if 7-Zip cannot
+  read a file out).
 - The updater signature (`.sig`) covers the exact installer bytes. Signing changes them, so the workflow
-  re-runs `tauri signer sign` on the signed installer. That step is allowed to fail the job: a stale `.sig`
+  re-runs `tauri signer sign` on the signed installer. That step fails the job on error: a stale `.sig`
   would break updates for everyone.
-- Only the installer `.exe` is signed, not the application binary inside it. Signing inside the bundle
-  would need Tauri's `bundle.windows.signCommand`; revisit if SmartScreen reputation requires it.
-- Not run yet: the step was written without access to an Azure account. Test it with a dry run first.
+- Not run yet with either provider: written without a SignPath project or an Azure account. Test with a dry
+  run first.
 
 ## Release assets are immutable once published
 
@@ -173,6 +198,7 @@ The same text is the body of the update card in the app.
 
 ## Pinned actions
 
-Most actions are pinned by commit SHA. Two are still on tags because their SHA could not be verified offline:
-`orhun/git-cliff-action@v4` and `azure/trusted-signing-action@v0.5.1`. Pin them the next time someone is
-online (`gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq .object.sha`).
+Actions are pinned by commit SHA with the tag in a comment. The signing actions were resolved on 2026-10-29:
+`azure/artifact-signing-action` v2.0.0 (annotated tag, dereferenced to the commit) and
+`signpath/github-action-submit-signing-request` v2. To move one, resolve the new tag
+(`gh api repos/<owner>/<repo>/git/ref/tags/<tag>`, and for an annotated tag `gh api repos/<owner>/<repo>/git/tags/<sha> --jq .object.sha`).

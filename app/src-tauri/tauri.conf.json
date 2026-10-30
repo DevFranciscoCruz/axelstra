@@ -29,6 +29,10 @@
   },
   "bundle": {
     "active": false,
+    "publisher": "Francisco Cruz",
+    "copyright": "Copyright (c) 2026 Francisco Cruz. MIT License.",
+    "shortDescription": "Axelstra desktop app",
+    "longDescription": "Axelstra desktop app: runs and supervises coding agents in git worktrees.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
