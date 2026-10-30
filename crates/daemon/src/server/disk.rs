@@ -153,8 +153,10 @@ pub(super) fn pass(reg: &Registry, only: Option<&str>, force: bool, dry: bool, a
     let quiet = reg.with_settings(artifacts::quiet_ms);
     let (mut out, mut skip, mut freed) = (vec![], vec![], 0u64);
     let mut due: Option<u64> = None;
+    // git lists canonical paths: the caller's spelling may be an alias (8.3 names on Windows, /var -> /private/var on macOS)
+    let only = only.map(|o| axelstra_core::git::canon(Path::new(o)).map(|c| norm(&c.to_string_lossy())).unwrap_or_else(|_| norm(o)));
     for w in worktrees(reg) {
-        if only.is_some_and(|o| norm(o) != norm(&w.path)) || (w.main && only.is_none()) {
+        if only.as_ref().is_some_and(|o| *o != norm(&w.path)) || (w.main && only.is_none()) {
             continue;
         }
         // nothing where artifacts live: nothing to say or wait for (no git run)

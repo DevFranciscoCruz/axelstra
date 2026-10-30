@@ -366,6 +366,11 @@ mod tests {
             }
         }
         g(r, &["checkout", "-q", "main"]);
+        // a pick onto the unchanged base within the same second recreates the very same commits (same parent, tree
+        // and dates), so main would simply become ax/all: give main a commit of its own first
+        std::fs::write(r.join("main.txt"), "m").unwrap();
+        g(r, &["add", "."]);
+        g(r, &["commit", "-qm", "main moves on"]);
         g(r, &["cherry-pick", "ax/all~1", "ax/all"]);
         g(r, &["cherry-pick", "ax/part~1"]);
         assert!(squash_merged(r, "ax/all", "main"));

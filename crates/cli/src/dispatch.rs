@@ -243,7 +243,7 @@ fn main_checkout_named(projects: &Value, want: &str) -> Option<String> {
     projects.as_array()?.iter().find_map(|p| {
         let main = p["worktrees"].as_array()?.iter().find(|x| x["is_main"] == json!(true))?;
         let path = main["path"].as_str().unwrap_or_default();
-        let inside = !n.contains("/.axelstra-wt/") && axelstra_core::paths::is_within(&n, path);
+        let inside = !n.contains("/.axelstra-wt/") && axelstra_core::paths::is_within(w, path);
         (inside || main["branch"].as_str() == Some(w)).then(|| p["name"].as_str().unwrap_or_default().to_string())
     })
 }
