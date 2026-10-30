@@ -99,6 +99,15 @@ a variable you already set. Edit `build` in `settings.json` (keys: `enabled`, `j
 - `deny.toml`: cargo-deny policy (advisories, licenses, bans, sources). CI runs `cargo deny check`. Locally:
   `cargo install cargo-deny --locked --version 0.20.2 && cargo deny check`.
 - `.github/dependabot.yml`: weekly updates for cargo, npm (`app/`) and GitHub Actions.
+- `.github/workflows/dependency-audit.yml`: the `deny` and `audit` gates of `ci.yml` on a timer (Monday) and on PRs that
+  change `Cargo.lock`, `app/package-lock.json` or `deny.toml`: `cargo deny check advisories licenses bans sources`,
+  `tools/check-deny-expiry.mjs`, `npm audit --omit=dev --audit-level=high`. It exists for advisories published while
+  nobody pushes and for ignores whose expiry passed; a failed scheduled run is the alarm (no issue is filed).
+- `.github/workflows/codeql.yml`: CodeQL for `rust`, `javascript-typescript` and `actions` (all `build-mode: none`, no
+  cargo build) on push and PR to `main` and weekly; results in Security > Code scanning. Code scanning's default setup
+  must stay off (this is the advanced setup).
+- Neither workflow is a required check, and must not become one: the release-please PR gets no `pull_request` runs
+  (it is pushed with `GITHUB_TOKEN`; `release-please.yml` dispatches only `ci.yml` on it).
 
 ## Dev/test profile (measured)
 
