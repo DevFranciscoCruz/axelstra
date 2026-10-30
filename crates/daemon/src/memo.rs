@@ -281,7 +281,8 @@ pub const GIT: &str = "git";
 /// and, where no event can say it changed, an age floor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Keep {
-    /// the repo's refs, the checkout's index and the generation of its scope (bumped by a file watch on it);
+    /// the checkout's own `HEAD` and branch (`gitstamp::head`: a commit in another worktree or a fetch leaves it
+    /// alone), its index and the generation of its scope (bumped by a file watch on it);
     /// `None` when the path has no `.git` of its own: nothing is kept
     pub stamp: Option<u64>,
     /// `WORKTREE_MAX_AGE` when no file watch of the daemon covers the checkout, else none
@@ -290,7 +291,8 @@ pub struct Keep {
 
 /// What a read of the checkout at `path` depends on (see `Keep`). The daemon watches the files of every checkout it
 /// is asked about (`watcher::own`, started here on the first ask; the watch bumps the path's scope), so an answer is
-/// kept until that watch fires or the refs or index move, with no clock. Only a checkout the daemon could not watch
+/// kept until that watch fires or its own HEAD, branch or index move, with no clock. A read that also depends on other
+/// refs (a base branch, the upstream) adds their `gitstamp::tips`/`upstream` to the stamp. Only a checkout the daemon could not watch
 /// (start failed, `watcher::MAX_OWN` reached) keeps the `WORKTREE_MAX_AGE` floor. The watch starts BEFORE the
 /// fingerprint is read, so an edit made after the read always moves it.
 pub fn worktree_keep(path: &str) -> Keep {
@@ -305,7 +307,7 @@ pub fn worktree_keep(path: &str) -> Keep {
 fn keep_of(path: &str, scope: &str, watched: bool) -> Keep {
     use axelstra_core::gitstamp;
     let p = std::path::Path::new(path);
-    let stamp = (|| Some(gitstamp::combine(&[gitstamp::refs(p)?, gitstamp::index(p)?, memo().scope_generation(scope)])))();
+    let stamp = (|| Some(gitstamp::combine(&[gitstamp::head(p)?, gitstamp::index(p)?, memo().scope_generation(scope)])))();
     Keep { stamp, max_age: (!watched).then_some(WORKTREE_MAX_AGE) }
 }
 
@@ -588,5 +590,89 @@ mod tests {
         assert_eq!(pool.run(|| pool.run(|| 5)), 5);
         // the permit came back
         assert_eq!(pool.run(|| 6), 6);
+    }
+}
+
+/// A repository with linked worktrees and a count of the git processes a piece of work starts, for the tests that
+/// check a read runs git only in the checkouts that changed.
+#[cfg(test)]
+pub(crate) mod testrepo {
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+
+    pub fn git(cwd: &Path, args: &[&str]) {
+        let mut full = vec!["-c", "user.name=t", "-c", "user.email=t@t"];
+        full.extend_from_slice(args);
+        let o = axelstra_core::git::run(cwd, &full).unwrap();
+        assert!(o.ok, "git {args:?}: {}", o.stderr);
+    }
+
+    /// `<tmp>/axl-<name>-<pid>/repo` on `main` with one commit, plus `n` worktrees `wt<i>` on branches `ax/w<i>`,
+    /// each with a commit of its own. Returns the root (to remove) and the worktree paths.
+    pub fn with_worktrees(name: &str, n: usize) -> (PathBuf, Vec<PathBuf>) {
+        let root = std::env::temp_dir().join(format!("axl-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("a.txt"), "1").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-qm", "init"]);
+        let wts: Vec<PathBuf> = (0..n)
+            .map(|i| {
+                let wt = root.join(format!("wt{i}"));
+                git(&repo, &["worktree", "add", "-q", "-b", &format!("ax/w{i}"), &wt.to_string_lossy()]);
+                std::fs::write(wt.join(format!("own{i}.txt")), "x").unwrap();
+                git(&wt, &["add", "."]);
+                git(&wt, &["commit", "-qm", "own"]);
+                wt
+            })
+            .collect();
+        (root, wts)
+    }
+
+    /// The git processes `f` started on this thread.
+    pub fn git_spawns(f: impl FnOnce()) -> u64 {
+        let site = format!("test-{:?}", std::thread::current().id());
+        let count = || {
+            axelstra_core::proc::site_stats()
+                .iter()
+                .filter(|s| s.site == site && s.command.starts_with("git"))
+                .map(|s| s.total)
+                .sum::<u64>()
+        };
+        let _g = axelstra_core::proc::site(&site);
+        let before = count();
+        f();
+        count() - before
+    }
+
+    /// Edits `file` in `wt` and waits until the daemon's own watch of it bumped its scope.
+    pub fn edit_and_wait(wt: &Path, file: &str) {
+        let scope = axelstra_core::paths::norm(&wt.to_string_lossy());
+        let before = super::memo().scope_generation(&scope);
+        std::thread::sleep(Duration::from_millis(300));
+        std::fs::write(wt.join(file), format!("{:?}", Instant::now())).unwrap();
+        let t = Instant::now();
+        while super::memo().scope_generation(&scope) == before {
+            assert!(t.elapsed() < Duration::from_secs(10), "the watch of {} never fired", wt.display());
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        // one write can reach the watch as two batches: wait until it has been quiet for a while
+        let (mut last, mut since) = (super::memo().scope_generation(&scope), Instant::now());
+        while since.elapsed() < Duration::from_millis(700) {
+            std::thread::sleep(Duration::from_millis(50));
+            let now = super::memo().scope_generation(&scope);
+            if now != last {
+                (last, since) = (now, Instant::now());
+            }
+        }
+    }
+
+    pub fn cleanup(root: &Path, wts: &[PathBuf]) {
+        for w in wts {
+            crate::watcher::forget_own(&w.to_string_lossy());
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -368,16 +368,29 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
 - **Idle reads (`memo.rs`).** The slow polled reads (`worktree.overview/status`, `git.changes`, `dispatch.overlap_files`, `ports.list`, `gh.list`, `agent.worktree_usage`, `budget.status`, `project.list`) are cached per generation: events (`broadcast_event` names, RefWatch, fs watch, any method outside `may_change_answers`) bump it (the reads of a checkout, `git.changes`, `worktree.status`, follow the `git` scope instead of `*`: only a call that `touches_checkouts` bumps it, never an agent's bookkeeping such as `session.*`, `msg.*`, `notes.*`, `flow.*`, `mem.*`), identical in-flight calls join one run (single-flight), git work goes through a 3-permit pool (never call `known_worktree` while holding a permit), and at High/Critical the cached value is served stale. `max_age` floors exist only where no event exists. App side: `createLive` has `debounceMs`, `soft` (cheap signature) and skips events while hidden; `session.changed` must not drive loaders by itself. Idle check: `node tools/idle-load.mjs`.
 - **Git answers by fingerprint (`core::gitstamp`).** A memo bump (any agent call outside `may_change_answers`) must not
   re-run git in every worktree: the pieces under those reads are kept in `gitstamp::Stamped` tables while a fingerprint
-  read from the repo's files holds (no process, no clock). `gitstamp::refs` hashes the HEADs, loose refs, `packed-refs`,
-  `reftable/tables.list` and `worktrees/*/{HEAD,gitdir,locked}`: `git::worktree_list`, `is_repo`, `default_branch`, the
-  janitor's git-only merge verdict (`janitor::git_verdict`; GitHub is still asked by the sweep), `integrate::ahead_of` and
-  the committed half of the overlaps. `gitstamp::config` keeps `git::identity`. What reads the working tree
+  read from the repo's files holds (no process, no clock), and each piece hashes only the refs it reads, so a commit in
+  one worktree runs git again in that worktree only. `gitstamp::refs` hashes the HEADs, loose refs, `packed-refs`,
+  `reftable/tables.list` and `worktrees/*/{HEAD,gitdir,locked}`: `git::worktree_list` and the janitor's git-only merge
+  verdict (`janitor::git_verdict`; GitHub is still asked by the sweep). `gitstamp::head` (the checkout's own `HEAD` and the
+  branch it names) keeps `is_repo`; `gitstamp::tips(names)` (those refs only) keeps `default_branch`
+  (`origin/HEAD`, `main`, `master`), `integrate::ahead_of` (default and branch) and, with `head`, the committed half of
+  the overlaps (`base...HEAD`). `gitstamp::config` keeps `git::identity`. What reads the working tree
   (`wtstatus::status_kept` for the overview and `worktree.status`, the uncommitted half of the overlaps, `git.changes`) uses
-  `memo::worktree_keep`: refs + index + the generation of that worktree's scope, which the daemon's own files-only watch
+  `memo::worktree_keep`: `head` + index + the generation of that worktree's scope, which the daemon's own files-only watch
   of it bumps (`watcher::own`, started on the first read, ended when the folder goes; at most `watcher::MAX_OWN`), so the
-  answer holds until that worktree changes, with no clock. `WORKTREE_MAX_AGE` stays only for a checkout the daemon could
-  not watch. Decisions that delete things call the uncached `wtstatus::status`. The stamp is
-  read BEFORE git runs; no fingerprint (no `.git` of its own, a read error, more than 20k loose refs) means git as before.
+  answer holds until that worktree changes, with no clock; `status_kept` and the `worktree.status`/`git.changes` keys add
+  `gitstamp::upstream` (the branch's upstream from the config, for ahead/behind) and `git.changes` the tip of its base.
+  `WORKTREE_MAX_AGE` stays only for a checkout the daemon could not watch. Decisions that delete things call the uncached
+  `wtstatus::status`. `overlaps::forget` (a rebase) drops only the snapshot, the stamps see the rebased checkout. The stamp
+  is read BEFORE git runs; no fingerprint (no `.git` of its own, a read error, more than 20k loose refs) means git as
+  before. Tests: `overlaps::tests::only_the_worktree_that_changed_runs_git_again`,
+  `wtstatus::tests::a_kept_status_runs_git_again_only_in_the_worktree_that_changed` (git spawns counted per test thread
+  with `memo::testrepo::git_spawns`).
+- **`projects.changed`.** `server::changes_projects` is an allow-list of the calls that change projects or worktrees
+  (create, remove, rename, rebase, integrate, from_pr, project add/init/setup/remove, `integrate.undo`, imports): reads and
+  previews (`project.env_preview`, `project.remove_preview`, ...) never broadcast it, since the app reloads the project
+  list, `worktree.status` and the overview on it. `worktree.sweep` announces it only when it is no dry run,
+  `worktree.set_parent` only when the link moved.
 - **Sleeps kept on purpose.** The rest are bounded backoffs on external OS resources: AV/indexer rename locks (`fsops.rs`,
   `store.rs`), the git handle of a killed process (`git.rs`), cleanup in `sources.rs`, Windows `PeekRead` 1-10 ms (`client.rs`; the
   sync pipe has no readiness event), synthetic input settle (`computer.rs`), the runner trust menu (`runner.rs`), the docker events

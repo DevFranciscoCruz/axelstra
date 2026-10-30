@@ -63,13 +63,16 @@ pub fn status_cached(worktree: &str) -> Status {
     st
 }
 
-/// `status` for the readers the app polls (overview, `worktree.status`): kept while the checkout's refs, index and file
-/// watch stay put (`memo::worktree_keep`; the age floor only for a checkout the daemon could not watch). Decisions
-/// that delete things call `status`.
+/// `status` for the readers the app polls (overview, `worktree.status`): kept while the checkout's HEAD, index, file
+/// watch and upstream stay put (`memo::worktree_keep` plus `gitstamp::upstream` for ahead/behind; the age floor only
+/// for a checkout the daemon could not watch), so a commit in another worktree does not run it again. Decisions that
+/// delete things call `status`.
 pub fn status_kept(worktree: &str) -> Status {
-    static KEPT: axelstra_core::gitstamp::Stamped<Status> = axelstra_core::gitstamp::Stamped::new();
+    use axelstra_core::gitstamp;
+    static KEPT: gitstamp::Stamped<Status> = gitstamp::Stamped::new();
     let k = crate::memo::worktree_keep(worktree);
-    KEPT.get(&axelstra_core::paths::norm(worktree), k.stamp, k.max_age, || status(worktree))
+    let stamp = (|| Some(gitstamp::combine(&[k.stamp?, gitstamp::upstream(std::path::Path::new(worktree))?])))();
+    KEPT.get(&axelstra_core::paths::norm(worktree), stamp, k.max_age, || status(worktree))
 }
 
 pub fn status(worktree: &str) -> Status {
@@ -94,5 +97,31 @@ mod tests {
     fn no_upstream_means_no_divergence() {
         let s = parse("p", "# branch.oid abc\n# branch.head feat\n");
         assert_eq!((s.dirty, s.ahead, s.behind, s.upstream), (0, 0, 0, false));
+    }
+
+    #[test]
+    fn a_kept_status_runs_git_again_only_in_the_worktree_that_changed() {
+        use crate::memo::testrepo::{cleanup, edit_and_wait, git, git_spawns, with_worktrees};
+        let (root, wts) = with_worktrees("status-spawns", 5);
+        let paths: Vec<String> = wts.iter().map(|w| w.to_string_lossy().to_string()).collect();
+        let all = || paths.iter().for_each(|w| drop(status_kept(w)));
+        all();
+        assert_eq!(git_spawns(all), 0, "nothing changed");
+        edit_and_wait(&wts[1], "own1.txt");
+        edit_and_wait(&wts[1], "own1.txt");
+        let per: Vec<u64> = paths.iter().map(|w| git_spawns(|| drop(status_kept(w)))).collect();
+        assert_eq!(per, vec![0, 1, 0, 0, 0], "only the edited worktree");
+        assert_eq!(status_kept(&paths[1]).dirty, 1);
+        // a commit in another worktree moves the repo's refs but not this one's HEAD, index or files
+        git(&wts[3], &["commit", "-q", "--allow-empty", "-m", "x"]);
+        assert_eq!(git_spawns(all), 1, "only the worktree that committed");
+        // the upstream of one worktree moved: its ahead/behind is read again, nobody else's
+        git(&wts[4], &["branch", "-q", "--set-upstream-to", "main"]);
+        all();
+        let before = status_kept(&paths[4]).behind;
+        git(&root.join("repo"), &["commit", "-q", "--allow-empty", "-m", "m"]);
+        assert_eq!(git_spawns(all), 1);
+        assert_eq!(status_kept(&paths[4]).behind, before + 1);
+        cleanup(&root, &wts);
     }
 }

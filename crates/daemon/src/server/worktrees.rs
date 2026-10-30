@@ -157,6 +157,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let path = p["path"].as_str().ok_or_else(|| missing("path"))?;
             let parent = p["parent"].as_str();
             tokio::task::block_in_place(|| crate::projects::set_parent(&reg.store, &pr.id, path, parent))?;
+            // the same link set again changes nothing the app shows
+            if crate::projects::find(&reg.store, &pr.id).map(|now| now.parents != pr.parents).unwrap_or(true) {
+                reg.projects_changed();
+            }
             Ok(json!({}))
         }
         "worktree.rename" => {

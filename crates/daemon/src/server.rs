@@ -953,21 +953,30 @@ struct Ctx<'a> {
     delay: &'a mut Duration,
 }
 
-/// Whether `method` changes projects or worktrees, which makes the cached project list stale.
+/// Whether `method` changes projects or worktrees, which makes the cached project list stale and broadcasts
+/// `projects.changed` (the app then reloads the list, the worktrees' status and the overview). An allow-list of the
+/// calls that do: previews and reads (`project.env_preview`, `project.remove_preview`, ...) must not. Calls that change
+/// them only sometimes say so themselves (`Registry::projects_changed`): `worktree.sweep` when it is no dry run,
+/// `worktree.set_parent` when the link moved, a clone when it finished.
 fn changes_projects(method: &str) -> bool {
-    (method.starts_with("worktree.") && !matches!(method, "worktree.status" | "worktree.overview"))
-        || matches!(method, "integrate.undo" | "workspace.import" | "backup.restore")
-        || (method.starts_with("project.")
-            && !matches!(
-                method,
-                "project.list"
-                    | "project.logo"
-                    | "project.log"
-                    | "project.discover"
-                    | "project.clone"
-                    | "project.clone_status"
-                    | "project.clone_cancel"
-            ))
+    matches!(
+        method,
+        "worktree.create"
+            | "worktree.from_pr"
+            | "worktree.integrate"
+            | "worktree.rebase"
+            | "worktree.remove"
+            | "worktree.rename"
+            | "project.add"
+            | "project.add_discovered"
+            | "project.init"
+            | "project.setup"
+            | "project.integrate"
+            | "project.remove"
+            | "integrate.undo"
+            | "workspace.import"
+            | "backup.restore"
+    )
 }
 
 /// The key of a kept answer of this daemon (the registry's address keeps daemons hosted by one process apart).
@@ -982,17 +991,19 @@ fn memo_opts<'a>(reg: &Registry, scopes: &'a [&'a str], max_age: Option<Duration
 }
 
 /// How a read of the checkouts at `paths` is kept by `crate::memo`: a key part made of their fingerprints
-/// (`memo::worktree_keep`: refs, index, the daemon's file watch), so the entry follows each checkout on its own, and
-/// the age floor when one of them has no watch or no fingerprint.
+/// (`memo::worktree_keep`: its HEAD, index and the daemon's file watch; plus its upstream, for ahead/behind), so the
+/// entry follows each checkout on its own (a commit in another worktree leaves it), and the age floor when one of them
+/// has no watch or no fingerprint.
 fn checkout_keep<'a>(paths: impl IntoIterator<Item = &'a str>) -> (String, Option<Duration>) {
     let (mut key, mut floor) = (String::new(), None);
     for p in paths {
         let k = crate::memo::worktree_keep(p);
-        match k.stamp {
-            Some(s) => key.push_str(&format!("{s:x},")),
+        let up = axelstra_core::gitstamp::upstream(std::path::Path::new(p));
+        match k.stamp.zip(up) {
+            Some((s, u)) => key.push_str(&format!("{s:x}.{u:x},")),
             None => key.push_str("-,"),
         }
-        if k.max_age.is_some() || k.stamp.is_none() {
+        if k.max_age.is_some() || k.stamp.is_none() || up.is_none() {
             floor = Some(crate::memo::WORKTREE_MAX_AGE);
         }
     }
@@ -1250,6 +1261,30 @@ mod memo_scope_tests {
         }
         for m in ["fs.write", "git.commit", "git.merge", "worktree.create", "integrate.undo", "some.new_method"] {
             assert!(touches_checkouts(m), "{m}");
+        }
+    }
+
+    #[test]
+    fn only_calls_that_change_projects_or_worktrees_announce_projects_changed() {
+        for m in [
+            "project.env_preview",
+            "project.remove_preview",
+            "project.list",
+            "project.logo",
+            "project.discover",
+            "project.clone_status",
+            "worktree.status",
+            "worktree.overview",
+            // they announce it themselves when they changed something
+            "worktree.sweep",
+            "worktree.set_parent",
+            "pm.detect",
+            "some.new_method",
+        ] {
+            assert!(!changes_projects(m), "{m}");
+        }
+        for m in ["worktree.create", "worktree.remove", "worktree.rename", "project.add", "project.remove", "integrate.undo"] {
+            assert!(changes_projects(m), "{m}");
         }
     }
 }

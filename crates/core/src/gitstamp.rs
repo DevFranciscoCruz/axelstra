@@ -133,6 +133,119 @@ pub fn refs(path: &Path) -> Option<u64> {
     ok.then(|| h.finish())
 }
 
+/// One ref by its full name: the loose file (and, for a symbolic ref such as `refs/remotes/origin/HEAD`, the ref it
+/// names), plus `packed-refs` and the reftable list where a packed one lives. Hashes nothing of any other ref.
+fn one_ref(h: &mut DefaultHasher, common: &Path, name: &str) -> bool {
+    name.hash(h);
+    let p = common.join(name);
+    let ok = match std::fs::read_to_string(&p) {
+        Ok(t) => {
+            t.hash(h);
+            match t.trim().strip_prefix("ref:") {
+                Some(target) => content(h, &common.join(target.trim())),
+                None => true,
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            0u8.hash(h);
+            true
+        }
+        // a folder (`refs/heads/ax` while `ax/x` exists) is no ref
+        Err(_) => p.is_dir(),
+    };
+    ok && meta(h, &common.join("packed-refs")) && content(h, &common.join("reftable").join("tables.list"))
+}
+
+/// The full names git tries for a short one (`main`, `origin/main`), in its own order (`git help revisions`).
+fn candidates(name: &str) -> Vec<String> {
+    if name.starts_with("refs/") || name == "HEAD" {
+        return vec![name.to_string()];
+    }
+    ["refs/", "refs/tags/", "refs/heads/", "refs/remotes/"]
+        .iter()
+        .map(|p| format!("{p}{name}"))
+        .chain(std::iter::once(format!("refs/remotes/{name}/HEAD")))
+        .collect()
+}
+
+/// Moves with the checkout's own `HEAD` and the branch it has checked out, and nothing else: a commit, a branch or a
+/// fetch elsewhere in the repo leaves it alone. What `diff HEAD`, `status` (without the upstream) and `ls-files` read.
+pub fn head(path: &Path) -> Option<u64> {
+    let d = dirs(path)?;
+    let mut h = DefaultHasher::new();
+    let text = match std::fs::read_to_string(d.git_dir.join("HEAD")) {
+        Ok(t) => t,
+        Err(_) => return None,
+    };
+    text.hash(&mut h);
+    let ok = match text.trim().strip_prefix("ref:") {
+        Some(name) => one_ref(&mut h, &d.common, name.trim()),
+        None => true,
+    };
+    ok.then(|| h.finish())
+}
+
+/// Moves with the refs `names` (short or full, as git would resolve them: `main`, `origin/main`, `refs/heads/x`) and
+/// nothing else. What `rev-list a..b`, `merge-base a b` or `diff a...HEAD` read besides `head`.
+pub fn tips(path: &Path, names: &[&str]) -> Option<u64> {
+    let d = dirs(path)?;
+    let mut h = DefaultHasher::new();
+    let ok = names.iter().all(|n| candidates(n).iter().all(|c| one_ref(&mut h, &d.common, c)));
+    ok.then(|| h.finish())
+}
+
+/// The upstream of `branch` (`refs/heads/x`) as a full ref name, read from git's config text: `branch.<x>.remote` and
+/// `.merge`; a remote `.` is a local branch. `None` when the branch has no upstream.
+pub fn upstream_of(config: &str, branch: &str) -> Option<String> {
+    let short = branch.strip_prefix("refs/heads/")?;
+    let (mut inside, mut remote, mut merge) = (false, None, None);
+    for line in config.lines().map(str::trim) {
+        if line.starts_with('[') {
+            // `[branch "x"]`: the subsection is case sensitive, the section is not
+            let head = line.trim_start_matches('[').trim_end_matches(']').trim();
+            inside = head
+                .split_once(char::is_whitespace)
+                .is_some_and(|(sec, sub)| sec.eq_ignore_ascii_case("branch") && sub.trim().trim_matches('"') == short);
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once('=') {
+            let v = v.trim().trim_matches('"').to_string();
+            match k.trim().to_ascii_lowercase().as_str() {
+                "remote" => remote = Some(v),
+                "merge" => merge = Some(v),
+                _ => {}
+            }
+        }
+    }
+    let merge = merge?;
+    match remote.as_deref() {
+        Some(".") => Some(merge),
+        Some(r) => Some(format!("refs/remotes/{r}/{}", merge.strip_prefix("refs/heads/").unwrap_or(&merge))),
+        None => None,
+    }
+}
+
+/// Moves with the checkout's `head` and its branch's upstream (the config file and the upstream's tip): what
+/// `status --branch` reads for ahead/behind. Other branches and remotes leave it alone.
+pub fn upstream(path: &Path) -> Option<u64> {
+    let d = dirs(path)?;
+    let mut h = DefaultHasher::new();
+    head(path)?.hash(&mut h);
+    let cfg = d.common.join("config");
+    let mut ok = meta(&mut h, &cfg);
+    let branch = std::fs::read_to_string(d.git_dir.join("HEAD")).ok()?;
+    if let Some(b) = branch.trim().strip_prefix("ref:") {
+        let text = std::fs::read_to_string(&cfg).unwrap_or_default();
+        if let Some(up) = upstream_of(&text, b.trim()) {
+            ok = ok && one_ref(&mut h, &d.common, &up);
+        }
+    }
+    ok.then(|| h.finish())
+}
+
 /// Moves with the checkout's index: staging, a commit, a checkout, a merge or a `git status` that refreshed it.
 pub fn index(path: &Path) -> Option<u64> {
     let d = dirs(path)?;
@@ -273,5 +386,50 @@ mod tests {
         assert_eq!(ask(None, None), 3, "no fingerprint: computed every time");
         assert_eq!(ask(Some(2), None), 2, "and nothing kept for it");
         assert_eq!(ask(Some(2), Some(Duration::ZERO)), 4, "older than max_age");
+    }
+
+    #[test]
+    fn head_and_tips_move_only_with_their_own_refs() {
+        let dir = temp("head");
+        let repo = dir.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        let (a, b) = (dir.join("a"), dir.join("b"));
+        git(&repo, &["worktree", "add", "-q", "-b", "ax/a", a.to_str().unwrap()]);
+        git(&repo, &["worktree", "add", "-q", "-b", "ax/b", b.to_str().unwrap()]);
+        let (ha, tb, tm) = (head(&a).unwrap(), tips(&a, &["ax/b"]).unwrap(), tips(&a, &["main"]).unwrap());
+        git(&b, &["commit", "-q", "--allow-empty", "-m", "b"]);
+        assert_eq!(head(&a), Some(ha), "a commit in another worktree");
+        assert_eq!(tips(&a, &["main"]), Some(tm));
+        assert_ne!(tips(&a, &["ax/b"]), Some(tb), "the branch named moved");
+        git(&a, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        assert_ne!(head(&a), Some(ha), "its own commit");
+        let ha = head(&a).unwrap();
+        git(&a, &["checkout", "-q", "--detach"]);
+        assert_ne!(head(&a), Some(ha), "detached");
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "m"]);
+        assert_ne!(tips(&a, &["main"]), Some(tm), "the default branch moved");
+        let tm = tips(&a, &["main"]).unwrap();
+        git(&repo, &["pack-refs", "--all"]);
+        assert_ne!(tips(&a, &["main"]), Some(tm), "packed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_upstream_is_read_from_the_branch_section() {
+        let cfg = "[core]
+	bare = false
+[branch \"ax/x\"]
+	remote = origin
+	merge = refs/heads/ax/x
+[branch \"loc\"]
+	remote = .
+	merge = refs/heads/main
+";
+        assert_eq!(upstream_of(cfg, "refs/heads/ax/x").as_deref(), Some("refs/remotes/origin/ax/x"));
+        assert_eq!(upstream_of(cfg, "refs/heads/loc").as_deref(), Some("refs/heads/main"));
+        assert_eq!(upstream_of(cfg, "refs/heads/none"), None);
+        assert_eq!(upstream_of(cfg, "abc123"), None);
     }
 }

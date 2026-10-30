@@ -3,7 +3,7 @@
 //! worktree, so the answer is cached for a few seconds.
 
 use crate::store::LockRecover;
-use axelstra_core::git;
+use axelstra_core::{git, gitstamp};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -29,21 +29,23 @@ fn listed(wt: &Path, args: &[&str], out: &mut BTreeSet<String>) {
 }
 
 /// The two halves of `changed_files`, each kept while what it reads holds (see `gitstamp`, `memo::worktree_keep`).
-static COMMITTED: axelstra_core::gitstamp::Stamped<BTreeSet<String>> = axelstra_core::gitstamp::Stamped::new();
-static UNCOMMITTED: axelstra_core::gitstamp::Stamped<BTreeSet<String>> = axelstra_core::gitstamp::Stamped::new();
+static COMMITTED: gitstamp::Stamped<BTreeSet<String>> = gitstamp::Stamped::new();
+static UNCOMMITTED: gitstamp::Stamped<BTreeSet<String>> = gitstamp::Stamped::new();
 
 /// Files a worktree changed: committed since the default branch plus uncommitted.
 fn changed_files(wt: &Path, base: &str) -> BTreeSet<String> {
     let key = axelstra_core::paths::norm(&wt.to_string_lossy());
-    // committed: commits only, so the repo's refs say when to look again
-    let mut out = COMMITTED.get(&format!("{key}|{base}"), axelstra_core::gitstamp::refs(wt), None, || {
+    // committed: commits only, so this checkout's HEAD and the base branch say when to look again (a commit or a
+    // branch elsewhere in the repo does not)
+    let stamp = (|| Some(gitstamp::combine(&[gitstamp::head(wt)?, gitstamp::tips(wt, &[base])?])))();
+    let mut out = COMMITTED.get(&format!("{key}|{base}"), stamp, None, || {
         let mut s = BTreeSet::new();
         listed(wt, &["diff", "--name-only", &format!("{base}...HEAD")], &mut s);
         s
     });
     // uncommitted: tracked edits (staged or not, renames included) and new files. `git::run` trims the output,
     // which would eat the leading space of the first `status --porcelain` line, so the two listings are asked for apart.
-    // Kept until the daemon's watch of this worktree fires or its index or refs move (an unwatched one: also the age floor)
+    // Kept until the daemon's watch of this worktree fires or its index, HEAD or branch move (an unwatched one: also the age floor)
     let k = crate::memo::worktree_keep(&wt.to_string_lossy());
     out.extend(UNCOMMITTED.get(&key, k.stamp, k.max_age, || {
         let mut s = BTreeSet::new();
@@ -118,10 +120,10 @@ fn snapshot(store: &Path, dispatch_json: &Path) -> Vec<(String, BTreeSet<String>
     v
 }
 
-/// Drops the snapshot: a rebase just changed what the worktrees touch.
+/// Drops the snapshot: a rebase just changed what the worktrees touch. The per-worktree halves stay: the rebased
+/// checkout's HEAD and index moved, so its stamps no longer match, and the others did not change.
 pub fn forget() {
     *CACHE.lock_recover() = None;
-    UNCOMMITTED.clear();
 }
 
 /// `{worktree path: [other worktree paths touching the same files]}`; worktrees without overlaps are absent.
@@ -194,5 +196,30 @@ mod tests {
         std::fs::write(r.join("a.txt"), "changed").unwrap();
         assert_eq!(changed_files(&r, "main"), set(&["a.txt", "b.txt"]));
         let _ = std::fs::remove_dir_all(&r);
+    }
+
+    #[test]
+    fn only_the_worktree_that_changed_runs_git_again() {
+        use crate::memo::testrepo::{cleanup, edit_and_wait, git, git_spawns, with_worktrees};
+        let (root, wts) = with_worktrees("overlap-spawns", 5);
+        let all = || wts.iter().for_each(|w| drop(changed_files(w, "main")));
+        all();
+        assert_eq!(git_spawns(all), 0, "nothing changed: every answer is kept");
+        // one file edited in one worktree: its uncommitted half asks git again (diff + ls-files), nobody else's does
+        edit_and_wait(&wts[2], "own2.txt");
+        assert_eq!(git_spawns(all), 2);
+        assert_eq!(git_spawns(all), 0);
+        // a commit in one worktree moves the repo's refs: only that worktree's halves are read again
+        std::fs::write(wts[0].join("c.txt"), "c").unwrap();
+        edit_and_wait(&wts[0], "c.txt");
+        git(&wts[0], &["add", "."]);
+        git(&wts[0], &["commit", "-qm", "c"]);
+        let n = git_spawns(all);
+        assert_eq!(n, 3, "committed diff + uncommitted diff + ls-files of the one worktree");
+        assert_eq!(changed_files(&wts[0], "main"), set(&["own0.txt", "c.txt"]));
+        // the default branch moved: every worktree's committed half is outdated, the uncommitted ones are not
+        git(&root.join("repo"), &["commit", "-q", "--allow-empty", "-m", "m"]);
+        assert_eq!(git_spawns(all), 5);
+        cleanup(&root, &wts);
     }
 }

@@ -437,8 +437,8 @@ static IDENTITY: crate::gitstamp::Stamped<RepoIdentity> = crate::gitstamp::Stamp
 
 /// True when `path` is inside a git repository (a plain folder has no `.git` to find).
 pub fn is_repo(path: &Path) -> bool {
-    // a `.git` of its own that git accepted once stays a repo until its refs or HEAD change
-    IS_REPO.get(&path.to_string_lossy(), crate::gitstamp::refs(path), None, || {
+    // a `.git` of its own that git accepted once stays a repo until its HEAD changes
+    IS_REPO.get(&path.to_string_lossy(), crate::gitstamp::head(path), None, || {
         run(path, &["rev-parse", "--git-dir"]).map(|o| o.ok).unwrap_or(false)
     })
 }
@@ -502,8 +502,9 @@ pub struct RepoIdentity {
 
 /// The branch the repo's main worktree is meant to stay on: origin's default, else `main`, else `master`.
 pub fn default_branch(repo: &Path) -> String {
-    // reads `refs/remotes/origin/HEAD` and which of `main`/`master` exist: all in the ref fingerprint
-    DEFAULT_BRANCH.get(&repo.to_string_lossy(), crate::gitstamp::refs(repo), None, || default_branch_uncached(repo))
+    // reads `refs/remotes/origin/HEAD` and which of `main`/`master` exist, nothing else: a commit elsewhere keeps it
+    let stamp = crate::gitstamp::tips(repo, &["refs/remotes/origin/HEAD", "refs/heads/main", "refs/heads/master"]);
+    DEFAULT_BRANCH.get(&repo.to_string_lossy(), stamp, None, || default_branch_uncached(repo))
 }
 
 fn default_branch_uncached(repo: &Path) -> String {
