@@ -5,6 +5,7 @@ import { createComponent } from "solid-js";
 const h = vi.hoisted(() => ({
   created: [] as string[],
   launched: [] as string[],
+  leads: [] as (boolean | undefined)[],
   rejectCreate: false,
 }));
 
@@ -41,7 +42,10 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 vi.mock("./api", async (orig) => ({
   ...(await orig<typeof import("./api")>()),
-  launchDefaultAgent: vi.fn(async (_p: string, _w: string, agent: string) => void h.launched.push(agent)),
+  launchDefaultAgent: vi.fn(async (...a: unknown[]) => {
+    h.launched.push(a[2] as string);
+    h.leads.push(a[7] as boolean | undefined);
+  }),
 }));
 vi.mock("./Confirm", () => ({ ask: vi.fn(async () => true), askDiscard: vi.fn(async () => true) }));
 
@@ -82,6 +86,7 @@ const open = async (agent?: string) => {
 beforeEach(() => {
   h.created.length = 0;
   h.launched.length = 0;
+  h.leads.length = 0;
   h.rejectCreate = false;
   setInstalledAgents(["claude", "codex"]);
   setError("");
@@ -101,6 +106,8 @@ describe("B1: the Novo worktree dialog closes once the worktree is created", () 
       expect(dialog()).toBeNull();
       expect(h.created).toEqual(["feat-x"]);
       expect(h.launched).toEqual(agent === "none" ? [] : [agent]);
+      // the agent of a worktree the user creates is that worktree's main, not a "Tarefa N"
+      expect(h.leads).toEqual(agent === "none" ? [] : [true]);
     });
   }
 

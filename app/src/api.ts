@@ -353,7 +353,8 @@ export const agentLine = (
 
 /** Opens the chosen agent CLI straight away in a worktree. The shell stays alive after the agent exits.
  * `pre.rules` lets a batch (restore) read the settings once instead of once per session.
- * `terse` is the project's own reply style; undefined follows the global setting. */
+ * `terse` is the project's own reply style; undefined follows the global setting.
+ * `lead` starts it as the worktree's main (`meta.lead`): the daemon makes a lead only when asked. */
 export const launchDefaultAgent = async (
   project: string,
   worktree: string,
@@ -362,6 +363,7 @@ export const launchDefaultAgent = async (
   restore?: { key?: string; resume?: string; note?: string; lead?: boolean },
   pre?: { rules: string | null },
   terse?: Terse,
+  lead?: boolean,
 ) => {
   const [[program, args], dir, rules] = await Promise.all([
     defaultShell(worktree),
@@ -402,7 +404,7 @@ export const launchDefaultAgent = async (
       key,
       note: restore?.note,
       main,
-      lead: restore?.lead || undefined,
+      lead: restore?.lead || lead || undefined,
     },
     env,
   );

@@ -239,7 +239,14 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   `worker: true` spawn, a named (restored) session and the main checkout never become leads. The app sends `lead` back on
   restore so a restart keeps the roles. The sidebar shows an existing lead first with a star and its tasks indented; a
   worktree of plain agents looks normal and nothing flags a missing lead ("Iniciar main do worktree" is an optional action
-  next to existing agents, `canStartLead` in `leadRole.ts`). Old worktrees that have a lead are unchanged.
+  next to existing agents, shown only while no lead runs there, `canStartLead` in `leadRole.ts`, and it sends `lead`). Old
+  worktrees that have a lead are unchanged.
+- **The app asks for the lead of a worktree the user works in.** The agent the app starts when the user creates a worktree
+  (`submitWorktree` in `Sidebar.tsx`), and the agent the user starts by hand in a worktree with no running agent (a new one,
+  one from a PR; `firstAgentLeads` in `leadRole.ts`, `newAgent` in `App.tsx`), go with `lead: true` (`launchDefaultAgent`'s
+  `lead` argument): named `main`, parent the project main, tasks under it. A later agent the user adds there is a `Tarefa N`
+  under it. The daemon's rule is unchanged: workers and leads of `axelstra dispatch new/send` decide by themselves, and the
+  main checkout never gets one (`firstAgentLeads` is false there; `session.main_no_tasks` stays).
 - **The main checkout never has tasks, it only dispatches them.** A project's own folder (or a folder below it, not under
   `.axelstra-wt`) holds only the project's main session and terminals. `session.spawn` from a `role=agent` connection or
   from the CLI (`axelstra agent`/`dispatch` send the additive `from: "cli"`; no PROTO bump) refuses there any agent that

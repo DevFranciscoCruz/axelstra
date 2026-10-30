@@ -172,7 +172,7 @@ export function Sidebar() {
       }
       const agent = projectPrefsOf(projectId).agent;
       const key = agent && AGENTS[agent] ? agent : canonAgent(savedAgent() === "none" ? "claude" : savedAgent());
-      const id = await launchDefaultAgent(projectId, path, key, AGENTS[key], undefined, undefined, projectTerse(projectId));
+      const id = await launchDefaultAgent(projectId, path, key, AGENTS[key], undefined, undefined, projectTerse(projectId), true);
       await refreshSessions();
       openIfStill(stamp, path, id);
     } catch (e) {
@@ -214,9 +214,10 @@ export function Sidebar() {
       selectIfStill(stamp, w.path);
       showNotice(T.created(name, w.env_copied?.length ? T.envCopied(w.env_copied.length) : "", w.env_skipped?.length ? T.envSkipped(w.env_skipped.length) : ""));
       // the worktree exists by now: a failing agent must not skip the setup, and the user reads a sentence, not the raw error
+      // the first agent of a worktree the user creates is its main: the one the user talks to, its tasks under it
       if (newAgent() !== "none") {
         try {
-          await launchDefaultAgent(projectId, w.path, newAgent(), AGENTS[newAgent()], undefined, undefined, projectTerse(projectId));
+          await launchDefaultAgent(projectId, w.path, newAgent(), AGENTS[newAgent()], undefined, undefined, projectTerse(projectId), true);
         } catch (e) {
           showNotice(T.agentFailed(name, errorText(e).slice(0, 120)));
         }
