@@ -26,6 +26,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 Some(reg.get(to).ok_or_else(|| axelstra_core::coded!("session.not_found", "no such session {id}", id = to))?)
             };
             let text = p["text"].as_str().unwrap_or_default();
+            // the same report or escalation again, with nothing in between: stored, but no second notice
+            let repeat = reg.bus.repeats(from, kind, text);
             let m = reg.bus.send(from, to, kind, text, p["reply_to"].as_u64(), p["thread"].as_str().map(String::from));
             if sleeping {
                 hibernate::wake(reg, to);
@@ -64,7 +66,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 sweep_soon(reg);
             }
             // agents get a one-line notice; a worker with a reaper reports through it instead
-            let quiet = p["quiet"].as_bool() == Some(true) || (kind == "done" && from.map(|f| reg.bus.is_reaped(f)).unwrap_or(false));
+            let quiet =
+                repeat || p["quiet"].as_bool() == Some(true) || (kind == "done" && from.map(|f| reg.bus.is_reaped(f)).unwrap_or(false));
             let agent = reg.metas.lock_recover().get(&to).map(|m| m["kind"] == "agent").unwrap_or(false);
             if quiet {
                 // the sender asked for no notice (or a reaper reports it): a wake must not type it later either

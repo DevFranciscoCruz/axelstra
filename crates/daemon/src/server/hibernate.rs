@@ -400,7 +400,8 @@ pub(super) fn fail_wake(reg: &Arc<Registry>, id: u32, code: Option<i32>, detail:
         if wake_if_sleeping(reg, p, &text) {
             return;
         }
-        let m = reg.bus.send(Some(id), p, "message", &text, None, None);
+        // a `notice`, not a `message`: it must not answer the parent's own escalation or undo its report
+        let m = reg.bus.send(Some(id), p, "notice", &text, None, None);
         if let Some(ps) = reg.get(p) {
             reg.announce(p, ps, &m, &label);
         }
@@ -412,7 +413,7 @@ fn wake_if_sleeping(reg: &Arc<Registry>, id: u32, text: &str) -> bool {
     if !reg.hib.is_sleeping(id) {
         return false;
     }
-    reg.bus.send(None, id, "message", text, None, None);
+    reg.bus.send(None, id, "notice", text, None, None);
     wake(reg, id);
     true
 }

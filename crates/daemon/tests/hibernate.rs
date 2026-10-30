@@ -397,9 +397,14 @@ fn a_resume_that_fails_ends_the_session_with_a_coded_error() {
     let wt = root.join("wt");
     std::fs::create_dir_all(&wt).unwrap();
     let mut c = start(&root, "fail");
+    // a parent in another worktree, stuck on its own escalation
+    let wt_par = root.join("wt-par");
+    std::fs::create_dir_all(&wt_par).unwrap();
+    let par = agent(&mut c, &wt_par, &key(90), json!({}), json!({}));
+    c.call("msg.send", json!({"from": par, "to": par, "text": "stuck-on-x", "kind": "escalate"})).unwrap();
     // the stand-in exits 1 for this id: resuming it fails
     let k = "badbadba-dbad-469f-a165-708677290001".to_string();
-    let id = agent(&mut c, &wt, &k, json!({}), json!({}));
+    let id = agent(&mut c, &wt, &k, json!({"parent": par}), json!({}));
     // the first start is `--session-id`, which the stand-in accepts
     let _ = screen(&mut c, id);
     // a slow machine prints the banner late: try again until the quiet time has passed
@@ -414,6 +419,22 @@ fn a_resume_that_fails_ends_the_session_with_a_coded_error() {
     let st = until("session ended", || c.call("session.status", json!({"id": id})).ok().filter(|s| s["running"] == false));
     assert_eq!(st["running"], false, "{st}");
     assert_eq!(st["wake_error"]["code"], "hibernate.wake_failed", "{st}");
+    // the parent is told once, as a notice: its own escalation still stands
+    let told = until("parent told", || {
+        let inbox = c.call("msg.inbox", json!({"session": par, "all": true, "mark": false})).unwrap();
+        let hits: Vec<Value> = inbox
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["text"].as_str().unwrap_or_default().contains("could not be resumed"))
+            .cloned()
+            .collect();
+        (!hits.is_empty()).then_some(hits)
+    });
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert_eq!(told[0]["kind"], "notice", "{told:?}");
+    assert_eq!(row(&mut c, par).unwrap()["wait"]["text"], "stuck-on-x");
+    let _ = c.call("session.kill", json!({"id": par}));
 }
 
 #[test]

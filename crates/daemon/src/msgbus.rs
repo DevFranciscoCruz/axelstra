@@ -156,6 +156,17 @@ impl Bus {
         self.pending.lock_recover().get(&id).cloned()
     }
 
+    /// True when `from` sends a `done` or an `escalate` identical to the one still standing (no new work and no answer
+    /// since): nothing new for the recipient, so it gets no second notice. Ask before `send`.
+    pub fn repeats(&self, from: Option<u32>, kind: &str, text: &str) -> bool {
+        let Some(f) = from else { return false };
+        match kind {
+            "done" => self.finished(f).is_some_and(|d| d["text"] == text),
+            "escalate" => self.is_escalated(f) && self.pending_of(f).as_deref() == Some(text),
+            _ => false,
+        }
+    }
+
     /// Stores a message and applies its side effects. The caller checked that `to` exists.
     pub fn send(&self, from: Option<u32>, to: u32, kind: &str, text: &str, reply_to: Option<u64>, thread: Option<String>) -> Msg {
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
@@ -371,6 +382,29 @@ mod tests {
         assert!(b.take_unannounced(1).is_empty());
         assert!(b.announce(m4.id), "the live path may still announce what it just sent");
         assert!(!b.announce(999));
+    }
+
+    /// A `done` or `escalate` sent again unchanged is no new fact; a changed text, or the same one after new work or an
+    /// answer, is.
+    #[test]
+    fn an_unchanged_done_or_escalation_repeats() {
+        let b = Bus::new();
+        assert!(!b.repeats(Some(3), "done", "[ok] x"));
+        b.send(Some(3), 1, "done", "[ok] x", None, None);
+        assert!(b.repeats(Some(3), "done", "[ok] x"));
+        assert!(!b.repeats(Some(3), "done", "[ok] y"));
+        assert!(!b.repeats(None, "done", "[ok] x"));
+        b.send(Some(1), 3, "message", "one more thing", None, None);
+        assert!(!b.repeats(Some(3), "done", "[ok] x"), "new work makes the same report news again");
+
+        b.send(Some(4), 1, "escalate", "stuck", None, None);
+        assert!(b.repeats(Some(4), "escalate", "stuck"));
+        assert!(!b.repeats(Some(4), "escalate", "stuck on Y"));
+        b.send(Some(1), 4, "reply", "try X", None, None);
+        assert!(!b.repeats(Some(4), "escalate", "stuck"), "after an answer it is a new escalation");
+        // an ask is matched by its own message id (`msg.reply_of`): never folded
+        b.send(Some(5), 1, "ask", "A or B?", None, None);
+        assert!(!b.repeats(Some(5), "ask", "A or B?"));
     }
 
     #[test]
