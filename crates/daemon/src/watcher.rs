@@ -178,11 +178,94 @@ fn git_dir(root: &Path) -> Result<PathBuf> {
 /// Starts watching `root`; `emit` runs (on the watcher thread) once per debounced batch.
 /// The thread ends when `stop` is set and `wake_stopped()` is called (it sleeps until the OS reports something).
 pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'static) -> Result<()> {
+    start_with(root, true, stop, emit)
+}
+
+/// Like `start`, for the files of the checkout only: its git directory (HEAD, index, refs) is not watched and its
+/// events say nothing, because whoever keeps answers already reads those through `gitstamp`.
+pub fn start_files(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'static) -> Result<()> {
+    start_with(root, false, stop, emit)
+}
+
+/// The daemon's own file watches, one per worktree whose git answers it keeps (`own`): the stop flag of each, by
+/// normalized path, and when a start failed (tried again after `OWN_RETRY`).
+#[derive(Default)]
+struct Own {
+    live: HashMap<String, Arc<AtomicBool>>,
+    failed: HashMap<String, Instant>,
+}
+
+/// Worktrees the daemon watches on its own at most; past it the others keep the age floor of unwatched checkouts.
+pub const MAX_OWN: usize = 64;
+/// A worktree whose watch could not start is not tried again before this.
+const OWN_RETRY: Duration = Duration::from_secs(300);
+
+fn owned() -> &'static Mutex<Own> {
+    static O: OnceLock<Mutex<Own>> = OnceLock::new();
+    O.get_or_init(Mutex::default)
+}
+
+/// Makes sure the daemon watches the files of `root` itself (whatever the app has open), calling `emit` once per
+/// debounced batch of changes, and says whether such a watch is live. Started on the first ask, it ends when the
+/// folder is gone (the next event finds it missing) or `forget_own` is called. False when the start failed lately,
+/// the folder is not a checkout or `MAX_OWN` watches already run: the caller then cannot trust the answers it keeps.
+pub fn own(root: &str, emit: impl Fn() + Send + 'static) -> bool {
+    let key = axelstra_core::paths::norm(root);
+    let mut o = owned().lock().unwrap_or_else(|e| e.into_inner());
+    o.live.retain(|_, stop| !stop.load(Ordering::SeqCst));
+    if o.live.contains_key(&key) {
+        return true;
+    }
+    if o.failed.get(&key).is_some_and(|at| at.elapsed() < OWN_RETRY) || o.live.len() >= MAX_OWN {
+        return false;
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    let (path, flag) = (PathBuf::from(root), stop.clone());
+    let started = start_files(path.clone(), stop.clone(), move || {
+        emit();
+        // the worktree was removed: nothing left to watch, the thread ends at the top of its loop
+        if !path.exists() {
+            flag.store(true, Ordering::SeqCst);
+        }
+    });
+    match started {
+        Ok(()) => {
+            o.failed.remove(&key);
+            o.live.insert(key, stop);
+            true
+        }
+        Err(_) => {
+            o.failed.insert(key, Instant::now());
+            false
+        }
+    }
+}
+
+/// Whether the daemon's own watch of `root` is live (`own` started it and it has not ended).
+pub fn owns(root: &str) -> bool {
+    let o = owned().lock().unwrap_or_else(|e| e.into_inner());
+    o.live.get(&axelstra_core::paths::norm(root)).is_some_and(|stop| !stop.load(Ordering::SeqCst))
+}
+
+/// Ends the daemon's own watch of `root`, if any.
+pub fn forget_own(root: &str) {
+    let stop = owned().lock().unwrap_or_else(|e| e.into_inner()).live.remove(&axelstra_core::paths::norm(root));
+    if let Some(stop) = stop {
+        stop.store(true, Ordering::SeqCst);
+        wake_stopped();
+    }
+}
+
+fn start_with(root: PathBuf, git: bool, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'static) -> Result<()> {
     // FSEvents reports real paths (`/private/var/...` for a `/var/...` folder), so events would never sit under a
     // symlinked root; Windows keeps its path as given (canonicalize would add the `\?\` prefix)
     #[cfg(target_os = "macos")]
     let root = root.canonicalize().unwrap_or(root);
-    let gdir = git_dir(&root).context("find git dir")?;
+    // a files-only watch reads the git dir from `.git` (no process); the full one asks git, whose answer events match
+    let gdir = match (git, axelstra_core::gitstamp::dirs(&root)) {
+        (false, Some(d)) => d.git_dir,
+        _ => git_dir(&root).context("find git dir")?,
+    };
     #[cfg(target_os = "macos")]
     let gdir = gdir.canonicalize().unwrap_or(gdir);
     let mut ignore = Ignores::new(&root, &gdir);
@@ -220,7 +303,7 @@ pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'sta
         return Err(axelstra_core::coded!("watch.failed", "could not watch the worktree"));
     }
     // HEAD/index live in the git directory, which for a linked worktree is outside its own folder
-    for d in git_watch_dirs(&gdir) {
+    for d in git_watch_dirs(&gdir).into_iter().filter(|_| git) {
         if w.watch(&d, RecursiveMode::NonRecursive).is_ok() {
             watched.insert(d);
         }
@@ -279,8 +362,8 @@ pub fn start(root: PathBuf, stop: Arc<AtomicBool>, emit: impl Fn() + Send + 'sta
                         }
                         let delay = match kind {
                             Kind::Work => WORK_DEBOUNCE,
-                            Kind::Git => GIT_DEBOUNCE,
-                            Kind::Ignore => continue,
+                            Kind::Git if git => GIT_DEBOUNCE,
+                            Kind::Git | Kind::Ignore => continue,
                         };
                         // leading-anchored: an endless burst cannot push the flush back forever
                         let at = Instant::now() + delay;

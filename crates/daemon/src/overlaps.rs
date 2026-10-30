@@ -28,7 +28,7 @@ fn listed(wt: &Path, args: &[&str], out: &mut BTreeSet<String>) {
     }
 }
 
-/// The two halves of `changed_files`, each kept while what it reads holds (see `gitstamp`, `memo::worktree_stamp`).
+/// The two halves of `changed_files`, each kept while what it reads holds (see `gitstamp`, `memo::worktree_keep`).
 static COMMITTED: axelstra_core::gitstamp::Stamped<BTreeSet<String>> = axelstra_core::gitstamp::Stamped::new();
 static UNCOMMITTED: axelstra_core::gitstamp::Stamped<BTreeSet<String>> = axelstra_core::gitstamp::Stamped::new();
 
@@ -43,9 +43,9 @@ fn changed_files(wt: &Path, base: &str) -> BTreeSet<String> {
     });
     // uncommitted: tracked edits (staged or not, renames included) and new files. `git::run` trims the output,
     // which would eat the leading space of the first `status --porcelain` line, so the two listings are asked for apart.
-    // Edits raise no event outside the watched worktree: also looked at again after `WORKTREE_MAX_AGE`
-    let stamp = crate::memo::worktree_stamp(&wt.to_string_lossy());
-    out.extend(UNCOMMITTED.get(&key, stamp, Some(crate::memo::WORKTREE_MAX_AGE), || {
+    // Kept until the daemon's watch of this worktree fires or its index or refs move (an unwatched one: also the age floor)
+    let k = crate::memo::worktree_keep(&wt.to_string_lossy());
+    out.extend(UNCOMMITTED.get(&key, k.stamp, k.max_age, || {
         let mut s = BTreeSet::new();
         listed(wt, &["diff", "--name-only", "HEAD"], &mut s);
         listed(wt, &["ls-files", "--others", "--exclude-standard"], &mut s);

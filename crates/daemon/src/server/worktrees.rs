@@ -64,12 +64,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             // only paths the daemon knows; the list comes from the UI and git runs in each
             let list: Vec<String> =
                 p["paths"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
-            // one entry per list, dropped when any of its worktrees reports a file change (the watcher bumps its path)
+            // one entry per list and per fingerprint of its worktrees (refs, index, the daemon's file watch of each):
+            // an agent's bookkeeping calls leave it alone, a call that may touch a checkout drops it (`memo::GIT`)
             let mine: Vec<String> = list.iter().take(64).map(|w| norm(w)).collect();
-            let mut scopes: Vec<&str> = vec!["*", "wt"];
-            scopes.extend(mine.iter().map(String::as_str));
-            let key = memo_key(reg, &["status", &mine.join("|")]);
-            crate::memo::memo().cached(&key, memo_opts(reg, &scopes, Some(crate::memo::WORKTREE_MAX_AGE)), || {
+            let (stamps, floor) = tokio::task::block_in_place(|| checkout_keep(list.iter().take(64).map(String::as_str)));
+            let key = memo_key(reg, &["status", &mine.join("|"), &stamps]);
+            crate::memo::memo().cached(&key, memo_opts(reg, &[crate::memo::GIT, "wt"], floor), || {
                 let out = tokio::task::block_in_place(|| {
                     crate::memo::git_pool().run(|| {
                         let mut allowed = std::collections::HashSet::new();

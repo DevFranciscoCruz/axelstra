@@ -365,16 +365,18 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   Also kept: `hydrateUi` 2 s (first paint must not wait for a daemon; the sync goes on), `NUDGE_LIMIT_MS` (a one-shot wait for an
   agent screen, not a call), UI debounces. The timeline panel's own 20 s `withTimeout` is gone.
   Tests: `apiRobust.test.ts` (fake transport: reply after 90 s succeeds, connection closed fails at once, ceiling, cosmetic).
-- **Idle reads (`memo.rs`).** The slow polled reads (`worktree.overview/status`, `git.changes`, `dispatch.overlap_files`, `ports.list`, `gh.list`, `agent.worktree_usage`, `budget.status`, `project.list`) are cached per generation: events (`broadcast_event` names, RefWatch, fs watch, any method outside `may_change_answers`) bump it, identical in-flight calls join one run (single-flight), git work goes through a 3-permit pool (never call `known_worktree` while holding a permit), and at High/Critical the cached value is served stale. `max_age` floors exist only where no event exists. App side: `createLive` has `debounceMs`, `soft` (cheap signature) and skips events while hidden; `session.changed` must not drive loaders by itself. Idle check: `node tools/idle-load.mjs`.
+- **Idle reads (`memo.rs`).** The slow polled reads (`worktree.overview/status`, `git.changes`, `dispatch.overlap_files`, `ports.list`, `gh.list`, `agent.worktree_usage`, `budget.status`, `project.list`) are cached per generation: events (`broadcast_event` names, RefWatch, fs watch, any method outside `may_change_answers`) bump it (the reads of a checkout, `git.changes`, `worktree.status`, follow the `git` scope instead of `*`: only a call that `touches_checkouts` bumps it, never an agent's bookkeeping such as `session.*`, `msg.*`, `notes.*`, `flow.*`, `mem.*`), identical in-flight calls join one run (single-flight), git work goes through a 3-permit pool (never call `known_worktree` while holding a permit), and at High/Critical the cached value is served stale. `max_age` floors exist only where no event exists. App side: `createLive` has `debounceMs`, `soft` (cheap signature) and skips events while hidden; `session.changed` must not drive loaders by itself. Idle check: `node tools/idle-load.mjs`.
 - **Git answers by fingerprint (`core::gitstamp`).** A memo bump (any agent call outside `may_change_answers`) must not
   re-run git in every worktree: the pieces under those reads are kept in `gitstamp::Stamped` tables while a fingerprint
   read from the repo's files holds (no process, no clock). `gitstamp::refs` hashes the HEADs, loose refs, `packed-refs`,
   `reftable/tables.list` and `worktrees/*/{HEAD,gitdir,locked}`: `git::worktree_list`, `is_repo`, `default_branch`, the
   janitor's git-only merge verdict (`janitor::git_verdict`; GitHub is still asked by the sweep), `integrate::ahead_of` and
   the committed half of the overlaps. `gitstamp::config` keeps `git::identity`. What reads the working tree
-  (`wtstatus::status_kept` for the overview and `worktree.status`, the uncommitted half of the overlaps) uses
-  `memo::worktree_stamp` (refs + index + the app's fs watch scope of that worktree) plus `WORKTREE_MAX_AGE`, since edits in a
-  checkout nobody watches raise no event. Decisions that delete things call the uncached `wtstatus::status`. The stamp is
+  (`wtstatus::status_kept` for the overview and `worktree.status`, the uncommitted half of the overlaps, `git.changes`) uses
+  `memo::worktree_keep`: refs + index + the generation of that worktree's scope, which the daemon's own files-only watch
+  of it bumps (`watcher::own`, started on the first read, ended when the folder goes; at most `watcher::MAX_OWN`), so the
+  answer holds until that worktree changes, with no clock. `WORKTREE_MAX_AGE` stays only for a checkout the daemon could
+  not watch. Decisions that delete things call the uncached `wtstatus::status`. The stamp is
   read BEFORE git runs; no fingerprint (no `.git` of its own, a read error, more than 20k loose refs) means git as before.
 - **Sleeps kept on purpose.** The rest are bounded backoffs on external OS resources: AV/indexer rename locks (`fsops.rs`,
   `store.rs`), the git handle of a killed process (`git.rs`), cleanup in `sources.rs`, Windows `PeekRead` 1-10 ms (`client.rs`; the

@@ -272,15 +272,41 @@ pub const PORTS_MAX_AGE: Duration = Duration::from_secs(10);
 pub const GH_MAX_AGE: Duration = Duration::from_secs(120);
 pub const BUDGET_MAX_AGE: Duration = Duration::from_secs(120);
 
-/// What a read of a checkout's files (`git status`, its uncommitted changes) depends on that shows without git: the
-/// repo's refs, the checkout's index and the app's file watch on it (the watcher bumps the worktree's scope). Files
-/// edited in a checkout nobody watches move none of these, so such reads also take `WORKTREE_MAX_AGE`. `None` when the
-/// path has no `.git` of its own: nothing is kept.
-pub fn worktree_stamp(path: &str) -> Option<u64> {
+/// Scope moved by every call that may change a checkout's files or refs (a commit, a file write, a worktree change),
+/// but not by an agent's bookkeeping (hints, messages, its task file, the memory governor, `ls`): the reads of a
+/// checkout (`git.changes`, `worktree.status`, overlaps) follow it instead of `*` (see `server::touches_checkouts`).
+pub const GIT: &str = "git";
+
+/// How a read of a checkout's files (`git status`, its uncommitted changes) is kept: the fingerprint it depends on
+/// and, where no event can say it changed, an age floor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Keep {
+    /// the repo's refs, the checkout's index and the generation of its scope (bumped by a file watch on it);
+    /// `None` when the path has no `.git` of its own: nothing is kept
+    pub stamp: Option<u64>,
+    /// `WORKTREE_MAX_AGE` when no file watch of the daemon covers the checkout, else none
+    pub max_age: Option<Duration>,
+}
+
+/// What a read of the checkout at `path` depends on (see `Keep`). The daemon watches the files of every checkout it
+/// is asked about (`watcher::own`, started here on the first ask; the watch bumps the path's scope), so an answer is
+/// kept until that watch fires or the refs or index move, with no clock. Only a checkout the daemon could not watch
+/// (start failed, `watcher::MAX_OWN` reached) keeps the `WORKTREE_MAX_AGE` floor. The watch starts BEFORE the
+/// fingerprint is read, so an edit made after the read always moves it.
+pub fn worktree_keep(path: &str) -> Keep {
+    let scope = axelstra_core::paths::norm(path);
+    let watched = {
+        let scope = scope.clone();
+        crate::watcher::own(path, move || memo().bump(&scope))
+    };
+    keep_of(path, &scope, watched)
+}
+
+fn keep_of(path: &str, scope: &str, watched: bool) -> Keep {
     use axelstra_core::gitstamp;
     let p = std::path::Path::new(path);
-    let watched = memo().scope_generation(&axelstra_core::paths::norm(path));
-    Some(gitstamp::combine(&[gitstamp::refs(p)?, gitstamp::index(p)?, watched]))
+    let stamp = (|| Some(gitstamp::combine(&[gitstamp::refs(p)?, gitstamp::index(p)?, memo().scope_generation(scope)])))();
+    Keep { stamp, max_age: (!watched).then_some(WORKTREE_MAX_AGE) }
 }
 
 /// Permits of the daemon's git pool: scans mostly wait on child processes and the disk, and a few at a time are
@@ -462,6 +488,75 @@ mod tests {
         // and from then on the new answer is the stale one served
         m.bump_all();
         assert_eq!(m.cached("k", o, || panic!("must not compute at High")).unwrap(), json!("after"));
+    }
+
+    fn repo(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("axl-memo-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("src")).unwrap();
+        assert!(axelstra_core::git::run(&d, &["init", "-q"]).unwrap().ok);
+        std::fs::write(d.join("src/a.rs"), "1").unwrap();
+        assert!(axelstra_core::git::run(&d, &["add", "."]).unwrap().ok);
+        d
+    }
+
+    #[test]
+    fn a_watched_worktree_answers_from_cache_until_its_own_watch_fires() {
+        use axelstra_core::gitstamp::Stamped;
+        let d = repo("watched");
+        let path = d.to_string_lossy().to_string();
+        let kept: Stamped<u32> = Stamped::new();
+        let runs = AtomicUsize::new(0);
+        let read = || {
+            let k = worktree_keep(&path);
+            kept.get("k", k.stamp, k.max_age, || runs.fetch_add(1, Ordering::SeqCst) as u32 + 1)
+        };
+        let k = worktree_keep(&path);
+        assert!(crate::watcher::owns(&path), "the daemon watches the checkout it is asked about");
+        assert_eq!(k.max_age, None, "a watched checkout has no age floor");
+        assert!(k.stamp.is_some());
+        assert_eq!(read(), 1);
+        // an agent's bookkeeping moves `*` (and other worktrees their own scope): the answer stays
+        memo().bump_all();
+        memo().bump("some/other/worktree");
+        assert_eq!(read(), 1);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        // an edit in the checkout: its watch bumps its scope and the next read asks git again
+        let before = memo().scope_generation(&axelstra_core::paths::norm(&path));
+        std::thread::sleep(Duration::from_millis(300));
+        std::fs::write(d.join("src/a.rs"), "2").unwrap();
+        let t = Instant::now();
+        while memo().scope_generation(&axelstra_core::paths::norm(&path)) == before {
+            assert!(t.elapsed() < Duration::from_secs(10), "the watch never fired");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(read(), 2);
+        assert_eq!(read(), 2);
+        crate::watcher::forget_own(&path);
+        assert!(!crate::watcher::owns(&path));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_unwatched_worktree_keeps_the_age_floor() {
+        let d = repo("unwatched");
+        let path = d.to_string_lossy().to_string();
+        let k = keep_of(&path, &axelstra_core::paths::norm(&path), false);
+        assert_eq!(k.max_age, Some(WORKTREE_MAX_AGE));
+        assert!(k.stamp.is_some());
+        // a folder with no `.git` of its own: nothing kept, and the floor
+        let plain = std::env::temp_dir().join(format!("axl-memo-plain-{}", std::process::id()));
+        std::fs::create_dir_all(&plain).unwrap();
+        let k = keep_of(&plain.to_string_lossy(), "plain", false);
+        assert_eq!((k.stamp, k.max_age), (None, Some(WORKTREE_MAX_AGE)));
+        // the floor expires the kept answer: `Stamped` asked with an elapsed floor computes again
+        let kept: axelstra_core::gitstamp::Stamped<u32> = axelstra_core::gitstamp::Stamped::new();
+        let k = keep_of(&path, &axelstra_core::paths::norm(&path), false);
+        assert_eq!(kept.get("k", k.stamp, k.max_age, || 1), 1);
+        assert_eq!(kept.get("k", k.stamp, k.max_age, || 2), 1, "within the floor");
+        assert_eq!(kept.get("k", k.stamp, Some(Duration::ZERO), || 3), 3, "past it");
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::remove_dir_all(&plain);
     }
 
     #[test]

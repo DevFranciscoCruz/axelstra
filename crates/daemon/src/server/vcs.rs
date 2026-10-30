@@ -7,11 +7,13 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "git.changes" => {
             let wt = crate::projects::known_worktree(&reg.store, p["worktree"].as_str().unwrap_or_default())?;
             let base = p["base"].as_str();
-            // dropped when the watcher of this worktree reports a file change (it bumps the path), by any mutation and by a ref move
+            // kept under the worktree's fingerprint (refs, index, the daemon's file watch of it) and dropped by a call
+            // that may touch a checkout (`memo::GIT`), never by an agent's bookkeeping
             let path = norm(&wt.to_string_lossy());
+            let (stamp, floor) = tokio::task::block_in_place(|| checkout_keep([path.as_str()]));
             crate::memo::memo().cached(
-                &memo_key(reg, &["changes", &path, base.unwrap_or_default()]),
-                memo_opts(reg, &["*", "wt", &path], Some(crate::memo::WORKTREE_MAX_AGE)),
+                &memo_key(reg, &["changes", &path, base.unwrap_or_default(), &stamp]),
+                memo_opts(reg, &[crate::memo::GIT, "wt"], floor),
                 || {
                     Ok(serde_json::to_value(tokio::task::block_in_place(|| {
                         crate::memo::git_pool().run(|| crate::changes::changes(&wt, base))

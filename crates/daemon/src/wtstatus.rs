@@ -64,12 +64,12 @@ pub fn status_cached(worktree: &str) -> Status {
 }
 
 /// `status` for the readers the app polls (overview, `worktree.status`): kept while the checkout's refs, index and file
-/// watch stay put (`memo::worktree_stamp`), and at most `WORKTREE_MAX_AGE` (edits in a checkout nobody watches raise no
-/// event). Decisions that delete things call `status`.
+/// watch stay put (`memo::worktree_keep`; the age floor only for a checkout the daemon could not watch). Decisions
+/// that delete things call `status`.
 pub fn status_kept(worktree: &str) -> Status {
     static KEPT: axelstra_core::gitstamp::Stamped<Status> = axelstra_core::gitstamp::Stamped::new();
-    let stamp = crate::memo::worktree_stamp(worktree);
-    KEPT.get(&axelstra_core::paths::norm(worktree), stamp, Some(crate::memo::WORKTREE_MAX_AGE), || status(worktree))
+    let k = crate::memo::worktree_keep(worktree);
+    KEPT.get(&axelstra_core::paths::norm(worktree), k.stamp, k.max_age, || status(worktree))
 }
 
 pub fn status(worktree: &str) -> Status {

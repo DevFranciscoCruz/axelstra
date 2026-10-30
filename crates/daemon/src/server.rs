@@ -981,6 +981,24 @@ fn memo_opts<'a>(reg: &Registry, scopes: &'a [&'a str], max_age: Option<Duration
     crate::memo::Opts { scopes, max_age, stale_ok: reg.under_pressure() }
 }
 
+/// How a read of the checkouts at `paths` is kept by `crate::memo`: a key part made of their fingerprints
+/// (`memo::worktree_keep`: refs, index, the daemon's file watch), so the entry follows each checkout on its own, and
+/// the age floor when one of them has no watch or no fingerprint.
+fn checkout_keep<'a>(paths: impl IntoIterator<Item = &'a str>) -> (String, Option<Duration>) {
+    let (mut key, mut floor) = (String::new(), None);
+    for p in paths {
+        let k = crate::memo::worktree_keep(p);
+        match k.stamp {
+            Some(s) => key.push_str(&format!("{s:x},")),
+            None => key.push_str("-,"),
+        }
+        if k.max_age.is_some() || k.stamp.is_none() {
+            floor = Some(crate::memo::WORKTREE_MAX_AGE);
+        }
+    }
+    (key, floor)
+}
+
 /// What each event of the watch stream says about the answers `crate::memo` keeps. No clock: the event is the moment.
 fn invalidate_for_event(name: &str) {
     let m = crate::memo::memo();
@@ -1086,6 +1104,18 @@ fn may_change_answers(method: &str) -> bool {
     )
 }
 
+/// Whether a call that `may_change_answers` can also change a checkout's files or refs. An agent's bookkeeping
+/// (its hints and wait state, messages and inbox, task file, flow progress, the memory governor, settings, spawning or
+/// ending sessions) cannot: agents call these all day, and the git reads of every worktree (`memo::GIT`) must not be
+/// recomputed for them. What an agent does to a checkout with git or an editor is seen by the fingerprints and the
+/// daemon's file watch instead (`memo::worktree_keep`).
+fn touches_checkouts(method: &str) -> bool {
+    let bookkeeping = ["session.", "msg.", "notes.", "flow.", "mem.", "settings.", "budget.", "audit.", "notices.", "debug.", "hooks."]
+        .iter()
+        .any(|p| method.starts_with(p));
+    !bookkeeping
+}
+
 /// Drops the cached project list and bumps the generation a `project.list` in flight checks before caching its answer.
 fn forget_project_list(reg: &Registry) {
     *reg.plist.lock_recover() = None;
@@ -1101,8 +1131,12 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
     let changes = may_change_answers(&c.req.method);
     // the children this call starts are counted under its method (`breakdown.own.sites` of `mem.status`)
     let _site = axelstra_core::proc::site(&c.req.method);
+    let checkouts = changes && touches_checkouts(&c.req.method);
     if changes {
         crate::memo::memo().bump_all();
+    }
+    if checkouts {
+        crate::memo::memo().bump(crate::memo::GIT);
     }
     if mutating {
         // stale answers kept under memory pressure must not cross a change the caller just made
@@ -1112,6 +1146,9 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
     let out = dispatch_call(c);
     if changes {
         crate::memo::memo().bump_all();
+    }
+    if checkouts {
+        crate::memo::memo().bump(crate::memo::GIT);
     }
     if mutating {
         crate::memo::memo().bump_hard();
@@ -1204,6 +1241,16 @@ mod memo_scope_tests {
         assert!(!may_change_answers("session.hint"));
         assert!(may_change_answers("git.merge"));
         assert!(may_change_answers("session.spawn"));
+    }
+
+    #[test]
+    fn an_agents_bookkeeping_leaves_the_git_reads_alone_but_a_file_write_does_not() {
+        for m in ["msg.send", "msg.inbox", "notes.append", "session.await", "session.spawn", "flow.set", "mem.pause"] {
+            assert!(!touches_checkouts(m), "{m}");
+        }
+        for m in ["fs.write", "git.commit", "git.merge", "worktree.create", "integrate.undo", "some.new_method"] {
+            assert!(touches_checkouts(m), "{m}");
+        }
     }
 }
 
