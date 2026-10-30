@@ -1032,6 +1032,8 @@ fn dispatch(c: &mut Ctx) -> Result<Value> {
     let (reg, mutating) = (c.reg.clone(), changes_projects(&c.req.method));
     // before the call and after it: a read that starts in between keeps nothing, and one after the reply sees the change
     let changes = may_change_answers(&c.req.method);
+    // the children this call starts are counted under its method (`breakdown.own.sites` of `mem.status`)
+    let _site = axelstra_core::proc::site(&c.req.method);
     if changes {
         crate::memo::memo().bump_all();
     }

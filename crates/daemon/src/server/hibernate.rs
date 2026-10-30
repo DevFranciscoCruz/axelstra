@@ -492,6 +492,7 @@ fn has_live_child(reg: &Registry, id: u32) -> bool {
 /// for the earliest. It looks again on a pulse (state changes are events) and when a refused session's backoff ends.
 pub(super) fn spawn_policy(reg: Arc<Registry>) {
     std::thread::spawn(move || {
+        let _site = axelstra_core::proc::site("hibernate_policy");
         let mut seen = reg.pulse.now();
         loop {
             let next = policy_tick(&reg);

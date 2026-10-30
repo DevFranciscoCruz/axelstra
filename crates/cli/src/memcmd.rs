@@ -184,6 +184,13 @@ fn pool_tags(o: &mut String, p: &Value, own: &Value) {
         let rate = f(&own["spawns_per_min"]).map(|r| format!(", {r:.1}/min")).unwrap_or_default();
         let _ =
             writeln!(o, "axelstra itself: {} child processes started{rate}, {} directories watched", n(&own["spawns"]), n(&own["watches"]));
+        if let Some(last) = own["spawns_last_min"].as_u64() {
+            let _ = writeln!(o, "  last minute: {last} child processes; by site (last minute / total):");
+            for s in own["sites"].as_array().into_iter().flatten() {
+                let (site, cmd) = (s["site"].as_str().unwrap_or("?"), s["command"].as_str().unwrap_or("?"));
+                let _ = writeln!(o, "  {:>6} {:>8}  {site}: {cmd}", n(&s["last_min"]), n(&s["total"]));
+            }
+        }
     }
 }
 
@@ -248,7 +255,8 @@ mod tests {
                     {"tag": "FMfn", "paged_mb": 1541, "nonpaged_mb": 0, "owner": "filter"},
                     {"tag": "Xyz1", "paged_mb": 3, "nonpaged_mb": 2, "owner": null}],
                     "tagged_mb": 1546, "sem_etiqueta_mb": 1300, "partial": true},
-                "own": {"spawns": 240, "uptime_secs": 120, "spawns_per_min": 120.0, "watches": 35},
+                "own": {"spawns": 240, "uptime_secs": 120, "spawns_per_min": 120.0, "watches": 35, "spawns_last_min": 90,
+                    "sites": [{"site": "dispatch.overlap_files", "command": "git diff", "total": 200, "last_min": 80}]},
                 "handles": {"total": 300000, "top": [{"name": "leak.exe", "pid": 7, "handles": 90000}]},
                 "system": {"cpu_user_pct": 12.0, "cpu_kernel_pct": 30.0, "commit_mb": 20480, "commit_limit_mb": 40960},
                 "top_cpu": [{"name": "a.exe", "pid": 1, "value": 55.0}],
@@ -261,6 +269,8 @@ mod tests {
     fn the_breakdown_lists_categories_externals_handles_and_the_suggestion() {
         let t = render(&sample());
         assert!(t.contains("where the memory goes:"), "{t}");
+        assert!(t.contains("last minute: 90 child processes"), "{t}");
+        assert!(t.contains("dispatch.overlap_files: git diff"), "{t}");
         assert!(t.contains("kernel non-paged") && t.contains("4000 MB  25.0%"), "{t}");
         assert!(t.contains("(baseline 800 MB)"), "{t}");
         assert!(t.contains("chrome.exe x12"), "{t}");
