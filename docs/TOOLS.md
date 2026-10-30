@@ -87,6 +87,7 @@ a variable you already set. Edit `build` in `settings.json` (keys: `enabled`, `j
   Pillow (`pip install pillow`). Only run it when the logo changes.
 
 - `axelstra mem [--json]` / `axelstra resume <session>|--all`: memory pressure, the biggest sessions and what the governor paused; continue paused sessions. `axelstra lock` applies both memory gates: first it waits while the governor level is High or Critical (before taking a slot), then the memory-need gate above (budget and available memory). See [`MEMORY.md`](MEMORY.md).
+- `axelstra disk [--json] [--refresh]` / `axelstra worktree sweep --artifacts [--dry-run] [--path P] [--force]`: free space of the volumes holding worktrees, size and build artifacts per worktree; reclaim the artifacts (`target/`, `node_modules/`, ignored caches) of inactive worktrees. See [`DISK.md`](DISK.md).
 
 ## Dependencies and policy
 

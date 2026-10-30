@@ -308,6 +308,7 @@ const ALLOWED_METHODS: &[&str] = &[
     "notes.export",
     "worktree.overview",
     "worktree.sweep",
+    "disk.status",
     "worktree.integrate",
     "integrate.undo",
     "orch.cancel",

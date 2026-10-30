@@ -4,7 +4,7 @@ import { categoryOf, deliveryOf, notifyPrefs, type NotifCategory } from "./notif
 import { readString, writeJson } from "./persist";
 import { L } from "./strings.logic";
 
-export type NotifKind = "done" | "waiting" | "ci-fail" | "ci-pass" | "merged" | "error" | "budget" | "attention";
+export type NotifKind = "done" | "waiting" | "ci-fail" | "ci-pass" | "merged" | "error" | "budget" | "attention" | "disk";
 
 export type NotifEntry = {
   id: string;
@@ -43,7 +43,7 @@ export const EPISODE_MS = 30 * 60_000;
 export const AGGREGATE_KINDS: NotifKind[] = ["done", "merged"];
 export const AGGREGATE_MS = 10 * 60_000;
 const KEY = "axelstra.notifications";
-const KINDS: NotifKind[] = ["done", "waiting", "ci-fail", "ci-pass", "merged", "error", "budget", "attention"];
+const KINDS: NotifKind[] = ["done", "waiting", "ci-fail", "ci-pass", "merged", "error", "budget", "attention", "disk"];
 
 /** newest first, at most `max` */
 export const trim = (list: NotifEntry[], max = MAX_ENTRIES): NotifEntry[] => list.slice(0, max);

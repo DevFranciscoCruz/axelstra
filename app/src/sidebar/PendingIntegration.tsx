@@ -20,6 +20,63 @@ const UNDO_TTL_MS = 20000;
 export const pendingFor = (projectId: string, path: string) =>
   sessionsOf(path).some((s) => s.running) ? undefined : pendingOf(overview(), projectId, path);
 
+const refreshAll = async () => {
+  await refreshOverview();
+  await refreshProjects();
+  await refreshSessions();
+};
+
+type Target = { projectId: string; path: string; name: string; into: string };
+
+/** takes the integration back (the daemon refuses when the default branch moved or was pushed) */
+const undo = async (t: Target, r: IntegrateResult) => {
+  if (!r.default_branch || !r.prev_tip || !r.new_tip || !r.branch || !r.branch_tip) return;
+  try {
+    await integrateUndo({
+      project: t.projectId,
+      default_branch: r.default_branch,
+      prev_tip: r.prev_tip,
+      new_tip: r.new_tip,
+      branch: r.branch,
+      branch_tip: r.branch_tip,
+    });
+    toast({ text: F.integrateUndone(t.name), kind: "info", key: `integrate:${t.path}` });
+  } catch (e) {
+    toast({
+      text: F.integrateUndoFailed(t.name, errorText(e)),
+      kind: "warn",
+      key: `integrate:${t.path}`,
+      sticky: true,
+    });
+  }
+  await refreshAll();
+};
+
+/** Asks, integrates the worktree into `into` and toasts the outcome (with "Desfazer" when it can be taken back). Also used
+ *  by the disk panel's warning about unintegrated work. */
+export const integrateFlow = async (t: Target & { ahead: number; dirty: boolean }) => {
+  const ok = await ask(F.integrateAsk(t.name, t.ahead, t.into, t.dirty), {
+    title: F.integrateTitle,
+    kind: "warning",
+    okLabel: F.integrateOk,
+  });
+  if (!ok) return;
+  try {
+    const r = await integrateWorktree(t.projectId, t.path);
+    const canUndo =
+      r.integrated && r.pushed !== true && !!(r.default_branch && r.prev_tip && r.new_tip && r.branch && r.branch_tip);
+    toast({
+      text: !r.integrated ? T.nothing(t.name) : r.removed ? T.doneRemoved(t.name, r.into) : T.done(t.name, r.into),
+      kind: "info",
+      key: `integrate:${t.path}`,
+      ...(canUndo ? { action: { label: F.undo, run: () => void undo(t, r) }, ttl: UNDO_TTL_MS } : {}),
+    });
+  } catch (e) {
+    toast({ text: T.failed(t.name, errorText(e)), kind: "warn", key: `integrate:${t.path}`, sticky: true });
+  }
+  await refreshAll();
+};
+
 /** "Por integrar" block under a worktree row: why it waits, and the three ways out. */
 export function PendingIntegration(props: {
   projectId: string;
@@ -41,67 +98,22 @@ export function PendingIntegration(props: {
   };
   const tip = () => reason() || T.tip(p()?.ahead ?? 0, props.into);
 
-  const refreshAll = async () => {
-    await refreshOverview();
-    await refreshProjects();
-    await refreshSessions();
-  };
-
-  /** takes the integration back (the daemon refuses when the default branch moved or was pushed) */
-  const undo = async (r: IntegrateResult) => {
-    if (!r.default_branch || !r.prev_tip || !r.new_tip || !r.branch || !r.branch_tip) return;
-    try {
-      await integrateUndo({
-        project: props.projectId,
-        default_branch: r.default_branch,
-        prev_tip: r.prev_tip,
-        new_tip: r.new_tip,
-        branch: r.branch,
-        branch_tip: r.branch_tip,
-      });
-      toast({ text: F.integrateUndone(props.name), kind: "info", key: `integrate:${props.path}` });
-    } catch (e) {
-      toast({
-        text: F.integrateUndoFailed(props.name, errorText(e)),
-        kind: "warn",
-        key: `integrate:${props.path}`,
-        sticky: true,
-      });
-    }
-    await refreshAll();
-  };
-
   const integrate = async () => {
     if (busy()) return;
-    const ok = await ask(F.integrateAsk(props.name, p()?.ahead ?? 0, props.into, !!p()?.dirty), {
-      title: F.integrateTitle,
-      kind: "warning",
-      okLabel: F.integrateOk,
-    });
-    if (!ok || busy()) return;
+    const x = p();
     setBusy(true);
     try {
-      const r = await integrateWorktree(props.projectId, props.path);
-      const canUndo =
-        r.integrated &&
-        r.pushed !== true &&
-        !!(r.default_branch && r.prev_tip && r.new_tip && r.branch && r.branch_tip);
-      toast({
-        text: !r.integrated
-          ? T.nothing(props.name)
-          : r.removed
-            ? T.doneRemoved(props.name, r.into)
-            : T.done(props.name, r.into),
-        kind: "info",
-        key: `integrate:${props.path}`,
-        ...(canUndo ? { action: { label: F.undo, run: () => void undo(r) }, ttl: UNDO_TTL_MS } : {}),
+      await integrateFlow({
+        projectId: props.projectId,
+        path: props.path,
+        name: props.name,
+        into: props.into,
+        ahead: x?.ahead ?? 0,
+        dirty: !!x?.dirty,
       });
-    } catch (e) {
-      toast({ text: T.failed(props.name, errorText(e)), kind: "warn", key: `integrate:${props.path}`, sticky: true });
     } finally {
       setBusy(false);
     }
-    await refreshAll();
   };
 
   return (
