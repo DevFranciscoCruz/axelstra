@@ -1,0 +1,45 @@
+name: codeql
+# CodeQL static analysis of the three languages the repo ships or runs: the Rust workspace (engine and Tauri host),
+# the TypeScript frontend and scripts (app/, scripts/, tools/), and the workflows themselves (actions). Every language
+# uses build-mode none: Rust is read from the sources and Cargo.toml (no cargo build here), so this job needs no
+# desktop toolkit and stays cheap. Findings go to the repository's code scanning tab (Security > Code scanning).
+#
+# Weekly as well as on push and PR, because a new query pack finds things in code nobody touched.
+# Not a required check: the release-please PR is pushed with GITHUB_TOKEN and gets no `pull_request` runs (see
+# release-please.yml), so requiring this workflow would leave that PR waiting forever.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * 1" # Monday 05:17 UTC, off the hour
+  workflow_dispatch:
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+permissions: { contents: read }
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # upload the SARIF to code scanning
+      security-events: write
+      # the CodeQL action reads the workflow run to tag the analysis
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [rust, javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:${{ matrix.language }}
