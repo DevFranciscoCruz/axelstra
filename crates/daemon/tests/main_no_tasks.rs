@@ -28,7 +28,16 @@ fn the_main_checkout_takes_no_tasks_from_agents_or_the_cli() {
         std::fs::create_dir_all(&d).unwrap();
         d.to_string_lossy().replace('\\', "/")
     };
-    let (repo, wt) = (dir("app"), dir(".axelstra-wt/app-fix"));
+    let repo = dir("app");
+    // app-fix is a real git worktree of the project, so the janitor's orphan sweep keeps it
+    let git = |args: &[&str]| {
+        let ok = std::process::Command::new("git").current_dir(&repo).args(args).status().unwrap().success();
+        assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"]);
+    let wt = root.join(".axelstra-wt/app-fix").to_string_lossy().replace('\\', "/");
+    git(&["worktree", "add", "-q", "-b", "fix", &wt]);
     std::fs::write(&store, json!([{"id": "p1", "name": "app", "path": repo}]).to_string()).unwrap();
     let pipe = common::pipe("mainnotasks");
     let token = "c".repeat(32);
