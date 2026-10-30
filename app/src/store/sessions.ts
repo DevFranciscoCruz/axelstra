@@ -14,6 +14,7 @@ import { guarded, keepSame, setSplitSession, showView, splitSession } from "./ui
 import { setChanges } from "./git";
 import { L } from "../strings.logic";
 import { decideWait } from "../waitNotice";
+import { autoSeatOf } from "../leadRole";
 
 export const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
 
@@ -52,15 +53,16 @@ export const activate = (id: number | null, by: ActivateBy): boolean => {
 };
 
 /** Keeps the active session consistent with the tabs of the selected worktree (call from an effect). A worktree opens on its
- *  own agent first (the main worktree has its own session, apart from the tasks), else on its first terminal, but only when an
+ *  main (lead, or the project's main session), else on a terminal, never on a task (`autoSeatOf`), and only when an
  *  automatic pick is armed; a tab that vanished just empties the seat. It never switches from one live tab to another. */
 export const settleActive = (tabs: SessionInfo[]) => {
   if (!sessionsLoaded()) return;
   const a = active();
   const missing = a === null || !tabs.some((s) => s.id === a);
-  if (autoPick && tabs.length > 0 && missing) {
+  const pick = autoPick && missing ? autoSeatOf(tabs) : undefined;
+  if (pick) {
     if (a !== null) setActive(null);
-    activate((tabs.find((s) => s.meta?.kind === "agent" && s.running) ?? tabs[0]).id, "auto");
+    activate(pick.id, "auto");
   } else if (a !== null && missing) activate(null, "auto");
   autoPick = false;
 };
