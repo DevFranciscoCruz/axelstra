@@ -1016,6 +1016,17 @@ fn may_change_answers(method: &str) -> bool {
             | "automation.list"
             | "computer.status"
             | "app.dir"
+            // queues drained by the app and limits read: what they hand out is not part of any kept answer
+            | "notices.take"
+            | "janitor.events"
+            | "triggers.events"
+            | "budget.events"
+            | "codex.limits"
+            | "agents.list"
+            | "host.info"
+            // `axelstra lock` inside agents: the governor's own bookkeeping
+            | "mem.hold"
+            | "mem.unhold"
     )
 }
 

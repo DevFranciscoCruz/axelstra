@@ -74,29 +74,58 @@ fn gh_merged_known(repo: &Path, branch: &str, tip: &str) -> Option<u64> {
     m.as_ref()?.get(&gh_key(repo, branch)).filter(|(t, _)| t == tip).map(|(_, n)| *n)
 }
 
-fn merged_reason_with(repo: &Path, branch: &str, default: &str, others: &[String], ask_gh: bool) -> Option<String> {
+/// What git alone says about a branch (no GitHub): it reads only commits and refs, so it is kept while the repo's
+/// ref fingerprint holds (`gitstamp::refs`); the sweep and the overview then ask git again only after a ref moved.
+#[derive(Clone)]
+enum GitVerdict {
+    /// no commit of its own (or git could not tell its tip): never "merged"
+    NotWork,
+    Merged(String),
+    /// work that git does not find anywhere else, at this tip
+    Open(String),
+}
+
+static VERDICTS: axelstra_core::gitstamp::Stamped<GitVerdict> = axelstra_core::gitstamp::Stamped::new();
+
+fn git_verdict(repo: &Path, branch: &str, default: &str, others: &[String]) -> GitVerdict {
+    let key = format!("{}|{branch}|{default}|{}", repo.to_string_lossy(), others.join("|"));
+    VERDICTS.get(&key, axelstra_core::gitstamp::refs(repo), None, || git_verdict_uncached(repo, branch, default, others))
+}
+
+fn git_verdict_uncached(repo: &Path, branch: &str, default: &str, others: &[String]) -> GitVerdict {
     // a branch nobody committed to is "inside" the default branch too, and must not be mistaken for merged work
     if !has_own_commits(repo, branch) {
-        return None;
+        return GitVerdict::NotWork;
     }
-    let tip = git::run(repo, &["rev-parse", branch]).ok().filter(|o| o.ok).map(|o| o.stdout.trim().to_string())?;
+    let Some(tip) = git::run(repo, &["rev-parse", branch]).ok().filter(|o| o.ok).map(|o| o.stdout.trim().to_string()) else {
+        return GitVerdict::NotWork;
+    };
     let upstream = format!("origin/{default}");
     if git::run(repo, &["merge-base", "--is-ancestor", branch, &upstream]).map(|o| o.ok).unwrap_or(false) {
-        return Some(format!("already in {upstream}"));
+        return GitVerdict::Merged(format!("already in {upstream}"));
     }
     // merged into the local default branch but not pushed yet: the commits stay reachable from it, so removing the branch loses nothing
     if git::run(repo, &["merge-base", "--is-ancestor", branch, default]).map(|o| o.ok).unwrap_or(false) {
-        return Some(format!("already in local {default}"));
+        return GitVerdict::Merged(format!("already in local {default}"));
     }
     for other in others.iter().filter(|o| o.as_str() != branch) {
         if git::run(repo, &["merge-base", "--is-ancestor", branch, other]).map(|o| o.ok).unwrap_or(false) {
-            return Some(format!("already in {other}"));
+            return GitVerdict::Merged(format!("already in {other}"));
         }
     }
     // squash and rebase merges leave no ancestor: every commit has an equivalent in the default branch
     if crate::cleanup::squash_merged(repo, branch, &upstream) || crate::cleanup::squash_merged(repo, branch, default) {
-        return Some(format!("its changes are already in {default}"));
+        return GitVerdict::Merged(format!("its changes are already in {default}"));
     }
+    GitVerdict::Open(tip)
+}
+
+fn merged_reason_with(repo: &Path, branch: &str, default: &str, others: &[String], ask_gh: bool) -> Option<String> {
+    let tip = match git_verdict(repo, branch, default, others) {
+        GitVerdict::NotWork => return None,
+        GitVerdict::Merged(why) => return Some(why),
+        GitVerdict::Open(tip) => tip,
+    };
     if !ask_gh {
         return gh_merged_known(repo, branch, &tip).map(|n| format!("PR #{n} merged"));
     }

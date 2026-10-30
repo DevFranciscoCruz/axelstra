@@ -65,7 +65,7 @@ fn rows(p: &Project, busy: &dyn Fn(&str) -> bool) -> Vec<Row> {
         if w.is_main {
             continue;
         }
-        let st = wtstatus::status(&w.path);
+        let st = wtstatus::status_kept(&w.path);
         let branch = w.branch.clone().unwrap_or_default();
         let busy = busy(&w.path);
         // the same rule as the janitor: only Axelstra's own branches, and never one with changes or a session
