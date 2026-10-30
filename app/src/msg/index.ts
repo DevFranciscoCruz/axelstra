@@ -13,6 +13,7 @@ import * as projectRemoval from "./projectRemoval";
 import * as host from "./host";
 import * as hibernate from "./hibernate";
 import * as governor from "./governor";
+import * as disk from "./disk";
 
 /** one file per group of code prefixes, so parallel changes never touch the same file */
 export const parts = {
@@ -30,6 +31,7 @@ export const parts = {
   host,
   hibernate,
   governor,
+  disk,
 };
 
 const merge = (k: "pt" | "en" | "ptBR"): Record<string, string> =>

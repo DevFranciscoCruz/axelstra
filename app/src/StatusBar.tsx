@@ -18,6 +18,7 @@ import { pollWtUsage, wtUsageTip } from "./Usage";
 import { ranked, spentOf, totalOf, fmtTokens } from "./usageFormat";
 import { Button, cn } from "./ui";
 import { MemoryPanelBody } from "./MemoryPanel";
+import { DiskPanel } from "./DiskPanel";
 import { chipVisible, levelClass } from "./memoryLogic";
 import { G } from "./strings.memory";
 import { K } from "./keyboard";
@@ -264,7 +265,7 @@ export function StatusBar() {
           </>
         }
       >
-        {() => (
+        {(close) => (
           <>
             <table class="sb-table">
               <thead>
@@ -312,6 +313,7 @@ export function StatusBar() {
                 {S.status.cleanTitle}
               </Button>
             </Show>
+            <DiskPanel onClose={close} />
           </>
         )}
       </Popover>

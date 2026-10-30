@@ -71,6 +71,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             if let Some(id) = p["meta"]["key"].as_str().and_then(|k| reg.live_by_key(k)) {
                 return Ok(json!({"id": id, "existing": true}));
             }
+            // a low disk starts reclaiming build artifacts of inactive worktrees (in a thread: the spawn never waits)
+            tokio::task::block_in_place(|| super::disk::ensure(reg, false));
             let mut s = Spawn {
                 program: p["program"].as_str().ok_or_else(|| missing("program"))?.into(),
                 args: p["args"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),

@@ -20,6 +20,7 @@ The interface comes in Portuguese (pt-PT), Brazilian Portuguese and English, pic
 - [Install](#install)
 - [Orchestration](#orchestration)
 - [Security](#security)
+- [Code signing policy](#code-signing-policy)
 - [Build from source](#build-from-source)
 - [Tests and tools](#tests-and-tools)
 - [Releasing](#releasing)
@@ -144,7 +145,7 @@ A permission prompt or question turns the dot red; `idle_prompt` is only idle. T
 
 ## Install
 
-Download the latest installer from the [Releases page](https://github.com/DevFranciscoCruz/axelstra/releases/latest):
+Download the latest installer from the [Releases page](https://github.com/DevFranciscoCruz/axelstra/releases/latest) (Windows signing: see the [Code signing policy](#code-signing-policy)):
 
 | Platform | File |
 | --- | --- |
@@ -159,7 +160,7 @@ Requirements: `git`, plus the agent CLI you use (`claude`, `codex` or `gemini`) 
 
 **macOS.** Not released for now (see the table above); the rest of this paragraph applies once releases are enabled. The `.dmg` is the first install; after that the app updates itself. Releases are signed with a Developer ID and notarized (a real release fails without the Apple secrets). A build made without them is unsigned: open it with right-click, Open, or `xattr -dr com.apple.quarantine /Applications/Axelstra.app`. The first dictation asks for microphone access.
 
-**Windows signature.** The installer is signed for the updater but not yet with an Authenticode certificate, so SmartScreen may warn on first run. See [Known limitations](#known-limitations).
+**Windows signature.** The installer is signed for the updater but not yet with an Authenticode certificate, so SmartScreen may warn on first run. Authenticode signing through SignPath Foundation is prepared (see the [Code signing policy](#code-signing-policy)) and starts once the project is accepted. See [Known limitations](#known-limitations).
 
 **Linux.** The files are not signed for the updater, so install each release by hand. Keep-awake uses `systemd-inhibit` when present; notification clicks do not open the session.
 
@@ -192,6 +193,27 @@ Run `axelstra --help` for the rest. The command palette entry *Orquestração* s
 - **Your data.** State lives in the per-user data dir with atomic writes, rotating copies and a schema version; the token file is private to the user.
 
 [`SECURITY.md`](SECURITY.md) has the policy and how to report a vulnerability; [`docs/s3-app-secret.md`](docs/s3-app-secret.md) explains what is still open in the role model.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+This applies to the Windows release files (`Axelstra_<version>_x64-setup.exe` and the `axelstra.exe` and `axelstra-app.exe` it installs) once the project is accepted by SignPath Foundation; until then the releases are not Authenticode-signed. The files are built from this repository's source by the [release workflow](.github/workflows/release.yml) on GitHub-hosted runners and submitted to SignPath from that workflow run; nothing built elsewhere is signed. Details: [`docs/SIGNING.md`](docs/SIGNING.md).
+
+Team roles:
+
+- Committers and reviewers: [DevFranciscoCruz](https://github.com/DevFranciscoCruz) (the owner). Changes from anyone else come as pull requests and are reviewed by the owner before they are merged.
+- Approvers: [DevFranciscoCruz](https://github.com/DevFranciscoCruz). Every release needs a manual approval of its signing requests in SignPath.
+
+All team members use multi-factor authentication on GitHub and SignPath.
+
+### Privacy statement
+
+Axelstra collects no telemetry and sends no usage or personal data to the authors or to anyone else. This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. What it does reach, and why:
+
+- **Update check** (Windows and macOS builds): at launch, every 6 hours and when the window regains focus the app downloads `latest.json` and, when there is a newer version, the installer from this repository's GitHub Releases. The request carries what any download does (IP address, user agent); no identifier is added.
+- **Voice dictation model:** only when you turn dictation on, the speech model is downloaded once from Hugging Face. Speech is transcribed on your machine and never sent anywhere.
+- **Tools you run:** the agent CLIs (`claude`, `codex`, `gemini`), `git`, `gh` and `docker` talk to their own services with your own accounts when you or your agents use them; their privacy policies apply. Remote hosts are reached over `ssh` only when you add one.
 
 ## Build from source
 

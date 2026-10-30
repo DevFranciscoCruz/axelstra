@@ -354,6 +354,25 @@ mod tests {
     }
 
     #[test]
+    fn a_fully_cherry_picked_branch_is_merged_and_a_partly_picked_one_is_not() {
+        let (_f, p) = fx("cherry");
+        let r = repo(&p);
+        for b in ["ax/all", "ax/part"] {
+            g(r, &["checkout", "-q", "-b", b, "main"]);
+            for n in ["1", "2"] {
+                std::fs::write(r.join(format!("{}-{n}.txt", &b[3..])), n).unwrap();
+                g(r, &["add", "."]);
+                g(r, &["commit", "-qm", n]);
+            }
+        }
+        g(r, &["checkout", "-q", "main"]);
+        g(r, &["cherry-pick", "ax/all~1", "ax/all"]);
+        g(r, &["cherry-pick", "ax/part~1"]);
+        assert!(squash_merged(r, "ax/all", "main"));
+        assert!(!squash_merged(r, "ax/part", "main"));
+    }
+
+    #[test]
     fn stale_branches_go_only_when_merged_or_empty() {
         let (_f, p) = fx("branches");
         let r = repo(&p);

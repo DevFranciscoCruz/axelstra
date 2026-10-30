@@ -103,4 +103,36 @@ describe("handleJanitorEvents", () => {
     );
     expect(toast).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: "english fallback" }));
   });
+  it("reclaimed builds get a disk entry each and one info toast with the total, apart from the removals", () => {
+    setNotifyPref("info", true);
+    handleJanitorEvents([
+      { ...ev("ax/a"), kind: "artifacts", freed_mb: 1024 },
+      { ...ev("ax/b"), kind: "artifacts", freed_mb: 8192 },
+    ]);
+    expect(pushNotification).toHaveBeenNthCalledWith(1, {
+      kind: "disk",
+      worktree: "/wt/ax/a",
+      text: "Builds de a apagados: 1,0 GB libertados",
+    });
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith({
+      text: "Builds de 2 worktrees inativos apagados: 9,0 GB libertados",
+      kind: "info",
+      key: "janitor:artifacts",
+    });
+  });
+  it("a pending removal names the holder, or shows the daemon's coded reason", () => {
+    handleJanitorEvents([{ ...ev("ax/p"), kind: "pending", holder: { name: "Code.exe", pid: 41 } }]);
+    expect(toast).toHaveBeenCalledWith({
+      text: "Worktree p não foi removido: a pasta está presa por Code.exe (pid 41)",
+      kind: "warn",
+      key: "janitor:/wt/ax/p:pending",
+    });
+    expect(pushNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: "attention", worktree: "/wt/ax/p" }));
+    toast.mockReset();
+    handleJanitorEvents([
+      { ...ev("ax/q"), kind: "pending", code: "artifacts.busy", params: { path: "/wt/ax/q" }, text: "english" },
+    ]);
+    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining("está em uso") }));
+  });
 });

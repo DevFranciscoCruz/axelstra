@@ -194,7 +194,13 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   `projects::migrate_marks` runs once at daemon start, before the janitor: worktrees that exist then with neither mark
   become `manual`; later ones are marked at creation. A removal that stays pending (folder held) is retried by event:
   a session exit (`watch_exit`) and `sweep_soon` kick the janitor. Holders we cannot observe get a bounded exponential
-  backoff (`janitor::retry_delay`: 1, 2, 4... up to 30 min), never a fixed timer.
+  backoff (`janitor::retry_delay`: 1, 2, 4... up to 30 min), never a fixed timer. Integration with no ancestor counts (`cleanup::squash_merged`: `git cherry` has no `+` line, or merging the branch
+  would change nothing), for `ax/*` and `orch/*`; a partly cherry-picked branch stays. A removal left pending because the
+  folder is held is a janitor event `kind: "pending"`, once per episode (`janitor::pending_begin`/`pending_end`), with the
+  holder (`janitor::holder_of`: Linux `/proc` cwd/exe, Windows an executable inside the folder) as `janitor.pending {branch,
+  path, holder, pid}`, else the reason as `janitor.pending_busy {branch, path, detail}`. A worktree that stays (work not
+  integrated) loses only its regenerable build output (`target/`, `node_modules/`, ignored caches) once inactive for
+  `janitor.artifact_quiet_hours` or when the disk runs low: `artifacts.rs`, `disk.rs`, `server/disk.rs`, see `docs/DISK.md`.
 - **Orchestrator runs (Kanban, `orch.start`).** A run's worktrees are Axelstra's own, so the janitor cleans them like an
   agent's (`janitor::managed_branch`: `ax/*`, `orch/<run>` integration branch, `orch-task/<run>/<card>` task branches;
   `integrable_branch` = `ax/*` and `orch/*`, the ones `integrate_with`, the overview's "por integrar" and `merged_reason`

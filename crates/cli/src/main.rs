@@ -157,6 +157,16 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Disk use: free space of the volumes holding worktrees, and per worktree its size, build artifacts
+    /// (target, node_modules, caches), last use, integration state, sessions and what can be reclaimed; biggest first
+    Disk {
+        /// print the daemon's raw answer
+        #[arg(long)]
+        json: bool,
+        /// measure the sizes again instead of using the cached ones
+        #[arg(long)]
+        refresh: bool,
+    },
     /// Continue sessions paused for memory (one session, or --all)
     Resume {
         session: Option<u32>,
@@ -441,11 +451,22 @@ enum WtCmd {
         /// background sweep every 10 minutes, on by default: on or off (no value: show)
         #[arg(long)]
         auto: Option<String>,
+        /// reclaim regenerable build artifacts (target, node_modules, ignored caches) of inactive worktrees
+        /// instead of removing worktrees; the worktrees, their files and their commits stay
+        #[arg(long, conflicts_with = "auto")]
+        artifacts: bool,
+        /// with --artifacts: only this worktree
+        #[arg(long, requires = "artifacts")]
+        path: Option<PathBuf>,
+        /// with --artifacts: also worktrees used recently (never one with a running session or build)
+        #[arg(long, requires = "artifacts")]
+        force: bool,
     },
 }
 
 mod computer;
 mod ctl;
+mod diskcmd;
 mod dispatch;
 mod events;
 mod hook;
@@ -547,6 +568,7 @@ fn real_main() -> Result<()> {
         }
         Cmd::Workspace { cmd } => workspace::run(cmd, host.as_deref())?,
         Cmd::Mem { json } => memcmd::status(remote::connect(host.as_deref())?, json)?,
+        Cmd::Disk { json, refresh } => diskcmd::status(remote::connect(host.as_deref())?, json, refresh)?,
         Cmd::Resume { session, all } => memcmd::resume(remote::connect(host.as_deref())?, session, all)?,
         Cmd::Lock { name, slots, mem_mb, timeout, command } => std::process::exit(lock::run(&name, slots, mem_mb, timeout, &command)?),
         Cmd::StatuslineTee => statusline::tee()?,

@@ -13,6 +13,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 }))
             },
         ),
+        "worktree.sweep" if p["artifacts"].as_bool() == Some(true) => Ok(super::disk::sweep(reg, p)),
         "worktree.sweep" => {
             let dry = p["dry_run"].as_bool().unwrap_or(false);
             let before = reg.closed.read();
@@ -116,6 +117,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "worktree.create" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let name = p["name"].as_str().ok_or_else(|| missing("name"))?;
+            // a new worktree will build: a low disk starts reclaiming (in a thread, this call does not wait)
+            tokio::task::block_in_place(|| super::disk::ensure(reg, false));
             // a parent that is not a worktree of this project is refused before anything is created
             let parent = p["parent"].as_str().map(str::trim).filter(|s| !s.is_empty());
             if let Some(par) = parent {

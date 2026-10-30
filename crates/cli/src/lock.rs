@@ -216,6 +216,17 @@ fn wait_for_memory(c: &mut axelstra_daemon::client::Client, timeout: Duration) -
     }
 }
 
+/// Before a build takes a slot the daemon gets one chance to reclaim build artifacts of inactive worktrees when the disk
+/// is low (`disk.ensure`). A daemon that does not answer or lacks the method never holds the build back; a disk still low
+/// after it gives one warning line.
+fn ensure_disk(c: &mut axelstra_daemon::client::Client) {
+    if let Ok(r) = c.call("disk.ensure", serde_json::json!({})) {
+        if let Some(w) = crate::diskcmd::ensure_warning(&r) {
+            eprintln!("{w}");
+        }
+    }
+}
+
 /// `slots`/`mem_mb` are what the user gave; with neither, `build` and `verify` declare a memory need derived from the jobs.
 pub fn run(name: &str, slots: Option<usize>, mem_mb: Option<u64>, timeout: u64, command: &[String]) -> Result<i32> {
     if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
@@ -227,6 +238,7 @@ pub fn run(name: &str, slots: Option<usize>, mem_mb: Option<u64>, timeout: u64, 
     let mut daemon = daemon();
     if let Some(c) = daemon.as_mut() {
         wait_for_memory(c, Duration::from_secs(timeout))?;
+        ensure_disk(c);
     }
     let mem = mem_mb.or(if slots.is_none() { default_mem_mb(name) } else { None });
     let held = match mem {

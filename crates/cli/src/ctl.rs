@@ -80,10 +80,21 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
             let (p, wt) = find_worktree(&projects, &path)?;
             c.call("worktree.remove", json!({"project": p["id"], "path": wt}))?;
         }
-        Cmd::Worktree { cmd: WtCmd::Sweep { dry_run, auto } } => {
+        Cmd::Worktree { cmd: WtCmd::Sweep { dry_run, auto, artifacts, path, force } } => {
             if let Some(a) = auto {
                 let r = c.call("janitor.auto", json!({"on": a == "on"}))?;
                 println!("automatic sweep: {}", if r["on"] == json!(true) { "on" } else { "off" });
+                return Ok(());
+            }
+            if artifacts {
+                let mut params = json!({"artifacts": true, "dry_run": dry_run, "force": force});
+                if let Some(path) = path {
+                    // the daemon matches the registered spelling of the worktree
+                    let projects = c.call("project.list", json!({}))?;
+                    params["path"] = json!(find_worktree(&projects, &path)?.1);
+                }
+                let r = c.call("worktree.sweep", params)?;
+                print!("{}", crate::diskcmd::render_sweep(&r, dry_run));
                 return Ok(());
             }
             let r = c.call("worktree.sweep", json!({"dry_run": dry_run}))?;

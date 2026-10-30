@@ -83,6 +83,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 json!({"terse": terse, "rules": crate::skill::terse_rules(terse), "pm": pm, "installed": installed, "auto_install": saved["auto_install"] == json!(true),
                 "shell": shell, "notify_sound": notify_sound, "notify_mode": notify_mode, "stall_minutes": crate::stall::minutes(&saved), "hibernate": crate::hibernate::policy_json(&saved), "ui": saved["ui"].as_object().cloned().unwrap_or_default(),
                 "build": crate::buildenv::BuildSettings::from_settings(&saved).to_json(),
+                "disk": crate::disk::Config::from_settings(&saved).to_json(),
+                "janitor": {"artifact_quiet_hours": crate::artifacts::quiet_ms(&saved) / 3_600_000},
                 "budgets": crate::budget::validate(&saved["budgets"]).unwrap_or_else(|_| json!({})),
                 "hosts": crate::hosts::validate(&saved["hosts"]).unwrap_or_else(|_| json!([]))}),
             )
@@ -125,6 +127,20 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                     )
                 })?;
             }
+            // `{enabled?, min_free_gb?, min_free_pct?, margin_gb?}` and `{artifact_quiet_hours?}`: the keys present change
+            if let Some(d) = p.get("disk") {
+                saved["disk"] = crate::disk::validate(&saved, d).ok_or_else(|| {
+                    axelstra_core::coded!(
+                        "settings.bad_disk",
+                        "disk takes enabled (true or false), min_free_gb and margin_gb (whole GB) and min_free_pct (0 to 90)"
+                    )
+                })?;
+            }
+            if let Some(j) = p.get("janitor") {
+                saved["janitor"] = crate::artifacts::validate(&saved, j).ok_or_else(|| {
+                    axelstra_core::coded!("settings.bad_janitor", "janitor takes artifact_quiet_hours (a whole number from 1 to 720)")
+                })?;
+            }
             // replaces the whole build setting (sessions started afterwards use it); null resets it to the defaults
             if let Some(b) = p.get("build") {
                 saved["build"] = if b.is_null() {
@@ -153,6 +169,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             reg.budget_wake.notify_one();
             // the hibernation deadlines are worked out again with the new setting
             reg.pulse.bump();
+            // the artifact pass and its deadline follow the new quiet hours or disk lines
+            if p.get("disk").is_some() || p.get("janitor").is_some() {
+                reg.janitor.bump();
+            }
             Ok(json!({}))
         }
         "agent.search" => {
