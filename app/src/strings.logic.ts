@@ -72,7 +72,6 @@ export const ptL = {
     back: "Voltar à aplicação",
     search: "Pesquisar definições",
     navLabel: "Secções das definições",
-    sections: "Secções",
     noMatch: "Nenhuma definição encontrada.",
     groups: {
       general: "Geral",

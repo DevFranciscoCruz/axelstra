@@ -70,7 +70,6 @@ export const ptBRL: Widen<typeof ptL> = {
     back: "Voltar ao aplicativo",
     search: "Pesquisar configurações",
     navLabel: "Seções das configurações",
-    sections: "Seções",
     noMatch: "Nenhuma configuração encontrada.",
     groups: {
       general: "Geral",
