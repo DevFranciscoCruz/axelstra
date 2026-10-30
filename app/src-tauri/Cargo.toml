@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+# Read by tauri-winres (through tauri-build) into the exe's VERSIONINFO; the other fields come from tauri.conf.json.
+[package.metadata.tauri-winres]
+InternalName = "axelstra-app"
+OriginalFilename = "axelstra-app.exe"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

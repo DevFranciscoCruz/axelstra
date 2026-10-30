@@ -307,6 +307,7 @@ dependencies = [
  "axelstra-daemon",
  "base64 0.22.1",
  "clap",
+ "embed-resource",
  "libc",
  "serde",
  "serde_json",
