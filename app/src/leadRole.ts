@@ -16,6 +16,12 @@ export const leadFirst = <T extends Pick<SessionInfo, "meta">>(agents: T[]): T[]
 export const canStartLead = (agents: Pick<SessionInfo, "meta" | "running">[], isMain: boolean) =>
   !isMain && !agents.some((a) => a.running && isLead(a));
 
+/** Whether the agent the user starts from the app in a worktree is that worktree's main: the first agent of a worktree
+ *  (none running there yet) is its lead, a later one is a task under it. Never in the project's main checkout, whose only
+ *  agent is the project main. A worktree that already has plain agents and no lead keeps them; "start main" adds one. */
+export const firstAgentLeads = (sessions: Pick<SessionInfo, "meta" | "running">[], isMain: boolean) =>
+  !isMain && !sessions.some((s) => s.running && s.meta?.kind === "agent");
+
 /** The running lead of the worktree at `path` in a full session list (any state: idle, working, waiting), or undefined.
  *  Paths compare in their normal form, so slash style, case and a trailing slash do not hide a lead. */
 export const leadOf = (all: SessionInfo[], path: string) =>

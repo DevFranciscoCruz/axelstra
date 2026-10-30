@@ -33,6 +33,7 @@ import { SplitPane } from "./SplitPane";
 import { useBootstrap } from "./useBootstrap";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { allowManualAgent } from "./sidebar/mainRules";
+import { firstAgentLeads } from "./leadRole";
 import { toast } from "./toasts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
@@ -234,7 +235,9 @@ export function App() {
     };
     if (!allowManualAgent(c, sessionsOf(c.wt.path), deps)) return;
     try {
-      const id = await launchDefaultAgent(c.project.id, c.wt.path, agent, AGENTS[agent], undefined, undefined, projectTerse(c.project.id));
+      // the first agent of a worktree (a new one, one from a PR) is its main; a later one is a task under it
+      const lead = firstAgentLeads(sessionsOf(c.wt.path), c.wt.is_main);
+      const id = await launchDefaultAgent(c.project.id, c.wt.path, agent, AGENTS[agent], undefined, undefined, projectTerse(c.project.id), lead);
       await refreshSessions();
       showView();
       activate(id);

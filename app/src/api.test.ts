@@ -32,7 +32,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { setProjectPref } from "./store";
-import { agentLine, restoreSessions, shQuote } from "./api";
+import { agentLine, launchDefaultAgent, restoreSessions, shQuote } from "./api";
 
 describe("shQuote", () => {
   it("doubles single quotes for PowerShell, typographic ones too", () => {
@@ -149,6 +149,15 @@ describe("restoreSessions", () => {
     const spawns = calls.filter((c) => c.method === "session.spawn");
     expect(spawns[0].params.label).toBe("main");
     expect(spawns[0].params.meta.lead).toBe(true);
+    expect(spawns[1].params.meta.lead).toBeUndefined();
+  });
+
+  it("starts a fresh agent as the worktree's main only when asked, with a new conversation", async () => {
+    await launchDefaultAgent("p", "C:/w/a", "claude", "claude", undefined, { rules: null }, undefined, true);
+    await launchDefaultAgent("p", "C:/w/a", "claude", "claude", undefined, { rules: null });
+    const spawns = calls.filter((c) => c.method === "session.spawn");
+    expect(spawns[0].params.meta.lead).toBe(true);
+    expect(spawns[0].params.meta.key).toBeTruthy();
     expect(spawns[1].params.meta.lead).toBeUndefined();
   });
 
