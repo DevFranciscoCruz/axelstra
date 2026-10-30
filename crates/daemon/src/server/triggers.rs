@@ -20,6 +20,8 @@ pub(super) fn emit(reg: &Registry, changes: &[Change]) {
     for c in changes {
         reg.broadcast_event(json!({"event": "pr.changed", "worktree": c.worktree, "number": c.number, "state": c.state, "ci": c.ci}));
         if !c.state.is_empty() && c.state != "open" {
+            // the janitor asks GitHub again now instead of at its remote deadline
+            crate::janitor::forget_remote_looks();
             reg.janitor.bump();
         }
     }

@@ -138,7 +138,7 @@ impl Default for JanitorTiming {
         JanitorTiming {
             quiet: Duration::from_secs(crate::janitor::MANUAL_QUIET_SECS),
             gap: Duration::from_secs(60),
-            slow: Duration::from_secs(30 * 60),
+            slow: crate::janitor::REMOTE_EVERY,
         }
     }
 }

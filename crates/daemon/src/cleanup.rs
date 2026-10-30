@@ -52,9 +52,15 @@ pub fn squash_merged(repo: &Path, branch: &str, upstream: &str) -> bool {
 }
 
 /// Local `ax/*`, `orch/*` and `orch-task/*` branches that no worktree has checked out and whose work is in the default branch (or that never got a
-/// commit of their own) are deleted. Returns what was done.
+/// commit of their own) are deleted. Returns what was done. A repo whose refs did not move since a pass that found
+/// nothing is not looked at again (no git runs) until a remote look of one of its branches is due.
 pub fn stale_branches(p: &Project, dry: bool, out: &mut Vec<Value>) {
     let repo = Path::new(&p.path);
+    // read before git runs: a ref that moves meanwhile leaves a note the next pass does not match
+    let stamp = axelstra_core::gitstamp::refs(repo);
+    if crate::janitor::stale_unchanged(repo, stamp) {
+        return;
+    }
     let default = git::default_branch(repo);
     let Ok(wts) = git::worktree_list(repo) else { return };
     let used: Vec<String> = wts.into_iter().filter_map(|w| w.branch).collect();
@@ -63,12 +69,26 @@ pub fn stale_branches(p: &Project, dry: bool, out: &mut Vec<Value>) {
     else {
         return;
     };
+    let before = out.len();
+    let mut open = false;
     for b in o.stdout.lines().map(str::trim).filter(|b| !b.is_empty() && !used.iter().any(|u| u == b)) {
         let why = match crate::janitor::merged_reason_in(repo, b, &default, &[]) {
             Some(w) => w,
             None if !crate::janitor::has_own_commits(repo, b) && crate::integrate::ahead_of(repo, b, &default) == 0 => "empty".to_string(),
-            None => continue,
+            None => {
+                open = true;
+                continue;
+            }
         };
+        // fresh git right before deleting: the branch did not move since the answer above
+        let sure = if why == "empty" {
+            crate::janitor::still_empty(repo, b, &default)
+        } else {
+            crate::janitor::still_integrated(repo, b, &default, &[], &why)
+        };
+        if !sure {
+            continue;
+        }
         let removed = !dry && git::run(repo, &["branch", "-D", b]).map(|o| o.ok).unwrap_or(false);
         if !dry && !removed {
             out.push(warn(Some(p), "", "branch", format!("could not delete the branch {b}"), dry));
@@ -76,11 +96,22 @@ pub fn stale_branches(p: &Project, dry: bool, out: &mut Vec<Value>) {
         }
         out.push(item(Some(p), "", b, "branch", &why, removed, dry));
     }
+    if out.len() == before {
+        crate::janitor::stale_note(repo, stamp, open);
+    }
 }
 
-/// `git worktree prune` for entries whose folder is gone; true when something was pruned (a dry run only looks).
+/// `git worktree prune` for entries whose folder is gone; true when something was pruned (a dry run only looks). Git
+/// runs only when a worktree git lists has no folder any more (the list is kept while the refs hold).
 pub fn prune_entries(p: &Project, dry: bool, out: &mut Vec<Value>) {
     let repo = Path::new(&p.path);
+    let missing = match git::worktree_list(repo) {
+        Ok(wts) => wts.iter().any(|w| !w.is_main && !git::verbatim(Path::new(&w.path)).exists()),
+        Err(_) => true,
+    };
+    if !missing {
+        return;
+    }
     let args: &[&str] = if dry { &["worktree", "prune", "--dry-run", "-v"] } else { &["worktree", "prune", "-v"] };
     let Ok(o) = git::run(repo, args) else { return };
     // `-v` prints one line per entry it removes (or would remove) on stderr

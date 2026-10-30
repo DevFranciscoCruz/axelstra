@@ -135,10 +135,15 @@ pub fn ahead_of(repo: &Path, branch: &str, default: &str) -> u32 {
 
 /// Seconds since the branch was created (the oldest entry of its reflog); `None` when unknown.
 pub fn branch_age_secs(repo: &Path, branch: &str) -> Option<u64> {
-    let o = git::run(repo, &["log", "-g", "--format=%ct", branch]).ok().filter(|o| o.ok)?;
-    let born: u64 = o.stdout.lines().last()?.trim().parse().ok()?;
+    let born = branch_born_secs(repo, branch)?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
     Some(now.saturating_sub(born))
+}
+
+/// When the branch was created (unix seconds of the oldest entry of its reflog); `None` when unknown.
+pub fn branch_born_secs(repo: &Path, branch: &str) -> Option<u64> {
+    let o = git::run(repo, &["log", "-g", "--format=%ct", branch]).ok().filter(|o| o.ok)?;
+    o.stdout.lines().last()?.trim().parse().ok()
 }
 
 /// Tracked files changed (or a merge half done): untracked files do not stop a merge, git refuses by itself when one

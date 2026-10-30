@@ -120,15 +120,146 @@ fn git_verdict_uncached(repo: &Path, branch: &str, default: &str, others: &[Stri
     GitVerdict::Open(tip)
 }
 
+/// How long a remote look at a branch with work of its own (`git fetch`, `gh pr list`) holds: the janitor's remote
+/// deadline (`JanitorTiming::slow`). A new tip of the branch or of `origin/<default>`, or a PR the watcher saw closed
+/// (`forget_remote_looks`), makes the next sweep look again at once.
+pub const REMOTE_EVERY: Duration = Duration::from_secs(30 * 60);
+
+/// A look this close to `REMOTE_EVERY` counts as due: the deadline wake comes a sweep's length after the last look.
+const REMOTE_SLACK: Duration = Duration::from_secs(120);
+
+/// The last remote look per repo and branch: the branch tip and the `origin/<default>` tip it was for, and when.
+type Looks = std::collections::HashMap<(String, String), (String, Option<String>, std::time::Instant)>;
+static LOOKS: Mutex<Option<Looks>> = Mutex::new(None);
+
+/// The tip of `origin/<default>` (kept while the repo's refs hold), `None` when there is no such ref.
+fn upstream_tip(repo: &Path, default: &str) -> Option<String> {
+    static UP: axelstra_core::gitstamp::Stamped<Option<String>> = axelstra_core::gitstamp::Stamped::new();
+    let key = format!("{}|{default}", repo.to_string_lossy());
+    UP.get(&key, axelstra_core::gitstamp::refs(repo), None, || {
+        git::run(repo, &["rev-parse", "--verify", "-q", &format!("refs/remotes/origin/{default}")])
+            .ok()
+            .filter(|o| o.ok)
+            .map(|o| o.stdout.trim().to_string())
+    })
+}
+
+/// Whether GitHub (and the remote) must be asked about `branch` at `tip`: never asked, the branch or the upstream
+/// moved since, or the last look is `REMOTE_EVERY` old.
+fn remote_due(repo: &Path, branch: &str, tip: &str, default: &str) -> bool {
+    let up = upstream_tip(repo, default);
+    let m = LOOKS.lock().unwrap_or_else(|e| e.into_inner());
+    match m.as_ref().and_then(|m| m.get(&gh_key(repo, branch))) {
+        Some((t, u, at)) => t != tip || *u != up || at.elapsed() + REMOTE_SLACK >= REMOTE_EVERY,
+        None => true,
+    }
+}
+
+fn remote_seen(repo: &Path, branch: &str, tip: &str, default: &str) {
+    let up = upstream_tip(repo, default);
+    let mut m = LOOKS.lock().unwrap_or_else(|e| e.into_inner());
+    m.get_or_insert_with(Default::default).insert(gh_key(repo, branch), (tip.to_string(), up, std::time::Instant::now()));
+}
+
+/// A PR was closed or merged on GitHub (the PR watcher saw it): the next sweep asks again instead of waiting for the
+/// remote deadline.
+pub fn forget_remote_looks() {
+    *LOOKS.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *STALE_SEEN.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+/// Repos where the last pass of `cleanup::stale_branches` found nothing to delete: the refs fingerprint it read
+/// before looking, when, and whether a branch with work of its own was left for a later remote look.
+type StaleSeen = std::collections::HashMap<String, (u64, std::time::Instant, bool)>;
+static STALE_SEEN: Mutex<Option<StaleSeen>> = Mutex::new(None);
+
+/// Whether the stale-branch pass of `repo` can be skipped: its refs did not move since a pass that found nothing, and
+/// no remote look of an open branch is due.
+pub(crate) fn stale_unchanged(repo: &Path, stamp: Option<u64>) -> bool {
+    let Some(stamp) = stamp else { return false };
+    let m = STALE_SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    m.as_ref()
+        .and_then(|m| m.get(&*repo.to_string_lossy()))
+        .is_some_and(|(s, at, open)| *s == stamp && (!*open || at.elapsed() + REMOTE_SLACK < REMOTE_EVERY))
+}
+
+/// A stale-branch pass under `stamp` (read before it looked) found nothing; `open`: a branch waits for a remote look.
+pub(crate) fn stale_note(repo: &Path, stamp: Option<u64>, open: bool) {
+    let Some(stamp) = stamp else { return };
+    let mut m = STALE_SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    m.get_or_insert_with(Default::default).insert(repo.to_string_lossy().into_owned(), (stamp, std::time::Instant::now(), open));
+}
+
+/// `git fetch` for the sweep. It neither follows the remote's HEAD nor writes `FETCH_HEAD`: a fetch that brings nothing
+/// then touches no ref, so the ref watcher (`prwatch::RefWatch`) does not kick the janitor again for its own fetch.
+fn fetch_quietly(repo: &Path) {
+    // a failure (offline) just means less is found
+    let _ = output_within(
+        Command::new("git").current_dir(repo).env("GIT_TERMINAL_PROMPT", "0").args([
+            "-c",
+            "remote.origin.followRemoteHEAD=never",
+            "fetch",
+            "--quiet",
+            "--no-write-fetch-head",
+            "origin",
+        ]),
+        NET_TIMEOUT,
+    );
+}
+
+/// `has_own_commits`, kept while the repo's refs hold (a commit moves the branch). For what only waits or reports;
+/// a removal asks git again (`still_empty`, `still_integrated`).
+fn own_commits_kept(repo: &Path, branch: &str) -> bool {
+    static OWN: axelstra_core::gitstamp::Stamped<bool> = axelstra_core::gitstamp::Stamped::new();
+    let key = format!("{}|{branch}", repo.to_string_lossy());
+    OWN.get(&key, axelstra_core::gitstamp::refs(repo), None, || has_own_commits(repo, branch))
+}
+
+/// `integrate::branch_age_secs` from a birth time kept while the repo's refs hold (a recreated branch moves them).
+fn branch_age_kept(repo: &Path, branch: &str) -> Option<u64> {
+    static BORN: axelstra_core::gitstamp::Stamped<Option<u64>> = axelstra_core::gitstamp::Stamped::new();
+    let key = format!("{}|{branch}", repo.to_string_lossy());
+    let born = BORN.get(&key, axelstra_core::gitstamp::refs(repo), None, || integrate::branch_born_secs(repo, branch))?;
+    Some((now_ms() / 1000).saturating_sub(born))
+}
+
+/// Fresh git right before an empty branch goes: no commit of its own and nothing the default branch lacks.
+pub(crate) fn still_empty(repo: &Path, branch: &str, default: &str) -> bool {
+    !has_own_commits(repo, branch)
+        && git::run(repo, &["rev-list", "--count", &format!("{default}..{branch}")])
+            .ok()
+            .filter(|o| o.ok)
+            .is_some_and(|o| o.stdout.trim() == "0")
+}
+
+/// Fresh git right before an integrated branch goes: git still finds its work elsewhere, or (for `PR #N merged`) the
+/// branch is still at the tip of the merged PR.
+pub(crate) fn still_integrated(repo: &Path, branch: &str, default: &str, others: &[String], why: &str) -> bool {
+    if why.starts_with("PR #") {
+        let tip = git::run(repo, &["rev-parse", branch]).ok().filter(|o| o.ok).map(|o| o.stdout.trim().to_string());
+        return tip.is_some_and(|t| gh_merged_known(repo, branch, &t).is_some());
+    }
+    matches!(git_verdict_uncached(repo, branch, default, others), GitVerdict::Merged(_))
+}
+
+/// `merged_reason_with` asks GitHub only when the remote look is due (`remote_due`); otherwise the last answer for this
+/// tip stands.
 fn merged_reason_with(repo: &Path, branch: &str, default: &str, others: &[String], ask_gh: bool) -> Option<String> {
     let tip = match git_verdict(repo, branch, default, others) {
         GitVerdict::NotWork => return None,
         GitVerdict::Merged(why) => return Some(why),
         GitVerdict::Open(tip) => tip,
     };
-    if !ask_gh {
-        return gh_merged_known(repo, branch, &tip).map(|n| format!("PR #{n} merged"));
+    if ask_gh && remote_due(repo, branch, &tip, default) {
+        // a failure (offline, not a GitHub repo) counts as a look too: it is asked again at the deadline
+        let _ = ask_gh_merged(repo, branch, &tip);
+        remote_seen(repo, branch, &tip, default);
     }
+    gh_merged_known(repo, branch, &tip).map(|n| format!("PR #{n} merged"))
+}
+
+/// Asks `gh` whether a PR of `branch` was merged at exactly `tip` and notes the answer (`gh_merged_note`).
+fn ask_gh_merged(repo: &Path, branch: &str, tip: &str) -> Option<()> {
     let o = output_within(
         Command::new("gh").current_dir(repo).env("GH_PROMPT_DISABLED", "1").args([
             "pr",
@@ -148,13 +279,9 @@ fn merged_reason_with(repo: &Path, branch: &str, default: &str, others: &[String
     let v: Value = serde_json::from_slice(&o.stdout).ok()?;
     let pr = v.as_array()?.first()?.clone();
     // the merged PR must be exactly what is here: commits added after the merge would be lost with the branch
-    if pr["headRefOid"].as_str() != Some(tip.as_str()) {
-        gh_merged_note(repo, branch, &tip, None);
-        return None;
-    }
-    let n = pr["number"].as_u64();
-    gh_merged_note(repo, branch, &tip, n);
-    n.map(|n| format!("PR #{n} merged"))
+    let n = pr["number"].as_u64().filter(|_| pr["headRefOid"].as_str() == Some(tip));
+    gh_merged_note(repo, branch, tip, n);
+    Some(())
 }
 
 /// True for the branches Axelstra's own flows create and the janitor may clean up: agent worktrees (`ax/*`), an
@@ -274,7 +401,6 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>, waitin
         if (env.touched)(&w.path) && !(auto && integrate::done_mark(&w.path, false).is_some()) {
             continue;
         }
-        let dirty = git::has_changes(Path::new(&w.path)).unwrap_or(true);
         // a lead (or `--report-to` worker) said `done` here: integrate its work, or flag why that is not possible
         let reported = if dry { integrate::done_mark(&w.path, false) } else { integrate::done_mark(&w.path, true) };
         if let (Some(ok), false) = (reported, dry) {
@@ -318,42 +444,54 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>, waitin
                 }
             }
         }
-        if dirty {
-            *waiting |= has_own_commits(repo, &branch);
-            continue;
-        }
-        if !fetched {
-            // so a merge done on GitHub since the last fetch is seen; a failure (offline) just means less is found
-            let _ = output_within(
-                Command::new("git").current_dir(repo).env("GIT_TERMINAL_PROMPT", "0").args(["fetch", "--quiet", "origin"]),
-                NET_TIMEOUT,
-            );
-            fetched = true;
-        }
         // a live `ax/*` branch is one that still exists in a worktree (a dry run removes none, so `gone` stays empty)
         let others: Vec<String> = git::worktree_list(repo)?
             .into_iter()
             .filter_map(|o| o.branch)
             .filter(|b| integrable_branch(b) && *b != branch && !gone.contains(b))
             .collect();
-        let Some(why) = merged_reason_in(repo, &branch, &default, &others) else {
-            *waiting |= has_own_commits(repo, &branch);
+        // git's verdict is kept while the repo's refs hold: an unchanged repo asks git nothing here
+        let mut verdict = git_verdict(repo, &branch, &default, &others);
+        if let GitVerdict::Open(tip) = &verdict {
+            if !fetched && remote_due(repo, &branch, tip, &default) {
+                // so a merge done on GitHub since the last look is seen; only when the remote look is due
+                fetch_quietly(repo);
+                fetched = true;
+                verdict = git_verdict(repo, &branch, &default, &others);
+            }
+        }
+        let why = match &verdict {
+            GitVerdict::NotWork => None,
+            GitVerdict::Merged(why) => Some(why.clone()),
+            // asks GitHub only when its look is due
+            GitVerdict::Open(_) => merged_reason_in(repo, &branch, &default, &others),
+        };
+        let Some(why) = why else {
+            *waiting |= own_commits_kept(repo, &branch);
             // nothing of its own and nothing to lose: an empty worktree nobody works in goes away after a few minutes
             // only an `auto` one: a manual or unmarked one may just be waiting for its first commit, and leaves only by
             // the user's button
-            let old = auto && (reported.is_some() || integrate::branch_age_secs(repo, &branch).is_some_and(|a| a >= EMPTY_MIN_AGE_SECS));
-            if old && integrate::ahead_of(repo, &branch, &default) == 0 && !has_own_commits(repo, &branch) {
-                let (removed, closed) = if dry { (false, vec![]) } else { remove_closing(env, p, &w.path, &branch) };
-                if removed {
-                    gone.push(branch.clone());
-                    push_event(
-                        json!({"kind": "empty", "project": p.id, "path": w.path, "branch": branch, "closed": closed, "at": now_ms()}),
-                    );
-                }
-                out.push(json!({"project": p.id, "path": w.path, "branch": branch, "why": "empty", "removed": removed, "pending": !dry && !removed, "dry_run": dry}));
+            let old = auto && (reported.is_some() || branch_age_kept(repo, &branch).is_some_and(|a| a >= EMPTY_MIN_AGE_SECS));
+            if !(old && integrate::ahead_of(repo, &branch, &default) == 0 && !own_commits_kept(repo, &branch)) {
+                continue;
             }
+            // fresh git and status right before removing it
+            if git::has_changes(Path::new(&w.path)).unwrap_or(true) || !still_empty(repo, &branch, &default) {
+                continue;
+            }
+            let (removed, closed) = if dry { (false, vec![]) } else { remove_closing(env, p, &w.path, &branch) };
+            if removed {
+                gone.push(branch.clone());
+                push_event(json!({"kind": "empty", "project": p.id, "path": w.path, "branch": branch, "closed": closed, "at": now_ms()}));
+            }
+            out.push(json!({"project": p.id, "path": w.path, "branch": branch, "why": "empty", "removed": removed, "pending": !dry && !removed, "dry_run": dry}));
             continue;
         };
+        // fresh status and git right before removing it: uncommitted work stays, and so does a branch that moved
+        if git::has_changes(Path::new(&w.path)).unwrap_or(true) || !still_integrated(repo, &branch, &default, &others, &why) {
+            *waiting |= own_commits_kept(repo, &branch);
+            continue;
+        }
         let (removed, closed) = if dry { (false, vec![]) } else { remove_closing(env, p, &w.path, &branch) };
         let into = integrated_into(&why, &default);
         if removed {
@@ -771,6 +909,74 @@ mod tests {
         let mut a = COMMIT.to_vec();
         a.push(msg);
         assert!(git::run(dir, &a).unwrap().ok);
+    }
+
+    /// Children started under `site` (the counters are process-wide; the site names this test's thread only). Not
+    /// `git worktree list`: its kept answer is dropped when a worktree is added or removed anywhere in the process while
+    /// git runs (`git::worktree_list`), which the other tests running in parallel do and an idle daemon does not.
+    fn spawned(site: &str) -> u64 {
+        axelstra_core::proc::site_stats().iter().filter(|r| r.site == site && r.command != "git worktree list").map(|r| r.total).sum()
+    }
+
+    /// The janitor is woken by events that often change nothing: a sweep of a repo whose refs did not move starts no
+    /// process (no reflog, status, for-each-ref, worktree prune, fetch or gh); a ref that moves makes it look again.
+    #[test]
+    fn an_idle_sweep_of_an_unchanged_repo_starts_nothing_and_a_ref_change_looks_again() {
+        let (root, store, p) = repo_with_store("idle");
+        let repo = root.join("proj");
+        // work not integrated yet (GitHub is asked once), an empty worktree, and a branch nobody has checked out
+        let open = projects::worktree_create(&p, "open").unwrap();
+        commit_in(Path::new(&open.path), "work");
+        let fresh = projects::worktree_create(&p, "fresh").unwrap();
+        assert!(git::run(&repo, &["branch", "ax/loose", "ax/open"]).unwrap().ok);
+        let site = format!("test.janitor_idle_{}", std::process::id());
+        let _site = axelstra_core::proc::site(&site);
+        let first = sweep(&store, &|_| false, false);
+        assert!(first.iter().all(|o| o["removed"] != true), "{first:?}");
+        let looked = spawned(&site);
+        assert!(looked > 0);
+        for _ in 0..3 {
+            let again = sweep(&store, &|_| false, false);
+            assert!(again.is_empty(), "{again:?}");
+        }
+        let rows = || -> Vec<(String, u64)> {
+            axelstra_core::proc::site_stats().into_iter().filter(|r| r.site == site).map(|r| (r.command, r.total)).collect()
+        };
+        assert_eq!(spawned(&site), looked, "a sweep of an unchanged repo started a process: {:?}", rows());
+        assert!(Path::new(&open.path).exists() && Path::new(&fresh.path).exists());
+        // a ref moves (the work is merged): the next sweep asks git again and removes the integrated worktree
+        assert!(git::run(&repo, &["merge", "-q", "--ff-only", "ax/open"]).unwrap().ok);
+        let out = sweep(&store, &|_| false, false);
+        assert!(spawned(&site) > looked);
+        assert!(out.iter().any(|o| o["branch"] == "ax/open" && o["removed"] == true), "{out:?}");
+        assert!(!Path::new(&open.path).exists());
+        assert!(out.iter().any(|o| o["branch"] == "ax/loose" && o["removed"] == true), "{out:?}");
+        let _ = take_events_under(&root);
+        let _ = git::remove_tree(&root);
+    }
+
+    /// GitHub is asked about a branch with work of its own once per remote deadline, again at once when the branch
+    /// moves or the PR watcher saw a PR closed.
+    #[test]
+    fn github_is_asked_again_only_when_the_look_is_due() {
+        let (root, _store, p) = repo_with_store("ghdue");
+        let repo = root.join("proj");
+        let wt = projects::worktree_create(&p, "w").unwrap();
+        commit_in(Path::new(&wt.path), "work");
+        let tip = || git::run(&repo, &["rev-parse", "ax/w"]).unwrap().stdout.trim().to_string();
+        assert!(remote_due(&repo, "ax/w", &tip(), "main"));
+        remote_seen(&repo, "ax/w", &tip(), "main");
+        assert!(!remote_due(&repo, "ax/w", &tip(), "main"));
+        // the upstream moved: a merge on GitHub may have arrived with it
+        assert!(git::run(&repo, &["update-ref", "refs/remotes/origin/main", "main"]).unwrap().ok);
+        assert!(remote_due(&repo, "ax/w", &tip(), "main"));
+        remote_seen(&repo, "ax/w", &tip(), "main");
+        // the branch moved: the old answer is not about this tip
+        commit_in(Path::new(&wt.path), "more");
+        assert!(remote_due(&repo, "ax/w", &tip(), "main"));
+        remote_seen(&repo, "ax/w", &tip(), "main");
+        assert!(!remote_due(&repo, "ax/w", &tip(), "main"));
+        let _ = git::remove_tree(&root);
     }
 
     #[test]
