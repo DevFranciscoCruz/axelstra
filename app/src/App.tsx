@@ -33,6 +33,7 @@ import { SplitPane } from "./SplitPane";
 import { useBootstrap } from "./useBootstrap";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { allowManualAgent } from "./sidebar/mainRules";
+import { firstAgentLeads } from "./leadRole";
 import { toast } from "./toasts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
