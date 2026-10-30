@@ -51,6 +51,17 @@ Verified: Claude Code 2.1.310 Notification types (`permission_prompt`, `idle_pro
 `ToolPermission`. Codex 0.154 has `~/.codex/hooks.json` events (`PermissionRequest`, `PreToolUse`, `Stop`, `UserPromptSubmit`);
 `axelstra hook codex` understands them but nothing installs them (Codex asks the user to trust each hook).
 
+## Message notices
+
+A bus message (`msg.send`, a child's `done`, the watchdog, a review comment) reaches an agent as a one-line notice
+(`prompts::notice`: kind, sender, the untrusted label, at most `NOTICE_TEXT_CHARS` (300) characters of the text on one line,
+`(more in axelstra inbox)` only when cut). Each message is announced AT MOST ONCE: `Msg.announced` (bus state, not
+serialized) is separate from `read`, and every notice goes through `Registry::announce`, which types it only when
+`Bus::announce(id)` flips the flag. So reading with `axelstra inbox --no-mark` (unread but seen) never brings it back, a new
+message announces only itself, and a `quiet` send (or a reaped worker's `done`, which its reaper reports) is marked
+announced without a notice. A hibernation wake types only the never-announced ones (see Hibernation). Every notice is read
+by the model and costs the user tokens: never retype the inbox, keep notices short.
+
 ## Awaiting something external
 
 `axelstra await --reason "CI #3703" [--for-min N]` (`session.await`, `awaits` in `waiting.rs`/`Awaits`) marks the caller's own
@@ -97,7 +108,9 @@ policy thread and the list rows are in `server/hibernate.rs`.
   verbatim from the original line), `codex resume --last` or `gemini --resume latest`, ending `|| exit 97` (`-NoExit` shells:
   `if (!$?) { exit 97 }`), so a failed resume is seen at once instead of falling back to a fresh start. The saved terminal is
   seeded, the worker flag and the reaper are armed again, then `settle` waits (a computed deadline: banner printed and 2.5 s
-  quiet, 4 s at least, 90 s at most) and types the notices of the unread inbox. Only then does `hibernated` go back to `null`.
+  quiet, 4 s at least, 90 s at most) and types what reached it and was never announced (`Bus::take_unannounced`): one
+  message gets its usual notice, several get ONE short line with the count and who sent what (`prompts::backlog`), their
+  text stays in the inbox. Only then does `hibernated` go back to `null`.
   If the process exits before that, or the spawn fails, the session is retired as exited with `wake_error`
   (`hibernate.wake_failed`), the parent is told and the watch stream gets `session.wake_failed`; it never stays hibernated.
 - **Policy.** One thread (`spawn_policy`) computes ONE deadline per session (`hibernate::due_in`): it triggers when the session
