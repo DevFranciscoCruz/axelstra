@@ -46,25 +46,29 @@ reads the hook JSON on stdin and calls `session.hint {state, kind: permission|qu
 nothing. The hint clears on `Stop`/`UserPromptSubmit` (idle/working hints), on the user's input and on new output
 (`hint_waiting`), and after 2 h. An agent connection may hint only its own session. `session.list` carries `wait: {kind, text}`;
 the daemon tells the parent once per wait. A session whose agent has no hooks is only working or idle. Do not add screen
-heuristics (`needs_input`/`asks_question` were removed on purpose); the stall watchdog (`stall.rs`) still covers silence.
+heuristics (`needs_input`/`asks_question` were removed on purpose). Silence is the stall watchdog's (`stall.rs`, see "Stall
+watchdog and the turn-end reminder"): it is not a wait and never turns the dot red.
 Verified: Claude Code 2.1.310 Notification types (`permission_prompt`, `idle_prompt`, `elicitation_dialog`), Gemini 0.65.0
 `ToolPermission`. Codex 0.154 has `~/.codex/hooks.json` events (`PermissionRequest`, `PreToolUse`, `Stop`, `UserPromptSubmit`);
 `axelstra hook codex` understands them but nothing installs them (Codex asks the user to trust each hook).
 
 ## Message notices
 
-A bus message (`msg.send`, a child's `done`, the watchdog, a review comment) reaches an agent as a one-line notice
+A bus message (`msg.send`, a child's `done`, an `ask`/`escalate`, a child's wait, the watchdog's parent line, a failed wake,
+work left not integrated, a review comment) reaches an agent as a one-line notice
 (`prompts::notice`: kind, sender, the untrusted label, at most `NOTICE_TEXT_CHARS` (300) characters of the text on one line,
 `(more in axelstra inbox)` only when cut). Each message is announced AT MOST ONCE: `Msg.announced` (bus state, not
 serialized) is separate from `read`, and every notice goes through `Registry::announce`, which types it only when
 `Bus::announce(id)` flips the flag. So reading with `axelstra inbox --no-mark` (unread but seen) never brings it back, a new
-message announces only itself, and a `quiet` send (or a reaped worker's `done`, which its reaper reports) is marked
-announced without a notice. A hibernation wake types only the never-announced ones (see Hibernation). Every notice is read
+message announces only itself, and a `quiet` send (or a reaped worker's `done`, which its reaper reports, or a `done`/`escalate`
+repeated unchanged, `Bus::repeats`) is marked announced without a notice. The stop reminder (`STOP_NUDGE`) is no bus message:
+it is pasted into the agent's own terminal only. A hibernation wake types only the never-announced ones (see Hibernation). Every notice is read
 by the model and costs the user tokens: never retype the inbox, keep notices short.
 
 ## Pulling state and waiting for reports
 
-The daemon pushes to a parent only a child's `done` and pendencies (a question, a permission/input wait, a real stall);
+The daemon pushes to a parent only a child's `done` and pendencies (a question, a permission/input wait, a real stall, a
+failure that needs action; see "Stall watchdog and the turn-end reminder");
 state is pulled. `session.list` rows carry `quiet_since` (unix ms of the last output/input/message, `null` while working),
 `liveness: {pty, agent}` (process alive; the agent showed a hook hint or output in this turn; silence is never "dead") and
 `next_action` (`none`, `reply <msg-id>`, `answer permission|question in session N`, `collect done`, `read N`), computed by
@@ -81,10 +85,68 @@ session as awaiting: it only waits for CI, a deploy or another process. `session
 `awaiting: {reason, since, until}` (unix ms; `null` when not) and the app shows its own state, neither working, idle nor the
 red waiting. `stall_facts` sets `awaiting`, so `is_stalled` is false meanwhile. It holds until the user types, output comes
 more than `AWAIT_GRACE_MS` (30 s, the agent's closing words) after the call, `done`, the process exits, `axelstra await --clear`
-or the limit (`--for-min`, default and cap `AWAIT_CAP_MS` 2 h); then the watchdog warns the parent once as usual. Event-driven
+or the limit (`--for-min`, default and cap `AWAIT_CAP_MS` 2 h); then the session is judged like any other by the stall
+watchdog (its parent hears at most once per episode). Event-driven
 (`pulse` on set/clear, awaiting is part of the session monitor's state); no polling. An agent may only call it for itself
 (`rpc.agent_own_session`). No PROTO bump: the app only reads an additive field. `NEVER_WAIT_RULE` (typed into every lead and
 worker prompt) and the axelstration skill tell agents to use it instead of stopping silently.
+
+## Stall watchdog and the turn-end reminder
+
+**Product rule.** The daemon types into a parent or an agent ONLY a child's `done` report and pendencies that need the parent
+or the user to act: an `ask`/`escalate` (a question), a child's permission or input wait (`tell_parent_waiting`), a real stall
+after the one-time self-reminder, and a failure that needs action (a failed wake, `prompts::wake_failed_report`; work left not
+integrated, `tell_main_not_integrated`, not for `integrate.not_ok` since the agent's own `done` said it). Nothing about state,
+progress, idle or working, and never a repeat of an unchanged state: a `done` or `escalate` sent again with the same text while
+it still stands is stored but not typed (`Bus::repeats`). Parents pull the rest (see "Pulling state and waiting for reports").
+Automatic lines to a parent are `kind: "notice"`, which changes none of the parent's own state (its `ask`, its `done`).
+
+**Facts** (`stall::Facts`, gathered by `stall_facts` in `server/loops.rs`). `excused` (never a reminder, a parent line or a
+user alert): not an agent, the project main, not running, reported `done`, `escalate` unanswered, a wait (`ask` pending or a
+hook permission/question, `Registry::wait_of`), `awaiting`, a live child, paused by the governor, `bg_work` (a process of its
+tree that was not part of its first 60 s of start-up: a background shell, a build, `axelstra lock`; `stall::Work`, rechecked
+every `BG_RECHECK_MS` 60 s while only that explains it), `slot_wait` (a spawn refused for the worker limit, while the limit is
+still reached, at most `AWAIT_CAP_MS`), `user_driven` and `unasked`. A hibernated session has no `Session` and is not looked at.
+- **Blank vs lost task.** `unasked` (`stall::never_asked`): spawned with no goal, no `reap`, no note (`meta.unrequested`, any
+  agent, not only leads; live meta, not kept across a restart), never typed into, never messaged and its hook never reported a
+  turn: it sits at its banner, nothing to stall on. One that HAD a request (a goal, a message) but whose hook never reported a
+  turn is a lost task (a trust dialog, a lost prompt or resume, no hooks): it is watched, and its parent line says so
+  (`Why::NeverStarted`).
+- **User-driven** (`stall::user_driven`): the user typed into it, and either it has no parent agent or the typing is more recent
+  than the last message in its inbox. The user decides when it goes on.
+- Quiet time is `min(idle, since input, since inbox message)` (`Facts::quiet_ms`).
+
+**Stop reminder.** `axelstra hook` sends `session.hint {state: "idle", event: "stop"}` on Claude/Codex `Stop` and Gemini
+`AfterAgent` (additive; an old hook sends no `event`, so no reminder). `session.hint` calls `stop_nudge` -> `self_nudge`, which
+refreshes the tree's processes and types `prompts::STOP_NUDGE` ("[axelstra] Your turn ended without done, await or ask. Finish
+with `axelstra done "<report>"`, `axelstra await --reason "..."` or `axelstra ask $AXELSTRA_PARENT "<question>"`.") when
+`stall::nudge_due` (watchdog on, a parent agent, not `excused`) and `Turns::stop` allows it: once per stop episode and at most
+once per `NUDGE_EVERY` (10 min). It is pasted into the terminal (`msgbus::deliver`), not a bus message: it reaches nobody else
+and does not count as new work. An agent with no hooks (`hints.state_of` none) gets the same reminder from its ephemeral reaper
+after `reaper_min_idle_secs` (120 s) of quiet. `IDLE_NUDGE` is gone. The reaper never closes or reports finished an agent on
+silence: only `done` or its exit ends it (plain commands are still closed when idle).
+
+**Parent line.** `stall_tick` tells the parent when `stall::parent_due`: quiet for the threshold, not `excused`, a parent agent,
+and the reminder of this episode (if any) is at least a threshold old. Once per episode (`Turns::begin_stall`). Text
+`stall::parent_text`, one line ending `Check it: axelstra read <id>`: `Why::Nudged` "stopped without done/await/ask and ignored
+one reminder", `Why::NeverStarted` "never reported a turn (a trust dialog or a lost prompt?) and has been quiet N min",
+`Why::Quiet` "stopped without done/await/ask and has been quiet N min" (hook turns seen but no Stop reached the reminder).
+Several children of one parent in one pass get ONE line (`parent_text_many`). Typed only when the parent is an agent
+(`announce`, sender `axelstra watchdog`). A child the parent ignores is never escalated to the user.
+
+**Episodes.** `stall::Turns` per session: the reminder episode and the stall episode end only on real new work: the user typed,
+a message reached its inbox, or a working hint that is not the reminder's own turn (`Turns::working`; the turn the reminder
+provoked is `echo`). A stray output byte, a redraw or a `Stop` does not end one, so nothing is repeated while the state is
+unchanged. An excuse (`done`, `await`, ...) silences it while it holds.
+
+**User alert.** Only for a session with no parent agent (`needs_human`), once per episode: `session.list` `stalled` (+ `stall`
+with the task and `stall::last_line`), and `session.changed` when that set changes. `stall_parent` marks an episode a parent
+agent has (the app does not alert on it). `pullview` turns either into `next_action` `read N`.
+
+**Timing.** `stall_minutes` in settings (default `DEFAULT_MINUTES` 15, max 1440, 0 = off; off also turns the reminder off).
+Tests: `AXELSTRA_STALL_SECS` with `AXELSTRA_TESTING=1`. No tick: the watchdog wakes on the pulse and at ONE computed moment
+(`stall::next_check_ms`: the threshold reached, the reminder a threshold old, an await expiring, or the 60 s `bg_work` recheck).
+No PROTO bump (`event` is additive, `stall_parent` too).
 
 ## Hibernation
 
@@ -218,7 +280,7 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   `axelstra dispatch new/send` decide who starts: by default a direct worker (no lead; its parent is the project main; it
   integrates itself: merge main, `axelstra lock verify -- node scripts/check.mjs`, `done`); a lead when the request lists
   2+ independent subtasks (`wants_lead` in `crates/cli/src/dispatch.rs`); `--lead` / `--no-lead` override the heuristic.
-  The stall watchdog ignores a lead that never got a request. Worktrees that already have a lead keep working as before.
+  The stall watchdog ignores an agent (lead or not) that never got a request (`stall::never_asked`). Worktrees that already have a lead keep working as before.
 - The janitor (`crates/daemon/src/janitor.rs`) is woken by events (daemon start, a session ending, a few seconds after each
   `done` or `git.merge` via `sweep_soon` in `server.rs`, a finished flow or run, a retry backoff) and by timers: the
   earliest moment a hand-made worktree stops counting as touched (`MANUAL_QUIET_SECS` after the daemon started or after
