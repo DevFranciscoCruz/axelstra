@@ -9,6 +9,8 @@ import {
   ShellChoice,
   Terse,
   BuildSettings,
+  DiskSettings,
+  JanitorSettings,
   backupExport,
   worktreeSweepFull,
   SweepItem,
@@ -28,6 +30,8 @@ import { WorkspaceSection } from "./WorkspaceSection";
 import { HostsSection } from "./HostsSection";
 import { MemorySection } from "./MemoryPanel";
 import { H } from "./strings.hibernate";
+import { D } from "./strings.disk";
+import { clampInt } from "./diskLogic";
 import { idleChoices } from "./hibernateLogic";
 import { SettingsPage } from "./SettingsPage";
 import { Caps, SectionId, setSection } from "./settingsNav";
@@ -147,6 +151,76 @@ function AutoNumber(props: {
 }
 
 /** Build environment of the sessions started from now on (`build` in the daemon's settings). */
+/** A whole number field saved when it loses focus or Enter is pressed; out of range is pulled back to the range. */
+function IntField(props: { label: string; value: number; min: number; max: number; onSave: (n: number) => void }) {
+  return (
+    <Field label={props.label}>
+      <Input
+        type="number"
+        min={props.min}
+        max={props.max}
+        step={1}
+        value={props.value}
+        onChange={(e) => {
+          const n = clampInt(e.currentTarget.value, props.min, props.max);
+          if (n === null) e.currentTarget.value = String(props.value);
+          else if (n !== props.value) props.onSave(n);
+        }}
+      />
+    </Field>
+  );
+}
+
+/** `disk` and `janitor.artifact_quiet_hours` of settings.json: when builds of idle worktrees go, and what "low space" is. */
+function DiskSection(props: {
+  disk: DiskSettings;
+  janitor: JanitorSettings;
+  save: (p: { disk?: DiskSettings; janitor?: JanitorSettings }) => void;
+}) {
+  const set = (patch: Partial<DiskSettings>) => props.save({ disk: { ...props.disk, ...patch } });
+  return (
+    <Section title={D.settings.title} note={D.settings.note}>
+      <div class="set-fields">
+        <IntField
+          label={D.settings.quietHours}
+          value={props.janitor.artifact_quiet_hours}
+          min={1}
+          max={720}
+          onSave={(artifact_quiet_hours) => props.save({ janitor: { artifact_quiet_hours } })}
+        />
+      </div>
+      <CheckboxField checked={props.disk.enabled} onChange={(enabled) => set({ enabled })}>
+        {D.settings.enabled}
+      </CheckboxField>
+      <Show when={props.disk.enabled}>
+        <div class="set-fields">
+          <IntField
+            label={D.settings.minFreeGb}
+            value={props.disk.min_free_gb}
+            min={0}
+            max={1_000_000}
+            onSave={(min_free_gb) => set({ min_free_gb })}
+          />
+          <IntField
+            label={D.settings.minFreePct}
+            value={props.disk.min_free_pct}
+            min={0}
+            max={90}
+            onSave={(min_free_pct) => set({ min_free_pct })}
+          />
+          <IntField
+            label={D.settings.marginGb}
+            value={props.disk.margin_gb}
+            min={0}
+            max={1_000_000}
+            onSave={(margin_gb) => set({ margin_gb })}
+          />
+        </div>
+      </Show>
+    </Section>
+  );
+}
+
 function BuildSection(props: { cfg: BuildSettings; save: (b: BuildSettings) => void }) {
   const set = (patch: Partial<BuildSettings>) => props.save({ ...props.cfg, ...patch });
   return (
@@ -523,6 +597,9 @@ export function Settings() {
                 )}
               </Show>
             </Section>
+            <Show when={cfg().disk && cfg().janitor ? { disk: cfg().disk!, janitor: cfg().janitor! } : undefined}>
+              {(d) => <DiskSection disk={d().disk} janitor={d().janitor} save={(p) => void save(p)} />}
+            </Show>
             <Section title={T.backup} note={T.backupNote}>
               <div class="m-actions start">
                 <Button onClick={() => void exportBackup()}>{T.export}</Button>

@@ -5,6 +5,8 @@ import { ptG } from "./strings.memory";
 import { enG } from "./strings.memory.en";
 import { ptH } from "./strings.hibernate";
 import { enH } from "./strings.hibernate.en";
+import { ptD } from "./strings.disk";
+import { enD } from "./strings.disk.en";
 import { enB } from "./strings.budget.en";
 import { ptP } from "./strings.panels";
 import { enP } from "./strings.panels.en";
@@ -81,6 +83,7 @@ const pairs: Pair[] = [
   ["B", ptB, enB],
   ["G", ptG, enG],
   ["H", ptH, enH],
+  ["D", ptD, enD],
   ["R", ptR, enR],
   ["W", ptW, enW],
   ["WS", ptWS, enWS],

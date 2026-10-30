@@ -8,6 +8,8 @@ import { G, ptG } from "./strings.memory";
 import { ptBRG } from "./strings.memory.ptbr";
 import { H, ptH } from "./strings.hibernate";
 import { ptBRH } from "./strings.hibernate.ptbr";
+import { D, ptD } from "./strings.disk";
+import { ptBRD } from "./strings.disk.ptbr";
 import { ptBRB } from "./strings.budget.ptbr";
 import { L, ptL } from "./strings.logic";
 import { ptBRL } from "./strings.logic.ptbr";
@@ -33,6 +35,7 @@ const dicts: Entry[] = [
   ["B", B, ptB, ptBRB],
   ["G", G, ptG, ptBRG],
   ["H", H, ptH, ptBRH],
+  ["D", D, ptD, ptBRD],
   ["R", R, ptR, ptBRR],
   ["W", W, ptW, ptBRW],
   ["WS", WS, ptWS, ptBRWS],
