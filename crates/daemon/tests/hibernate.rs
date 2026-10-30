@@ -308,21 +308,29 @@ fn a_done_that_races_a_hibernation_always_wakes_the_lead() {
     let wt = root.join("wt");
     std::fs::create_dir_all(&wt).unwrap();
     let (mut c, pipe) = start_at(&root, "race");
+    // the race is the explicit hibernation against the done: the policy would be a third party, since a lead with a
+    // live child hibernates by itself after the test's short quiet time, before a slow start has even printed its
+    // banner. Off in this daemon's settings; `session.hibernate` does not depend on it.
+    c.call("settings.set", json!({"hibernate": {"enabled": false}})).unwrap();
     for round in 0..6u32 {
         let lead = agent(&mut c, &wt, &key(10 + round), json!({"lead": true}), json!({}));
         let worker = agent(&mut c, &root, &key(30 + round), json!({}), json!({"parent": lead}));
         ready(&mut c, lead);
         let mut a = Client::connect(&pipe, &"h".repeat(32)).unwrap();
         let mut b = Client::connect(&pipe, &"h".repeat(32)).unwrap();
-        let t1 = std::thread::spawn(move || {
-            let _ = hibernate(&mut a, lead);
-        });
+        let t1 = std::thread::spawn(move || hibernate(&mut a, lead).map_err(|e| code_of(&e)));
         let t2 = std::thread::spawn(move || {
             b.call("msg.send", json!({"from": worker, "to": lead, "text": format!("report-{round}"), "kind": "done", "quiet": true}))
                 .unwrap();
         });
-        t1.join().unwrap();
+        let slept = t1.join().unwrap();
         t2.join().unwrap();
+        // it slept first, or the done reached it first (before the check or before the commit): nothing else
+        assert!(
+            slept.as_ref().is_ok_and(|r| r["hibernated"].is_object())
+                || slept.as_ref().is_err_and(|e| e == "hibernate.event" || e == "hibernate.recent"),
+            "round {round}: {slept:?}"
+        );
         // whichever came first: the report is in the inbox and the lead ends up running
         until("lead awake after the race", || is_awake(&mut c, lead).then_some(()));
         let inbox = c.call("msg.inbox", json!({"session": lead, "all": true, "mark": false})).unwrap();
