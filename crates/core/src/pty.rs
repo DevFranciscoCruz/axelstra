@@ -21,6 +21,9 @@ const SUB_QUEUE: usize = 4096;
 const INPUT_QUEUE: usize = 1024;
 /// Silence after which a session counts as quiet (the daemon's "idle" and "went quiet" use the same threshold).
 pub const QUIET_MS: u64 = 1500;
+/// Output this soon after a resize or a terminal report (focus in/out, a reply to a query) is the program repainting
+/// what it already showed, not working: opening a tab must not turn an idle agent into a working one.
+const REDRAW_MS: u64 = 2000;
 
 /// Runs on the output thread when a quiet session prints again (see `Session::on_wake`).
 pub type WakeHook = Arc<dyn Fn() + Send + Sync>;
@@ -103,6 +106,8 @@ struct Shared {
     last_out: AtomicU64,
     /// unix ms of the last input written
     last_in: AtomicU64,
+    /// unix ms of the last real resize or terminal report: the repaint it provokes is not activity
+    last_redraw: AtomicU64,
     /// bumped whenever the ring content changes: a rendered screen is valid while this has not moved
     generation: AtomicU64,
     screens: Mutex<Vec<ScreenCache>>,
@@ -131,6 +136,7 @@ impl Shared {
             eof: AtomicBool::new(false),
             last_out: AtomicU64::new(now_ms()),
             last_in: AtomicU64::new(0),
+            last_redraw: AtomicU64::new(0),
             generation: AtomicU64::new(0),
             screens: Mutex::new(Vec::new()),
             wake: Mutex::new(None),
@@ -341,8 +347,11 @@ impl Session {
             let mut dsr = DsrFilter::new();
             let mut chunk = [0u8; 16 * 1024];
             let note_output = |sh: &Shared| {
-                // typing echoes back as output: that is the user, not the program working
-                if now_ms().saturating_sub(sh.last_in.load(Ordering::Relaxed)) > 700 {
+                // typing echoes back as output: that is the user, not the program working; a repaint after a resize
+                // or a focus report is the terminal, not the program working either
+                let now = now_ms();
+                let redraw = sh.last_redraw.load(Ordering::Relaxed);
+                if now.saturating_sub(sh.last_in.load(Ordering::Relaxed)) > 700 && (redraw == 0 || now.saturating_sub(redraw) > REDRAW_MS) {
                     let before = sh.last_out.swap(now_ms(), Ordering::Relaxed);
                     // quiet until now: whoever tracks "went quiet / working again" hears it without polling
                     if now_ms().saturating_sub(before) >= QUIET_MS {
@@ -500,7 +509,10 @@ impl Session {
     }
 
     pub fn write(&self, data: &[u8]) -> Result<()> {
-        self.shared.last_in.store(now_ms(), Ordering::Relaxed);
+        // what the terminal answers by itself (focus in/out when a tab is opened, replies to the queries in the replayed
+        // history) is not the user typing; the program may repaint on it, which is not work either
+        let at = if is_terminal_report(data) { &self.shared.last_redraw } else { &self.shared.last_in };
+        at.store(now_ms(), Ordering::Relaxed);
         self.queue_input(data)
     }
 
@@ -525,9 +537,16 @@ impl Session {
         self.view().screen_tail(lines)
     }
 
+    /// A resize to the size the session already has does nothing (the app sends its size each time a tab is shown); a
+    /// real one makes the program repaint, which `idle_ms` does not count as activity.
     pub fn resize(&self, cols: u16, rows: u16) -> Result<()> {
-        *self.size.lock_recover() = (cols, rows);
+        let mut size = self.size.lock_recover();
+        if *size == (cols, rows) {
+            return Ok(());
+        }
+        self.shared.last_redraw.store(now_ms(), Ordering::Relaxed);
         self.master.lock_recover().resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })?;
+        *size = (cols, rows);
         Ok(())
     }
 
@@ -577,6 +596,62 @@ impl Session {
     pub fn job_usage_in(&self, snap: &crate::procs::Snapshot) -> (u64, u64) {
         self.job.usage_in(snap)
     }
+}
+
+/// True when `data` is only what a terminal sends by itself, never keys the user typed: focus in/out (`CSI I`, `CSI O`),
+/// replies to queries (cursor position `CSI r;c R`, device attributes `CSI ? .. c` / `CSI > .. c`, status `CSI .. n`, mode
+/// reports `CSI ? .. $ y`, window reports `CSI .. t`, keyboard flags `CSI ? .. u`) and OSC/DCS strings (colour and version
+/// replies). xterm.js sends them through the same channel as typing, e.g. when a tab is shown or history is replayed.
+fn is_terminal_report(data: &[u8]) -> bool {
+    let mut i = 0;
+    while i < data.len() {
+        if data[i] != 0x1b || i + 1 >= data.len() {
+            return false;
+        }
+        match data[i + 1] {
+            b'[' => {
+                let start = i + 2;
+                let mut j = start;
+                while j < data.len() && matches!(data[j], b'0'..=b'9' | b';' | b'?' | b'>' | b'=' | b'$' | b' ') {
+                    j += 1;
+                }
+                let Some(&fin) = data.get(j) else { return false };
+                let params = &data[start..j];
+                let private = params.first().is_some_and(|b| matches!(b, b'?' | b'>' | b'='));
+                let ok = match fin {
+                    b'I' | b'O' => params.is_empty(),
+                    b'R' => params.contains(&b';') && !private,
+                    b'c' => private,
+                    b'n' | b't' => !params.is_empty() && !private,
+                    b'y' => private && params.ends_with(b"$"),
+                    b'u' => params.first() == Some(&b'?'),
+                    _ => false,
+                };
+                if !ok {
+                    return false;
+                }
+                i = j + 1;
+            }
+            b']' | b'P' => {
+                // a string up to BEL or ST (`ESC \`)
+                let mut j = i + 2;
+                loop {
+                    match data.get(j) {
+                        None => return false,
+                        Some(0x07) => break,
+                        Some(0x1b) if data.get(j + 1) == Some(&b'\\') => {
+                            j += 1;
+                            break;
+                        }
+                        _ => j += 1,
+                    }
+                }
+                i = j + 1;
+            }
+            _ => return false,
+        }
+    }
+    !data.is_empty()
 }
 
 #[cfg(test)]
@@ -823,6 +898,74 @@ mod tests {
         s.write(b"x").unwrap();
         std::thread::sleep(Duration::from_millis(400));
         assert!(s.idle_ms() >= 1500, "echo must not count as activity: {}", s.idle_ms());
+        s.kill();
+    }
+
+    #[test]
+    fn terminal_reports_are_told_from_typing() {
+        for r in [
+            &b"\x1b[I"[..],
+            b"\x1b[O",
+            b"\x1b[12;40R",
+            b"\x1b[?1;2c",
+            b"\x1b[>0;276;0c",
+            b"\x1b[0n",
+            b"\x1b[?2004;1$y",
+            b"\x1b[8;30;120t",
+            b"\x1b[?0u",
+            b"\x1b]11;rgb:1e1e/1e1e/1e1e\x07",
+            b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+            b"\x1bP>|xterm.js(5.5.0)\x1b\\",
+            b"\x1b[I\x1b[12;40R",
+        ] {
+            assert!(is_terminal_report(r), "{:?} is a terminal report", String::from_utf8_lossy(r));
+        }
+        for k in [
+            &b""[..],
+            b"x",
+            b"\r",
+            b"\x1b",
+            b"\x1b[A",
+            b"\x1b[1;5D",
+            b"\x1b[3~",
+            b"\x1b[200~text\x1b[201~",
+            b"\x1b[97;5u",
+            b"\x1b[Ix",
+            b"\x1b]11;rgb:1e1e",
+            b"\x1bOP",
+        ] {
+            assert!(!is_terminal_report(k), "{:?} is typing", String::from_utf8_lossy(k));
+        }
+    }
+
+    #[test]
+    fn focus_report_is_not_typing() {
+        let s = spawn_shell();
+        s.write(b"\x1b[I").unwrap();
+        assert_eq!(s.since_input_ms(), u64::MAX, "a focus report is the terminal, not the user");
+        s.write(b"x").unwrap();
+        assert!(s.since_input_ms() < 1000);
+        s.kill();
+    }
+
+    #[test]
+    fn repaint_after_resize_is_not_activity() {
+        let s = spawn_shell();
+        std::thread::sleep(Duration::from_millis(QUIET_MS + 300));
+        let line: &[u8] = if cfg!(windows) { b"echo repaint-1\r\n" } else { b"echo repaint-1\n" };
+        // a real resize: whatever the program prints right after it is a repaint
+        s.resize(100, 30).unwrap();
+        s.write_system(line).unwrap();
+        assert!(wait_for(&s, "repaint-1"));
+        assert!(s.idle_ms() >= QUIET_MS, "a repaint after a resize must not count as activity: {}", s.idle_ms());
+        // the same size again (the app sends its size each time a tab is shown) changes nothing: once the repaint
+        // window is over, output counts as before
+        std::thread::sleep(Duration::from_millis(REDRAW_MS + 200));
+        s.resize(100, 30).unwrap();
+        let line: &[u8] = if cfg!(windows) { b"echo work-2\r\n" } else { b"echo work-2\n" };
+        s.write_system(line).unwrap();
+        assert!(wait_for(&s, "work-2"));
+        assert!(s.idle_ms() < QUIET_MS, "output after the window is activity: {}", s.idle_ms());
         s.kill();
     }
 }
