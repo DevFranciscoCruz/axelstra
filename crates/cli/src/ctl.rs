@@ -429,7 +429,8 @@ pub(crate) fn spawn_agent(
 }
 
 fn print_ls(v: &Value) {
-    let rows: Vec<[String; 4]> = v
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    let rows: Vec<[String; 6]> = v
         .as_array()
         .map(|a| a.as_slice())
         .unwrap_or_default()
@@ -446,22 +447,48 @@ fn print_ls(v: &Value) {
             } else {
                 "idle"
             };
+            // a daemon without the pull fields shows dashes
+            let quiet = s["quiet_since"].as_u64().map_or("-".to_string(), |t| format!("quiet {}", quiet_for(now.saturating_sub(t))));
             [
                 s["id"].to_string(),
                 s["label"].as_str().unwrap_or("-").to_string(),
                 state.to_string(),
+                quiet,
+                s["next_action"].as_str().unwrap_or("-").to_string(),
                 s["meta"]["worktree"].as_str().unwrap_or("-").to_string(),
             ]
         })
         .collect();
-    let mut w = [0usize; 3];
+    let mut w = [0usize; 5];
     for r in &rows {
-        for i in 0..3 {
+        for i in 0..5 {
             w[i] = w[i].max(r[i].chars().count());
         }
     }
     for r in &rows {
-        println!("{:<w0$}  {:<w1$}  {:<w2$}  {}", r[0], r[1], r[2], r[3], w0 = w[0], w1 = w[1], w2 = w[2]);
+        println!(
+            "{:<w0$}  {:<w1$}  {:<w2$}  {:<w3$}  {:<w4$}  {}",
+            r[0],
+            r[1],
+            r[2],
+            r[3],
+            r[4],
+            r[5],
+            w0 = w[0],
+            w1 = w[1],
+            w2 = w[2],
+            w3 = w[3],
+            w4 = w[4]
+        );
+    }
+}
+
+/// `45s`, `12m`, `3h`: how long a session has been quiet, for `axelstra ls`.
+fn quiet_for(ms: u64) -> String {
+    match ms / 1000 {
+        s if s < 60 => format!("{s}s"),
+        s if s < 3600 => format!("{}m", s / 60),
+        s => format!("{}h", s / 3600),
     }
 }
 
@@ -731,6 +758,13 @@ pub fn strip_ansi(s: &str) -> String {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn quiet_for_is_short() {
+        assert_eq!(quiet_for(45_000), "45s");
+        assert_eq!(quiet_for(12 * 60_000 + 5_000), "12m");
+        assert_eq!(quiet_for(3 * 3_600_000), "3h");
+    }
 
     #[test]
     fn worker_prompt_says_how_to_report_and_never_to_wait_silently() {

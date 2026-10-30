@@ -82,7 +82,9 @@ enum Cmd {
         #[arg(long)]
         quiet: bool,
     },
-    /// Read this session's messages (unread unless --all)
+    /// Read this session's messages (unread unless --all). With --wait, block (no polling, no model turns) until a
+    /// message of --types arrives: exit 0 with the messages, exit 2 when --timeout-ms ran out with nothing new (then
+    /// `axelstra ls` shows each session's state and next action)
     Inbox {
         #[arg(long)]
         all: bool,
@@ -93,6 +95,16 @@ enum Cmd {
         json: bool,
         #[arg(long)]
         session: Option<u32>,
+        /// block until an unread message of --types is there (returns at once when one already is)
+        #[arg(long)]
+        wait: bool,
+        /// with --wait, comma list of: done, question, escalation, wait (a child's permission/input wait or stall
+        /// notice), message, reply. Default: done,question,escalation,wait
+        #[arg(long, value_delimiter = ',', requires = "wait")]
+        types: Vec<String>,
+        /// with --wait, give up after this many ms (exit 2); default: wait until something arrives
+        #[arg(long, requires = "wait")]
+        timeout_ms: Option<u64>,
     },
     /// Ask another session a question and block until it answers (`axelstra reply`)
     Ask {

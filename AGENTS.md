@@ -62,6 +62,18 @@ message announces only itself, and a `quiet` send (or a reaped worker's `done`, 
 announced without a notice. A hibernation wake types only the never-announced ones (see Hibernation). Every notice is read
 by the model and costs the user tokens: never retype the inbox, keep notices short.
 
+## Pulling state and waiting for reports
+
+The daemon pushes to a parent only a child's `done` and pendencies (a question, a permission/input wait, a real stall);
+state is pulled. `session.list` rows carry `quiet_since` (unix ms of the last output/input/message, `null` while working),
+`liveness: {pty, agent}` (process alive; the agent showed a hook hint or output in this turn; silence is never "dead") and
+`next_action` (`none`, `reply <msg-id>`, `answer permission|question in session N`, `collect done`, `read N`), computed by
+the pure `crate::pullview` (sleeper rows in `server/hibernate.rs`); `axelstra ls` shows quiet-for and next action. A
+coordinator blocks with `axelstra inbox --wait [--types done,question,escalation,wait] [--timeout-ms N]` (`msg.wait {session,
+types, mark, timeout_ms}` in `server/messaging.rs`): unread messages of those kinds at once, else it sleeps on the bus
+(`Bus::wait_sent`, bumped by every `send`) for at most a 20 s chunk; the CLI calls again (exit 2 and a checkpoint line on
+timeout). Own session only for an agent (`rpc.agent_own_session`); not app-called, no PROTO bump.
+
 ## Awaiting something external
 
 `axelstra await --reason "CI #3703" [--for-min N]` (`session.await`, `awaits` in `waiting.rs`/`Awaits`) marks the caller's own

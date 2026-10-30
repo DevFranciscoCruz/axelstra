@@ -124,6 +124,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             let list = reg.bus.inbox(to, p["all"].as_bool() == Some(true), p["mark"].as_bool() != Some(false));
             Ok(json!(list))
         }
+        "msg.wait" => {
+            let to = p["session"].as_u64().and_then(|x| u32::try_from(x).ok()).ok_or_else(|| missing("session"))?;
+            let types: Vec<String> =
+                p["types"].as_array().map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect()).unwrap_or_default();
+            let kinds = crate::pullview::wait_kinds(&types)
+                .map_err(|k| axelstra_core::coded!("msg.unknown_kind", "unknown message kind {kind}", kind = k))?;
+            let wait = Duration::from_millis(p["timeout_ms"].as_u64().unwrap_or(0).min(WAIT_CHUNK_MS));
+            Ok(wait_for(reg, to, &kinds, p["mark"].as_bool() != Some(false), wait))
+        }
         "msg.thread" => {
             let name = p["name"].as_str().ok_or_else(|| missing("name"))?;
             Ok(json!(reg.bus.thread(name)))
@@ -133,6 +142,25 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             Ok(json!({"reply": reg.bus.reply_to(id), "original": reg.bus.get(id)}))
         }
         m => Err(unknown_method(m)),
+    }
+}
+
+/// The longest one `msg.wait` call blocks; `axelstra inbox --wait` calls again for a longer wait.
+const WAIT_CHUNK_MS: u64 = 20_000;
+
+/// The unread messages of `kinds` for `session`, at once when some are there, else as soon as one is sent (the bus
+/// wakes every waiter on each send) or `wait` runs out: `{messages, timed_out}`. No polling: it sleeps on the bus.
+fn wait_for(reg: &Registry, session: u32, kinds: &[&str], mark: bool, wait: Duration) -> Value {
+    let end = Instant::now() + wait;
+    loop {
+        // read the counter first: a message sent between the look and the sleep moves it, so the sleep returns at once
+        let seen = reg.bus.sent_count();
+        let found = reg.bus.unread_of_kinds(session, kinds, mark);
+        let left = end.saturating_duration_since(Instant::now());
+        if !found.is_empty() || left.is_zero() || reg.closing.load(Ordering::SeqCst) {
+            return json!({"messages": found, "timed_out": found.is_empty()});
+        }
+        reg.bus.wait_sent(seen, left);
     }
 }
 

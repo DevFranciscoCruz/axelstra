@@ -37,6 +37,22 @@ fn fmt_msg(m: &Value) -> String {
     )
 }
 
+/// `axelstra inbox --wait`: one `msg.wait` call blocks in the daemon for at most a chunk (20 s) and answers; a longer
+/// wait calls again. Not a retry loop with a sleep: each call sleeps on the bus until a message is sent. Empty when
+/// `timeout_ms` ran out with nothing new.
+fn wait_inbox(c: &mut Client, session: u32, types: &[String], mark: bool, timeout_ms: Option<u64>) -> Result<Vec<Value>> {
+    const CHUNK_MS: u64 = 20_000;
+    let end = timeout_ms.map(|t| Instant::now() + Duration::from_millis(t));
+    loop {
+        let left = end.map_or(CHUNK_MS, |e| e.saturating_duration_since(Instant::now()).as_millis() as u64);
+        let r = c.call("msg.wait", json!({"session": session, "types": types, "mark": mark, "timeout_ms": left.min(CHUNK_MS)}))?;
+        let list = r["messages"].as_array().cloned().unwrap_or_default();
+        if !list.is_empty() || end.is_some_and(|e| Instant::now() >= e) {
+            return Ok(list);
+        }
+    }
+}
+
 pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
     match cmd {
         Cmd::Msg { to, text, thread, from, quiet } => {
@@ -45,7 +61,30 @@ pub fn run(cmd: Cmd, mut c: Client) -> Result<()> {
                 c.call("msg.send", json!({"from": from, "to": to, "text": text, "kind": "message", "thread": thread, "quiet": quiet}))?;
             println!("{}", r["id"]);
         }
-        Cmd::Inbox { all, no_mark, json, session } => {
+        Cmd::Inbox { wait: true, no_mark, json, session, types, timeout_ms, .. } => {
+            let s = match session {
+                Some(s) => s,
+                None => me()?,
+            };
+            let list = wait_inbox(&mut c, s, &types, !no_mark, timeout_ms)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&list)?);
+            } else if list.is_empty() {
+                println!("no new reports; run axelstra ls to see state");
+            } else {
+                for m in &list {
+                    println!(
+                        "{}
+",
+                        fmt_msg(m)
+                    );
+                }
+            }
+            if list.is_empty() {
+                std::process::exit(2);
+            }
+        }
+        Cmd::Inbox { all, no_mark, json, session, .. } => {
             let s = match session {
                 Some(s) => s,
                 None => me()?,

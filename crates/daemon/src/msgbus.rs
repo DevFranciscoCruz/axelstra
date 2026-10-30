@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 
 pub const DEFAULT_MAX_WORKERS: usize = 6;
 
@@ -46,6 +46,9 @@ pub struct Bus {
     /// workers with a reaper thread: it delivers their final report itself
     reaped: Mutex<HashSet<u32>>,
     limit: AtomicUsize,
+    /// bumped by every `send`, whoever calls it (a handler, the watchdog, a hook wait): `msg.wait` sleeps on it
+    sent: Mutex<u64>,
+    sent_cv: Condvar,
 }
 
 /// Text with every control character removed except newline and tab: no escape sequence, no bracketed-paste
@@ -210,7 +213,48 @@ impl Bus {
             }
             _ => {}
         }
+        *self.sent.lock_recover() += 1;
+        self.sent_cv.notify_all();
         m
+    }
+
+    /// How many messages were sent so far (the value `wait_sent` compares against).
+    pub fn sent_count(&self) -> u64 {
+        *self.sent.lock_recover()
+    }
+
+    /// Sleeps until a message is sent after `seen` (a `sent_count`), or `timeout`. Returns the count now.
+    pub fn wait_sent(&self, seen: u64, timeout: std::time::Duration) -> u64 {
+        let g = self.sent.lock_recover();
+        let g = self.sent_cv.wait_timeout_while(g, timeout, |n| *n == seen).unwrap_or_else(std::sync::PoisonError::into_inner).0;
+        *g
+    }
+
+    /// Unread messages of `session` whose kind is in `kinds`, oldest first; `mark` flags them read (the others stay as
+    /// they are). What `msg.wait` hands back.
+    pub fn unread_of_kinds(&self, session: u32, kinds: &[&str], mark: bool) -> Vec<Msg> {
+        let mut g = self.inbox.lock_recover();
+        let Some(list) = g.get_mut(&session) else { return vec![] };
+        let mut out = vec![];
+        for m in list.iter_mut().filter(|m| !m.read && kinds.contains(&m.kind.as_str())) {
+            out.push(m.clone());
+            if mark {
+                m.read = true;
+            }
+        }
+        out
+    }
+
+    /// The id of the question (`ask` or `escalate`) `id` asked and is still waiting on, the one to `axelstra reply` to.
+    pub fn pending_msg(&self, id: u32) -> Option<u64> {
+        self.pending_of(id)?;
+        let g = self.inbox.lock_recover();
+        g.values().flatten().filter(|m| m.from == Some(id) && matches!(m.kind.as_str(), "ask" | "escalate")).map(|m| m.id).max()
+    }
+
+    /// True when the `done` report of `child` sits unread in some inbox (its parent has not collected it).
+    pub fn done_unread(&self, child: u32) -> bool {
+        self.inbox.lock_recover().values().flatten().any(|m| m.from == Some(child) && m.kind == "done" && !m.read)
     }
 
     /// ms since the last message was put in the inbox of `session` (second resolution; `u64::MAX` when none).

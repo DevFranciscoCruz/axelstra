@@ -40,6 +40,7 @@ pub mod prompts;
 pub mod proto;
 pub mod prwatch;
 pub mod publish;
+pub mod pullview;
 pub mod rebase;
 pub mod remote;
 pub mod removal;

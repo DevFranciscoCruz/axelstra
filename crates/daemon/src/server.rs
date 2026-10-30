@@ -602,7 +602,7 @@ async fn run_call(req: Req, reg: &Arc<Registry>, tx: &Tx, st: &Arc<Mutex<ConnSta
         reg.audit.record(me, &req.method, &req.params, &res.as_ref().map(|_| ()).map_err(|e| format!("{e:#}")));
     }
     // calls that wait on purpose are not slow
-    if !matches!(req.method.as_str(), "ask" | "msg.ask" | "session.wait" | "mem.admit" | "hello") {
+    if !matches!(req.method.as_str(), "ask" | "msg.ask" | "msg.wait" | "session.wait" | "mem.admit" | "hello") {
         crate::lag::count(&req.method, t0.elapsed());
         crate::lag::note(&format!("daemon {}", req.method), t0.elapsed(), 30);
     }
@@ -886,7 +886,8 @@ fn session_list(reg: &Registry) -> Vec<Value> {
                 );
                 json!({"minutes": stall_min, "code": c.code, "params": c.params_json(), "text": c.to_string()})
             });
-            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "wait": wait.map(|w| json!({"kind": w.kind.as_str(), "text": w.text})), "awaiting": awaiting.map(|a| json!({"reason": a.reason, "since": a.since, "until": a.until})), "stalled": stalled, "stall_parent": stall_parent, "stall": stall, "paused": reg.pauser.paused_of(id).map(|(reason, since, build)| json!({"reason": reason, "since": since, "build": build})), "mem_level": mem_level, "mem_free_mb": mem_free, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta})
+            let pull = pull_facts(reg, id, running, &wait, &facts, stalled || stall_parent);
+            json!({"id": id, "running": running, "idle_ms": idle, "waiting": waiting, "wait": wait.map(|w| json!({"kind": w.kind.as_str(), "text": w.text})), "awaiting": awaiting.map(|a| json!({"reason": a.reason, "since": a.since, "until": a.until})), "stalled": stalled, "stall_parent": stall_parent, "stall": stall, "paused": reg.pauser.paused_of(id).map(|(reason, since, build)| json!({"reason": reason, "since": since, "build": build})), "mem_level": mem_level, "mem_free_mb": mem_free, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id), "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta, "quiet_since": crate::pullview::quiet_since(&pull, crate::pullview::now_ms()), "liveness": crate::pullview::liveness(&pull), "next_action": crate::pullview::next_action(&pull)})
         })
         .collect();
     v.sort_by_key(|x| x["id"].as_u64());
@@ -897,6 +898,44 @@ fn session_list(reg: &Registry) -> Vec<Value> {
 /// One JSON call as the handlers see it: the request, the registry and the state of the connection it came in on.
 struct Ctx<'a> {
     req: &'a Req,
+/// What `pullview` needs about a live session row (`quiet_since`, `liveness`, `next_action`).
+fn pull_facts(
+    reg: &Registry,
+    id: u32,
+    running: bool,
+    wait: &Option<axelstra_core::waiting::Wait>,
+    facts: &crate::stall::Facts,
+    stalled: bool,
+) -> crate::pullview::Facts {
+    use axelstra_core::waiting::{HintState, WaitKind};
+    let hint = reg.hints.state_of(id).filter(|(_, age)| *age < axelstra_core::waiting::HINT_TTL_MS);
+    // a hook wait; an `ask`/`escalate` is answered by `reply`, not on the screen
+    let hook_wait = match wait {
+        Some(w) if reg.bus.pending_of(id).is_none() => Some(w.kind == WaitKind::Permission),
+        _ => None,
+    };
+    crate::pullview::Facts {
+        id,
+        pty: running,
+        hibernated: false,
+        paused: facts.paused,
+        awaiting: facts.awaiting,
+        live_children: facts.live_children,
+        finished: facts.reported,
+        done_unread: facts.reported && reg.bus.done_unread(id),
+        pending_msg: reg.bus.pending_msg(id),
+        hook_wait,
+        // the row's own verdict (the user is told, or the parent is): a stall someone must look at
+        stalled,
+        hint_working_ms: hint.filter(|(s, _)| *s == HintState::Working).map(|(_, a)| a),
+        hint_age_ms: hint.map(|(_, a)| a),
+        bg_work: facts.bg_work,
+        idle_ms: facts.idle_ms,
+        since_input_ms: facts.since_input_ms,
+        since_msg_ms: facts.since_msg_ms,
+    }
+}
+
     p: &'a Value,
     reg: &'a Arc<Registry>,
     tx: &'a Tx,
@@ -1019,6 +1058,8 @@ fn may_change_answers(method: &str) -> bool {
             | "msg.thread"
             | "msg.reply_of"
             | "notes.read"
+            // read flags show only in `session.list` and the inbox (not kept)
+            | "msg.wait"
             | "notes.read_file"
             | "notes.export"
             | "notes.worktree"
@@ -1089,7 +1130,7 @@ fn dispatch_call(c: &mut Ctx) -> Result<Value> {
         ));
     }
     // an agent reads its own inbox and writes only its own task file: its credential names the session
-    if matches!(req.method.as_str(), "msg.inbox" | "notes.append") {
+    if matches!(req.method.as_str(), "msg.inbox" | "msg.wait" | "notes.append") {
         require_own(*c.agent, p["session"].as_u64(), &req.method)?;
     }
     if sources::handles(&req.method) {

@@ -471,10 +471,24 @@ pub(super) fn decorate(reg: &Registry, rows: &mut Vec<Value>) {
     }
     for (id, sl, waking) in sleepers {
         let (label, meta) = (reg.labels.lock_recover().get(&id).cloned(), reg.metas.lock_recover().get(&id).cloned());
+        // its process ended: no sign of life to read, and nothing to do but collect a report it left
+        let finished = reg.bus.finished(id).is_some();
+        let pull = crate::pullview::Facts {
+            id,
+            hibernated: true,
+            finished,
+            done_unread: finished && reg.bus.done_unread(id),
+            pending_msg: reg.bus.pending_msg(id),
+            idle_ms: now_ms().saturating_sub(sl.since),
+            since_input_ms: u64::MAX,
+            since_msg_ms: reg.bus.since_msg_ms(id),
+            ..Default::default()
+        };
         // `running` stays true: the session did not end, and a frontend that reads false as "exited" must not close its tab
         rows.push(json!({"id": id, "running": true, "idle_ms": now_ms().saturating_sub(sl.since), "waiting": false, "wait": null,
             "awaiting": null, "stalled": false, "stall": null, "escalated": reg.bus.is_escalated(id), "unread": reg.bus.unread(id),
-            "finished": reg.bus.finished(id).is_some(), "label": label, "meta": meta,
+            "finished": finished, "label": label, "meta": meta,
+            "quiet_since": sl.since, "liveness": crate::pullview::liveness(&pull), "next_action": crate::pullview::next_action(&pull),
             "hibernated": {"since": sl.since, "saved_mb": mb(sl.saved_bytes), "waking": waking, "queued": reg.hib.queued(id)}}));
     }
     rows.sort_by_key(|x| x["id"].as_u64());

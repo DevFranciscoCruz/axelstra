@@ -8,6 +8,7 @@ Your own session id is `$AXELSTRA_SESSION` (PowerShell: `$env:AXELSTRA_SESSION`)
 
 - `axelstra projects` — registered projects (ids, paths, worktrees).
 - `axelstra ls [--json]` — live sessions: id, worktree, agent, state (`working`, `waiting`, `idle`). `waiting` (red dot, bell, system notification) means the agent itself said it needs an answer; it is never guessed from what the terminal shows.
+  `ls` also shows how long each session has been quiet and its **next action** for you: `none` (keep waiting: working, awaiting, waiting on its own children, hibernated, paused), `reply <msg-id>`, `answer permission in session N`, `answer question in session N`, `collect done`, `read N` (a real stall). `--json` adds `quiet_since` (unix ms, null while working), `liveness {pty, agent}` (`agent: false` only means no sign of life in this turn, never dead) and `next_action`. You are not told about state changes: pull them here when you choose.
 - `axelstra limit [N]` — show or set how many workers may run at once (default 6). Starting more fails with "worker limit reached": wait for one to finish.
 
 ## Chain of command
@@ -70,6 +71,7 @@ axelstra terminal <worktree> --cmd "npm run dev"       # long-lived shell tab
 
 - `axelstra msg <id> "<text>"` — queue a message for session `<id>`. An agent gets a one-line notice in its screen; the full text stays in its inbox. `--quiet` skips the notice.
 - `axelstra inbox [--all] [--json]` — read your messages (marks them read; `--no-mark` leaves them).
+- `axelstra inbox --wait [--types done,question,escalation,wait] [--timeout-ms N]` — coordinator: **block** (no polling, no turns spent) until a child's report or a pendency reaches you; it returns at once when one is already unread. Exit 0 with the messages; exit 2 with "no new reports" when the timeout ran out (then `axelstra ls` shows the state). Use it instead of a sleep-and-check loop.
 - `axelstra ask <id> "<question>" [--timeout 600]` — send a question and **block** until the other session answers. Prints the answer.
 - `--thread NAME` on `msg` and `ask` groups related messages (replies inherit it); `axelstra thread NAME` prints the whole conversation in order.
 - `axelstra reply <message-id> "<answer>"` — answer a question you were notified about (the number is in the notice). This unblocks the asker.
