@@ -42,7 +42,7 @@ mod imp {
         }
 
         pub fn spawn(&self, cmd: &mut Command) -> Result<Child> {
-            crate::proc::hidden(cmd);
+            crate::proc::hidden_once(cmd);
             let mut child = cmd.spawn()?;
             let ok = unsafe { AssignProcessToJobObject(self.0, child.as_raw_handle() as HANDLE) };
             if ok == 0 {
@@ -234,6 +234,7 @@ mod imp {
         }
 
         pub fn spawn(&self, cmd: &mut Command) -> Result<Child> {
+            crate::proc::hidden_once(cmd);
             cmd.process_group(0);
             let c = cmd.spawn()?;
             self.0.lock_recover().push(c.id() as i32);
@@ -409,3 +410,44 @@ mod imp {
 #[cfg(unix)]
 pub use imp::peek_exit;
 pub use imp::Job;
+
+#[cfg(test)]
+mod count_tests {
+    use super::*;
+
+    fn exit0() -> Command {
+        let mut c = Command::new(if cfg!(windows) { "cmd" } else { "sh" });
+        c.args(if cfg!(windows) { &["/d", "/c", "exit 0"][..] } else { &["-c", "exit 0"][..] });
+        c
+    }
+
+    fn children_of(site: &str) -> u64 {
+        crate::proc::site_stats().iter().filter(|r| r.site == site).map(|r| r.total).sum()
+    }
+
+    #[test]
+    fn each_spawn_counts_one_child() {
+        let job = Job::new().unwrap();
+        let _g = crate::proc::site("test.job.spawn");
+        job.spawn(&mut exit0()).unwrap().wait().unwrap();
+        assert_eq!(children_of("test.job.spawn"), 1);
+
+        let _g = crate::proc::site("test.job.hidden_then_spawn");
+        let mut c = exit0();
+        crate::proc::hidden(&mut c);
+        job.spawn(&mut c).unwrap().wait().unwrap();
+        assert_eq!(children_of("test.job.hidden_then_spawn"), 1);
+        // the same command started again is a second child
+        job.spawn(&mut c).unwrap().wait().unwrap();
+        assert_eq!(children_of("test.job.hidden_then_spawn"), 2);
+
+        // hidden, then run outside a Job, then a different command spawned through the Job: both count
+        let _g = crate::proc::site("test.job.hidden_elsewhere");
+        let mut a = exit0();
+        crate::proc::hidden(&mut a).status().unwrap();
+        let mut b = Command::new(if cfg!(windows) { "cmd" } else { "sh" });
+        b.args(if cfg!(windows) { &["/d", "/c", "exit 1"][..] } else { &["-c", "exit 1"][..] });
+        job.spawn(&mut b).unwrap().wait().unwrap();
+        assert_eq!(children_of("test.job.hidden_elsewhere"), 2);
+    }
+}

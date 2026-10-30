@@ -108,7 +108,7 @@ impl Drain {
 /// Runs `cmd` to completion or until `timeout`, keeping at most `max_bytes` of each of stdout and stderr.
 /// See the module docs for the guarantees.
 pub fn run_capped(cmd: &mut Command, timeout: Duration, max_bytes: usize) -> Result<Captured> {
-    crate::proc::hidden(cmd);
+    // no window and counted once: `Job::spawn` does both
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let job = Job::new()?;
     let mut child = job.spawn(cmd)?;
@@ -167,6 +167,22 @@ mod tests {
         assert!(o.stdout_lossy().contains("out-1"));
         assert!(o.stderr_lossy().contains("err-1"));
         assert!(!o.truncated && !o.timed_out);
+    }
+
+    fn children_of(site: &str) -> u64 {
+        crate::proc::site_stats().iter().filter(|r| r.site == site).map(|r| r.total).sum()
+    }
+
+    #[test]
+    fn one_run_counts_one_child_whether_or_not_the_caller_hid_it() {
+        let _g = crate::proc::site("test.exec.run_capped_once");
+        run_capped(&mut sh("exit 0"), Duration::from_secs(10), 1024).unwrap();
+        assert_eq!(children_of("test.exec.run_capped_once"), 1);
+        let _g = crate::proc::site("test.exec.hidden_then_run_capped");
+        let mut c = sh("exit 0");
+        crate::proc::hidden(&mut c);
+        run_capped(&mut c, Duration::from_secs(10), 1024).unwrap();
+        assert_eq!(children_of("test.exec.hidden_then_run_capped"), 1);
     }
 
     #[test]

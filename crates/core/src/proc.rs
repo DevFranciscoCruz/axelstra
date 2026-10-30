@@ -179,17 +179,54 @@ pub fn site_stats() -> Vec<SiteStat> {
     v
 }
 
-/// Keeps a console window from flashing on Windows; a no-op elsewhere. Do not call it after another `creation_flags`.
-/// Counts the child under the thread's [`site`] (call it once the program and arguments are set).
-pub fn hidden(cmd: &mut Command) -> &mut Command {
+thread_local! {
+    /// The command the last [`hidden`] call of this thread counted, until a spawn that would count it again takes it.
+    static COUNTED: std::cell::Cell<Option<(usize, u64)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Which `Command` this is: its address plus what it runs and where, so a later command at a reused address that runs
+/// something else is a different one.
+fn identity(cmd: &Command) -> (usize, u64) {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    cmd.get_program().hash(&mut h);
+    cmd.get_args().for_each(|a| a.hash(&mut h));
+    cmd.get_current_dir().hash(&mut h);
+    (cmd as *const Command as usize, h.finish())
+}
+
+fn count(cmd: &Command) {
     mark_start();
     SPAWNS.fetch_add(1, Ordering::Relaxed);
     count_site(cmd);
+}
+
+fn no_window(cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(NO_WINDOW);
     }
+    #[cfg(not(windows))]
+    let _ = cmd;
+}
+
+/// Keeps a console window from flashing on Windows; a no-op elsewhere. Do not call it after another `creation_flags`.
+/// Counts the child under the thread's [`site`] (call it once the program and arguments are set).
+pub fn hidden(cmd: &mut Command) -> &mut Command {
+    count(cmd);
+    COUNTED.with(|c| c.set(Some(identity(cmd))));
+    no_window(cmd);
+    cmd
+}
+
+/// For the spawn helpers that call it on every command they start (`Job::spawn`, so `exec::run_capped`): the same as
+/// [`hidden`], except that a command the caller already passed through `hidden` is not counted twice.
+pub fn hidden_once(cmd: &mut Command) -> &mut Command {
+    if COUNTED.with(|c| c.take()) != Some(identity(cmd)) {
+        count(cmd);
+    }
+    no_window(cmd);
     cmd
 }
 
