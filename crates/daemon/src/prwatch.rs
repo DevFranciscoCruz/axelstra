@@ -266,18 +266,97 @@ pub fn classify(path: &Path) -> Option<RefKind> {
     (name == "HEAD").then_some(RefKind::Local)
 }
 
+/// Every remote-tracking ref of the repository whose git directory is `common`: the loose files under `refs/remotes`
+/// (path and content) and the `refs/remotes/` lines of `packed-refs`. Files only, no process. `None` when one cannot be
+/// read (the caller then takes the event as a real change).
+pub fn remote_refs(common: &Path) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    fn walk(h: &mut std::collections::hash_map::DefaultHasher, dir: &Path, n: &mut usize) -> Option<()> {
+        let rd = match std::fs::read_dir(dir) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(()),
+            Err(_) => return None,
+        };
+        let mut entries: Vec<(String, bool)> = Vec::new();
+        for e in rd {
+            let e = e.ok()?;
+            let name = e.file_name().to_string_lossy().into_owned();
+            // a ref being written: its final name comes with its own event
+            if !name.ends_with(".lock") {
+                entries.push((name, e.file_type().ok()?.is_dir()));
+            }
+        }
+        entries.sort();
+        for (name, is_dir) in entries {
+            *n += 1;
+            if *n > 20_000 {
+                return None;
+            }
+            name.hash(h);
+            let p = dir.join(&name);
+            if is_dir {
+                walk(h, &p, n)?;
+            } else {
+                match std::fs::read(&p) {
+                    Ok(b) => b.hash(h),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(_) => return None,
+                }
+            }
+        }
+        Some(())
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    walk(&mut h, &common.join("refs").join("remotes"), &mut 0)?;
+    match std::fs::read_to_string(common.join("packed-refs")) {
+        Ok(text) => text.lines().filter(|l| l.contains(" refs/remotes/")).for_each(|l| l.hash(&mut h)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return None,
+    }
+    Some(h.finish())
+}
+
+/// The last [`remote_refs`] seen per watched git directory. A rewrite that leaves them as they were is no news: Windows
+/// reports a folder change on `refs/remotes/<remote>` for every fetch, even one that rewrote `origin/HEAD` unchanged.
+#[derive(Default)]
+pub struct RemoteStamps(HashMap<PathBuf, Option<u64>>);
+
+impl RemoteStamps {
+    /// Remembers the remote refs of `dirs` as they are now (and forgets the others).
+    pub fn seed(&mut self, dirs: &BTreeSet<PathBuf>) {
+        self.0.retain(|d, _| dirs.contains(d));
+        for d in dirs {
+            self.0.entry(d.clone()).or_insert_with(|| remote_refs(d));
+        }
+    }
+
+    /// What a `Remote` path of the git directory `dir` really means: `Remote` when its remote refs moved since the last
+    /// look (or cannot be read), else nothing for a path under `refs/remotes` and `Local` for `packed-refs` (a pack of
+    /// local refs, or a branch written there).
+    pub fn judge(&mut self, dir: &Path, path: &Path) -> Option<RefKind> {
+        let now = remote_refs(dir);
+        let before = self.0.insert(dir.to_path_buf(), now);
+        if now.is_none() || before.flatten() != now {
+            return Some(RefKind::Remote);
+        }
+        path.file_name().is_some_and(|n| n == "packed-refs").then_some(RefKind::Local)
+    }
+}
+
 /// Watches the refs of the projects' repositories (`<git dir>`, `FETCH_HEAD` and `packed-refs` directly, `refs/**`).
-/// Any change wakes the PR loop; a remote one also calls `on_remote` (the janitor: a merge may have arrived).
+/// Any change wakes the PR loop; a remote one also calls `on_remote` (the janitor: a merge may have arrived), but only
+/// when the remote refs really moved ([`RemoteStamps`]).
 pub struct RefWatch {
     watcher: Option<notify::RecommendedWatcher>,
     dirs: BTreeSet<PathBuf>,
     common: HashMap<PathBuf, Option<PathBuf>>,
+    stamps: Arc<Mutex<RemoteStamps>>,
     on_remote: Arc<dyn Fn() + Send + Sync>,
 }
 
 impl RefWatch {
     pub fn new(on_remote: Arc<dyn Fn() + Send + Sync>) -> Self {
-        RefWatch { watcher: None, dirs: BTreeSet::new(), common: HashMap::new(), on_remote }
+        RefWatch { watcher: None, dirs: BTreeSet::new(), common: HashMap::new(), stamps: Default::default(), on_remote }
     }
 
     fn common_dir(&mut self, repo: &Path) -> Option<PathBuf> {
@@ -300,12 +379,25 @@ impl RefWatch {
         }
         use notify::{RecursiveMode, Watcher};
         let on_remote = self.on_remote.clone();
+        self.stamps.lock_recover().seed(&want);
+        let stamps = self.stamps.clone();
+        let dirs = want.clone();
         let made = notify::recommended_watcher(move |ev: notify::Result<notify::Event>| {
             let Ok(ev) = ev else { return };
             if matches!(ev.kind, notify::EventKind::Access(_)) {
                 return;
             }
-            let kinds: Vec<RefKind> = ev.paths.iter().filter_map(|p| classify(p)).collect();
+            let kinds: Vec<RefKind> = ev
+                .paths
+                .iter()
+                .filter_map(|p| match classify(p)? {
+                    RefKind::Remote => match dirs.iter().find(|d| p.starts_with(d)) {
+                        Some(d) => stamps.lock_recover().judge(d, p),
+                        None => Some(RefKind::Remote),
+                    },
+                    k => Some(k),
+                })
+                .collect();
             if kinds.is_empty() {
                 return;
             }
@@ -446,6 +538,38 @@ mod tests {
         assert_eq!(c("/r/.git/objects/ab/cdef"), None);
         assert_eq!(c("/r/.git/index"), None);
         assert_eq!(c("/r/.git/refs/stash"), None);
+    }
+
+    #[test]
+    fn only_a_real_remote_ref_change_counts_as_remote() {
+        let root = std::env::temp_dir().join(format!("axl-remote-stamps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let remotes = root.join("refs").join("remotes");
+        let origin = remotes.join("origin");
+        std::fs::create_dir_all(&origin).unwrap();
+        std::fs::write(origin.join("HEAD"), "ref: refs/remotes/origin/main\n").unwrap();
+        std::fs::write(origin.join("main"), "1111\n").unwrap();
+        let mut st = RemoteStamps::default();
+        st.seed(&BTreeSet::from([root.clone()]));
+        // a no-op fetch: origin/HEAD rewritten as it was, reported as a change of the folder
+        std::fs::write(origin.join("HEAD"), "ref: refs/remotes/origin/main\n").unwrap();
+        assert_eq!(classify(&origin), Some(RefKind::Remote));
+        assert_eq!(st.judge(&root, &origin), None);
+        // a real one: origin/main moved; the next event of the same state is no news again
+        std::fs::write(origin.join("main"), "2222\n").unwrap();
+        assert_eq!(st.judge(&root, &origin), Some(RefKind::Remote));
+        assert_eq!(st.judge(&root, &origin.join("main")), None);
+        // packed-refs: a local branch packed is only a local change, a remote line moving is remote
+        let packed = root.join("packed-refs");
+        std::fs::write(&packed, "aaaa refs/heads/main\n").unwrap();
+        assert_eq!(st.judge(&root, &packed), Some(RefKind::Local));
+        std::fs::write(&packed, "aaaa refs/heads/main\nbbbb refs/remotes/origin/feat\n").unwrap();
+        assert_eq!(st.judge(&root, &packed), Some(RefKind::Remote));
+        // a new remote is a change too
+        std::fs::create_dir_all(remotes.join("up")).unwrap();
+        std::fs::write(remotes.join("up").join("main"), "3333\n").unwrap();
+        assert_eq!(st.judge(&root, &remotes), Some(RefKind::Remote));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
