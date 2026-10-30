@@ -100,6 +100,28 @@ pub fn verify_server_owner(pipe: &std::fs::File) -> Result<()> {
     }
 }
 
+/// The executable of the process serving the pipe behind `pipe` (an open client end), or `None` when the OS does not say.
+pub fn server_exe(pipe: &std::fs::File) -> Option<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::Threading::QueryFullProcessImageNameW;
+    unsafe {
+        let mut pid = 0u32;
+        if GetNamedPipeServerProcessId(pipe.as_raw_handle() as HANDLE, &mut pid) == 0 {
+            return None;
+        }
+        let proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if proc.is_null() {
+            return None;
+        }
+        let mut buf = vec![0u16; 32768];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(proc, 0, buf.as_mut_ptr(), &mut len);
+        CloseHandle(proc);
+        (ok != 0).then(|| std::path::PathBuf::from(std::ffi::OsString::from_wide(&buf[..len as usize])))
+    }
+}
+
 /// Protected DACL (no inherited entries): full access for the user with this SID and for SYSTEM.
 pub fn sddl_for(sid: &str) -> String {
     format!("D:P(A;;GA;;;{sid})(A;;GA;;;SY)")

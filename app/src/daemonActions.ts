@@ -8,13 +8,14 @@ import { S } from "./strings";
  * Restart the daemon after asking: it is a separate process that outlives the app, so shutting it down is safe on every
  * platform; the next call starts a fresh one and the app restores the sessions (see "daemon-restarted").
  * `onState` follows the progress (true while restarting); `after` runs once the new daemon answers. Returns false when the
- * user declined or it failed.
+ * user declined or it failed. `confirm` replaces the default question when a caller has something more specific to say.
  */
 export async function restartDaemonFlow(
   onState?: (restarting: boolean) => void,
   after?: () => void | Promise<void>,
+  confirm?: string,
 ): Promise<boolean> {
-  if (!(await ask(S.restartConfirm, { title: S.restartTitle, kind: "warning", okLabel: S.restartDaemon })))
+  if (!(await ask(confirm ?? S.restartConfirm, { title: S.restartTitle, kind: "warning", okLabel: S.restartDaemon })))
     return false;
   onState?.(true);
   try {

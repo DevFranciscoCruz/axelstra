@@ -114,6 +114,24 @@ policy thread and the list rows are in `server/hibernate.rs`.
 - **Not done on purpose.** Triggers (CI fix) still see a worktree with only a sleeper as having no agent. The "focused tab" is
   approximated by recent input/subscribe events; the app does not tell the daemon which tab is focused.
 
+## Stale daemon
+
+Most changes do not bump `PROTO`, so the app also compares commits. `hello` carries `version`, `commit`, `built` (and `exe`),
+kept in `Client`. `connect` in `app/src-tauri/src/main.rs` (`connect_via`, injectable pipe, token, start function and exe
+lookup) first applies the too-old rule (`PROTO`/`SECURITY_MIN`: always replaced), then the pure `stale::decide`
+(`app/src-tauri/src/stale.rs`): a commit missing or `unknown` on either side, or equal commits, keep the daemon (the old
+behaviour). Different commits are stale: when the daemon's exe is not in the app's directory (canonical dirs compared; learned
+from the OS, `Client::server_exe`: the pipe's server process on Windows, the socket peer on Linux/macOS, else `hello.exe`) or
+cannot be learned, it is kept with an offer `dev`, never replaced; beside the app, it is replaced (`daemon.shutdown`, wait,
+start the app's own; session restore brings the sessions back) only when `session.list` shows nothing busy (a running row that
+is working, waiting, awaiting, paused or hibernated, or any running terminal: what runs in it cannot be seen and a restore only
+brings a fresh shell; a failed list counts as busy), else kept with an offer `busy`. The check
+runs at connect and reconnect only, never by polling; the static `STALE` memo (held across the whole connect) makes one
+connection per daemon run decide, log one English stderr line (`axelstra: daemon kept|replaced|kept, restart offered: why;
+app ..., daemon ...`) and emit the Tauri event `daemon-stale` on an offer; the others reuse it, and a daemon the app just
+started is never judged again. `diagnostics` carries `daemon_version`, `daemon_commit`, `daemon_built` and `daemon_offer`
+(`{reason: busy|dev}` for that daemon run, else null); the app's Restart is the existing `restartDaemonFlow`. No PROTO bump.
+
 ## Bumping PROTO
 
 `PROTO` in `crates/daemon/src/proto.rs` is the app <-> daemon contract version. A daemon outlives

@@ -437,6 +437,10 @@ pub struct Client {
     pub build: String,
     /// `SECURITY_MIN` of the daemon (0 for a daemon from before it existed)
     pub security: u64,
+    /// version, short commit and build date the daemon reported in `hello` (empty for a daemon from before they existed)
+    pub version: String,
+    pub commit: String,
+    pub built: String,
     /// the whole `hello` result, for the bridge to hand on to its own client
     hello: Value,
 }
@@ -478,6 +482,44 @@ fn open_pipe(pipe: &str) -> Result<Conn> {
             }
             Err(e) => return Err(e).with_context(|| format!("daemon not reachable at {pipe}")),
         }
+    }
+}
+
+/// The executable of the process at the other end of a unix socket.
+#[cfg(unix)]
+fn peer_exe(s: &std::os::unix::net::UnixStream) -> Option<std::path::PathBuf> {
+    use std::os::fd::AsRawFd;
+    let fd = s.as_raw_fd();
+    #[cfg(target_os = "linux")]
+    {
+        let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
+        let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        let ok = unsafe { libc::getsockopt(fd, libc::SOL_SOCKET, libc::SO_PEERCRED, (&mut cred as *mut libc::ucred).cast(), &mut len) };
+        if ok != 0 || cred.pid <= 0 {
+            return None;
+        }
+        std::fs::read_link(format!("/proc/{}/exe", cred.pid)).ok()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut pid: libc::pid_t = 0;
+        let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+        let ok = unsafe { libc::getsockopt(fd, libc::SOL_LOCAL, libc::LOCAL_PEERPID, (&mut pid as *mut libc::pid_t).cast(), &mut len) };
+        if ok != 0 || pid <= 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+        if n <= 0 {
+            return None;
+        }
+        buf.truncate(n as usize);
+        Some(std::path::PathBuf::from(String::from_utf8(buf).ok()?))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = fd;
+        None
     }
 }
 
@@ -595,6 +637,9 @@ impl Client {
             broken: false,
             build: String::new(),
             security: 0,
+            version: String::new(),
+            commit: String::new(),
+            built: String::new(),
             hello: Value::Null,
         };
         let hello = c.call("hello", json!({"token": token, "client": client, "agent_token": agent_token}))?;
@@ -608,6 +653,8 @@ impl Client {
         c.instance = hello["instance"].as_u64().unwrap_or(0);
         c.build = hello["build"].as_str().unwrap_or_default().to_string();
         c.security = hello["security"].as_u64().unwrap_or(0);
+        let text = |k: &str| hello[k].as_str().unwrap_or_default().to_string();
+        (c.version, c.commit, c.built) = (text("version"), text("commit"), text("built"));
         c.hello = hello;
     }
 
@@ -635,6 +682,9 @@ impl Client {
             broken: false,
             build: String::new(),
             security: 0,
+            version: String::new(),
+            commit: String::new(),
+            built: String::new(),
             hello: Value::Null,
         };
         let started = std::time::Instant::now();
@@ -675,6 +725,20 @@ impl Client {
         if let Conn::Child(c) = &self.rd {
             let _ = recover(&c.shared.child).kill();
         }
+    }
+
+    /// The executable of the daemon behind a local connection: from the OS (the pipe's server process on Windows, the
+    /// socket's peer on Linux and macOS), so it also works for a daemon from before `hello` said it; else the `exe` that
+    /// `hello` reported. `None` for a remote connection or when neither is known.
+    pub fn server_exe(&self) -> Option<std::path::PathBuf> {
+        let from_os = match &self.rd {
+            #[cfg(windows)]
+            Conn::File(f) => crate::pipesec::server_exe(f),
+            #[cfg(unix)]
+            Conn::Unix(s) => peer_exe(s),
+            Conn::Child(_) => return None,
+        };
+        from_os.or_else(|| self.hello["exe"].as_str().filter(|e| !e.is_empty()).map(std::path::PathBuf::from))
     }
 
     /// The `hello` result the daemon gave (for the bridge, which answers its own client's `hello` with it).
@@ -718,6 +782,9 @@ impl Client {
             broken: self.broken,
             build: self.build.clone(),
             security: self.security,
+            version: self.version.clone(),
+            commit: self.commit.clone(),
+            built: self.built.clone(),
             hello: self.hello.clone(),
         })
     }

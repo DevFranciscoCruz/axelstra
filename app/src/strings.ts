@@ -21,11 +21,13 @@ export const ptS = {
   retry: "Tentar de novo",
   restartDaemon: "Reiniciar daemon",
   restartingDaemon: "A reiniciar o daemon…",
-  restartConfirm: "Reiniciar o daemon fecha os terminais abertos; os agentes são retomados depois do reinício. Continuar?",
+  restartConfirm:
+    "Reiniciar o daemon fecha os terminais abertos; os agentes são retomados depois do reinício. Continuar?",
   restartTitle: "Reiniciar o daemon",
   restartFailed: "Não foi possível reiniciar o daemon: ",
   daemonSilent: "o daemon não voltou a responder",
-  oldDaemon: "O daemon em execução é de uma versão anterior e não conhece este pedido. Reinicia-o para carregar as definições.",
+  oldDaemon:
+    "O daemon em execução é de uma versão anterior e não conhece este pedido. Reinicia-o para carregar as definições.",
   loadFailed: "Não foi possível carregar as definições: ",
 
   replies: "Respostas dos agentes",
@@ -53,12 +55,19 @@ export const ptS = {
   notifyCats: {
     title: "O que te avisa",
     note: "Cada categoria desligada fica só no centro de notificações, já lida: sem aviso do sistema, som, aviso no ecrã nem contador.",
-    need: { label: "Preciso de ti", hint: "Um agente espera a tua resposta ou permissão, ou algo precisa de uma decisão tua." },
+    need: {
+      label: "Preciso de ti",
+      hint: "Um agente espera a tua resposta ou permissão, ou algo precisa de uma decisão tua.",
+    },
     done: { label: "Concluído", hint: "Um agente terminou a tarefa ou um worktree foi integrado." },
     info: { label: "Informativo", hint: "CI a passar, avisos de orçamento, correções automáticas de CI." },
-    error: { label: "Erros", hint: "Falhas que ninguém está a tratar: CI a falhar, erro de um terminal, orçamento excedido." },
+    error: {
+      label: "Erros",
+      hint: "Falhas que ninguém está a tratar: CI a falhar, erro de um terminal, orçamento excedido.",
+    },
     dnd: "Não incomodar",
-    dndHint: "Sem aviso do sistema, som nem aviso no ecrã. Tudo continua registado no centro e «Preciso de ti» mantém o ponto vermelho.",
+    dndHint:
+      "Sem aviso do sistema, som nem aviso no ecrã. Tudo continua registado no centro e «Preciso de ti» mantém o ponto vermelho.",
   },
 
   stall: "Agente parado",
@@ -94,7 +103,14 @@ export const ptS = {
 
   shell: "Shell dos terminais",
   shellNote: "Vale para terminais e agentes novos. «Automático» usa o shell predefinido do sistema.",
-  shells: { auto: "Automático", pwsh: "PowerShell 7", powershell: "Windows PowerShell", bash: "Bash", wsl: "WSL", cmd: "CMD" },
+  shells: {
+    auto: "Automático",
+    pwsh: "PowerShell 7",
+    powershell: "Windows PowerShell",
+    bash: "Bash",
+    wsl: "WSL",
+    cmd: "CMD",
+  },
 
   appearance: "Aparência",
   appearanceNote: "Tema da aplicação. Os terminais e o editor seguem-no.",
@@ -126,12 +142,17 @@ export const ptS = {
   /** names of the known agent CLIs, by key; the others show their key */
   agentNames: { claude: "Claude Code", codex: "Codex", gemini: "Gemini CLI" } as Record<string, string>,
   /** second line of each agent in the "Novo agente" picker: which AI it is */
-  agentDescs: { claude: "IA da Anthropic (Claude)", codex: "IA da OpenAI (GPT)", gemini: "IA da Google (Gemini)" } as Record<string, string>,
+  agentDescs: {
+    claude: "IA da Anthropic (Claude)",
+    codex: "IA da OpenAI (GPT)",
+    gemini: "IA da Google (Gemini)",
+  } as Record<string, string>,
   toolFailed: "Uma ferramenta externa (git, gh ou docker) falhou. Mensagem original:",
 
   status: {
     memTitle: "Memória usada pelo Axelstra",
-    memTip: (app: string, daemon: string, sessions: string) => `Memória do Axelstra\nAplicação: ${app}\nDaemon: ${daemon}\nTerminais e agentes: ${sessions}`,
+    memTip: (app: string, daemon: string, sessions: string) =>
+      `Memória do Axelstra\nAplicação: ${app}\nDaemon: ${daemon}\nTerminais e agentes: ${sessions}`,
     awake: "Impedir que o computador adormeça",
     awakeNA: "Não disponível neste sistema: falta o systemd-inhibit",
     on: "Ligado",
@@ -156,7 +177,8 @@ export const ptS = {
     mergedHead: "Já integradas",
     cleanTitle: "Limpar integradas",
     remove: "Remover",
-    cleanAsk: (n: number, list: string) => `Remover ${count(n, "worktree já integrada", "worktrees já integradas")}, de todos os projetos?\n\n${list}`,
+    cleanAsk: (n: number, list: string) =>
+      `Remover ${count(n, "worktree já integrada", "worktrees já integradas")}, de todos os projetos?\n\n${list}`,
     removed: (n: number) => count(n, "worktree removida", "worktrees removidas"),
     noPorts: "Nenhuma porta de servidor aberta",
     shortcutsHint: "atalhos",
@@ -180,8 +202,13 @@ export const ptS = {
   },
 
   versionSkew: {
-    text: "O daemon é mais antigo que a app: reiniciar (os terminais restauram).",
+    text: (app: string, daemon: string) => `O daemon corre uma versão mais antiga (${daemon}) que a app (${app}).`,
+    busy: "Ficou o daemon antigo porque havia trabalho em curso.",
+    dev: "Ficou o daemon antigo porque não foi possível confirmar a versão dele.",
+    unknown: "desconhecida",
     restart: "Reiniciar daemon",
+    confirm:
+      "Reiniciar o daemon com a versão nova? Os agentes em curso são retomados a partir da conversa guardada e os terminais voltam a abrir.",
   },
 
   toast: {
@@ -201,12 +228,14 @@ export const ptS = {
   },
 
   app: {
-    computerAsk: "Permitir que os agentes vejam o ecrã e controlem o rato e o teclado?\n\nPodem tirar capturas de qualquer janela e clicar ou escrever em teu nome. Fica ligado até o desligar aqui ou fechar a aplicação.",
+    computerAsk:
+      "Permitir que os agentes vejam o ecrã e controlem o rato e o teclado?\n\nPodem tirar capturas de qualquer janela e clicar ou escrever em teu nome. Fica ligado até o desligar aqui ou fechar a aplicação.",
     computerTitle: "Controlo do ecrã",
     allow: "Permitir",
     noGit: "o git não está instalado ou não está no PATH (sem ele não há worktrees)",
     noAgents: "nenhum agente (claude, codex, gemini) foi encontrado (instala um deles para usar agentes)",
-    pickerNone: "Nenhum agente encontrado. Instala o Claude Code, o Codex ou o Gemini CLI e abre este diálogo outra vez.",
+    pickerNone:
+      "Nenhum agente encontrado. Instala o Claude Code, o Codex ou o Gemini CLI e abre este diálogo outra vez.",
     missing: (bits: string[]) => `Falta configurar: ${bits.join("; ")}.`,
     restoreFailed: "Não foi possível restaurar as sessões: ",
     restoreFailedList: (names: string[]) => `não foi possível restaurar: ${names.join(", ")}`,
@@ -216,7 +245,8 @@ export const ptS = {
     reconnectFailed: "Não foi possível reconectar ao daemon. Reinicia o Axelstra se persistir.",
     noWaiting: "Nenhum agente está à espera de resposta.",
     noClosed: "Nenhum separador fechado para reabrir.",
-    closeAsk: (name: string, agent: boolean) => `Fechar "${name}"? ${agent ? "O agente em execução é terminado." : "O terminal e o que corre nele são terminados."}`,
+    closeAsk: (name: string, agent: boolean) =>
+      `Fechar "${name}"? ${agent ? "O agente em execução é terminado." : "O terminal e o que corre nele são terminados."}`,
     closeAgent: "Fechar agente",
     closeTerminal: "Fechar terminal",
     leftWidth: "Largura da lista de projetos",
@@ -234,7 +264,8 @@ export const ptS = {
     closeFile: "Fechar ficheiro",
     closeDiff: "Fechar diff",
     screen: "ecrã",
-    screenOnTip: "Os agentes podem ver o ecrã e controlar o rato e o teclado. Desliga em: paleta de comandos, «Controlo do ecrã»",
+    screenOnTip:
+      "Os agentes podem ver o ecrã e controlar o rato e o teclado. Desliga em: paleta de comandos, «Controlo do ecrã»",
     openPort: (port: number) => `Abrir http://localhost:${port} no navegador`,
     voice: "Ditado por voz (Ctrl+Shift+M)",
     split: "Dividir: ver dois terminais lado a lado",

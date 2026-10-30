@@ -185,8 +185,14 @@ export const ptBRS: Widen<typeof ptS> = {
   },
 
   versionSkew: {
-    text: "O daemon é mais antigo que o aplicativo: reinicie (os terminais são restaurados).",
+    text: (app: string, daemon: string) =>
+      `O daemon está rodando uma versão mais antiga (${daemon}) que a do aplicativo (${app}).`,
+    busy: "O daemon antigo foi mantido porque havia trabalho em andamento.",
+    dev: "O daemon antigo foi mantido porque não foi possível confirmar a versão dele.",
+    unknown: "desconhecida",
     restart: "Reiniciar daemon",
+    confirm:
+      "Reiniciar o daemon com a versão nova? Os agentes em andamento são retomados a partir da conversa salva e os terminais voltam a abrir.",
   },
 
   toast: {

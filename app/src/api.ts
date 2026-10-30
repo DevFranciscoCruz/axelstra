@@ -276,6 +276,13 @@ export type Diagnostics = {
   daemon_proto: number | null;
   daemon_instance: number | null;
   daemon_build: string | null;
+  /** build metadata the daemon reported (null when it did not, or on a host from before it was passed on) */
+  daemon_version?: string | null;
+  daemon_commit?: string | null;
+  daemon_built?: string | null;
+  /** non-null when the host's last connect to this daemon kept it although it is older (busy: work is running; dev: a
+   * commit is unknown or the daemon exe is not beside the app) */
+  daemon_offer?: { reason: "busy" | "dev" } | null;
   daemon_security: number | null;
   app_security_min: number;
   data_dir: string;

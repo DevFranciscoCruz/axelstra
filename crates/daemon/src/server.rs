@@ -50,10 +50,16 @@ fn term_dim(v: &Value, default: u16) -> u16 {
     v.as_u64().map_or(default, |x| x.clamp(1, 1000) as u16)
 }
 
+/// Where this daemon runs from (`exe` in `hello`).
+static EXE: std::sync::LazyLock<Option<String>> =
+    std::sync::LazyLock::new(|| std::env::current_exe().ok().map(|p| p.to_string_lossy().into_owned()));
+
 /// What `hello` and `ping` say about this daemon, so the app can tell when it is older than it should be.
 fn hello_info() -> Value {
     json!({"proto": PROTO, "instance": *INSTANCE, "build": BUILD_ID, "security": SECURITY_MIN,
-        "version": axelstra_core::buildinfo::VERSION, "commit": axelstra_core::buildinfo::COMMIT, "built": axelstra_core::buildinfo::BUILT})
+        "version": axelstra_core::buildinfo::VERSION, "commit": axelstra_core::buildinfo::COMMIT, "built": axelstra_core::buildinfo::BUILT,
+        // where this daemon runs from, for an app that cannot learn it from the OS (see `Client::server_exe`)
+        "exe": *EXE})
 }
 
 /// Calls that only the app (the user) may make; a connection with role=agent is refused them.
