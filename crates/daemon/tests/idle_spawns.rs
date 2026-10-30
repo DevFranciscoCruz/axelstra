@@ -21,11 +21,11 @@ const WARMUP: Duration = Duration::from_secs(15);
 const WINDOW: Duration = Duration::from_secs(45);
 /// Time between two edits in the selected worktree.
 const EDIT_EVERY: Duration = Duration::from_secs(5);
-/// Children one edit may cost: the git of the edited worktree only (its change list 3, status, overlaps, overview:
-/// about 5 once each child is counted once). Before the fixes one edit cost about 13 (8 edits, 104 children).
-const PER_EDIT: u64 = 6;
-/// Children the window may start besides the edits: one janitor sweep, the age floor of a checkout nobody watches.
-const SLACK: u64 = 12;
+/// Children one edit may cost: the git of the edited worktree only (its change list 3, overview status 1, overlaps
+/// under 1: 40 children for 8 edits once fixed). Before the fixes one edit cost about 13 (8 edits, 104 children).
+const PER_EDIT: u64 = 5;
+/// Children the window may start besides the edits: a janitor sweep or two, the age floor of a checkout nobody watches.
+const SLACK: u64 = 10;
 
 fn git(cwd: &Path, args: &[&str]) {
     let out = Command::new("git").current_dir(cwd).args(args).output().unwrap();
