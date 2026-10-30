@@ -23,20 +23,34 @@ jobs:
         with: { node-version-file: .nvmrc }
       - run: node scripts/stamp-version.mjs --self-test
       - run: node scripts/stamp-version.mjs --check
+  # engine + frontend checks on every OS the app ships for; fail-fast off so one OS failing does not hide the others
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with: { components: "rustfmt, clippy" }
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with: { node-version-file: .nvmrc }
+      - run: cargo fmt --all --check
+      # cfg(unix), macOS-only and Windows-only code is only seen by the OS that compiles it
       # the app crate needs the desktop toolkit; the engine crates (daemon, orchestrator, CLI) do not
+      - name: Clippy (engine)
+        run: cargo clippy -p axelstra-core -p axelstra-daemon -p axelstra --all-targets -- -D warnings
       - name: Engine tests
         run: cargo test --no-fail-fast -p axelstra-core -p axelstra-daemon -p axelstra
+      - name: Frontend types and tests
+        working-directory: app
+        run: |
+          npm ci
+          npx tsc --noEmit
+          npm test
   host:
     runs-on: windows-latest
     timeout-minutes: 40
@@ -59,20 +73,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo check -p axelstra-app
-  # cfg(unix) and macOS-only code is never seen by the Windows lint job; lint the engine crates there too
-  lint-unix:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with: { components: "clippy" }
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      - run: cargo clippy -p axelstra-core -p axelstra-daemon -p axelstra --all-targets -- -D warnings
   # boots the real binary: daemon in a throwaway data dir, `axelstra ls`, a session, kill (tools/smoke.mjs)
   smoke:
     strategy:

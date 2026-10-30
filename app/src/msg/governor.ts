@@ -8,6 +8,8 @@ export const pt = {
   "governor.kernel_pool_high": "Memória do kernel alta ({gb} GB): possível fuga de handles/driver; reiniciar liberta.",
   "governor.kernel_pool_filter":
     "Memória do kernel alta ({gb} GB); a etiqueta {tag} ({mb} MB) é a cache de nomes do gestor de filtros (antivírus e outros filtros de ficheiros).",
+  "governor.kernel_pool_filter_hint":
+    "Memória do kernel alta ({gb} GB); a etiqueta {tag} ({mb} MB) é a cache de nomes do gestor de filtros (antivírus e outros filtros de ficheiros). Para o Windows Defender não analisar as pastas de compilação, corra isto numa PowerShell de administrador (o Axelstra não o executa): {command}",
   "governor.kernel_pool_tokens":
     "Memória do kernel alta ({gb} GB); a etiqueta {tag} ({mb} MB) são tokens de segurança, que muitos processos lançados deixam.",
   "governor.kernel_pool_files":
@@ -35,6 +37,8 @@ export const en: Widen<typeof pt> = {
   "governor.kernel_pool_high": "Kernel memory is high ({gb} GB): possible handle or driver leak; restarting frees it.",
   "governor.kernel_pool_filter":
     "Kernel memory is high ({gb} GB); the biggest pool tag {tag} ({mb} MB) is the file-name cache of the filter manager (antivirus and other file filters).",
+  "governor.kernel_pool_filter_hint":
+    "Kernel memory is high ({gb} GB); the biggest pool tag {tag} ({mb} MB) is the file-name cache of the filter manager (antivirus and other file filters). To keep Windows Defender from scanning build folders, run this in an administrator PowerShell (Axelstra does not run it): {command}",
   "governor.kernel_pool_tokens":
     "Kernel memory is high ({gb} GB); the biggest pool tag {tag} ({mb} MB) is security tokens, which many started processes leave.",
   "governor.kernel_pool_files":
@@ -64,6 +68,8 @@ export const ptBR: Widen<typeof pt> = {
     "Memória do kernel alta ({gb} GB): possível vazamento de handles/driver; reiniciar libera.",
   "governor.kernel_pool_filter":
     "Memória do kernel alta ({gb} GB); a etiqueta {tag} ({mb} MB) é o cache de nomes do gerenciador de filtros (antivírus e outros filtros de arquivos).",
+  "governor.kernel_pool_filter_hint":
+    "Memória do kernel alta ({gb} GB); a etiqueta {tag} ({mb} MB) é o cache de nomes do gerenciador de filtros (antivírus e outros filtros de arquivos). Para o Windows Defender não analisar as pastas de compilação, rode isto num PowerShell de administrador (o Axelstra não executa): {command}",
   "governor.kernel_pool_tokens":
     "Memória do kernel alta ({gb} GB); a tag {tag} ({mb} MB) são tokens de segurança, que muitos processos iniciados deixam.",
   "governor.kernel_pool_files":

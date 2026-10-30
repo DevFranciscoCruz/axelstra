@@ -74,7 +74,8 @@ pub(super) fn process_start(pid: u32) -> Option<u64> {
     }
 }
 
-/// Linux: field 22 of `/proc/<pid>/stat` (start time in clock ticks since boot). Elsewhere `ps -o lstart=`.
+/// Linux: field 22 of `/proc/<pid>/stat` (start time in clock ticks since boot). macOS: `proc_pidinfo(PROC_PIDTBSDINFO)`
+/// (start time in microseconds since the epoch). Other Unixes: a hash of `ps -o lstart=` (1 s resolution).
 #[cfg(unix)]
 pub(super) fn process_start(pid: u32) -> Option<u64> {
     #[cfg(target_os = "linux")]
@@ -84,7 +85,16 @@ pub(super) fn process_start(pid: u32) -> Option<u64> {
         let rest = stat.rsplit_once(')')?.1;
         rest.split_whitespace().nth(19)?.parse().ok()
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        let pid = libc::c_int::try_from(pid).ok()?;
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        // SAFETY: `info` is a plain-old-data struct of `size` bytes that outlives the call; the kernel writes at most that
+        let n = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, &mut info as *mut _ as *mut libc::c_void, size) };
+        (n == size).then(|| start_micros(info.pbi_start_tvsec, info.pbi_start_tvusec))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let out = std::process::Command::new("ps").args(["-o", "lstart=", "-p", &pid.to_string()]).output().ok()?;
         let text = String::from_utf8_lossy(&out.stdout);
@@ -97,6 +107,12 @@ pub(super) fn process_start(pid: u32) -> Option<u64> {
         text.hash(&mut h);
         Some(h.finish())
     }
+}
+
+/// A `timeval` start time (`pbi_start_tvsec`, `pbi_start_tvusec`) as microseconds since the epoch.
+#[allow(dead_code)] // used on macOS and in tests
+fn start_micros(sec: u64, usec: u64) -> u64 {
+    sec.saturating_mul(1_000_000).saturating_add(usec)
 }
 
 /// Windows: a Job Object tracks every descendant, even those whose parent died, so there are no orphans to find.
@@ -161,6 +177,25 @@ mod tests {
     fn unreadable_start_time_is_not_vouched_for() {
         let p = Peer { pid: std::process::id(), start: None };
         assert!(!p.still_same());
+    }
+
+    #[test]
+    fn bsd_start_time_keeps_microseconds() {
+        assert_eq!(start_micros(1_700_000_000, 123_456), 1_700_000_000_123_456);
+        // two starts within the same second differ
+        assert_ne!(start_micros(1_700_000_000, 1), start_micros(1_700_000_000, 2));
+        assert_eq!(start_micros(u64::MAX, 5), u64::MAX);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_start_time_is_recent_and_stable() {
+        let me = std::process::id();
+        let a = process_start(me).expect("proc_pidinfo of our own process");
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros() as u64;
+        assert!(a <= now && now - a < 24 * 3600 * 1_000_000, "start {a}, now {now}");
+        assert_eq!(process_start(me), Some(a));
+        assert_eq!(process_start(u32::MAX), None);
     }
 
     #[test]

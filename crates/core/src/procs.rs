@@ -12,11 +12,11 @@ pub struct Proc {
     pub ppid: u32,
     /// process group id (unix only; 0 on Windows)
     pub pgid: u32,
-    /// resident memory in KiB (unix only; 0 on Windows, where Job Objects report memory themselves)
+    /// resident memory in KiB (working set on Windows; 0 for a process the OS will not let us open)
     pub rss_kib: u64,
 }
 
-/// A copy of the machine's process table. Taking one costs a `ps -A` on unix, so take it once per poll and pass it
+/// A copy of the machine's process table. Taking one costs a single `ps -A` on unix (one batched call, also on macOS) or an open per process on Windows, so take it once per poll and pass it
 /// to every lookup (`with_descendants_in`, `Job::usage_in`, ...) instead of letting each lookup dump the table.
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
@@ -50,7 +50,7 @@ fn read_table() -> Vec<Proc> {
         e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
         let mut ok = Process32FirstW(h, &mut e);
         while ok != 0 {
-            out.push(Proc { pid: e.th32ProcessID, ppid: e.th32ParentProcessID, pgid: 0, rss_kib: 0 });
+            out.push(Proc { pid: e.th32ProcessID, ppid: e.th32ParentProcessID, pgid: 0, rss_kib: win_rss_kib(e.th32ProcessID) });
             ok = Process32NextW(h, &mut e);
         }
         CloseHandle(h);
@@ -58,11 +58,38 @@ fn read_table() -> Vec<Proc> {
     out
 }
 
+/// Working set of `pid` in KiB; 0 when the process is gone or the OS refuses (idle, system and protected processes).
+#[cfg(windows)]
+fn win_rss_kib(pid: u32) -> u64 {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    if pid == 0 || pid == 4 {
+        return 0;
+    }
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return 0;
+        }
+        let mut c: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
+        c.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        let kib = if GetProcessMemoryInfo(h, &mut c, c.cb) != 0 { c.WorkingSetSize as u64 / 1024 } else { 0 };
+        CloseHandle(h);
+        kib
+    }
+}
+
+/// One `ps -A` for the whole table (BSD/macOS and procps both accept these columns).
 #[cfg(unix)]
 fn read_table() -> Vec<Proc> {
     let Ok(o) = std::process::Command::new("ps").args(["-A", "-o", "pid=,ppid=,pgid=,rss="]).output() else { return Vec::new() };
-    String::from_utf8_lossy(&o.stdout)
-        .lines()
+    parse_ps_table(&String::from_utf8_lossy(&o.stdout))
+}
+
+/// Parses `ps -o pid=,ppid=,pgid=,rss=` output; a line that does not have four numbers is skipped.
+pub fn parse_ps_table(text: &str) -> Vec<Proc> {
+    text.lines()
         .filter_map(|l| {
             let mut it = l.split_whitespace();
             Some(Proc {
@@ -73,6 +100,23 @@ fn read_table() -> Vec<Proc> {
             })
         })
         .collect()
+}
+
+/// Parses `ps -o pid=,comm=` output. `comm` is a full path on macOS and may hold spaces, so the rest of the line is the name.
+pub fn parse_ps_names(text: &str) -> Vec<(u32, String)> {
+    text.lines()
+        .filter_map(|l| {
+            let (pid, name) = l.trim_start().split_once(char::is_whitespace)?;
+            let name = name.trim();
+            (!name.is_empty()).then_some((pid.parse().ok()?, name.to_string()))
+        })
+        .collect()
+}
+
+/// Lowercase executable name without directory (either separator) and without `.exe`.
+pub fn clean_name(n: &str) -> String {
+    let n = n.trim().rsplit(['/', '\\']).next().unwrap_or(n).to_ascii_lowercase();
+    n.strip_suffix(".exe").map(str::to_string).unwrap_or(n)
 }
 
 /// A fresh process table.
@@ -178,10 +222,6 @@ pub fn marked(prefix: &str) -> HashSet<u32> {
 /// Executable names (lowercase, no directory, no `.exe`) of those of `pids` that are running now. One table dump, so
 /// ask for all the pids of a tree together.
 pub fn names_of(pids: &HashSet<u32>) -> HashMap<u32, String> {
-    let clean = |n: &str| {
-        let n = n.rsplit(['/', '\\']).next().unwrap_or(n).to_ascii_lowercase();
-        n.strip_suffix(".exe").map(str::to_string).unwrap_or(n)
-    };
     let mut out = HashMap::new();
     #[cfg(windows)]
     unsafe {
@@ -197,7 +237,7 @@ pub fn names_of(pids: &HashSet<u32>) -> HashMap<u32, String> {
         while ok != 0 {
             if pids.contains(&e.th32ProcessID) {
                 let len = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(e.szExeFile.len());
-                out.insert(e.th32ProcessID, clean(&String::from_utf16_lossy(&e.szExeFile[..len])));
+                out.insert(e.th32ProcessID, clean_name(&String::from_utf16_lossy(&e.szExeFile[..len])));
             }
             ok = Process32NextW(h, &mut e);
         }
@@ -205,13 +245,9 @@ pub fn names_of(pids: &HashSet<u32>) -> HashMap<u32, String> {
     }
     #[cfg(unix)]
     if let Ok(o) = std::process::Command::new("ps").args(["-A", "-o", "pid=,comm="]).output() {
-        for l in String::from_utf8_lossy(&o.stdout).lines() {
-            if let Some((pid, name)) = l.trim_start().split_once(char::is_whitespace) {
-                if let Ok(pid) = pid.parse::<u32>() {
-                    if pids.contains(&pid) {
-                        out.insert(pid, clean(name.trim()));
-                    }
-                }
+        for (pid, name) in parse_ps_names(&String::from_utf8_lossy(&o.stdout)) {
+            if pids.contains(&pid) {
+                out.insert(pid, clean_name(&name));
             }
         }
     }
@@ -288,6 +324,50 @@ mod tests {
         let _ = child.wait();
         assert!(found.contains(&pid));
         assert!(!found.contains(&std::process::id()));
+    }
+
+    #[test]
+    fn parses_ps_tables_of_linux_and_macos() {
+        let mac = "    1     0     1  10240
+  501     1   501   2048
+  junk line
+  502   501   501
+";
+        let t = parse_ps_table(mac);
+        assert_eq!(t.len(), 2);
+        assert_eq!(t[1], Proc { pid: 501, ppid: 1, pgid: 501, rss_kib: 2048 });
+    }
+
+    #[test]
+    fn parses_ps_names_with_paths_and_spaces() {
+        let out = "  1 /sbin/launchd
+  77 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+ 9 bash
+ x bad
+ 10
+";
+        let v = parse_ps_names(out);
+        assert_eq!(v.len(), 3);
+        assert_eq!(clean_name(&v[1].1), "google chrome");
+        assert_eq!(clean_name(&v[0].1), "launchd");
+    }
+
+    #[test]
+    fn clean_name_handles_both_separators_and_exe() {
+        assert_eq!(clean_name(r"C:\Program Files\Git\bin\Bash.EXE"), "bash");
+        assert_eq!(clean_name("/usr/bin/Node"), "node");
+        assert_eq!(clean_name("cargo.exe"), "cargo");
+        assert_eq!(clean_name("  zsh "), "zsh");
+    }
+
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn own_process_reports_memory() {
+        let me = std::process::id();
+        let s = snapshot();
+        let p = s.procs.iter().find(|p| p.pid == me).expect("self in table");
+        assert!(p.rss_kib > 0, "rss of own process");
+        assert_eq!(names_of(&HashSet::from([me])).len(), 1);
     }
 
     #[test]

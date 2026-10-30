@@ -220,7 +220,11 @@ pub fn memory() -> Option<(u64, u64)> {
     {
         parse_meminfo(&std::fs::read_to_string("/proc/meminfo").ok()?)
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        crate::governor::mac::memory_bytes()
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         None
     }
@@ -473,6 +477,13 @@ mod tests {
         let t = "MemTotal:       16000000 kB\nMemFree:  100 kB\nMemAvailable:    8000000 kB\n";
         assert_eq!(parse_meminfo(t), Some((16000000 * 1024, 8000000 * 1024)));
         assert_eq!(parse_meminfo("nope"), None);
+    }
+
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn this_machine_reports_memory() {
+        let (total, avail) = memory().expect("memory reading");
+        assert!(total > 0 && avail <= total, "{total} {avail}");
     }
 
     #[test]

@@ -22,6 +22,7 @@ use std::time::Duration;
 pub mod cause;
 #[cfg(target_os = "linux")]
 mod linux;
+pub(crate) mod mac;
 mod sample;
 pub mod suspend;
 #[cfg(windows)]
@@ -335,6 +336,12 @@ pub fn os_source() -> Arc<dyn MemSource> {
     match linux::PsiSource::new() {
         Ok(s) => return Arc::new(s),
         Err(e) => eprintln!("governor: PSI unavailable ({e}); sampling instead"),
+    }
+    // no OS wait exists here, so `has_events` is false and the computed deadline is the only wake
+    #[cfg(target_os = "macos")]
+    match mac::MacSource::new() {
+        Ok(s) => return Arc::new(s),
+        Err(e) => eprintln!("governor: {e}; sampling instead"),
     }
     Arc::new(Sampler::new())
 }
