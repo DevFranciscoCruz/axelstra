@@ -17,6 +17,8 @@ export const pt = {
   "session.input_closed": "A entrada da sessão está fechada.",
   "session.spawn_failed": "Não foi possível iniciar {program}.\n({detail})",
   "session.cwd_missing": "A pasta {path} não existe: {program} não foi iniciado.",
+  "session.main_no_tasks":
+    'O checkout principal de {project} só recebe a sessão main e terminais. Dá à tarefa o seu próprio worktree com `axelstra dispatch new {project} <nome> "<pedido>"`.',
   "msg.unknown_kind": "Tipo de mensagem desconhecido: {kind}.",
 
   // task files
@@ -96,6 +98,8 @@ export const en: Widen<typeof pt> = {
   "session.input_closed": "The session's input is closed.",
   "session.spawn_failed": "Could not start {program}.\n({detail})",
   "session.cwd_missing": "The folder {path} does not exist: {program} was not started.",
+  "session.main_no_tasks":
+    'The main checkout of {project} only takes its main session and terminals. Give the task its own worktree with `axelstra dispatch new {project} <name> "<request>"`.',
   "msg.unknown_kind": "Unknown message kind: {kind}.",
 
   "notes.too_many_files": "There are too many task files named {base}.",
@@ -170,6 +174,8 @@ export const ptBR: Widen<typeof pt> = {
   "session.input_closed": "A entrada da sessão está fechada.",
   "session.spawn_failed": "Não foi possível iniciar {program}.\n({detail})",
   "session.cwd_missing": "A pasta {path} não existe: {program} não foi iniciado.",
+  "session.main_no_tasks":
+    'O checkout principal de {project} só recebe a sessão main e terminais. Crie um worktree próprio para a tarefa com `axelstra dispatch new {project} <nome> "<pedido>"`.',
   "msg.unknown_kind": "Tipo de mensagem desconhecido: {kind}.",
 
   "notes.too_many_files": "Há arquivos de tarefa demais com o nome {base}.",

@@ -401,6 +401,8 @@ pub(crate) fn spawn_agent(
     // a worker that finds no free slot (or no memory) waits in the daemon's FIFO: each call sleeps there until something
     // frees up, so this is not a retry loop with a sleep. The ticket keeps the place between calls.
     req["queue"] = json!(true);
+    // the daemon refuses a task in a project's main checkout (`session.main_no_tasks`) from the CLI as from an agent
+    req["from"] = json!("cli");
     let mut told = false;
     loop {
         let r = c.call("session.spawn", req.clone())?;
