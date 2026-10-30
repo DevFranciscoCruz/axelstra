@@ -79,6 +79,21 @@ a variable you already set. Edit `build` in `settings.json` (keys: `enabled`, `j
   method, daemon-side; child processes counted by `core::proc::hidden`), the events the subscriber got per minute and new
   `lag.log` lines. Exits 1 on more than `--max-spawns-per-min` child processes per minute, any new `lag.log` line or any
   daemon call at idle. Run it before and after a change that touches polling, loaders or events.
+- `idle-spawns.mjs [--bin p] [--projects 3] [--worktrees 10] [--agents 8] [--terminals 2] [--warmup 30] [--idle 180] [--agent-every 20] [--focus-every 120] [--commit-every 5] [--working 2|all] [--churn-every 90] [--no-remote] [--max-spawns-per-min N] [--json]`:
+  spawn-storm check of a realistic desktop near idle. Same isolation as `idle-load.mjs` (plus a throwaway
+  `GIT_CONFIG_GLOBAL` and an empty `GH_CONFIG_DIR`, so gh is logged out). Makes N repos (each with an unreachable
+  github.com `origin`) and worktrees through `worktree.create` (auto, every fourth manual; some dirty, some with commits
+  not in main), agent sessions (a shell holding its own agent credential: one main per project, the rest in worktrees),
+  plain terminals and one finished command. Then acts like the app (a watch on the selected worktree and the loaders the
+  frontend runs on each event, with its debounces; a window focus every `--focus-every` s) and like the agents (hook
+  hints, `msg.inbox`, quiet `msg.send`, `session.list`; `--working` of them, 2 by default (`all` for a busy desktop), also
+  edit a file and run `git status` in their worktree each turn and commit every `--commit-every` turns) and like dispatch
+  (every `--churn-every` s a task worktree from `worktree.create` and a worker in it that ends: projects.changed,
+  dispatch.changed, a janitor wake). After the warm-up it prints the child processes per minute by site and command (diff
+  of `mem.status` breakdown.own.sites, which lists the 16 busiest; the rest is one row), calls per method with the
+  children each call cost (a read that re-runs git in every worktree shows here) and events per minute. Exit 1 above
+  `--max-spawns-per-min` (no limit when not given). The short in-process form is `crates/daemon/tests/idle_spawns.rs` (an
+  edit may cost the git of the edited worktree only).
 - `e2e.mjs [path\to\axelstra-app.exe]`: drives the real Windows app over the DevTools protocol (boot, a session, restore, the Add project dialog, CSP) in a throwaway data dir; see `docs/E2E.md`. Sets `AXELSTRA_TEST_HIDDEN=1` so no window shows.
 - `e2e-html-link.mjs [path\to\axelstra-app.exe]`: Ctrl+click on an `.html` path in a terminal logs its `file://` url to `AXELSTRA_TEST_OPENER_LOG` instead of opening a browser; same isolation and hidden window as `e2e.mjs`, see `docs/E2E.md`.
 - `e2e-kanban.mjs [path	oxelstra-app.exe]`: drag and drop on the Kanban board (pointer, Esc, drop outside, keyboard) with real input events, reading the `.kanban/` card files back; same isolation and hidden window as `e2e.mjs`, see `docs/E2E.md`.
