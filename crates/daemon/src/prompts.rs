@@ -84,8 +84,9 @@ pub fn wake_failed_report(label: &str, error: &str) -> String {
 /// Build-cost rules typed into every lead and worker prompt: many agents compile at once on one machine.
 pub const BUILD_RULE: &str = "Builds are expensive here: run every heavy cargo or npm command (full build, test suite, clippy, verify) through `axelstra lock verify -- <cmd>`, one at a time. Your environment already carries a CARGO_BUILD_JOBS derived from this machine's cores and free memory: keep it, never raise it. Run `cargo check` before `cargo test`, and use `node scripts/check.mjs --fast` (where the project has it) while iterating; run the full check once at the end.";
 
-/// Typed into a worker that went quiet without reporting: report through the bus instead of leaving a silent screen.
-pub const IDLE_NUDGE: &str = "[axelstra] you stopped without reporting. If you finished, run `axelstra done \"<report>\"` with the result (what changed, what failed, what is left). If you are blocked or have a question, run `axelstra escalate \"<reason>\"`.";
+/// Typed ONCE into an Axelstra-managed agent whose own Stop hook said its turn ended with nothing that explains the
+/// stop (no `done`, `await`, `ask`, live child). It is the only reminder: staying quiet after it tells the parent.
+pub const STOP_NUDGE: &str = "[axelstra] Your turn ended without done, await or ask. Finish with `axelstra done \"<report>\"`, `axelstra await --reason \"...\"` or `axelstra ask $AXELSTRA_PARENT \"<question>\"`.";
 
 /// How a worker's end is described in its report to the parent.
 pub fn worker_status(reported: bool, closed_idle: bool, code: Option<i32>) -> String {
@@ -243,9 +244,12 @@ mod tests {
     }
 
     #[test]
-    fn the_idle_nudge_names_both_ways_out() {
-        assert!(IDLE_NUDGE.starts_with("[axelstra] you stopped without reporting."));
-        assert!(IDLE_NUDGE.contains("`axelstra done \"<report>\"`") && IDLE_NUDGE.contains("`axelstra escalate \"<reason>\"`"));
+    fn the_stop_nudge_is_one_short_line_with_the_three_ways_out() {
+        assert!(STOP_NUDGE.starts_with("[axelstra] Your turn ended without done, await or ask."));
+        for needle in ["axelstra done", "axelstra await --reason", "axelstra ask $AXELSTRA_PARENT"] {
+            assert!(STOP_NUDGE.contains(needle), "{needle}");
+        }
+        assert!(!STOP_NUDGE.contains('\n') && STOP_NUDGE.chars().count() < 200);
     }
 
     #[test]
@@ -268,7 +272,7 @@ mod tests {
         let all = [
             notice(&msg("message", "x"), "a"),
             waiting_report(true, "x"),
-            IDLE_NUDGE.to_string(),
+            STOP_NUDGE.to_string(),
             BUILD_RULE.to_string(),
             worker_status(false, true, None),
             worker_report("a", "b", "c"),

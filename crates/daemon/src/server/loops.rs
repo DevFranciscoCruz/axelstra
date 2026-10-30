@@ -25,16 +25,38 @@ pub(super) fn sweep_soon(reg: &Arc<Registry>) {
 }
 
 /// Tells the main agent of the project that `item` (a sweep result with an `integrate.*` code) was left for a human or
-/// for it. Typed into an agent, so it stays English.
+/// for it. Typed into an agent, so it stays English. Not for `integrate.not_ok`: the agent's own failed/blocked `done`
+/// report already said it. A `notice`, so main's own pending question and report stay; a hibernated main wakes for it.
 pub(super) fn tell_main_not_integrated(reg: &Arc<Registry>, item: &Value) {
+    if item["code"] == "integrate.not_ok" {
+        return;
+    }
     let Some(project) = item["project"].as_str() else { return };
-    let Some((id, s)) = reg.project_main(project).and_then(|id| reg.get(id).map(|s| (id, s))) else { return };
+    let main = reg.project_main(project).or_else(|| {
+        let metas = reg.metas.lock_recover();
+        metas
+            .iter()
+            .filter(|(id, m)| {
+                m["kind"] == "agent" && m["main"] == true && m["project"].as_str() == Some(project) && reg.hib.is_sleeping(**id)
+            })
+            .map(|(id, _)| *id)
+            .min()
+    });
+    let Some(id) = main else { return };
     let text = crate::prompts::not_integrated(
         item["path"].as_str().unwrap_or_default(),
         item["branch"].as_str().unwrap_or_default(),
         item["why"].as_str().unwrap_or_default(),
     );
-    let m = reg.bus.send(None, id, "message", &text, None, None);
+    // the event touches the session before it is looked up, so a hibernation in between cannot lose it
+    reg.hib.touch(id);
+    if reg.hib.is_sleeping(id) {
+        reg.bus.send(None, id, "notice", &text, None, None);
+        hibernate::wake(reg, id);
+        return;
+    }
+    let Some(s) = reg.get(id) else { return };
+    let m = reg.bus.send(None, id, "notice", &text, None, None);
     reg.announce(id, s, &m, "axelstra");
 }
 
@@ -80,7 +102,6 @@ struct ReaperTask {
     lines: usize,
     worked: bool,
     done_by_idle: bool,
-    nudged: bool,
     /// set once it decided to end: the report goes out when this moment came
     drain_until: Option<Instant>,
 }
@@ -104,7 +125,7 @@ enum Step {
 
 impl ReaperTask {
     fn new(id: u32, parent: Option<u32>, idle_mode: bool, idle_secs: u64, lines: usize) -> Self {
-        ReaperTask { id, parent, idle_mode, idle_secs, lines, worked: false, done_by_idle: false, nudged: false, drain_until: None }
+        ReaperTask { id, parent, idle_mode, idle_secs, lines, worked: false, done_by_idle: false, drain_until: None }
     }
 
     fn step(&mut self, reg: &Arc<Registry>, now: Instant) -> Step {
@@ -128,10 +149,13 @@ impl ReaperTask {
             // or that it only waits for CI or a deploy (`axelstra await`): quiet on purpose
             if reg.wait_of(self.id, s.since_input_ms(), idle).is_some() || reg.awaiting_of(self.id, s.since_input_ms(), idle).is_some() {
                 self.worked = false;
-            } else if !self.nudged && reg.metas.lock_recover().get(&self.id).map(|m| m["kind"] == "agent").unwrap_or(false) {
-                // first quiet spell: ask the worker to report through the bus instead of scraping its screen
-                crate::msgbus::deliver(s.clone(), crate::msgbus::paste(crate::prompts::IDLE_NUDGE));
-                self.nudged = true;
+            } else if reg.metas.lock_recover().get(&self.id).is_some_and(|m| m["kind"] == "agent") {
+                // an agent is never closed or reported finished on silence alone: only `done` or its exit end it. One
+                // without hooks gets the one stop reminder here (the Stop hook gives it to the others, see `stop_nudge`);
+                // if it stays quiet the stall watchdog tells the parent. It is looked at again when it works again
+                if reg.hints.state_of(self.id).is_none() {
+                    self_nudge(reg, self.id);
+                }
                 self.worked = false;
             } else {
                 self.done_by_idle = true;
@@ -230,8 +254,9 @@ pub(super) fn spawn_done_closer(reg: Arc<Registry>, id: u32) {
     add_task(&reg, Task::Closer(CloserTask { id, armed: Instant::now() }));
 }
 
-/// The shortest quiet spell after which an ephemeral worker may be nudged and then closed. An agent in a long tool call,
-/// a slow network or a build that prints nothing is silent for a minute without being done; a plain command is not.
+/// The shortest quiet spell after which an ephemeral worker may be nudged (an agent without hooks) or closed (a plain
+/// command; an agent never is). An agent in a long tool call, a slow network or a build that prints nothing is silent
+/// for a minute without being done; a plain command is not.
 pub(crate) fn reaper_min_idle_secs(agent: bool) -> u64 {
     if agent {
         120
@@ -825,6 +850,14 @@ pub(super) fn spawn_idle_exit(reg: Arc<Registry>) {
 
 pub(super) type Picked = (u32, Arc<Session>, axelstra_core::pty::View, Option<String>, Option<Value>);
 
+/// The sessions with their view, label and meta, taken in the registry's lock order.
+pub(super) fn pick(reg: &Registry) -> Vec<Picked> {
+    let l = reg.sessions.lock_recover();
+    let labels = reg.labels.lock_recover();
+    let metas = reg.metas.lock_recover();
+    l.iter().map(|(id, s)| (*id, s.clone(), s.view(), labels.get(id).cloned(), metas.get(id).cloned())).collect()
+}
+
 /// Parents of the sessions that still run for them: a parent waiting on live children is not stalled.
 pub(super) fn busy_parents(reg: &Registry, picked: &[Picked]) -> std::collections::HashSet<u32> {
     picked
@@ -846,22 +879,23 @@ pub(super) fn stall_facts(
 ) -> crate::stall::Facts {
     let parent = meta.and_then(|m| m["parent"].as_u64()).map(|p| p as u32);
     // a parent that is a live agent session handles a stall of its child; anything else leaves it to the user
-    let parent_idle_ms = parent.and_then(|p| {
+    let parent_agent = parent.is_some_and(|p| {
         let agent = reg.metas.lock_recover().get(&p).is_some_and(|m| m["kind"] == "agent");
-        let s = reg.get(p)?;
-        (agent && s.try_wait().is_none()).then(|| s.idle_ms())
+        agent && reg.get(p).is_some_and(|s| s.try_wait().is_none())
     });
     let full = || {
         let alive = |i: u32| reg.get(i).is_some_and(|s| s.try_wait().is_none());
         reg.bus.live_workers(alive) >= reg.bus.limit()
     };
     let since_msg_ms = reg.bus.since_msg_ms(id);
+    let hinted = reg.hints.state_of(id).is_some();
     crate::stall::Facts {
         agent: meta.is_some_and(|m| m["kind"] == "agent"),
         main: meta.is_some_and(|m| m["main"] == true),
         running,
         reported: reg.bus.finished(id).is_some(),
         escalated: reg.bus.is_escalated(id),
+        waiting: running && reg.wait_of(id, since_input_ms, idle_ms).is_some(),
         awaiting: reg.awaiting_of(id, since_input_ms, idle_ms).is_some(),
         live_children: busy.contains(&id),
         paused: reg.pauser.paused_of(id).is_some(),
@@ -870,16 +904,46 @@ pub(super) fn stall_facts(
         since_msg_ms,
         bg_work: reg.work.busy(id),
         slot_wait: reg.work.slot_waiting(id, full),
-        parent_idle_ms,
-        unasked: crate::stall::never_asked(meta.is_some_and(|m| m["unrequested"] == true), since_input_ms, since_msg_ms),
-        notified_ms: reg.stall_notified.lock_recover().get(&id).map(|t| t.elapsed().as_millis() as u64),
+        parent_agent,
+        user_driven: crate::stall::user_driven(parent_agent, since_input_ms, since_msg_ms),
+        unasked: crate::stall::never_asked(meta.is_some_and(|m| m["unrequested"] == true), since_input_ms, since_msg_ms, hinted),
     }
 }
 
-/// An agent that became stalled gets one message to its parent per episode (until it works again); the user hears of
-/// it (`session.list` `stalled`) only when nobody handles it. No tick: it looks when the pulse moves (a session
-/// changed, a message, a hint, the settings) and at the one computed moment the next decision falls due
-/// (`stall::next_check_ms`, `stall::next_human_ms`).
+/// The agent's own Stop hook fired (`session.hint` with `event: "stop"`): an Axelstra-managed agent that ended its turn
+/// with nothing that explains it gets ONE short reminder typed into it (`prompts::STOP_NUDGE`), at most once per stop
+/// episode and once per `stall::NUDGE_EVERY`. The reminder is no message: it reaches nobody else and is not new work.
+pub(super) fn stop_nudge(reg: &Arc<Registry>, id: u32) {
+    self_nudge(reg, id);
+}
+
+/// Types the one stop reminder into `id` when it is due (`stall::nudge_due`; never while a background process of its
+/// tree runs) and none was typed in this stop episode or in the last `stall::NUDGE_EVERY`. True when typed.
+pub(super) fn self_nudge(reg: &Arc<Registry>, id: u32) -> bool {
+    let threshold = reg.with_settings(crate::stall::threshold_ms);
+    let Some(s) = reg.get(id) else { return false };
+    let running = s.try_wait().is_none();
+    let meta = reg.metas.lock_recover().get(&id).cloned();
+    let busy = busy_parents(reg, &pick(reg));
+    // what its tree runs now (a Monitor, a background shell, a build): the watchdog's last look may be old
+    if let Some(root) = s.pid().filter(|_| running && threshold > 0) {
+        let mut below = axelstra_core::procs::snapshot_cached(Duration::from_secs(5)).descendants(&[root]);
+        below.remove(&root);
+        reg.work.observe(id, Instant::now(), &below);
+    }
+    let facts = stall_facts(reg, id, running, s.idle_ms(), s.since_input_ms(), meta.as_ref(), &busy);
+    let due = crate::stall::nudge_due(&facts, threshold);
+    let typed = reg.turns.stop(id, Instant::now(), facts.since_input_ms, facts.since_msg_ms, due);
+    if typed {
+        crate::msgbus::deliver(s, crate::msgbus::paste(crate::prompts::STOP_NUDGE));
+    }
+    typed
+}
+
+/// An agent that stays stalled after its stop reminder (or has no Stop hook) is told to its parent in one line, once per
+/// episode; one with no parent agent is shown to the user (`session.list` `stalled`), once per episode too. An episode
+/// ends only on real new work (`stall::Turns`). No tick: it looks when the pulse moves (a session changed, a message, a
+/// hint, the settings) and at the one computed moment the next decision falls due (`stall::next_check_ms`).
 pub(super) fn spawn_stall_watchdog(reg: Arc<Registry>) {
     std::thread::spawn(move || {
         let _site = axelstra_core::proc::site("stall_watchdog");
@@ -895,12 +959,7 @@ pub(super) fn spawn_stall_watchdog(reg: Arc<Registry>) {
 pub(super) fn stall_tick(reg: &Arc<Registry>) -> Option<Duration> {
     let threshold = reg.with_settings(crate::stall::threshold_ms);
     let minutes = crate::stall::display_minutes(threshold);
-    let picked: Vec<Picked> = {
-        let l = reg.sessions.lock_recover();
-        let labels = reg.labels.lock_recover();
-        let metas = reg.metas.lock_recover();
-        l.iter().map(|(id, s)| (*id, s.clone(), s.view(), labels.get(id).cloned(), metas.get(id).cloned())).collect()
-    };
+    let picked = pick(reg);
     // the processes each running agent started, so a background shell or a build is not mistaken for silence
     if threshold > 0 {
         let agents: Vec<_> =
@@ -916,54 +975,53 @@ pub(super) fn stall_tick(reg: &Arc<Registry>) -> Option<Duration> {
             }
         }
     }
-    reg.work.retain(&picked.iter().map(|p| p.0).collect());
+    let alive: std::collections::HashSet<u32> = picked.iter().map(|p| p.0).collect();
+    reg.work.retain(&alive);
+    reg.turns.retain(&alive);
     let busy = busy_parents(reg, &picked);
-    let mut stalled = Vec::new();
+    let mut fresh = Vec::new();
     let mut human = std::collections::HashSet::new();
-    let mut worked = std::collections::HashSet::new();
     let mut next: Option<u64> = None;
     let mut soonest = |ms: Option<u64>| {
         if let Some(ms) = ms {
             next = Some(next.map_or(ms, |n| n.min(ms)));
         }
     };
+    let now = Instant::now();
     let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
     for (id, s, view, label, meta) in &picked {
-        let facts = stall_facts(reg, *id, s.try_wait().is_none(), view.idle_ms(), view.since_input_ms(), meta.as_ref(), &busy);
-        let await_left = reg.awaiting_of(*id, view.since_input_ms(), view.idle_ms()).map(|a| a.until.saturating_sub(now_ms));
-        soonest(crate::stall::next_check_ms(&facts, threshold, await_left));
-        soonest(crate::stall::next_human_ms(&facts, threshold));
-        if facts.quiet_ms() < threshold {
-            worked.insert(*id);
-        }
-        if crate::stall::is_stalled(&facts, threshold) {
-            let parent = meta.as_ref().and_then(|m| m["parent"].as_u64()).map(|p| p as u32);
-            stalled.push((*id, label.clone(), parent, view.screen_tail(12)));
-            if crate::stall::needs_human(&facts, threshold) {
-                human.insert(*id);
+        let (idle, input) = (view.idle_ms(), view.since_input_ms());
+        let facts = stall_facts(reg, *id, s.try_wait().is_none(), idle, input, meta.as_ref(), &busy);
+        let await_left = reg.awaiting_of(*id, input, idle).map(|a| a.until.saturating_sub(now_ms));
+        let nudged = reg.turns.nudged_ms(*id, now, input, facts.since_msg_ms);
+        soonest(crate::stall::next_check_ms(&facts, threshold, await_left, nudged));
+        let parent = meta.as_ref().and_then(|m| m["parent"].as_u64()).map(|p| p as u32);
+        if crate::stall::parent_due(&facts, threshold, nudged) {
+            // the first look of an episode tells; while nothing really changes, nobody hears it again
+            if reg.turns.begin_stall(*id, now, input, facts.since_msg_ms) {
+                let why = if nudged.is_some() {
+                    crate::stall::Why::Nudged
+                } else if reg.hints.state_of(*id).is_none() {
+                    crate::stall::Why::NeverStarted
+                } else {
+                    crate::stall::Why::Quiet
+                };
+                fresh.push((*id, label.clone(), parent, why));
             }
+        } else if crate::stall::needs_human(&facts, threshold) {
+            reg.turns.begin_stall(*id, now, input, facts.since_msg_ms);
+        }
+        // the user's alert holds for the whole episode (a stray output byte does not end it), while nothing excuses it
+        if !facts.parent_agent && !crate::stall::excused(&facts) && reg.turns.in_episode(*id, now, input, facts.since_msg_ms) {
+            human.insert(*id);
         }
     }
-    let fresh: Vec<_> = {
-        let alive: std::collections::HashSet<u32> = picked.iter().map(|p| p.0).collect();
-        let mut seen = reg.stall_notified.lock_recover();
-        // an episode ends when the session works again (output, typing, a message) or goes away
-        seen.retain(|id, _| alive.contains(id) && !worked.contains(id));
-        let now = Instant::now();
-        // the first look of an episode stamps the time the parent was told; a later look must not move it, or any pulse
-        // (output, a message, a resource sample) would restart the wait before the user is alerted
-        stalled.into_iter().filter(|x| seen.get(&x.0).is_none() && seen.insert(x.0, now).is_none()).collect()
-    };
-    if !fresh.is_empty() {
-        // the alert of a session with a parent agent falls due a threshold after the parent was told
-        soonest(Some(threshold + 20));
-    }
-    // one message per parent and pass, however many of its children stalled together
-    type Child = (String, u32, Vec<String>);
+    // one line per parent and pass, however many of its children stalled together
+    type Child = (String, u32, crate::stall::Why);
     let mut by_parent: Vec<(u32, Vec<Child>)> = Vec::new();
-    for (id, label, parent, screen) in fresh {
+    for (id, label, parent, why) in fresh {
         let Some(pid) = parent.filter(|p| reg.get(*p).is_some()) else { continue };
-        let item = (label.unwrap_or_else(|| format!("session {id}")), id, screen);
+        let item = (label.unwrap_or_else(|| format!("session {id}")), id, why);
         match by_parent.iter_mut().find(|(p, _)| *p == pid) {
             Some((_, v)) => v.push(item),
             None => by_parent.push((pid, vec![item])),
@@ -972,8 +1030,8 @@ pub(super) fn stall_tick(reg: &Arc<Registry>) -> Option<Duration> {
     for (pid, items) in by_parent {
         let Some(ps) = reg.get(pid) else { continue };
         let text = match items.as_slice() {
-            [(label, id, screen)] => crate::stall::parent_text(label, *id, minutes, &crate::stall::last_line(screen)),
-            _ => crate::stall::parent_text_many(&items.iter().map(|(l, id, _)| (l.clone(), *id)).collect::<Vec<_>>(), minutes),
+            [(label, id, why)] => crate::stall::parent_text(label, *id, minutes, *why),
+            _ => crate::stall::parent_text_many(&items.iter().map(|(l, id, _)| (l.clone(), *id)).collect::<Vec<_>>()),
         };
         // a `notice` leaves the parent's own state (its pending question, its report) alone
         let from = if let [(_, id, _)] = items.as_slice() { Some(*id) } else { None };
@@ -1026,5 +1084,63 @@ mod usage_roots_tests {
         assert_eq!(resolve_root(&r), None);
         let r = UsageRoot { dir: std::env::temp_dir(), kinds: UsageKinds::default(), json_only: false };
         assert!(resolve_root(&r).is_some());
+    }
+}
+
+#[cfg(test)]
+mod quiet_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn registry(tag: &str) -> Arc<Registry> {
+        let dir = std::env::temp_dir().join(format!("axl-quiet-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Arc::new(Registry::new(dir.join("projects.json"), "p".into(), "t".into()))
+    }
+
+    fn long_sleep() -> Spawn {
+        let (prog, args): (&str, Vec<String>) =
+            if cfg!(windows) { ("cmd", vec!["/c".into(), "ping -n 30 127.0.0.1 >nul".into()]) } else { ("sleep", vec!["30".into()]) };
+        Spawn { program: prog.into(), args, cwd: None, env: vec![], cols: 80, rows: 24 }
+    }
+
+    #[test]
+    fn an_ephemeral_agent_is_never_closed_or_reported_finished_on_silence() {
+        let reg = registry("reaper");
+        let boss = reg.spawn(&long_sleep(), None, Some(json!({"kind": "agent"}))).unwrap();
+        let id = reg.spawn(&long_sleep(), None, Some(json!({"kind": "agent", "parent": boss}))).unwrap();
+        // idle mode with a 1 s quiet spell: a plain command would be closed long before the end of this wait
+        spawn_reaper(reg.clone(), id, Some(boss), true, 1, 10);
+        std::thread::sleep(Duration::from_secs(5));
+        reg.pulse.bump();
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(reg.get(id).is_some(), "closed on silence");
+        assert!(reg.exited_of(id).is_none(), "reported as finished on silence");
+        // its `done` still ends it
+        reg.bus.send(Some(id), boss, "done", "ok", None, None);
+        reg.pulse.bump();
+        let t = Instant::now();
+        while reg.get(id).is_some() {
+            assert!(t.elapsed() < Duration::from_secs(20), "a reported worker was not retired");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        reg.get(boss).unwrap().kill();
+    }
+
+    #[test]
+    fn main_hears_of_work_left_unintegrated_as_a_notice_but_not_of_a_failed_report() {
+        let reg = registry("main");
+        let main = reg.spawn(&long_sleep(), None, Some(json!({"kind": "agent", "main": true, "project": "p1"}))).unwrap();
+        let item = |code: &str| json!({"project": "p1", "path": "/w/a", "branch": "ax/a", "why": "conflict.", "code": code});
+        // the agent's failed/blocked `done` already said it
+        tell_main_not_integrated(&reg, &item("integrate.not_ok"));
+        assert!(reg.bus.inbox(main, true, false).is_empty());
+        tell_main_not_integrated(&reg, &item("integrate.conflict"));
+        let got = reg.bus.inbox(main, true, false);
+        assert_eq!(got.len(), 1);
+        // a notice leaves main's own pending question and report alone
+        assert_eq!(got[0].kind, "notice");
+        assert!(got[0].text.contains("NOT integrated"));
+        reg.get(main).unwrap().kill();
     }
 }

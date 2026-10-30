@@ -50,8 +50,8 @@ pub(super) struct Registry {
     pub(super) modes: Mutex<HashMap<u32, String>>,
     /// sessions that said they only wait for something external (`session.await`)
     pub(super) awaits: axelstra_core::waiting::Awaits,
-    /// sessions the stall watchdog already told their parent about (until they work again)
-    pub(super) stall_notified: Mutex<HashMap<u32, std::time::Instant>>,
+    /// the stop reminder and the stall episode of each session (`stall::Turns`)
+    pub(super) turns: crate::stall::Turns,
     /// work a quiet session has that no screen shows (processes it started, a wish for a worker slot)
     pub(super) work: crate::stall::Work,
     /// bumped when a request changed projects or worktrees; watchers hear it as `projects.changed`
@@ -473,7 +473,7 @@ impl Registry {
             hints: Default::default(),
             modes: Default::default(),
             awaits: Default::default(),
-            stall_notified: Default::default(),
+            turns: Default::default(),
             work: Default::default(),
             wt_gen: AtomicU64::new(0),
             audit,
@@ -591,15 +591,15 @@ impl Registry {
         let Some(pid) = self.metas.lock_recover().get(&id).and_then(|m| m["parent"].as_u64()).map(|p| p as u32) else { return };
         // a hibernated parent wakes for it: the message waits in its inbox and is typed once it is back
         if self.hib.is_sleeping(pid) {
-            let m = self.bus.send(
+            // a `notice`, like the awake branch: a message would clear the parent's own pending question and report
+            self.bus.send(
                 Some(id),
                 pid,
-                "message",
+                "notice",
                 &crate::prompts::waiting_report(wait.kind == axelstra_core::waiting::WaitKind::Permission, &wait.text),
                 None,
                 None,
             );
-            let _ = m;
             if let Some(me) = self.me.get().and_then(std::sync::Weak::upgrade) {
                 hibernate::wake(&me, pid);
             }

@@ -236,10 +236,15 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             };
             let label = crate::notes::on_spawn(&crate::notes::root(&data_dir), p["label"].as_str(), &mut meta, p["goal"].as_str(), alone);
             let note = meta.as_ref().and_then(|m| m.get("note").cloned());
-            // a lead started by hand with no prompt, no dispatch and no conversation to resume has no request yet: the stall
-            // watchdog leaves it alone until someone writes to it. Live meta only; `spec` below is cut from `p`, so a
-            // restart does not keep the flag
-            if lead && p["goal"].as_str().is_none_or(|g| g.trim().is_empty()) && !p["reap"].is_object() && p["meta"]["note"].is_null() {
+            // an agent started with no goal, no dispatch and no conversation to resume may have no request yet: the stall
+            // watchdog leaves it alone until someone writes to it or its hook reports a turn (`stall::never_asked`). Live
+            // meta only; `spec` below is cut from `p`, so a restart does not keep the flag
+            let agent_kind = meta.as_ref().is_some_and(|m| m["kind"] == "agent");
+            if (lead || agent_kind)
+                && p["goal"].as_str().is_none_or(|g| g.trim().is_empty())
+                && !p["reap"].is_object()
+                && p["meta"]["note"].is_null()
+            {
                 if let Some(m) = meta.as_mut().filter(|m| m.is_object()) {
                     m["unrequested"] = json!(true);
                 }
@@ -314,6 +319,12 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             }
             reg.hints.set(id, state, wait);
             reg.tell_parent_waiting(id);
+            match state {
+                axelstra_core::waiting::HintState::Working => reg.turns.working(id, Instant::now()),
+                // the agent's own Stop hook (additive `event: "stop"`; an old hook sends none, so no reminder)
+                axelstra_core::waiting::HintState::Idle if p["event"].as_str() == Some("stop") => stop_nudge(reg, id),
+                _ => {}
+            }
             Ok(json!({}))
         }
         // an agent says it only waits for something external (CI, a deploy): the stall watchdog stays quiet until it

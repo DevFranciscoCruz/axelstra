@@ -19,14 +19,20 @@ pub struct Event {
     pub state: &'static str,
     pub kind: Option<&'static str>,
     pub text: String,
+    /// the agent's turn ended (its Stop hook): the daemon may type its one stop reminder (`event: "stop"`)
+    pub stop: bool,
 }
 
 fn plain(state: &'static str) -> Option<Event> {
-    Some(Event { state, kind: None, text: String::new() })
+    Some(Event { state, kind: None, text: String::new(), stop: false })
+}
+
+fn stopped() -> Option<Event> {
+    Some(Event { state: "idle", kind: None, text: String::new(), stop: true })
 }
 
 fn wait(kind: &'static str, text: String) -> Option<Event> {
-    Some(Event { state: "waiting", kind: Some(kind), text })
+    Some(Event { state: "waiting", kind: Some(kind), text, stop: false })
 }
 
 /// The first non-empty string among `keys` of `v`.
@@ -63,11 +69,11 @@ pub fn event_of(agent: &str, event: &str, payload: &Value) -> Option<Event> {
             wait("permission", if what.is_empty() { tool.into() } else { format!("{tool}: {what}") })
         }
         ("codex", "pretooluse") => plain("working"),
-        ("claude" | "codex", "stop") => plain("idle"),
+        ("claude" | "codex", "stop") => stopped(),
         ("claude" | "codex", "userpromptsubmit") => plain("working"),
         // Gemini CLI: a prompt was submitted / the turn ended / a tool ran, so its permission prompt was answered
         ("gemini", "beforeagent" | "aftertool") => plain("working"),
-        ("gemini", "afteragent") => plain("idle"),
+        ("gemini", "afteragent") => stopped(),
         _ => None,
     }
 }
@@ -86,9 +92,13 @@ pub fn mode_of(agent: &str, payload: &Value) -> Option<String> {
     field(payload, &["permission_mode"]).map(String::from)
 }
 
-/// The `session.hint` params: `mode` only when the agent told it.
+/// The `session.hint` params: `mode` only when the agent told it, `event: "stop"` only for a turn end (additive: an old
+/// daemon ignores it).
 fn hint_params(id: u32, ev: &Event, mode: Option<String>) -> Value {
     let mut p = json!({"id": id, "state": ev.state, "kind": ev.kind, "text": ev.text});
+    if ev.stop {
+        p["event"] = json!("stop");
+    }
     if let Some(m) = mode {
         p["mode"] = json!(m);
     }
@@ -207,6 +217,26 @@ mod tests {
         assert_eq!(hint_params(7, &e, mode_of("claude", &p))["mode"], "bypassPermissions");
         assert!(hint_params(7, &e, None).get("mode").is_none());
         assert!(reads_payload("claude", "Stop") && !reads_payload("gemini", "Stop") && reads_payload("gemini", "Notification"));
+    }
+
+    #[test]
+    fn a_turn_end_sends_event_stop_and_nothing_else_does() {
+        for (agent, event) in [("claude", "Stop"), ("codex", "Stop"), ("gemini", "AfterAgent")] {
+            let e = event_of(agent, event, &Value::Null).unwrap();
+            assert!(e.stop, "{agent} {event}");
+            let p = hint_params(3, &e, None);
+            assert_eq!((p["state"].as_str(), p["event"].as_str()), (Some("idle"), Some("stop")), "{agent} {event}");
+        }
+        for (agent, event, payload) in [
+            ("claude", "UserPromptSubmit", Value::Null),
+            ("claude", "Notification", json!({"notification_type": "idle_prompt"})),
+            ("claude", "Notification", json!({"notification_type": "permission_prompt"})),
+            ("codex", "PreToolUse", Value::Null),
+            ("gemini", "BeforeAgent", Value::Null),
+        ] {
+            let e = event_of(agent, event, &payload).unwrap();
+            assert!(!e.stop && hint_params(3, &e, None).get("event").is_none(), "{agent} {event}");
+        }
     }
 
     #[test]

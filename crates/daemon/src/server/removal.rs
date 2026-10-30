@@ -65,7 +65,7 @@ impl Registry {
         }
         for id in &owned.ids {
             self.forget_session(*id);
-            self.stall_notified.lock_recover().remove(id);
+            self.turns.forget(*id);
         }
         // saved sessions waiting for a restore: they would bring the project's agents back
         let mut paths = wt_paths.to_vec();

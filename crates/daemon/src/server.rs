@@ -873,9 +873,12 @@ fn session_list(reg: &Registry) -> Vec<Value> {
             let waiting = wait.is_some();
             let awaiting = if running { reg.awaiting_of(id, view.since_input_ms(), idle) } else { None };
             let facts = stall_facts(reg, id, running, idle, view.since_input_ms(), meta.as_ref(), &busy);
-            // the user is told only when nobody handles the stall; `stall_parent` says a parent agent was told
-            let stalled = crate::stall::needs_human(&facts, stall_ms);
-            let stall_parent = !stalled && crate::stall::is_stalled(&facts, stall_ms);
+            // the stall episode the watchdog opened (it holds until real work): the user is told only of a session with no
+            // parent agent; `stall_parent` says a parent agent was told
+            let episode = !crate::stall::excused(&facts)
+                && reg.turns.in_episode(id, std::time::Instant::now(), view.since_input_ms(), facts.since_msg_ms);
+            let stalled = episode && !facts.parent_agent;
+            let stall_parent = episode && facts.parent_agent;
             let stall = stalled.then(|| {
                 let line = crate::stall::last_line(&view.screen_tail(12));
                 let task = label.clone().unwrap_or_else(|| format!("session {id}"));
@@ -895,9 +898,6 @@ fn session_list(reg: &Registry) -> Vec<Value> {
     v
 }
 
-/// One JSON call as the handlers see it: the request, the registry and the state of the connection it came in on.
-struct Ctx<'a> {
-    req: &'a Req,
 /// What `pullview` needs about a live session row (`quiet_since`, `liveness`, `next_action`).
 fn pull_facts(
     reg: &Registry,
@@ -936,6 +936,9 @@ fn pull_facts(
     }
 }
 
+/// One JSON call as the handlers see it: the request, the registry and the state of the connection it came in on.
+struct Ctx<'a> {
+    req: &'a Req,
     p: &'a Value,
     reg: &'a Arc<Registry>,
     tx: &'a Tx,
@@ -1055,11 +1058,11 @@ fn may_change_answers(method: &str) -> bool {
             | "mem.status"
             | "mem.admit"
             | "hooks.status"
+            // read flags show only in `session.list` and the inbox (not kept)
+            | "msg.wait"
             | "msg.thread"
             | "msg.reply_of"
             | "notes.read"
-            // read flags show only in `session.list` and the inbox (not kept)
-            | "msg.wait"
             | "notes.read_file"
             | "notes.export"
             | "notes.worktree"
