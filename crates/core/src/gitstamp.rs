@@ -159,8 +159,11 @@ const MAX_ENTRIES: usize = 4096;
 
 /// Answers kept under a key while their fingerprint holds. A lookup with no fingerprint computes and keeps nothing.
 pub struct Stamped<T> {
-    map: Mutex<Option<HashMap<String, (u64, Instant, T)>>>,
+    map: Mutex<Option<Kept<T>>>,
 }
+
+/// key -> (fingerprint, when computed, answer)
+type Kept<T> = HashMap<String, (u64, Instant, T)>;
 
 impl<T: Clone> Default for Stamped<T> {
     fn default() -> Self {
