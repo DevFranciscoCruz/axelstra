@@ -192,6 +192,7 @@ pub(super) fn spawn_loop(reg: Arc<Registry>) {
         }
     });
     std::thread::spawn(move || {
+        let _site = axelstra_core::proc::site("prwatch");
         let mut seen_refusals = std::collections::HashSet::new();
         let r = reg.clone();
         // a remote ref moved: a merge may have arrived, so the janitor looks too (it has its own gap)

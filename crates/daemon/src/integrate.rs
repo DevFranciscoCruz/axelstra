@@ -121,11 +121,16 @@ pub struct Undone {
 
 /// Commits on `branch` that `default` lacks.
 pub fn ahead_of(repo: &Path, branch: &str, default: &str) -> u32 {
-    git::run(repo, &["rev-list", "--count", &format!("{default}..{branch}")])
-        .ok()
-        .filter(|o| o.ok)
-        .and_then(|o| o.stdout.trim().parse().ok())
-        .unwrap_or(0)
+    // commits only: kept while the repo's refs do not move
+    static AHEAD: axelstra_core::gitstamp::Stamped<u32> = axelstra_core::gitstamp::Stamped::new();
+    let key = format!("{}|{default}..{branch}", repo.to_string_lossy());
+    AHEAD.get(&key, axelstra_core::gitstamp::refs(repo), None, || {
+        git::run(repo, &["rev-list", "--count", &format!("{default}..{branch}")])
+            .ok()
+            .filter(|o| o.ok)
+            .and_then(|o| o.stdout.trim().parse().ok())
+            .unwrap_or(0)
+    })
 }
 
 /// Seconds since the branch was created (the oldest entry of its reflog); `None` when unknown.

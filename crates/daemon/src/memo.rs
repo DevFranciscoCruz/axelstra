@@ -129,6 +129,11 @@ impl Memo {
         *self.scopes.lock_recover().entry(scope.to_string()).or_default() += 1;
     }
 
+    /// How many times `scope` was bumped (0 when never).
+    pub fn scope_generation(&self, scope: &str) -> u64 {
+        self.scopes.lock_recover().get(scope).copied().unwrap_or(0)
+    }
+
     fn snapshot(&self, scopes: &[&str]) -> u64 {
         let map = self.scopes.lock_recover();
         scopes.iter().fold(0u64, |acc, s| {
@@ -266,6 +271,17 @@ pub const WORKTREE_MAX_AGE: Duration = Duration::from_secs(30);
 pub const PORTS_MAX_AGE: Duration = Duration::from_secs(10);
 pub const GH_MAX_AGE: Duration = Duration::from_secs(120);
 pub const BUDGET_MAX_AGE: Duration = Duration::from_secs(120);
+
+/// What a read of a checkout's files (`git status`, its uncommitted changes) depends on that shows without git: the
+/// repo's refs, the checkout's index and the app's file watch on it (the watcher bumps the worktree's scope). Files
+/// edited in a checkout nobody watches move none of these, so such reads also take `WORKTREE_MAX_AGE`. `None` when the
+/// path has no `.git` of its own: nothing is kept.
+pub fn worktree_stamp(path: &str) -> Option<u64> {
+    use axelstra_core::gitstamp;
+    let p = std::path::Path::new(path);
+    let watched = memo().scope_generation(&axelstra_core::paths::norm(path));
+    Some(gitstamp::combine(&[gitstamp::refs(p)?, gitstamp::index(p)?, watched]))
+}
 
 /// Permits of the daemon's git pool: scans mostly wait on child processes and the disk, and a few at a time are
 /// enough to keep the screen current without every core going to kernel time.

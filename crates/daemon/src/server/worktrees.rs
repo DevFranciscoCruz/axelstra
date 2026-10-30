@@ -78,7 +78,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                                 allowed.insert(norm(&w.path));
                             }
                         }
-                        list.iter().take(64).filter(|w| allowed.contains(&norm(w))).map(|w| crate::wtstatus::status(w)).collect::<Vec<_>>()
+                        list.iter()
+                            .take(64)
+                            .filter(|w| allowed.contains(&norm(w)))
+                            .map(|w| crate::wtstatus::status_kept(w))
+                            .collect::<Vec<_>>()
                     })
                 });
                 Ok(json!({"status": out}))
@@ -412,7 +416,10 @@ fn project_list(reg: &Arc<Registry>) -> Result<Value> {
     let gen = reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst);
     let ps = crate::projects::load(&reg.store);
     // each project starts several git processes: a few projects at a time, not one after the other
-    let one = |pr: &crate::projects::Project| -> Value { crate::memo::git_pool().run(|| one_project(pr)) };
+    let one = |pr: &crate::projects::Project| -> Value {
+        let _site = axelstra_core::proc::site("project.list");
+        crate::memo::git_pool().run(|| one_project(pr))
+    };
     fn one_project(pr: &crate::projects::Project) -> Value {
         let repo = std::path::Path::new(&pr.path);
         let mut wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();

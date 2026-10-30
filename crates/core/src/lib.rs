@@ -3,6 +3,7 @@ pub mod buildinfo;
 pub mod card;
 pub mod exec;
 pub mod git;
+pub mod gitstamp;
 pub mod job;
 pub mod msg;
 pub mod orch;

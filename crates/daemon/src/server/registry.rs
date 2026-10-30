@@ -903,6 +903,7 @@ impl Registry {
 pub(super) fn watch_exit(reg: &Arc<Registry>, id: u32, s: Arc<Session>) {
     let reg = Arc::downgrade(reg);
     std::thread::spawn(move || {
+        let _site = axelstra_core::proc::site("watch_exit");
         s.wait_exit();
         s.kill();
         // the last output may still be on its way through the pipe: then the stream ends, which is what tells a

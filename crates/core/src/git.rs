@@ -158,8 +158,9 @@ pub fn is_pr_code(dir: &Path) -> bool {
 }
 
 /// `git worktree list` is asked many times a second by the UI and the daemon (every folder check starts a process):
-/// the answer is reused for a moment and dropped whenever a worktree is added or removed here.
-type WtCache = std::collections::HashMap<String, (std::time::Instant, Vec<Worktree>)>;
+/// the answer is reused while the repo's ref fingerprint (`gitstamp::refs`: HEADs, refs, `worktrees/`) holds, and
+/// dropped whenever a worktree is added or removed here. A repo with no fingerprint reuses it for a moment only.
+type WtCache = std::collections::HashMap<String, (std::time::Instant, Option<u64>, Vec<Worktree>)>;
 static WT_CACHE: std::sync::Mutex<Option<WtCache>> = std::sync::Mutex::new(None);
 /// Bumped by every `forget_worktree_lists`: a list computed before the bump may be stale and must not be cached.
 static WT_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -408,8 +409,14 @@ pub fn repo_root(path: &Path) -> Result<PathBuf> {
 pub fn worktree_list(repo: &Path) -> Result<Vec<Worktree>> {
     use std::sync::atomic::Ordering;
     let key = repo.to_string_lossy().to_string();
-    if let Some((at, v)) = WT_CACHE.lock_recover().as_ref().and_then(|m| m.get(&key)) {
-        if at.elapsed() < Duration::from_secs(3) {
+    // read before git runs: a ref that moves meanwhile leaves an entry the next call does not match
+    let stamp = crate::gitstamp::refs(repo);
+    if let Some((at, s, v)) = WT_CACHE.lock_recover().as_ref().and_then(|m| m.get(&key)) {
+        let valid = match stamp {
+            Some(now) => *s == Some(now),
+            None => s.is_none() && at.elapsed() < Duration::from_secs(3),
+        };
+        if valid {
             return Ok(v.clone());
         }
     }
@@ -418,14 +425,22 @@ pub fn worktree_list(repo: &Path) -> Result<Vec<Worktree>> {
     let mut cache = WT_CACHE.lock_recover();
     // a worktree was added or removed while git ran: this answer may predate it, so it is returned but not kept
     if WT_GEN.load(Ordering::SeqCst) == generation {
-        cache.get_or_insert_with(Default::default).insert(key, (std::time::Instant::now(), v.clone()));
+        cache.get_or_insert_with(Default::default).insert(key, (std::time::Instant::now(), stamp, v.clone()));
     }
     Ok(v)
 }
 
+/// Answers of `is_repo`, `default_branch` and `identity`, kept while the repo's files say nothing moved.
+static IS_REPO: crate::gitstamp::Stamped<bool> = crate::gitstamp::Stamped::new();
+static DEFAULT_BRANCH: crate::gitstamp::Stamped<String> = crate::gitstamp::Stamped::new();
+static IDENTITY: crate::gitstamp::Stamped<RepoIdentity> = crate::gitstamp::Stamped::new();
+
 /// True when `path` is inside a git repository (a plain folder has no `.git` to find).
 pub fn is_repo(path: &Path) -> bool {
-    run(path, &["rev-parse", "--git-dir"]).map(|o| o.ok).unwrap_or(false)
+    // a `.git` of its own that git accepted once stays a repo until its refs or HEAD change
+    IS_REPO.get(&path.to_string_lossy(), crate::gitstamp::refs(path), None, || {
+        run(path, &["rev-parse", "--git-dir"]).map(|o| o.ok).unwrap_or(false)
+    })
 }
 
 fn worktree_list_uncached(repo: &Path) -> Result<Vec<Worktree>> {
@@ -487,6 +502,11 @@ pub struct RepoIdentity {
 
 /// The branch the repo's main worktree is meant to stay on: origin's default, else `main`, else `master`.
 pub fn default_branch(repo: &Path) -> String {
+    // reads `refs/remotes/origin/HEAD` and which of `main`/`master` exist: all in the ref fingerprint
+    DEFAULT_BRANCH.get(&repo.to_string_lossy(), crate::gitstamp::refs(repo), None, || default_branch_uncached(repo))
+}
+
+fn default_branch_uncached(repo: &Path) -> String {
     if let Ok(o) = run(repo, &["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"]) {
         if o.ok {
             if let Some(b) = o.stdout.strip_prefix("origin/") {
@@ -503,6 +523,11 @@ pub fn default_branch(repo: &Path) -> String {
 }
 
 pub fn identity(repo: &Path) -> RepoIdentity {
+    // the origin url lives in the config file
+    IDENTITY.get(&repo.to_string_lossy(), crate::gitstamp::config(repo), None, || identity_uncached(repo))
+}
+
+fn identity_uncached(repo: &Path) -> RepoIdentity {
     let folder = repo.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let remote = run(repo, &["config", "--get", "remote.origin.url"]).ok().filter(|o| o.ok && !o.stdout.is_empty()).map(|o| o.stdout);
     // never expose credentials embedded in a remote url

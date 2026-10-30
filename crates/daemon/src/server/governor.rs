@@ -229,7 +229,7 @@ fn breakdown(reg: &Registry, info: &crate::governor::MemInfo) -> Value {
         baseline_mb: baseline,
         kernel_high,
         pool_tags: src.pool_tags(),
-        own: cause::own_json(spawns, secs, axelstra_core::proc::watch_count()),
+        own: cause::own_json(spawns, secs, axelstra_core::proc::watch_count(), &axelstra_core::proc::site_stats()),
         system: cause::system_json(counters.as_ref(), rates.as_ref()),
         top,
     })
