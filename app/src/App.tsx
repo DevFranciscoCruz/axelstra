@@ -32,6 +32,8 @@ import { AgentPickerModal } from "./AgentPickerModal";
 import { SplitPane } from "./SplitPane";
 import { useBootstrap } from "./useBootstrap";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
+import { allowManualAgent } from "./sidebar/mainRules";
+import { toast } from "./toasts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { UpdateToast } from "./UpdateToast";
 import { VersionSkew } from "./VersionSkew";
@@ -225,6 +227,12 @@ export function App() {
     const agent = await pickAgent();
     if (!agent) return;
     if (agent === "shell") return void newTerminal();
+    // the main checkout has one agent, the project's main: a second one would be a task, which belongs in a worktree
+    const deps = {
+      notify: (text: string, action: { label: string; run: () => void }) => toast({ text, kind: "info" as const, action }),
+      newWorktree: (project: string) => setCreatingWorktree(project),
+    };
+    if (!allowManualAgent(c, sessionsOf(c.wt.path), deps)) return;
     try {
       const id = await launchDefaultAgent(c.project.id, c.wt.path, agent, AGENTS[agent], undefined, undefined, projectTerse(c.project.id));
       await refreshSessions();

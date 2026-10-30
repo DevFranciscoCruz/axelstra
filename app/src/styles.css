@@ -843,7 +843,15 @@ button.icon, button.x, button.cbtn { display: inline-flex; align-items: center; 
 .wt-agent { display: flex; align-items: center; gap: 4px; border-radius: var(--r-md); font-size: var(--fs-md); }
 .wt-agent:hover, .wt-agent.active { background: var(--line); }
 .wt-agent.lead { background: color-mix(in srgb, var(--accent, var(--line)) 14%, transparent); font-weight: 600; }
-.wt-agent.task { margin-left: 12px; }
+.wt-agent.lead.active { background: color-mix(in srgb, var(--accent, var(--line)) 30%, transparent); }
+/* a task sits under its lead: indented on a guide line, secondary text; only its own click selects it */
+.wt-agent.task { margin-left: 12px; padding-left: 4px; border-left: 2px solid var(--line-3); border-radius: 0 var(--r-md) var(--r-md) 0; color: var(--muted); }
+.wt-agent.task.active { color: inherit; }
+/* an old task of the main checkout (main only dispatches): apart and muted, still opens on click */
+.wt-legacy-head { margin: 6px 6px 2px; color: var(--muted); font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: .04em; }
+.wt-agent.legacy { opacity: .7; }
+.wt-agent.legacy.active, .wt-agent.legacy:hover { opacity: 1; }
+.wt-legacy-tag { margin-left: 6px; padding: 0 4px; border: 1px dashed var(--line-3); border-radius: var(--r-lg); color: var(--muted); font-size: var(--fs-sm); font-weight: 400; }
 .wt-lead-tag { display: inline-flex; vertical-align: -1px; margin-left: 5px; color: var(--accent, var(--muted)); }
 .wt-agent-name { flex: 1 0 7ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wt-agent-kind, .wt-agent-wt { flex: 0 100 auto; min-width: 0; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--line-3); border-radius: var(--r-lg); padding: 0 5px; color: var(--muted); font-size: var(--fs-sm); }

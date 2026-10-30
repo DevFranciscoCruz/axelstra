@@ -65,6 +65,11 @@ export const ptP = {
     leadTip: "Líder do worktree: as tarefas lançadas aqui reportam-lhe",
     startLead: "Iniciar main do worktree",
     startLeadTip: "Opcional: abre um agente líder neste worktree; as tarefas seguintes reportam-lhe",
+    legacy: "legado",
+    legacyGroup: "Tarefas antigas no main",
+    legacyTip: (name: string) =>
+      `${name}: tarefa antiga no checkout principal. O main só despacha; passa o trabalho para um worktree.`,
+    mainBusy: "O main deste projeto já está a correr: as tarefas vão para um worktree.",
     pending: {
       label: "Por integrar",
       attentionLabel: "Precisa de atenção",
