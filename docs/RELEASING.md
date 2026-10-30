@@ -59,11 +59,11 @@ The workflow picks the provider from the `release` Environment secrets (step *Au
 
 | Provider | Secrets (`release` Environment) | Variables (optional) |
 | --- | --- | --- |
-| SignPath Foundation (preferred when both are set) | `SIGNPATH_API_TOKEN`, `SIGNPATH_ORGANIZATION_ID` | `SIGNPATH_PROJECT_SLUG` (default `axelstra`), `SIGNPATH_POLICY_SLUG` (default `release-signing`) |
+| SignPath Foundation (preferred when both are set) | `SIGNPATH_API_TOKEN`, `SIGNPATH_ORGANIZATION_ID` | repository variables `SIGNPATH_PROJECT_SLUG` (default `axelstra`), `SIGNPATH_SIGNING_POLICY_SLUG` (default `release-signing`), `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` (default `windows`) |
 | Azure Artifact Signing (formerly Trusted Signing) | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `TS_ENDPOINT`, `TS_ACCOUNT`, `TS_PROFILE` | none |
 
-SignPath also needs two artifact configurations in the SignPath project, slugs `binaries` and `installer`
-(sketch in `docs/SIGNING.md`).
+SignPath also needs `.signpath/artifact-configuration.xml` pasted into the SignPath project as an artifact
+configuration (one configuration for both signing requests; owner checklist in `docs/SIGNING.md`).
 
 **To turn it on:** add the secrets of one provider to the `release` Environment, then run the workflow by hand
 with *dry run* on and check the *Verify the Authenticode signatures* step. With SignPath, approve the two
