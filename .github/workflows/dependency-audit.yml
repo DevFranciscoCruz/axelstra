@@ -1,0 +1,46 @@
+name: dependency-audit
+# The same dependency gates as the `deny` and `audit` jobs of ci.yml, on a timer. ci.yml only runs when somebody pushes,
+# but an advisory is published on the researcher's schedule: one disclosed in a quiet week against a dependency nobody
+# touched stays invisible until the next PR. The weekly run also catches a deny.toml ignore whose expiry date has passed
+# (tools/check-deny-expiry.mjs). On PRs it runs only when a lockfile changes, so its result shows up as its own check.
+#
+# Read only, no secrets, no issue filing: a red run in the Actions tab (and the e-mail GitHub sends for a failed
+# scheduled run) is the alarm. Not a required check: the release-please PR is pushed with GITHUB_TOKEN and gets no
+# `pull_request` runs (see release-please.yml).
+on:
+  pull_request:
+    paths:
+      - Cargo.lock
+      - app/package-lock.json
+      - deny.toml
+      - .github/workflows/dependency-audit.yml
+  schedule:
+    - cron: "41 5 * * 1" # Monday 05:41 UTC, off the hour
+  workflow_dispatch:
+concurrency:
+  group: dependency-audit-${{ github.ref }}
+  cancel-in-progress: true
+permissions: { contents: read }
+jobs:
+  # cargo-deny with the repo's policy (deny.toml): vulnerabilities fail, unmaintained and yanked stay warnings
+  cargo-deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with: { node-version-file: .nvmrc }
+      - run: cargo install cargo-deny --locked --version 0.20.2
+      - run: cargo deny check advisories licenses bans sources
+      - run: node tools/check-deny-expiry.mjs
+  # npm audit reads app/package-lock.json and the registry; no install needed. High and critical fail in what ships.
+  npm-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with: { node-version-file: .nvmrc }
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: app
