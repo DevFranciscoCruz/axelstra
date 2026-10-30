@@ -176,15 +176,16 @@ pub fn kill_pids(pids: &HashSet<u32>) {
     }
 }
 
-/// Environment variable every session's process carries. Its value is `<daemon pid>:<session id>:<spawn time>`, and
+/// Environment variable every session's process carries. Its value is `<daemon>:<session id>:<spawn time>` (`<daemon>`
+/// is the daemon's pid and its registry instance, `<pid>.<n>`), and
 /// children inherit it, so a process that left the session's tree (`setsid`, a double fork, a reparent to init) can
 /// still be found by it.
 pub const MARK_ENV: &str = "AXELSTRA_MARK";
 
-/// The `AXELSTRA_MARK` entry prefix that names every process of session `id` under daemon `daemon_pid`, whatever its
-/// spawn time (a woken session keeps its id and gets a new time).
-pub fn mark_prefix(daemon_pid: u32, id: u32) -> String {
-    format!("{MARK_ENV}={daemon_pid}:{id}:")
+/// The `AXELSTRA_MARK` entry prefix that names every process of session `id` under `daemon` (see `MARK_ENV`), whatever
+/// its spawn time (a woken session keeps its id and gets a new time).
+pub fn mark_prefix(daemon: &str, id: u32) -> String {
+    format!("{MARK_ENV}={daemon}:{id}:")
 }
 
 /// Whether a NUL-separated environment block has an entry starting with `prefix`.
@@ -298,11 +299,13 @@ mod tests {
 
     #[test]
     fn mark_prefix_matches_one_session_only() {
-        let block = b"PATH=/bin\0AXELSTRA_MARK=7:12:1700\0HOME=/h\0";
-        assert!(environ_has(block, &mark_prefix(7, 12)));
-        assert!(!environ_has(block, &mark_prefix(7, 1)), "id 1 must not match id 12");
-        assert!(!environ_has(block, &mark_prefix(8, 12)), "another daemon's session");
-        assert!(!environ_has(b"", &mark_prefix(7, 12)));
+        let block = b"PATH=/bin\0AXELSTRA_MARK=7.1:12:1700\0HOME=/h\0";
+        assert!(environ_has(block, &mark_prefix("7.1", 12)));
+        assert!(!environ_has(block, &mark_prefix("7.1", 1)), "id 1 must not match id 12");
+        assert!(!environ_has(block, &mark_prefix("8.1", 12)), "another daemon's session");
+        assert!(!environ_has(block, &mark_prefix("7.0", 12)), "another registry of the same process");
+        assert!(!environ_has(block, &mark_prefix("7", 12)));
+        assert!(!environ_has(b"", &mark_prefix("7.1", 12)));
     }
 
     #[cfg(target_os = "linux")]

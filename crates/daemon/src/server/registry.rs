@@ -8,6 +8,9 @@ use super::*;
 /// (`session.list`, `daemon.shutdown` and `persist` do); the `lock_order` test runs those paths against each other.
 pub(super) struct Registry {
     pub(super) next: AtomicU32,
+    /// what names this registry in `AXELSTRA_MARK`: the pid plus an instance number, since one process can serve several
+    /// registries (tests) and each numbers its sessions from 1
+    pub(super) mark: String,
     pub(super) sessions: Mutex<HashMap<u32, Arc<Session>>>,
     pub(super) labels: Mutex<HashMap<u32, String>>,
     /// free-form UI data per session (project, worktree...), returned by session.list
@@ -444,8 +447,10 @@ impl Registry {
         }
         let governor = Arc::new(crate::governor::Governor::new(gcfg));
         let pauser = pause::Pauser::new(Arc::new(crate::governor::suspend::OsSuspender), saved.with_file_name("paused.json"));
+        static INSTANCE: AtomicU32 = AtomicU32::new(0);
         Registry {
             next: AtomicU32::new(0),
+            mark: format!("{}.{}", std::process::id(), INSTANCE.fetch_add(1, Ordering::Relaxed)),
             sessions: Default::default(),
             labels: Default::default(),
             metas: Default::default(),
@@ -707,7 +712,7 @@ impl Registry {
         let mut stray: std::collections::HashSet<u32> = left.into_iter().filter(|p| !roots.contains(p)).collect();
         // what carries a closed session's mark is its own, even when it left the tree (Linux; empty elsewhere)
         for id in &ids {
-            stray.extend(axelstra_core::procs::marked(&axelstra_core::procs::mark_prefix(std::process::id(), *id)));
+            stray.extend(axelstra_core::procs::marked(&axelstra_core::procs::mark_prefix(&self.mark, *id)));
         }
         axelstra_core::procs::kill_pids(&stray);
         self.closed.sessions.fetch_add(sessions.len() as u64, Ordering::SeqCst);
@@ -845,7 +850,7 @@ impl Registry {
         // marks every process of the session, so `tear_down` finds the ones that left its tree (Linux)
         let spawned = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
         s.env.retain(|(k, _)| k != axelstra_core::procs::MARK_ENV);
-        s.env.push((axelstra_core::procs::MARK_ENV.into(), format!("{}:{id}:{spawned}", std::process::id())));
+        s.env.push((axelstra_core::procs::MARK_ENV.into(), format!("{}:{id}:{spawned}", self.mark)));
         // the session's own credential: it identifies the connection as an agent, which cannot do the app-only calls
         s.env.retain(|(k, _)| k != "AXELSTRA_AGENT_TOKEN");
         if let Some(t) = new_agent_token() {
