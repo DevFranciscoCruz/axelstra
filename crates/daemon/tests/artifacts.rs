@@ -78,7 +78,10 @@ fn age(wt: &Path) {
     }
 }
 
+/// The reason given for `path`; the daemon reports git's canonical spelling, so `path` is compared canonical too.
 fn code_of(v: &Value, path: &str) -> Option<String> {
+    let canon = axelstra_core::git::canon(Path::new(path)).map(|c| c.to_string_lossy().to_string());
+    let path = canon.as_deref().unwrap_or(path);
     v["skipped"]
         .as_array()?
         .iter()
