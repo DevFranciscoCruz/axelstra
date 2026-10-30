@@ -67,6 +67,22 @@ pub fn pick_role(
     (lead, parent)
 }
 
+/// The main checkout never has tasks, it only dispatches them: it holds the project's main session and terminals.
+/// True when a spawn there must be refused: an agent that is not the project main (a would-be "Tarefa N", a lead) or a
+/// worker that is no terminal. A spawn claiming `main` is the main only while the project has no live main
+/// (`has_main`), so an agent cannot dodge the rule by saying so. Only asked for spawns from an agent connection or the
+/// CLI (`from: "cli"`); the app (and its restores of legacy tasks) is not refused here.
+pub fn refused_in_main_checkout(meta: &Value, worker: bool, has_main: bool) -> bool {
+    let kind = meta["kind"].as_str().unwrap_or_default();
+    if matches!(kind, "terminal" | "docker") {
+        return false;
+    }
+    if kind == "agent" {
+        return meta["main"] != true || has_main;
+    }
+    worker
+}
+
 /// "Tarefa 7" -> 7
 pub fn default_number(label: &str) -> Option<u32> {
     label.strip_prefix("Tarefa ")?.trim().parse().ok()
@@ -443,6 +459,24 @@ mod tests {
         assert_eq!(pick_role(&flagged, false, &[(5, true)], Some(1), None), (true, Some(1)));
         // terminals are no agents
         assert_eq!(pick_role(&json!({"kind": "terminal"}), false, &[], Some(1), None), (false, None));
+    }
+
+    #[test]
+    fn main_checkout_takes_only_the_main_and_terminals() {
+        let task = json!({"kind": "agent", "agent": "claude"});
+        assert!(refused_in_main_checkout(&task, false, false));
+        assert!(refused_in_main_checkout(&task, true, true));
+        let mut lead = task.clone();
+        lead["lead"] = json!(true);
+        assert!(refused_in_main_checkout(&lead, false, true));
+        let main = json!({"kind": "agent", "agent": "claude", "main": true});
+        assert!(!refused_in_main_checkout(&main, false, false));
+        // a second "main" while one runs is a task in disguise
+        assert!(refused_in_main_checkout(&main, false, true));
+        assert!(!refused_in_main_checkout(&json!({"kind": "terminal"}), true, true));
+        assert!(!refused_in_main_checkout(&json!({"kind": "docker"}), false, true));
+        assert!(!refused_in_main_checkout(&Value::Null, false, true));
+        assert!(refused_in_main_checkout(&Value::Null, true, true));
     }
 
     #[test]

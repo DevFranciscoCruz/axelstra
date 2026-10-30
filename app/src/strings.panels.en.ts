@@ -63,6 +63,11 @@ export const enP: Widen<typeof ptP> = {
     leadTip: "Worktree lead: tasks launched here report to it",
     startLead: "Start worktree main",
     startLeadTip: "Optional: opens a lead agent in this worktree; later tasks report to it",
+    legacy: "legacy",
+    legacyGroup: "Old tasks in main",
+    legacyTip: (name: string) =>
+      `${name}: an old task in the main checkout. Main only dispatches; move this work to a worktree.`,
+    mainBusy: "This project's main is already running: tasks go into a worktree.",
     pending: {
       label: "To integrate",
       attentionLabel: "Needs attention",

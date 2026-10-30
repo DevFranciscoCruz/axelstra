@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canStartLead, isLead, leadFirst, leadOf, worktreeSignals } from "./leadRole";
+import type { SessionMeta } from "./api";
+import { autoSeatOf, canStartLead, isLead, leadFirst, leadOf, worktreeSignals } from "./leadRole";
 import { agentRowInfo } from "./agentRow";
 
 const a = (id: number, over: { lead?: boolean; running?: boolean; state?: string; kind?: string } = {}) => ({
@@ -90,5 +91,39 @@ describe("lead of a worktree in the sidebar", () => {
     });
     // ended sessions do not count
     expect(worktreeSignals([a(1, { lead: true, running: false }), a(2)], stateOf).live).toBe(1);
+  });
+});
+
+describe("autoSeatOf: what a selected worktree opens on", () => {
+  type Row = { id: number; label: string; running: boolean; meta: SessionMeta };
+  const r = (id: number, meta: SessionMeta, label = `Tarefa ${id}`, running = true): Row => ({
+    id,
+    label,
+    running,
+    meta,
+  });
+  const seat = (tabs: Row[]) => autoSeatOf(tabs)?.id ?? null;
+
+  it("never a task or worker", () => {
+    expect(
+      seat([r(1, { kind: "agent" }), r(2, { kind: "agent", worker: true }), r(3, { kind: "agent", parent: 9 })]),
+    ).toBeNull();
+  });
+  it("the lead, the project main or the row named main before a terminal", () => {
+    expect(seat([r(1, { kind: "terminal" }), r(2, { kind: "agent" }), r(3, { kind: "agent", lead: true })])).toBe(3);
+    expect(seat([r(1, { kind: "terminal" }), r(2, { kind: "agent", main: true }, "Agente")])).toBe(2);
+    expect(seat([r(1, { kind: "agent" }), r(2, { kind: "agent" }, "main")])).toBe(2);
+  });
+  it("a worker named main is still a worker", () => {
+    expect(seat([r(1, { kind: "agent", worker: true }, "main")])).toBeNull();
+  });
+  it("a running main or terminal first", () => {
+    expect(
+      seat([r(1, { kind: "agent", lead: true }, "main", false), r(2, { kind: "agent", lead: true }, "main")]),
+    ).toBe(2);
+    expect(seat([r(1, { kind: "terminal" }, "t", false), r(2, { kind: "terminal" }, "t")])).toBe(2);
+  });
+  it("a terminal when there is no main", () => {
+    expect(seat([r(1, { kind: "agent" }), r(2, {}, "pwsh")])).toBe(2);
   });
 });

@@ -135,6 +135,14 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   restore so a restart keeps the roles. The sidebar shows an existing lead first with a star and its tasks indented; a
   worktree of plain agents looks normal and nothing flags a missing lead ("Iniciar main do worktree" is an optional action
   next to existing agents, `canStartLead` in `leadRole.ts`). Old worktrees that have a lead are unchanged.
+- **The main checkout never has tasks, it only dispatches them.** A project's own folder (or a folder below it, not under
+  `.axelstra-wt`) holds only the project's main session and terminals. `session.spawn` from a `role=agent` connection or
+  from the CLI (`axelstra agent`/`dispatch` send the additive `from: "cli"`; no PROTO bump) refuses there any agent that
+  is not the project main (a task, a lead, a second `main` while one runs) and any worker that is no terminal, with the
+  coded `session.main_no_tasks {project}` (the hint is `axelstra dispatch new <project> <name> "<request>"`; pure check
+  `notes::refused_in_main_checkout`). `axelstra dispatch send` to the main checkout (its path, the project, its branch)
+  refuses with the same code. The app is not refused by the daemon (it steers the user itself), so restored legacy
+  `Tarefa N` sessions of a main checkout still restore.
 - A lead started by `axelstra dispatch new/send --lead` (or by the heuristic) is ephemeral: when it calls `axelstra done` its
   session closes (a reaper in mode `exit` with `lead: true`, so it does not count against the worker limit) and the report
   goes to main and to the task file. Main only reads the report. A direct worker (the default) reports to the project main
