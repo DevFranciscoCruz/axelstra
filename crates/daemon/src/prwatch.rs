@@ -252,9 +252,12 @@ pub fn classify(path: &Path) -> Option<RefKind> {
     }
     if let Some(i) = s.find("/refs/") {
         let rest = &s[i + 6..];
-        return if rest.starts_with("remotes/") {
+        // the namespace folder itself counts: on Linux (inotify) a ref written right after git created its folder
+        // lands before the new folder is watched, so the folder's creation is the only event there is
+        let under = |ns: &str| rest == ns || rest.strip_prefix(ns).is_some_and(|r| r.starts_with('/'));
+        return if under("remotes") {
             Some(RefKind::Remote)
-        } else if rest.starts_with("heads/") || rest.starts_with("tags/") {
+        } else if under("heads") || under("tags") {
             Some(RefKind::Local)
         } else {
             None
@@ -432,6 +435,9 @@ mod tests {
         assert_eq!(c("C:\\r\\.git\\refs\\remotes\\origin\\main"), Some(RefKind::Remote));
         assert_eq!(c("/r/.git/refs/heads/ax/feat"), Some(RefKind::Local));
         assert_eq!(c("/r/.git/refs/tags/v1"), Some(RefKind::Local));
+        assert_eq!(c("/r/.git/refs/remotes"), Some(RefKind::Remote), "the folder created by a first remote ref");
+        assert_eq!(c("/r/.git/refs/heads"), Some(RefKind::Local));
+        assert_eq!(c("/r/.git/refs/remotesx/y"), None);
         assert_eq!(c("/r/.git/FETCH_HEAD"), Some(RefKind::Fetch));
         assert_eq!(c("/r/.git/packed-refs"), Some(RefKind::Remote));
         assert_eq!(c("/r/.git/HEAD"), Some(RefKind::Local));
