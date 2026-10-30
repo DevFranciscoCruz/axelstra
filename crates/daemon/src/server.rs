@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 mod containers;
+mod disk;
 mod files;
 mod governor;
 mod hibernate;
@@ -64,7 +65,7 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         // they list the file system outside any worktree
         "host.info" | "host.browse" => true,
         // notifications, the stall watchdog, installs and the shell are what keeps the user informed and safe
-        "settings.set" => ["budgets", "hosts", "notify_mode", "notify_sound", "stall_minutes", "auto_install", "shell", "hibernate"]
+        "settings.set" => ["budgets", "hosts", "notify_mode", "notify_sound", "stall_minutes", "auto_install", "shell", "hibernate", "disk", "janitor"]
             .iter()
             .any(|k| p.get(*k).is_some()),
         // the saved sessions are the user's to drop, and an agent must not stop the daemon or switch the clean-up off
@@ -72,6 +73,8 @@ fn agent_forbidden(method: &str, p: &Value) -> bool {
         // hibernating and waking are the user's; an agent only asks to `await` for itself
         "session.hibernate" | "session.wake" => true,
         "janitor.auto" => p.get("on").is_some(),
+        // reclaiming another worktree's builds, or a recent one's, is the user's; the plain pass (inactive only) is open
+        "worktree.sweep" => p["artifacts"].as_bool() == Some(true) && (p["force"].as_bool() == Some(true) || p.get("path").is_some()),
         // an agent must not switch the memory governor off or move its lines
         "mem.config" | "mem.pause" | "mem.resume" => true,
         "project.add"
@@ -973,6 +976,9 @@ fn may_change_answers(method: &str) -> bool {
             | "project.env_preview"
             | "worktree.status"
             | "worktree.overview"
+            // they bump the `disk` scope themselves when they reclaim
+            | "disk.status"
+            | "disk.ensure"
             | "dispatch.meta"
             | "dispatch.overlaps"
             | "dispatch.overlap_files"
@@ -1077,6 +1083,7 @@ fn dispatch_call(c: &mut Ctx) -> Result<Value> {
         "git" | "gh" => vcs::call(c),
         "triggers" => triggers::call(c),
         "mem" => governor::call(c),
+        "disk" => disk::call(c),
         "docker" => containers::call(c),
         "orch" | "kanban" | "automation" => orchestration::call(c),
         "msg" | "notes" => messaging::call(c),

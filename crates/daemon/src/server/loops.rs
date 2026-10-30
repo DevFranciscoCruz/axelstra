@@ -673,6 +673,18 @@ pub(super) fn spawn_janitor(reg: Arc<Registry>) {
             } else {
                 attempts = 0;
             }
+            // the build artifacts of worktrees nobody used for `janitor.artifact_quiet_hours` (`server/disk.rs`); it also
+            // sets the next artifact deadline that `next_janitor_wake` sleeps until
+            if reg.with_settings(crate::disk::Config::from_settings).enabled {
+                let art = super::disk::pass(&reg, None, false, false, true);
+                if art["freed_mb"].as_u64().is_some_and(|n| n > 0) {
+                    eprintln!("janitor: build artifacts freed {} MB", art["freed_mb"]);
+                }
+            } else {
+                *reg.disk.due.lock_recover() = None;
+            }
+            // a low volume left after both: reclaim further down the list (same rules), or say so
+            super::disk::ensure(&reg, true);
             reg.announce_events();
         }
     });
