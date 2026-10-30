@@ -66,11 +66,14 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             // agents get a one-line notice; a worker with a reaper reports through it instead
             let quiet = p["quiet"].as_bool() == Some(true) || (kind == "done" && from.map(|f| reg.bus.is_reaped(f)).unwrap_or(false));
             let agent = reg.metas.lock_recover().get(&to).map(|m| m["kind"] == "agent").unwrap_or(false);
-            if let (true, false, Some(target)) = (agent, quiet, target) {
+            if quiet {
+                // the sender asked for no notice (or a reaper reports it): a wake must not type it later either
+                reg.bus.announce(m.id);
+            } else if let (true, Some(target)) = (agent, target) {
                 let label = from
                     .map(|f| reg.labels.lock_recover().get(&f).cloned().unwrap_or_else(|| crate::prompts::session_name(f)))
                     .unwrap_or_else(|| crate::prompts::USER_SENDER.into());
-                reg.deliver_untrusted(to, target, &crate::msgbus::notice(&m, &label));
+                reg.announce(to, target, &m, &label);
             }
             Ok(json!({"id": m.id}))
         }

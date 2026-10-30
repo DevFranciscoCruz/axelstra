@@ -23,6 +23,10 @@ pub struct Msg {
     pub thread: Option<String>,
     pub ts: u64,
     pub read: bool,
+    /// a notice about it was typed into the receiver (or the sender asked for none): it is never typed again, read or not.
+    /// Separate from `read`: an agent that reads with `axelstra inbox --no-mark` leaves it unread but already announced.
+    #[serde(skip)]
+    pub announced: bool,
 }
 
 #[derive(Default)]
@@ -157,7 +161,18 @@ impl Bus {
         let id = self.next.fetch_add(1, Ordering::SeqCst) + 1;
         // an answer belongs to the conversation of the message it answers
         let thread = thread.or_else(|| reply_to.and_then(|r| self.get(r)).and_then(|o| o.thread));
-        let m = Msg { id, from, to, kind: kind.to_string(), text: text.to_string(), reply_to, thread, ts: now(), read: false };
+        let m = Msg {
+            id,
+            from,
+            to,
+            kind: kind.to_string(),
+            text: text.to_string(),
+            reply_to,
+            thread,
+            ts: now(),
+            read: false,
+            announced: false,
+        };
         self.inbox.lock_recover().entry(to).or_default().push(m.clone());
         match (kind, from) {
             ("escalate", Some(f)) => {
@@ -209,6 +224,32 @@ impl Bus {
                     m.read = true;
                 }
             }
+        }
+        out
+    }
+
+    /// Marks message `id` as announced. True only for the first call: the caller that gets true types the notice, so a
+    /// message is announced at most once whoever tries.
+    pub fn announce(&self, id: u64) -> bool {
+        let mut g = self.inbox.lock_recover();
+        match g.values_mut().flatten().find(|m| m.id == id) {
+            Some(m) if !m.announced => {
+                m.announced = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Unread messages of `session` that were never announced, oldest first, marked announced now (a woken agent is
+    /// told about these only, never about what it already saw).
+    pub fn take_unannounced(&self, session: u32) -> Vec<Msg> {
+        let mut g = self.inbox.lock_recover();
+        let Some(list) = g.get_mut(&session) else { return vec![] };
+        let mut out = vec![];
+        for m in list.iter_mut().filter(|m| !m.read && !m.announced) {
+            m.announced = true;
+            out.push(m.clone());
         }
         out
     }
@@ -301,8 +342,35 @@ mod tests {
             thread: None,
             ts: 0,
             read: false,
+            announced: false,
         };
         assert!(notice(&m, "s").contains("untrusted"));
+    }
+
+    /// Notices were typed again for messages the agent had already seen, because it read them with `--no-mark` and a
+    /// wake typed every unread one. A message is announced once; reading or not reading changes nothing.
+    #[test]
+    fn a_message_is_announced_at_most_once_read_or_not() {
+        let b = Bus::new();
+        let m1 = b.send(Some(2), 1, "message", "first", None, None);
+        assert!(b.announce(m1.id));
+        assert!(!b.announce(m1.id), "a second announcement is refused");
+        // read without marking: still unread, still announced
+        assert_eq!(b.inbox(1, false, false).len(), 1);
+        assert!(b.take_unannounced(1).is_empty(), "the backlog is not announced again");
+        let m2 = b.send(Some(2), 1, "message", "second", None, None);
+        let m3 = b.send(Some(3), 1, "ask", "third", None, None);
+        let fresh = b.take_unannounced(1);
+        assert_eq!(fresh.iter().map(|m| m.id).collect::<Vec<_>>(), vec![m2.id, m3.id]);
+        assert!(b.take_unannounced(1).is_empty());
+        assert!(!b.announce(m2.id));
+        assert_eq!(b.unread(1), 3, "announcing is not reading");
+        // a read message is not announced after the fact either
+        let m4 = b.send(None, 1, "message", "fourth", None, None);
+        b.inbox(1, false, true);
+        assert!(b.take_unannounced(1).is_empty());
+        assert!(b.announce(m4.id), "the live path may still announce what it just sent");
+        assert!(!b.announce(999));
     }
 
     #[test]

@@ -548,6 +548,14 @@ impl Registry {
         crate::msgbus::deliver(target, crate::msgbus::paste_with(text, !self.runs_in_bypass(id)));
     }
 
+    /// Types the one-line notice of message `m` into agent `id`, unless it was already announced: every message is
+    /// announced at most once, whether or not the agent then reads it (`axelstra inbox --no-mark` leaves it unread).
+    pub(super) fn announce(&self, id: u32, target: Arc<Session>, m: &crate::msgbus::Msg, from_label: &str) {
+        if self.bus.announce(m.id) {
+            self.deliver_untrusted(id, target, &crate::msgbus::notice(m, from_label));
+        }
+    }
+
     /// True while a session waiting to be restored (from the previous daemon run) belongs to this worktree.
     pub(super) fn worktree_pending(&self, path: &str) -> bool {
         let want = norm(path);
@@ -604,7 +612,7 @@ impl Registry {
         let m = self.bus.send(Some(id), pid, "notice", &text, None, None);
         let agent = self.metas.lock_recover().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
         if agent {
-            self.deliver_untrusted(pid, ps, &crate::msgbus::notice(&m, &format!("{label} ({})", crate::prompts::session_name(id))));
+            self.announce(pid, ps, &m, &format!("{label} ({})", crate::prompts::session_name(id)));
         }
     }
 
