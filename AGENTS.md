@@ -152,6 +152,14 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   restore so a restart keeps the roles. The sidebar shows an existing lead first with a star and its tasks indented; a
   worktree of plain agents looks normal and nothing flags a missing lead ("Iniciar main do worktree" is an optional action
   next to existing agents, `canStartLead` in `leadRole.ts`). Old worktrees that have a lead are unchanged.
+- **The main checkout never has tasks, it only dispatches them.** A project's own folder (or a folder below it, not under
+  `.axelstra-wt`) holds only the project's main session and terminals. `session.spawn` from a `role=agent` connection or
+  from the CLI (`axelstra agent`/`dispatch` send the additive `from: "cli"`; no PROTO bump) refuses there any agent that
+  is not the project main (a task, a lead, a second `main` while one runs) and any worker that is no terminal, with the
+  coded `session.main_no_tasks {project}` (the hint is `axelstra dispatch new <project> <name> "<request>"`; pure check
+  `notes::refused_in_main_checkout`). `axelstra dispatch send` to the main checkout (its path, the project, its branch)
+  refuses with the same code. The app is not refused by the daemon (it steers the user itself), so restored legacy
+  `Tarefa N` sessions of a main checkout still restore.
 - A lead started by `axelstra dispatch new/send --lead` (or by the heuristic) is ephemeral: when it calls `axelstra done` its
   session closes (a reaper in mode `exit` with `lead: true`, so it does not count against the worker limit) and the report
   goes to main and to the task file. Main only reads the report. A direct worker (the default) reports to the project main
@@ -203,7 +211,13 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   `projects::migrate_marks` runs once at daemon start, before the janitor: worktrees that exist then with neither mark
   become `manual`; later ones are marked at creation. A removal that stays pending (folder held) is retried by event:
   a session exit (`watch_exit`) and `sweep_soon` kick the janitor. Holders we cannot observe get a bounded exponential
-  backoff (`janitor::retry_delay`: 1, 2, 4... up to 30 min), never a fixed timer.
+  backoff (`janitor::retry_delay`: 1, 2, 4... up to 30 min), never a fixed timer. Integration with no ancestor counts (`cleanup::squash_merged`: `git cherry` has no `+` line, or merging the branch
+  would change nothing), for `ax/*` and `orch/*`; a partly cherry-picked branch stays. A removal left pending because the
+  folder is held is a janitor event `kind: "pending"`, once per episode (`janitor::pending_begin`/`pending_end`), with the
+  holder (`janitor::holder_of`: Linux `/proc` cwd/exe, Windows an executable inside the folder) as `janitor.pending {branch,
+  path, holder, pid}`, else the reason as `janitor.pending_busy {branch, path, detail}`. A worktree that stays (work not
+  integrated) loses only its regenerable build output (`target/`, `node_modules/`, ignored caches) once inactive for
+  `janitor.artifact_quiet_hours` or when the disk runs low: `artifacts.rs`, `disk.rs`, `server/disk.rs`, see `docs/DISK.md`.
 - **Orchestrator runs (Kanban, `orch.start`).** A run's worktrees are Axelstra's own, so the janitor cleans them like an
   agent's (`janitor::managed_branch`: `ax/*`, `orch/<run>` integration branch, `orch-task/<run>/<card>` task branches;
   `integrable_branch` = `ax/*` and `orch/*`, the ones `integrate_with`, the overview's "por integrar" and `merged_reason`
@@ -264,6 +278,16 @@ workspace.import, host.info, host.browse, stalled in session.list, stall_minutes
   agent screen, not a call), UI debounces. The timeline panel's own 20 s `withTimeout` is gone.
   Tests: `apiRobust.test.ts` (fake transport: reply after 90 s succeeds, connection closed fails at once, ceiling, cosmetic).
 - **Idle reads (`memo.rs`).** The slow polled reads (`worktree.overview/status`, `git.changes`, `dispatch.overlap_files`, `ports.list`, `gh.list`, `agent.worktree_usage`, `budget.status`, `project.list`) are cached per generation: events (`broadcast_event` names, RefWatch, fs watch, any method outside `may_change_answers`) bump it, identical in-flight calls join one run (single-flight), git work goes through a 3-permit pool (never call `known_worktree` while holding a permit), and at High/Critical the cached value is served stale. `max_age` floors exist only where no event exists. App side: `createLive` has `debounceMs`, `soft` (cheap signature) and skips events while hidden; `session.changed` must not drive loaders by itself. Idle check: `node tools/idle-load.mjs`.
+- **Git answers by fingerprint (`core::gitstamp`).** A memo bump (any agent call outside `may_change_answers`) must not
+  re-run git in every worktree: the pieces under those reads are kept in `gitstamp::Stamped` tables while a fingerprint
+  read from the repo's files holds (no process, no clock). `gitstamp::refs` hashes the HEADs, loose refs, `packed-refs`,
+  `reftable/tables.list` and `worktrees/*/{HEAD,gitdir,locked}`: `git::worktree_list`, `is_repo`, `default_branch`, the
+  janitor's git-only merge verdict (`janitor::git_verdict`; GitHub is still asked by the sweep), `integrate::ahead_of` and
+  the committed half of the overlaps. `gitstamp::config` keeps `git::identity`. What reads the working tree
+  (`wtstatus::status_kept` for the overview and `worktree.status`, the uncommitted half of the overlaps) uses
+  `memo::worktree_stamp` (refs + index + the app's fs watch scope of that worktree) plus `WORKTREE_MAX_AGE`, since edits in a
+  checkout nobody watches raise no event. Decisions that delete things call the uncached `wtstatus::status`. The stamp is
+  read BEFORE git runs; no fingerprint (no `.git` of its own, a read error, more than 20k loose refs) means git as before.
 - **Sleeps kept on purpose.** The rest are bounded backoffs on external OS resources: AV/indexer rename locks (`fsops.rs`,
   `store.rs`), the git handle of a killed process (`git.rs`), cleanup in `sources.rs`, Windows `PeekRead` 1-10 ms (`client.rs`; the
   sync pipe has no readiness event), synthetic input settle (`computer.rs`), the runner trust menu (`runner.rs`), the docker events
@@ -358,8 +382,11 @@ User guide: `docs/MEMORY.md`. PROTO 31.
   allocations and special pools have no tag), `partial: true` always. Read only when the breakdown is built and when `governor.kernel_pool_high`
   is raised (no timer). The notice then names the biggest tag with one code per owner (`governor.kernel_pool_{filter,tokens,files,watchers,ntfs,mm,io,etw,tag}`);
   no tags (Linux, refused): the old generic code. Linux keeps `/proc/meminfo` Slab/SReclaimable/SUnreclaim only (slabinfo needs root).
-  `breakdown.own` = `{spawns, uptime_secs, spawns_per_min (null under 60 s), watches}`: children started through `core::proc::hidden`
-  (`spawn_stats`) and directories watched by `watcher.rs` (`core::proc::WatchTally`, dropped with the watcher thread; the few fixed
+  `breakdown.own` = `{spawns, uptime_secs, spawns_per_min (null under 60 s), watches, spawns_last_min, sites}`: children started through `core::proc::hidden`
+  (`spawn_stats`); `sites` = the 16 busiest `{site, command, total, last_min}` (`core::proc::site_stats`), where `site` is what the
+  thread was doing (`proc::site(name)` guard: `dispatch` names every call by its method, and the janitor, PR watcher, reapers, session
+  monitor, stall watchdog, hibernate policy and exit watchers name theirs; anything else is `other`) and `command` the program plus its
+  git/gh/docker subcommand; `last_min` counts the last whole minute, `spawns_last_min` sums them (null under 60 s); and directories watched by `watcher.rs` (`core::proc::WatchTally`, dropped with the watcher thread; the few fixed
   watchers of kanban, PR refs, usage and orchestrator runs are not counted). Shown in `axelstra mem`, the memory panel and `debug.load`.
 - **Kernel alerts.** No new timer: `Governor::set_tick` runs `server/governor.rs::cause_tick` on each wake of the governor thread (OS event or its
   computed deadline), which reads only the kernel pools and the machine counters (`cause::Monitor::evaluate`). Pool alert (`KernelWatch`): the first

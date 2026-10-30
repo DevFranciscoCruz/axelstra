@@ -39,3 +39,18 @@ export const worktreeSignals = <
   const awaiting = running.some((s) => s.meta?.kind === "agent" && !!s.awaiting);
   return { live: running.length, waiting, working, stalled, awaiting };
 };
+
+/** The worktree's own "main": its lead, or the project's main session in the main checkout (`meta.main`, or the row the
+ *  daemon named "main"). Never a worker. */
+export const isMainSeat = (s: Pick<SessionInfo, "meta" | "label">) =>
+  s.meta?.worker !== true && (isLead(s) || s.meta?.main === true || s.label === "main");
+
+/** The session a freshly selected worktree opens on: its main (running first), else a terminal (running first). Never a
+ *  plain agent or worker ("Tarefa N"): with only tasks the seat stays empty and the user picks one. */
+export const autoSeatOf = <T extends Pick<SessionInfo, "meta" | "label" | "running">>(tabs: T[]): T | undefined => {
+  const live = (list: T[]) => list.find((s) => s.running) ?? list[0];
+  return (
+    live(tabs.filter((s) => s.meta?.kind === "agent" && isMainSeat(s))) ??
+    live(tabs.filter((s) => s.meta?.kind !== "agent"))
+  );
+};

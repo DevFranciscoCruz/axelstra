@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for the Windows release (slug: the repository variable
+  SIGNPATH_ARTIFACT_CONFIGURATION_SLUG, default `windows`). Paste this file into the SignPath project
+  (Artifact configurations > Edit); SignPath reads it from there, not from the repository.
+
+  The release workflow sends two signing requests with this one configuration, because SignPath cannot open an
+  NSIS installer (it has no NSIS container element) and the programs must be signed before NSIS packs them:
+    1. the zip of sign-in/binaries: axelstra-app.exe and the sidecar axelstra-x86_64-pc-windows-msvc.exe
+       (installed as axelstra.exe);
+    2. the zip of the installer: Axelstra_<version>_x64-setup.exe, built from the binaries signed in step 1.
+  Every entry is therefore optional (min-matches="0"); the workflow checks afterwards that all three files,
+  and the two programs read back out of the installer, carry a valid signature.
+
+  SignPath Foundation requires file metadata restrictions: every signed file must have the product name
+  `Axelstra` and the same product version, the `version` parameter, which the workflow passes from
+  app/src-tauri/tauri.conf.json (crates/cli/build.rs, tauri.conf.json and the NSIS template set them). The
+  default 0.0.0 matches no real build, so a request without the parameter fails instead of signing.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" default-value="0.0.0" />
+  </parameters>
+  <zip-file>
+    <pe-file path="axelstra-app.exe" min-matches="0" product-name="Axelstra" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="axelstra-x86_64-pc-windows-msvc.exe" min-matches="0" product-name="Axelstra" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="Axelstra_${version}_x64-setup.exe" min-matches="0" product-name="Axelstra" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

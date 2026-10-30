@@ -20,23 +20,37 @@ fn norm(p: &str) -> String {
     axelstra_core::paths::norm(p).to_lowercase()
 }
 
-/// Files a worktree changed: committed since the default branch plus uncommitted.
-fn changed_files(wt: &Path, base: &str) -> BTreeSet<String> {
-    let mut out = BTreeSet::new();
-    if let Ok(o) = git::run(wt, &["diff", "--name-only", &format!("{base}...HEAD")]) {
+fn listed(wt: &Path, args: &[&str], out: &mut BTreeSet<String>) {
+    if let Ok(o) = git::run(wt, args) {
         if o.ok {
             out.extend(o.stdout.lines().map(|l| l.trim().replace('\\', "/")).filter(|l| !l.is_empty()));
         }
     }
+}
+
+/// The two halves of `changed_files`, each kept while what it reads holds (see `gitstamp`, `memo::worktree_stamp`).
+static COMMITTED: axelstra_core::gitstamp::Stamped<BTreeSet<String>> = axelstra_core::gitstamp::Stamped::new();
+static UNCOMMITTED: axelstra_core::gitstamp::Stamped<BTreeSet<String>> = axelstra_core::gitstamp::Stamped::new();
+
+/// Files a worktree changed: committed since the default branch plus uncommitted.
+fn changed_files(wt: &Path, base: &str) -> BTreeSet<String> {
+    let key = axelstra_core::paths::norm(&wt.to_string_lossy());
+    // committed: commits only, so the repo's refs say when to look again
+    let mut out = COMMITTED.get(&format!("{key}|{base}"), axelstra_core::gitstamp::refs(wt), None, || {
+        let mut s = BTreeSet::new();
+        listed(wt, &["diff", "--name-only", &format!("{base}...HEAD")], &mut s);
+        s
+    });
     // uncommitted: tracked edits (staged or not, renames included) and new files. `git::run` trims the output,
-    // which would eat the leading space of the first `status --porcelain` line, so the two listings are asked for apart
-    for args in [&["diff", "--name-only", "HEAD"][..], &["ls-files", "--others", "--exclude-standard"][..]] {
-        if let Ok(o) = git::run(wt, args) {
-            if o.ok {
-                out.extend(o.stdout.lines().map(|l| l.trim().replace('\\', "/")).filter(|l| !l.is_empty()));
-            }
-        }
-    }
+    // which would eat the leading space of the first `status --porcelain` line, so the two listings are asked for apart.
+    // Edits raise no event outside the watched worktree: also looked at again after `WORKTREE_MAX_AGE`
+    let stamp = crate::memo::worktree_stamp(&wt.to_string_lossy());
+    out.extend(UNCOMMITTED.get(&key, stamp, Some(crate::memo::WORKTREE_MAX_AGE), || {
+        let mut s = BTreeSet::new();
+        listed(wt, &["diff", "--name-only", "HEAD"], &mut s);
+        listed(wt, &["ls-files", "--others", "--exclude-standard"], &mut s);
+        s
+    }));
     out
 }
 
@@ -107,6 +121,7 @@ fn snapshot(store: &Path, dispatch_json: &Path) -> Vec<(String, BTreeSet<String>
 /// Drops the snapshot: a rebase just changed what the worktrees touch.
 pub fn forget() {
     *CACHE.lock_recover() = None;
+    UNCOMMITTED.clear();
 }
 
 /// `{worktree path: [other worktree paths touching the same files]}`; worktrees without overlaps are absent.

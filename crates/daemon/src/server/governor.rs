@@ -53,6 +53,8 @@ pub(super) fn spawn(reg: &Arc<Registry>) {
 /// One governor wake: reads the kernel pools and the machine counters (cheap, no process table) and raises at most one
 /// notice per episode. The process table (handle counts) is read only when a notice is raised.
 pub(super) fn cause_tick(reg: &Registry) {
+    // free disk space rides on the same wake (a few syscalls); a low volume starts a reclaim in a thread
+    super::disk::tick(reg);
     let cfg = reg.governor.config();
     if !cfg.enabled {
         return;
@@ -227,7 +229,7 @@ fn breakdown(reg: &Registry, info: &crate::governor::MemInfo) -> Value {
         baseline_mb: baseline,
         kernel_high,
         pool_tags: src.pool_tags(),
-        own: cause::own_json(spawns, secs, axelstra_core::proc::watch_count()),
+        own: cause::own_json(spawns, secs, axelstra_core::proc::watch_count(), &axelstra_core::proc::site_stats()),
         system: cause::system_json(counters.as_ref(), rates.as_ref()),
         top,
     })

@@ -312,10 +312,22 @@ pub fn breakdown(i: &Inputs) -> Value {
 
 /// What this daemon itself adds to the kernel pools: children started (each takes a security token and file objects) and
 /// directories watched (each is a change-notification handle). `spawns`/`secs` come from `core::proc::spawn_stats`.
-pub fn own_json(spawns: u64, secs: u64, watches: u64) -> Value {
+/// `sites` (`core::proc::site_stats`) says who started them: the method or background loop and the command, with the
+/// count of the last whole minute (`spawns_last_min` is their sum: what "now" costs, not the average since the start).
+pub fn own_json(spawns: u64, secs: u64, watches: u64, sites: &[axelstra_core::proc::SiteStat]) -> Value {
     let per_min = (secs >= 60).then(|| round1(spawns as f64 * 60.0 / secs as f64));
-    json!({"spawns": spawns, "uptime_secs": secs, "spawns_per_min": per_min, "watches": watches})
+    let last_min: u64 = sites.iter().map(|s| s.last_min).sum();
+    let top: Vec<Value> = sites
+        .iter()
+        .take(OWN_SITES)
+        .map(|s| json!({"site": s.site, "command": s.command, "total": s.total, "last_min": s.last_min}))
+        .collect();
+    json!({"spawns": spawns, "uptime_secs": secs, "spawns_per_min": per_min, "watches": watches,
+           "spawns_last_min": (secs >= 60).then_some(last_min), "sites": top})
 }
+
+/// Rows of `breakdown.own.sites` (the busiest; the sum in `spawns_last_min` counts all of them).
+const OWN_SITES: usize = 16;
 
 fn round1(x: f64) -> f64 {
     (x * 10.0).round() / 10.0
@@ -1170,8 +1182,19 @@ pgmajfault 77
 
     #[test]
     fn own_rate_needs_a_minute_of_uptime() {
-        assert!(own_json(30, 59, 4)["spawns_per_min"].is_null());
-        let o = own_json(120, 120, 7);
+        assert!(own_json(30, 59, 4, &[])["spawns_per_min"].is_null());
+        let o = own_json(120, 120, 7, &[]);
         assert_eq!((o["spawns_per_min"].as_f64(), o["watches"].as_u64()), (Some(60.0), Some(7)));
+    }
+
+    #[test]
+    fn own_lists_the_sites_and_sums_their_last_minute() {
+        use axelstra_core::proc::SiteStat;
+        let row = |site: &str, last_min| SiteStat { site: site.into(), command: "git status".into(), total: 10, last_min };
+        let o = own_json(20, 120, 0, &[row("worktree.status", 4), row("janitor", 1)]);
+        assert_eq!(o["spawns_last_min"].as_u64(), Some(5));
+        assert_eq!(o["sites"][0]["site"], "worktree.status");
+        assert_eq!(o["sites"][0]["command"], "git status");
+        assert!(own_json(20, 30, 0, &[])["spawns_last_min"].is_null());
     }
 }

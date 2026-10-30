@@ -63,6 +63,15 @@ pub fn status_cached(worktree: &str) -> Status {
     st
 }
 
+/// `status` for the readers the app polls (overview, `worktree.status`): kept while the checkout's refs, index and file
+/// watch stay put (`memo::worktree_stamp`), and at most `WORKTREE_MAX_AGE` (edits in a checkout nobody watches raise no
+/// event). Decisions that delete things call `status`.
+pub fn status_kept(worktree: &str) -> Status {
+    static KEPT: axelstra_core::gitstamp::Stamped<Status> = axelstra_core::gitstamp::Stamped::new();
+    let stamp = crate::memo::worktree_stamp(worktree);
+    KEPT.get(&axelstra_core::paths::norm(worktree), stamp, Some(crate::memo::WORKTREE_MAX_AGE), || status(worktree))
+}
+
 pub fn status(worktree: &str) -> Status {
     match git::run(Path::new(worktree), &["status", "--porcelain=v2", "--branch"]) {
         Ok(o) if o.ok => parse(worktree, &o.stdout),

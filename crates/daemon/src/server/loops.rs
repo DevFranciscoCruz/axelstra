@@ -253,7 +253,10 @@ fn add_task(reg: &Arc<Registry>, task: Task) {
             st.running = true;
             reg.reapers.threads_started.fetch_add(1, Ordering::SeqCst);
             let r = reg.clone();
-            std::thread::spawn(move || run_reapers(r));
+            std::thread::spawn(move || {
+                let _site = axelstra_core::proc::site("reapers");
+                run_reapers(r)
+            });
         }
     }
     // a thread that is already running looks at the new task now
@@ -611,6 +614,7 @@ pub(super) fn queue_janitor_retry(reg: &Arc<Registry>, attempts: u32) {
 pub(super) fn spawn_janitor(reg: Arc<Registry>) {
     let gap = reg.timing.gap;
     std::thread::spawn(move || {
+        let _site = axelstra_core::proc::site("janitor");
         let mut seen = 0;
         let mut last: Option<Instant> = None;
         let mut attempts = 0u32;
@@ -673,6 +677,18 @@ pub(super) fn spawn_janitor(reg: Arc<Registry>) {
             } else {
                 attempts = 0;
             }
+            // the build artifacts of worktrees nobody used for `janitor.artifact_quiet_hours` (`server/disk.rs`); it also
+            // sets the next artifact deadline that `next_janitor_wake` sleeps until
+            if reg.with_settings(crate::disk::Config::from_settings).enabled {
+                let art = super::disk::pass(&reg, None, false, false, true);
+                if art["freed_mb"].as_u64().is_some_and(|n| n > 0) {
+                    eprintln!("janitor: build artifacts freed {} MB", art["freed_mb"]);
+                }
+            } else {
+                *reg.disk.due.lock_recover() = None;
+            }
+            // a low volume left after both: reclaim further down the list (same rules), or say so
+            super::disk::ensure(&reg, true);
             reg.announce_events();
         }
     });
@@ -686,6 +702,7 @@ pub(super) fn spawn_janitor(reg: Arc<Registry>) {
 pub(super) fn spawn_session_monitor(reg: Arc<Registry>) {
     use axelstra_core::pty::QUIET_MS;
     std::thread::spawn(move || {
+        let _site = axelstra_core::proc::site("session_monitor");
         let mut seen = reg.pulse.now();
         // (id, running, quiet, escalated, unread, finished, awaiting)
         let mut last: Vec<(u32, bool, bool, bool, usize, bool, bool)> = vec![];
@@ -865,6 +882,7 @@ pub(super) fn stall_facts(
 /// (`stall::next_check_ms`, `stall::next_human_ms`).
 pub(super) fn spawn_stall_watchdog(reg: Arc<Registry>) {
     std::thread::spawn(move || {
+        let _site = axelstra_core::proc::site("stall_watchdog");
         let mut seen = reg.pulse.now();
         loop {
             let next = stall_tick(&reg);

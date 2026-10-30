@@ -3,7 +3,8 @@ import { AgentHit, agentSearch, geminiPathVariants, hitResume, launchDefaultAgen
 import { moveIndex } from "./a11y";
 import { ago } from "./time";
 import { Modal } from "./Modal";
-import { findWorktree, projects, projectTerse, refreshSessions, setError, setShowAgentSearch, activate, selectWorktree, navStamp } from "./store";
+import { findWorktree, projects, projectTerse, refreshSessions, setError, setShowAgentSearch, selectWorktree, navStamp, openIfStill, sessionsOf, setCreatingWorktree, toast } from "./store";
+import { allowManualAgent } from "./sidebar/mainRules";
 import { Input } from "./ui";
 import { P } from "./strings.panels";
 
@@ -59,12 +60,19 @@ export function AgentSearch() {
     const t = target(h);
     if (!t) return;
     setShowAgentSearch(false);
+    // resuming into the main checkout beside its running main would make a task there: offer a worktree instead
+    const deps = {
+      notify: (text: string, action: { label: string; run: () => void }) => toast({ text, kind: "info", action }),
+      newWorktree: (project: string) => setCreatingWorktree(project),
+    };
+    if (!allowManualAgent(t, sessionsOf(t.wt.path), deps)) return;
     selectWorktree(t.wt.path);
     const stamp = navStamp();
     try {
       const id = await launchDefaultAgent(t.project.id, t.wt.path, h.agent, h.agent, { resume: hitResume(h) ?? undefined }, undefined, projectTerse(t.project.id));
       await refreshSessions();
-      if (stamp === navStamp()) activate(id, "user");
+      // the resumed agent is what the user picked: open exactly it, unless they went elsewhere meanwhile
+      openIfStill(stamp, t.wt.path, id);
     } catch (e) {
       setError(String(e));
     }

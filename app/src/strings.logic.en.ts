@@ -69,7 +69,6 @@ export const enL: Widen<typeof ptL> = {
     back: "Back to the app",
     search: "Search settings",
     navLabel: "Settings sections",
-    sections: "Sections",
     noMatch: "No settings found.",
     groups: {
       general: "General",

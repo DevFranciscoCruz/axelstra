@@ -189,6 +189,11 @@ export type BuildSettings = {
 };
 /** `hibernate` of settings.json: put idle agents to sleep by themselves, after this many quiet minutes (1 to 1440) */
 export type HibernateSettings = { enabled: boolean; idle_minutes: number };
+/** `disk` of settings.json: low = free at or below `min_free_gb` or `min_free_pct` % of the volume; builds of inactive
+ *  worktrees are reclaimed until free is above both lines plus `margin_gb` */
+export type DiskSettings = { enabled: boolean; min_free_gb: number; min_free_pct: number; margin_gb: number };
+/** `janitor` of settings.json: the builds of a worktree quiet this long (1 to 720 hours) are reclaimed */
+export type JanitorSettings = { artifact_quiet_hours: number };
 export type Settings = {
   terse: Terse;
   rules: string | null;
@@ -208,6 +213,9 @@ export type Settings = {
   ui?: Record<string, string>;
   /** token limits per day / week; absent on a daemon from before budgets */
   budgets?: Budgets;
+  /** absent on a daemon from before the disk settings */
+  disk?: DiskSettings;
+  janitor?: JanitorSettings;
 };
 export type SettingsPatch = {
   terse?: Terse;
@@ -220,6 +228,8 @@ export type SettingsPatch = {
   budgets?: Budgets;
   build?: BuildSettings;
   hibernate?: HibernateSettings;
+  disk?: DiskSettings;
+  janitor?: JanitorSettings;
 };
 /** `terse` asks for the rules of that level (a project's own choice) instead of the saved one */
 export const getSettings = (terse?: Terse) => call<Settings>("settings.get", terse ? { terse } : {});
@@ -625,7 +635,8 @@ export type DaemonEvent =
   | "session.hibernated"
   | "session.woke"
   | "session.wake_failed"
-  | "session.input_dropped";
+  | "session.input_dropped"
+  | "disk.changed";
 /** What an event carries besides its name (`kanban.changed {project}`, `orch.changed {run, project}`, `clone.changed {id}`...). */
 export type DaemonEventData = {
   event?: string;
@@ -1198,6 +1209,44 @@ export type SweepResult = { swept: SweepItem[]; closed_sessions?: number; closed
 export const worktreeSweepFull = () => call<SweepResult>("worktree.sweep", {});
 export const worktreeSweep = () => worktreeSweepFull().then((r) => r.swept);
 
+// ---- disk (daemon: disk.*, worktree.sweep {artifacts}) ----
+/** a volume holding `.axelstra-wt` folders; `low` = at or below the line (`min_free_mb`) */
+export type DiskVolume = { root: string; free_mb: number; total_mb: number; low: boolean; min_free_mb: number };
+/** one worktree of `disk.status`: sizes in MB, `active` = a session, a build or a flow uses it (never reclaimed) */
+export type DiskWorktree = {
+  project: string;
+  path: string;
+  branch: string;
+  total_mb: number;
+  target_mb: number;
+  node_modules_mb: number;
+  cache_mb: number;
+  /** ms since the epoch; null when nothing tells (no session left it since the daemon started, no git file) */
+  last_used_ms: number | null;
+  integrated: boolean;
+  ahead: number;
+  sessions: number[];
+  active: boolean;
+  reclaimable_mb: number;
+};
+export type DiskStatus = { volumes: DiskVolume[]; worktrees: DiskWorktree[]; measured_ms: number | null };
+/** Sizes of the worktrees and free space of their volumes; the daemon keeps the sizes until something changes (`disk.changed`),
+ *  `refresh` measures again. An older daemon has none. */
+export const diskStatus = (refresh = false) =>
+  callBg<DiskStatus>("disk.status", refresh ? { refresh } : {}).catch((e) =>
+    isUnknownMethod(e) ? null : Promise.reject(e),
+  );
+export type ArtifactDir = { path: string; kind: "target" | "node_modules" | "cache"; mb: number };
+export type ArtifactSweep = {
+  artifacts: { path: string; dirs: ArtifactDir[]; freed_mb: number }[];
+  skipped: { path: string; code: string | null; params?: Record<string, unknown>; text?: string }[];
+  freed_mb: number;
+};
+/** Removes the build artifacts (target, node_modules, ignored caches) of inactive worktrees, never the worktrees: one
+ *  (`path`) or all; `force` skips only the quiet-hours rule; `dry_run` measures what would go. */
+export const sweepArtifacts = (o: { path?: string; force?: boolean; dry_run?: boolean } = {}) =>
+  call<ArtifactSweep>("worktree.sweep", { artifacts: true, ...o });
+
 /** `project` is Gemini's project hash (its logs keep no folder); `geminiPathVariants` + sha-256 map it back to a worktree. */
 export type AgentHit = {
   agent: "claude" | "codex" | "gemini";
@@ -1564,9 +1613,12 @@ export type JanitorEvent = {
   into: string;
   why: string;
   at: number;
-  /** absent = "removed" (an older daemon) */
-  kind?: "removed" | "integrated" | "empty" | "attention";
+  /** absent = "removed" (an older daemon); `artifacts`: builds reclaimed (`freed_mb`); `pending`: a removal the folder held back */
+  kind?: "removed" | "integrated" | "empty" | "attention" | "artifacts" | "pending";
   how?: "ff" | "merge";
+  freed_mb?: number;
+  /** the process holding the folder of a `pending` removal, when known */
+  holder?: { name?: string; pid?: number } | string | null;
   /** labels of the sessions closed so the folder could be removed */
   closed?: string[];
   pushed?: boolean | null;

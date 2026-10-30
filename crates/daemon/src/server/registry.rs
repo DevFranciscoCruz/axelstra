@@ -103,6 +103,8 @@ pub(super) struct Registry {
     pub(super) governor: Arc<crate::governor::Governor>,
     /// what the governor froze (and the builds under `axelstra lock` it may freeze): see `server/pause.rs`
     pub(super) pauser: pause::Pauser,
+    /// build artifacts and free disk space (`server/disk.rs`): when sessions left worktrees, the artifact deadline
+    pub(super) disk: super::disk::DiskState,
 }
 
 #[derive(Default)]
@@ -492,6 +494,7 @@ impl Registry {
             spawnq: Default::default(),
             governor,
             pauser,
+            disk: Default::default(),
         }
     }
 
@@ -643,6 +646,7 @@ impl Registry {
     /// Notes that a session left this worktree just now.
     pub(super) fn note_activity(&self, path: &str) {
         self.activity.lock_recover().insert(norm(path), Instant::now());
+        self.disk.note_left(path);
     }
 
     /// For a worktree the user made by hand: a session of any kind is open there, or one was a moment ago (or this
@@ -655,12 +659,15 @@ impl Registry {
         self.activity.lock_recover().get(&norm(path)).is_some_and(|at| at.elapsed() < quiet)
     }
 
-    /// When the janitor must look again without any event (see `janitor_wake`). Forgets activity notes that no longer
-    /// matter.
+    /// When the janitor must look again without any event (see `janitor_wake`), or for the artifact pass. Forgets
+    /// activity notes that no longer matter.
     pub(super) fn next_janitor_wake(&self) -> Option<Duration> {
         let mut activity = self.activity.lock_recover();
         activity.retain(|_, at| at.elapsed() < self.timing.quiet);
-        janitor_wake(&self.timing, self.started.elapsed(), activity.values().map(Instant::elapsed), crate::janitor::awaiting_remote())
+        let own =
+            janitor_wake(&self.timing, self.started.elapsed(), activity.values().map(Instant::elapsed), crate::janitor::awaiting_remote());
+        // the moment a worktree with build artifacts has been quiet long enough (`server/disk.rs`)
+        super::disk::earliest(own, self.disk.due_in())
     }
 
     /// Closes every session of this worktree (agents, shells, whatever they started: the whole process tree dies) and
@@ -896,6 +903,7 @@ impl Registry {
 pub(super) fn watch_exit(reg: &Arc<Registry>, id: u32, s: Arc<Session>) {
     let reg = Arc::downgrade(reg);
     std::thread::spawn(move || {
+        let _site = axelstra_core::proc::site("watch_exit");
         s.wait_exit();
         s.kill();
         // the last output may still be on its way through the pipe: then the stream ends, which is what tells a

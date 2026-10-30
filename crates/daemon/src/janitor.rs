@@ -74,29 +74,58 @@ fn gh_merged_known(repo: &Path, branch: &str, tip: &str) -> Option<u64> {
     m.as_ref()?.get(&gh_key(repo, branch)).filter(|(t, _)| t == tip).map(|(_, n)| *n)
 }
 
-fn merged_reason_with(repo: &Path, branch: &str, default: &str, others: &[String], ask_gh: bool) -> Option<String> {
+/// What git alone says about a branch (no GitHub): it reads only commits and refs, so it is kept while the repo's
+/// ref fingerprint holds (`gitstamp::refs`); the sweep and the overview then ask git again only after a ref moved.
+#[derive(Clone)]
+enum GitVerdict {
+    /// no commit of its own (or git could not tell its tip): never "merged"
+    NotWork,
+    Merged(String),
+    /// work that git does not find anywhere else, at this tip
+    Open(String),
+}
+
+static VERDICTS: axelstra_core::gitstamp::Stamped<GitVerdict> = axelstra_core::gitstamp::Stamped::new();
+
+fn git_verdict(repo: &Path, branch: &str, default: &str, others: &[String]) -> GitVerdict {
+    let key = format!("{}|{branch}|{default}|{}", repo.to_string_lossy(), others.join("|"));
+    VERDICTS.get(&key, axelstra_core::gitstamp::refs(repo), None, || git_verdict_uncached(repo, branch, default, others))
+}
+
+fn git_verdict_uncached(repo: &Path, branch: &str, default: &str, others: &[String]) -> GitVerdict {
     // a branch nobody committed to is "inside" the default branch too, and must not be mistaken for merged work
     if !has_own_commits(repo, branch) {
-        return None;
+        return GitVerdict::NotWork;
     }
-    let tip = git::run(repo, &["rev-parse", branch]).ok().filter(|o| o.ok).map(|o| o.stdout.trim().to_string())?;
+    let Some(tip) = git::run(repo, &["rev-parse", branch]).ok().filter(|o| o.ok).map(|o| o.stdout.trim().to_string()) else {
+        return GitVerdict::NotWork;
+    };
     let upstream = format!("origin/{default}");
     if git::run(repo, &["merge-base", "--is-ancestor", branch, &upstream]).map(|o| o.ok).unwrap_or(false) {
-        return Some(format!("already in {upstream}"));
+        return GitVerdict::Merged(format!("already in {upstream}"));
     }
     // merged into the local default branch but not pushed yet: the commits stay reachable from it, so removing the branch loses nothing
     if git::run(repo, &["merge-base", "--is-ancestor", branch, default]).map(|o| o.ok).unwrap_or(false) {
-        return Some(format!("already in local {default}"));
+        return GitVerdict::Merged(format!("already in local {default}"));
     }
     for other in others.iter().filter(|o| o.as_str() != branch) {
         if git::run(repo, &["merge-base", "--is-ancestor", branch, other]).map(|o| o.ok).unwrap_or(false) {
-            return Some(format!("already in {other}"));
+            return GitVerdict::Merged(format!("already in {other}"));
         }
     }
     // squash and rebase merges leave no ancestor: every commit has an equivalent in the default branch
     if crate::cleanup::squash_merged(repo, branch, &upstream) || crate::cleanup::squash_merged(repo, branch, default) {
-        return Some(format!("its changes are already in {default}"));
+        return GitVerdict::Merged(format!("its changes are already in {default}"));
     }
+    GitVerdict::Open(tip)
+}
+
+fn merged_reason_with(repo: &Path, branch: &str, default: &str, others: &[String], ask_gh: bool) -> Option<String> {
+    let tip = match git_verdict(repo, branch, default, others) {
+        GitVerdict::NotWork => return None,
+        GitVerdict::Merged(why) => return Some(why),
+        GitVerdict::Open(tip) => tip,
+    };
     if !ask_gh {
         return gh_merged_known(repo, branch, &tip).map(|n| format!("PR #{n} merged"));
     }
@@ -234,6 +263,7 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>, waitin
             // an agent works here again: whatever kept the last report from being integrated is moot
             if !w.is_main {
                 integrate::clear_attention(&w.path);
+                pending_end(&w.path);
             }
             continue;
         }
@@ -313,7 +343,7 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>, waitin
             // the user's button
             let old = auto && (reported.is_some() || integrate::branch_age_secs(repo, &branch).is_some_and(|a| a >= EMPTY_MIN_AGE_SECS));
             if old && integrate::ahead_of(repo, &branch, &default) == 0 && !has_own_commits(repo, &branch) {
-                let (removed, closed) = if dry { (false, vec![]) } else { remove_closing(env, p, &w.path) };
+                let (removed, closed) = if dry { (false, vec![]) } else { remove_closing(env, p, &w.path, &branch) };
                 if removed {
                     gone.push(branch.clone());
                     push_event(
@@ -324,7 +354,7 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>, waitin
             }
             continue;
         };
-        let (removed, closed) = if dry { (false, vec![]) } else { remove_closing(env, p, &w.path) };
+        let (removed, closed) = if dry { (false, vec![]) } else { remove_closing(env, p, &w.path, &branch) };
         let into = integrated_into(&why, &default);
         if removed {
             gone.push(branch.clone());
@@ -338,13 +368,135 @@ fn sweep_project(p: &Project, env: &Env, dry: bool, out: &mut Vec<Value>, waitin
 /// Closes the sessions still in the worktree (they hold its folder open on Windows), then removes it all-or-nothing:
 /// when the folder is still held nothing was removed, git and the branch are untouched and the next sweep (kicked when
 /// the holder exits, and again shortly after a failure) tries again. Returns whether it went, and the sessions closed.
-fn remove_closing(env: &Env, p: &Project, path: &str) -> (bool, Vec<String>) {
+/// A removal that failed because the folder is held is reported once (`pending_event`); one that went ends the episode.
+fn remove_closing(env: &Env, p: &Project, path: &str, branch: &str) -> (bool, Vec<String>) {
     let closed = (env.close)(path);
     // a session closed on the way may have left something behind: then the work is not finished after all
     if !closed.is_empty() && git::has_changes(Path::new(path)).unwrap_or(true) {
         return (false, closed);
     }
-    (projects::worktree_remove_strict(p, path).is_ok(), closed)
+    match projects::worktree_remove_strict(p, path) {
+        Ok(()) => {
+            pending_end(path);
+            (true, closed)
+        }
+        Err(e) => {
+            if pending_begin(path) {
+                push_event(pending_event(p, path, branch, &e, holder_of(Path::new(path))));
+            }
+            (false, closed)
+        }
+    }
+}
+
+/// Worktrees whose removal stayed pending and that were already reported: the retries of one episode say nothing new.
+static PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// True when `path` starts a new pending episode (it was not reported yet).
+fn pending_begin(path: &str) -> bool {
+    let k = axelstra_core::paths::norm(path);
+    let mut s = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    if s.contains(&k) {
+        return false;
+    }
+    s.push(k);
+    true
+}
+
+/// The episode of `path` is over (it was removed, or a session works in it again).
+fn pending_end(path: &str) {
+    let k = axelstra_core::paths::norm(path);
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).retain(|p| *p != k);
+}
+
+/// The janitor event of an integrated worktree whose folder could not be removed: `janitor.pending` names the process that
+/// holds it when one is found, else `janitor.pending_busy` carries the reason of the failed removal (`reason` its code).
+pub(crate) fn pending_event(p: &Project, path: &str, branch: &str, err: &anyhow::Error, holder: Option<(String, u32)>) -> Value {
+    let short = branch.trim_start_matches("ax/").to_string();
+    let reason = axelstra_core::msg::find(err).map(|c| c.code.clone());
+    let c = match &holder {
+        Some((name, pid)) => axelstra_core::msg::Coded::new(
+            "janitor.pending",
+            format!("worktree {short} is integrated but {name} (pid {pid}) holds its folder {path}; it goes when that process exits"),
+            &[("branch", short.clone()), ("path", path.to_string()), ("holder", name.clone()), ("pid", pid.to_string())],
+        ),
+        None => {
+            let detail = axelstra_core::msg::find(err).map(|c| c.text.clone()).unwrap_or_else(|| format!("{err:#}"));
+            axelstra_core::msg::Coded::new(
+                "janitor.pending_busy",
+                format!("worktree {short} is integrated but its folder {path} could not be removed yet: {detail}"),
+                &[("branch", short.clone()), ("path", path.to_string()), ("detail", detail.clone())],
+            )
+        }
+    };
+    let holder = holder.map(|(name, pid)| json!({"name": name, "pid": pid}));
+    json!({"kind": "pending", "project": p.id, "path": path, "branch": branch, "holder": holder, "reason": reason,
+           "code": c.code, "params": c.params_json(), "text": c.text, "at": now_ms()})
+}
+
+/// A process that keeps `dir` from being removed, when one can be found cheaply: on Linux one whose working directory or
+/// executable is inside it (`/proc`), on Windows one whose executable is inside it (a test binary or a dev server built
+/// there). A handle opened by another process (an editor, an indexer) is not found: then the reason is all there is.
+pub fn holder_of(dir: &Path) -> Option<(String, u32)> {
+    let d = git::canon(dir).unwrap_or_else(|_| dir.to_path_buf()).to_string_lossy().to_string();
+    let me = std::process::id();
+    holder_in(&d, me)
+}
+
+#[cfg(target_os = "linux")]
+fn holder_in(dir: &str, me: u32) -> Option<(String, u32)> {
+    for e in std::fs::read_dir("/proc").ok()?.flatten() {
+        let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
+        if pid == me {
+            continue;
+        }
+        let inside = ["cwd", "exe"]
+            .iter()
+            .any(|l| std::fs::read_link(e.path().join(l)).is_ok_and(|t| axelstra_core::paths::is_within(&t.to_string_lossy(), dir)));
+        if inside {
+            let name = std::fs::read_to_string(e.path().join("comm")).map(|n| n.trim().to_string()).unwrap_or_default();
+            return Some((name, pid));
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn holder_in(dir: &str, me: u32) -> Option<(String, u32)> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::ProcessStatus::EnumProcesses;
+    use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
+    let mut pids = vec![0u32; 4096];
+    let mut got = 0u32;
+    if unsafe { EnumProcesses(pids.as_mut_ptr(), (pids.len() * 4) as u32, &mut got) } == 0 {
+        return None;
+    }
+    pids.truncate(got as usize / 4);
+    for pid in pids.into_iter().filter(|&p| p != 0 && p != me) {
+        let image = unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h.is_null() {
+                continue;
+            }
+            let mut buf = [0u16; 1024];
+            let mut len = buf.len() as u32;
+            let ok = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut len);
+            CloseHandle(h);
+            if ok == 0 {
+                continue;
+            }
+            String::from_utf16_lossy(&buf[..len as usize])
+        };
+        if axelstra_core::paths::is_within(&image, dir) {
+            return Some((image.rsplit(['\\', '/']).next().unwrap_or("").to_string(), pid));
+        }
+    }
+    None
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn holder_in(_dir: &str, _me: u32) -> Option<(String, u32)> {
+    None
 }
 
 /// The toast / notification of a removal; with closed sessions it names them (`janitor.removed_closed`).
@@ -379,6 +531,8 @@ pub fn sweep_with(store: &Path, env: &Env, dry: bool) -> Vec<Value> {
     let mut out = vec![];
     let all = projects::load(store);
     let mut waiting = false;
+    // a pending worktree removed some other way (the user's button) ends its episode too
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).retain(|k| Path::new(k).exists());
     for p in &all {
         let _ = sweep_project(p, env, dry, &mut out, &mut waiting);
         crate::cleanup::stale_branches(p, dry, &mut out);
@@ -939,6 +1093,149 @@ mod tests {
             assert_eq!(out[0]["removed"], true, "{out:?}");
         }
         assert!(!Path::new(&wt.path).exists());
+        git::purge_trash(wt_parent(&wt));
+        let _ = git::remove_tree(&root);
+    }
+
+    /// A worktree whose branch gets `files` committed one per commit: (worktree, branch).
+    fn worktree_with_files(p: &Project, name: &str, files: &[&str]) -> (git::Worktree, String) {
+        let wt = projects::worktree_create(p, name).unwrap();
+        for f in files {
+            std::fs::write(Path::new(&wt.path).join(f), f).unwrap();
+            assert!(git::run(Path::new(&wt.path), &["add", f]).unwrap().ok);
+            assert!(git::run(Path::new(&wt.path), &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", f]).unwrap().ok);
+        }
+        (wt, format!("ax/{name}"))
+    }
+
+    fn on_main(p: &Project, args: &[&str]) {
+        let mut a = vec!["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"];
+        a.extend_from_slice(args);
+        assert!(git::run(Path::new(&p.path), &a).unwrap().ok, "git {args:?}");
+    }
+
+    /// Integration with no ancestor: a squash merge and a full cherry-pick both count, a partial cherry-pick and work
+    /// nobody integrated do not.
+    #[test]
+    fn squash_merged_and_cherry_picked_worktrees_go_and_partial_or_unintegrated_ones_stay() {
+        let (root, store, p) = repo_with_store("equiv");
+        let (sq, sq_b) = worktree_with_files(&p, "sq", &["s1.txt", "s2.txt"]);
+        let (cp, cp_b) = worktree_with_files(&p, "cp", &["c1.txt", "c2.txt"]);
+        let (part, part_b) = worktree_with_files(&p, "part", &["p1.txt", "p2.txt"]);
+        let (open, _) = worktree_with_files(&p, "open", &["o1.txt"]);
+        on_main(&p, &["merge", "--squash", &sq_b]);
+        on_main(&p, &["commit", "-qm", "squashed"]);
+        on_main(&p, &["cherry-pick", &format!("{cp_b}~1"), &cp_b]);
+        on_main(&p, &["cherry-pick", &format!("{part_b}~1")]);
+        let out = sweep(&store, &|_| false, false);
+        let removed: Vec<&str> = out.iter().filter(|o| o["removed"] == true).filter_map(|o| o["branch"].as_str()).collect();
+        assert!(removed.contains(&sq_b.as_str()) && removed.contains(&cp_b.as_str()) && removed.len() == 2, "{out:?}");
+        assert!(!Path::new(&sq.path).exists() && !Path::new(&cp.path).exists());
+        assert!(Path::new(&part.path).exists() && Path::new(&open.path).exists(), "{out:?}");
+        assert!(branch_exists(&p, &part_b), "a partly picked branch keeps its work");
+        git::purge_trash(wt_parent(&sq));
+        let _ = git::remove_tree(&root);
+    }
+
+    /// An orchestrator integration branch (it only receives `merge --no-ff`) goes once merged into the default branch.
+    #[test]
+    fn a_merged_orch_integration_branch_goes_and_an_unmerged_one_stays() {
+        let (root, store, p) = repo_with_store("orchint");
+        let mk = |run: &str, merge: bool| {
+            let (_task, task_b) = worktree_with_files(&p, &format!("{run}-card"), &[&format!("{run}.txt")]);
+            let orch = format!("orch/{run}");
+            let integ = projects::create_at(&p, &format!("{run}-integ"), "main", true).unwrap().0;
+            let ip = Path::new(&integ.path);
+            assert!(git::run(ip, &["checkout", "-q", "-b", &orch]).unwrap().ok);
+            let merge_card = ["-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-ff", "-m", "card", task_b.as_str()];
+            assert!(git::run(ip, &merge_card).unwrap().ok);
+            assert!(has_own_commits(Path::new(&p.path), &orch), "a merge counts as an own commit of orch/*");
+            if merge {
+                on_main(&p, &["merge", "-q", "--no-ff", "-m", "run", &orch]);
+            }
+            integ
+        };
+        let done = mk("r1", true);
+        let open = mk("r2", false);
+        let out = sweep(&store, &|_| false, false);
+        assert!(out.iter().any(|o| o["branch"] == "orch/r1" && o["removed"] == true), "{out:?}");
+        assert!(!out.iter().any(|o| o["branch"] == "orch/r2" && o["removed"] == true), "{out:?}");
+        assert!(!Path::new(&done.path).exists() && Path::new(&open.path).exists());
+        git::purge_trash(wt_parent(&done));
+        let _ = git::remove_tree(&root);
+    }
+
+    #[test]
+    fn a_pending_event_names_the_holder_or_the_reason() {
+        let p = Project { id: "p".into(), ..Default::default() };
+        let path = "/w";
+        let err = axelstra_core::coded!("worktree.folder_busy", "the folder {path} is still in use", path = path);
+        let e = pending_event(&p, "/w", "ax/x", &err, Some(("node".into(), 42)));
+        assert_eq!((e["kind"].as_str(), e["code"].as_str()), (Some("pending"), Some("janitor.pending")));
+        assert_eq!((e["holder"]["name"].as_str(), e["holder"]["pid"].as_u64()), (Some("node"), Some(42)));
+        assert_eq!((e["params"]["branch"].as_str(), e["params"]["pid"].as_str()), (Some("x"), Some("42")));
+        assert_eq!(e["reason"], "worktree.folder_busy");
+        let e = pending_event(&p, "/w", "ax/x", &err, None);
+        assert_eq!(e["code"], "janitor.pending_busy");
+        assert!(e["holder"].is_null() && e["params"]["detail"].as_str().unwrap().contains("still in use"), "{e}");
+        // one report per episode
+        let k = format!("/tmp/axl-episode-{}", std::process::id());
+        assert!(pending_begin(&k) && !pending_begin(&k));
+        pending_end(&k);
+        assert!(pending_begin(&k));
+        pending_end(&k);
+    }
+
+    /// The holder of a folder is found: on Linux by working directory, on Windows by an executable that runs from it.
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn the_process_holding_a_folder_is_found() {
+        let (root, _store, p) = repo_with_store("holder");
+        let wt = projects::worktree_create(&p, "h").unwrap();
+        assert!(holder_of(Path::new(&wt.path)).is_none());
+        let mut child = if cfg!(windows) {
+            let exe = Path::new(&wt.path).join("axl-hold.exe");
+            std::fs::copy(r"C:\Windows\System32\PING.EXE", &exe).unwrap();
+            Command::new(&exe).args(["-n", "60", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn().unwrap()
+        } else {
+            holder(&wt.path)
+        };
+        let found = holder_of(Path::new(&wt.path));
+        let _ = child.kill();
+        let _ = child.wait();
+        let (name, pid) = found.expect("holder");
+        assert_eq!(pid, child.id());
+        assert!(name.to_lowercase().contains(if cfg!(windows) { "axl-hold" } else { "sleep" }), "{name}");
+        let _ = git::remove_tree(&root);
+    }
+
+    /// A held integrated worktree is reported once with its holder, and the retries say nothing new.
+    #[cfg(windows)]
+    #[test]
+    fn a_held_integrated_worktree_is_reported_pending_once() {
+        let (root, store, p, wt) = merged_worktree("pendev", "pendev");
+        // ignored, so the worktree is still clean (a dirty one is never removed)
+        std::fs::create_dir_all(Path::new(&p.path).join(".git/info")).unwrap();
+        std::fs::write(Path::new(&p.path).join(".git/info/exclude"), "axl-pend.exe\nheld.lock\n").unwrap();
+        let exe = Path::new(&wt.path).join("axl-pend.exe");
+        std::fs::copy(r"C:\Windows\System32\PING.EXE", &exe).unwrap();
+        let mut child =
+            Command::new(&exe).args(["-n", "60", "127.0.0.1"]).current_dir(&wt.path).stdout(std::process::Stdio::null()).spawn().unwrap();
+        let open = open_without_delete_share(&wt.path);
+        let out = sweep(&store, &|_| false, false);
+        assert_eq!(out[0]["pending"], true, "{out:?}");
+        let ev = take_events_under(&root);
+        let pend: Vec<&Value> = ev.iter().filter(|e| e["kind"] == "pending").collect();
+        assert_eq!(pend.len(), 1, "{ev:?}");
+        assert_eq!(pend[0]["code"], "janitor.pending");
+        assert_eq!(pend[0]["holder"]["pid"].as_u64(), Some(child.id() as u64), "{ev:?}");
+        let _ = sweep(&store, &|_| false, false);
+        assert!(take_events_under(&root).iter().all(|e| e["kind"] != "pending"), "a retry does not report again");
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(open);
+        let out = sweep(&store, &|_| false, false);
+        assert_eq!(out[0]["removed"], true, "{out:?}");
         git::purge_trash(wt_parent(&wt));
         let _ = git::remove_tree(&root);
     }

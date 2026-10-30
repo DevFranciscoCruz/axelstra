@@ -232,6 +232,30 @@ fn resolve<'a>(rows: &'a [Row], want: &str) -> Result<&'a Row> {
         .with_context(|| format!("no worktree matches {want:?} (see `axelstra dispatch list`)"))
 }
 
+/// Name of the project whose main checkout `want` names (its path, a folder below it, the project's id or name, or the
+/// branch checked out there): the main checkout never has tasks, so `send` refuses it.
+fn main_checkout_named(projects: &Value, want: &str) -> Option<String> {
+    let w = want.trim();
+    if let Some(p) = find_project_by_ref(projects, w) {
+        return p["name"].as_str().map(String::from);
+    }
+    let n = norm(w);
+    projects.as_array()?.iter().find_map(|p| {
+        let main = p["worktrees"].as_array()?.iter().find(|x| x["is_main"] == json!(true))?;
+        let path = main["path"].as_str().unwrap_or_default();
+        let inside = !n.contains("/.axelstra-wt/") && axelstra_core::paths::is_within(&n, path);
+        (inside || main["branch"].as_str() == Some(w)).then(|| p["name"].as_str().unwrap_or_default().to_string())
+    })
+}
+
+fn main_no_tasks(project: String) -> anyhow::Error {
+    axelstra_core::coded!(
+        "session.main_no_tasks",
+        "the main checkout of {project} only takes its main session and terminals: give the task its own worktree with `axelstra dispatch new {project} <name> \"<request>\"`",
+        project = project
+    )
+}
+
 fn entry<'a>(meta: &'a mut Value, path: &str) -> &'a mut Value {
     let e = &mut meta[norm(path)];
     if !e.is_object() {
@@ -314,7 +338,13 @@ pub fn run(cmd: DispCmd, mut c: Client) -> Result<()> {
         }
         DispCmd::Send { worktree, request, agent, lead, no_lead } => {
             let rs = rows(&mut c, &meta, None)?;
-            let r = resolve(&rs, &worktree)?;
+            let r = match resolve(&rs, &worktree) {
+                Ok(r) => r,
+                Err(e) => {
+                    let projects = c.call("project.list", json!({}))?;
+                    return Err(main_checkout_named(&projects, &worktree).map(main_no_tasks).unwrap_or(e));
+                }
+            };
             if r.merged || r.archived {
                 bail!(
                     "{} is {}: do not send new work to it. Use `axelstra dispatch new`",
@@ -406,6 +436,22 @@ mod tests {
         assert!(p.contains("Never wait silently for the human"));
         assert!(p.contains("CARGO_BUILD_JOBS") && p.contains("cargo check"));
         assert!(!p.contains("dispatcher, not an implementer"));
+    }
+
+    #[test]
+    fn send_to_the_main_checkout_is_refused_with_the_code() {
+        let projects = json!([{"id": "p1", "name": "app", "path": "C:/x/app", "worktrees": [
+            {"path": "C:/x/app", "branch": "main", "is_main": true},
+            {"path": "C:/x/.axelstra-wt/app-fix", "branch": "ax/fix", "is_main": false}]}]);
+        for want in ["C:/x/app", "C:/x/app/src", "main", "app", "p1"] {
+            assert_eq!(main_checkout_named(&projects, want).as_deref(), Some("app"), "{want}");
+        }
+        for want in ["C:/x/.axelstra-wt/app-fix", "ax/fix", "fix", "C:/x/other"] {
+            assert_eq!(main_checkout_named(&projects, want), None, "{want}");
+        }
+        let e = main_no_tasks("app".into());
+        assert_eq!(axelstra_core::msg::find(&e).map(|c| c.code.as_str()), Some("session.main_no_tasks"));
+        assert!(e.to_string().contains("axelstra dispatch new app <name>"));
     }
 
     #[test]

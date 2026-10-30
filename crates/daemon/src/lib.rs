@@ -1,4 +1,5 @@
 pub mod agentlog;
+pub mod artifacts;
 pub mod audit;
 pub mod automations;
 pub mod backup;
@@ -9,6 +10,7 @@ pub mod checks;
 pub mod cleanup;
 pub mod client;
 pub mod computer;
+pub mod disk;
 pub mod docker;
 pub mod envtools;
 pub mod fsops;

@@ -13,6 +13,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 }))
             },
         ),
+        "worktree.sweep" if p["artifacts"].as_bool() == Some(true) => Ok(super::disk::sweep(reg, p)),
         "worktree.sweep" => {
             let dry = p["dry_run"].as_bool().unwrap_or(false);
             let before = reg.closed.read();
@@ -77,7 +78,11 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                                 allowed.insert(norm(&w.path));
                             }
                         }
-                        list.iter().take(64).filter(|w| allowed.contains(&norm(w))).map(|w| crate::wtstatus::status(w)).collect::<Vec<_>>()
+                        list.iter()
+                            .take(64)
+                            .filter(|w| allowed.contains(&norm(w)))
+                            .map(|w| crate::wtstatus::status_kept(w))
+                            .collect::<Vec<_>>()
                     })
                 });
                 Ok(json!({"status": out}))
@@ -116,6 +121,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
         "worktree.create" => {
             let pr = crate::projects::find(&reg.store, p["project"].as_str().unwrap_or_default())?;
             let name = p["name"].as_str().ok_or_else(|| missing("name"))?;
+            // a new worktree will build: a low disk starts reclaiming (in a thread, this call does not wait)
+            tokio::task::block_in_place(|| super::disk::ensure(reg, false));
             // a parent that is not a worktree of this project is refused before anything is created
             let parent = p["parent"].as_str().map(str::trim).filter(|s| !s.is_empty());
             if let Some(par) = parent {
@@ -409,7 +416,10 @@ fn project_list(reg: &Arc<Registry>) -> Result<Value> {
     let gen = reg.wt_gen.load(std::sync::atomic::Ordering::SeqCst);
     let ps = crate::projects::load(&reg.store);
     // each project starts several git processes: a few projects at a time, not one after the other
-    let one = |pr: &crate::projects::Project| -> Value { crate::memo::git_pool().run(|| one_project(pr)) };
+    let one = |pr: &crate::projects::Project| -> Value {
+        let _site = axelstra_core::proc::site("project.list");
+        crate::memo::git_pool().run(|| one_project(pr))
+    };
     fn one_project(pr: &crate::projects::Project) -> Value {
         let repo = std::path::Path::new(&pr.path);
         let mut wts = axelstra_core::git::worktree_list(repo).unwrap_or_default();

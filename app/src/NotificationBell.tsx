@@ -16,6 +16,7 @@ import {
 import { ago } from "./time";
 import { basename } from "./paths";
 import { S } from "./strings";
+import { D } from "./strings.disk";
 import { P } from "./strings.panels";
 import { toast } from "./toasts";
 import "./notifications.css";
@@ -31,6 +32,7 @@ const KIND: Record<NotifKind, [string, string]> = {
   error: lazyPair("!", () => S.notif.error),
   budget: lazyPair("Σ", () => S.notif.budget),
   attention: lazyPair("⚠", () => S.notif.attention),
+  disk: lazyPair("▤", () => D.notify.kind),
 };
 
 const FOCUSABLE = "button:not(:disabled)";

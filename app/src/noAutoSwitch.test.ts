@@ -29,6 +29,9 @@ const agent = (id: number, over: Partial<SessionInfo> = {}): SessionInfo => ({
   meta: { kind: "agent", worktree: WT },
   ...over,
 });
+/** the worktree's main (its lead): the one session besides a terminal the app seats by itself */
+const main = (id: number, over: Partial<SessionInfo> = {}): SessionInfo =>
+  agent(id, { label: "main", meta: { kind: "agent", worktree: WT, lead: true }, ...over });
 const load = async () => {
   vi.resetModules();
   const store = await import("./store");
@@ -52,29 +55,30 @@ beforeEach(() => {
 });
 
 describe("only the user changes the active session", () => {
-  it("restore: seats the worktree's agent once the first list arrived, not before", async () => {
+  it("restore: seats the worktree's main once the first list arrived, not before", async () => {
     const { store, tabs } = await load();
     store.settleActive(tabs());
     expect(store.activeSession()).toBeNull();
-    await poll(store, [agent(1, { meta: { kind: "terminal", worktree: WT } }), agent(2)]);
+    await poll(store, [agent(1, { meta: { kind: "terminal", worktree: WT } }), main(2), agent(3)]);
     store.settleActive(tabs());
     expect(store.activeSession()).toBe(2);
   });
 
   it("a session spawned by an agent, worker or dispatch never takes the focus", async () => {
     const { store, tabs } = await load();
-    await poll(store, [agent(1)]);
+    await poll(store, [main(1)]);
     store.settleActive(tabs());
     expect(store.activeSession()).toBe(1);
-    await poll(store, [agent(1), agent(2, { meta: { kind: "agent", worktree: WT, worker: true } as never }), agent(3)]);
+    await poll(store, [main(1), agent(2, { meta: { kind: "agent", worktree: WT, worker: true } as never }), agent(3)]);
     store.settleActive(tabs());
     expect(store.activeSession()).toBe(1);
   });
 
   it("an empty seat is not filled by a later spawn (all tabs closed, then a worker appears)", async () => {
     const { store, tabs } = await load();
-    await poll(store, [agent(1)]);
+    await poll(store, [main(1)]);
     store.settleActive(tabs());
+    expect(store.activeSession()).toBe(1);
     store.handleSessionExited({ id: 1, code: 0 });
     expect(store.activeSession()).toBeNull();
     await poll(store, [agent(5)]);
@@ -93,9 +97,9 @@ describe("only the user changes the active session", () => {
     expect(store.activeSession()).toBeNull();
   });
 
-  it("selecting a worktree seats its agent; the user's own pick wins", async () => {
+  it("selecting a worktree seats its main; the user's own pick wins", async () => {
     const { store, tabs } = await load();
-    await poll(store, [agent(1), agent(2)]);
+    await poll(store, [main(1), agent(2)]);
     store.settleActive(tabs());
     store.activate(1, "user");
     store.selectWorktree(WT);
@@ -162,13 +166,13 @@ describe("only the user changes the active session", () => {
 
   it("after a daemon restart the app may seat a session again", async () => {
     const { store, tabs } = await load();
-    await poll(store, [agent(1)]);
+    await poll(store, [main(1)]);
     store.settleActive(tabs());
     await poll(store, []);
     store.settleActive(tabs());
     expect(store.activeSession()).toBeNull();
     store.armAutoPick();
-    await poll(store, [agent(1)]);
+    await poll(store, [main(1)]);
     store.settleActive(tabs());
     expect(store.activeSession()).toBe(1);
   });
@@ -197,5 +201,43 @@ describe("only the user changes the active session", () => {
     expect(tabs().length).toBe(1);
     expect(store.activeSession()).toBe(1);
     dispose();
+  });
+});
+
+describe("selecting a worktree seats its main, never a task", () => {
+  const settled = async (list: SessionInfo[]) => {
+    const { store, tabs } = await load();
+    await poll(store, list);
+    store.selectWorktree(WT);
+    store.settleActive(tabs());
+    return store;
+  };
+
+  it("only tasks: the seat stays empty", async () => {
+    expect(
+      (await settled([agent(1), agent(2, { meta: { kind: "agent", worktree: WT, worker: true } })])).activeSession(),
+    ).toBeNull();
+  });
+
+  it("main and a task: main, wherever it sorts", async () => {
+    expect((await settled([agent(1), main(2)])).activeSession()).toBe(2);
+  });
+
+  it("the project's main session in the main checkout (meta.main) counts as main", async () => {
+    const pm = agent(3, { label: "Agente", meta: { kind: "agent", worktree: WT, main: true } });
+    expect((await settled([agent(1), pm])).activeSession()).toBe(3);
+  });
+
+  it("a terminal and a task: the terminal", async () => {
+    expect((await settled([agent(1), agent(2, { meta: { kind: "terminal", worktree: WT } })])).activeSession()).toBe(2);
+  });
+
+  it("the user may still open a task", async () => {
+    const store = await settled([main(1), agent(2)]);
+    store.openSession(WT, 2);
+    expect(store.activeSession()).toBe(2);
+    store.activate(1, "user");
+    store.activate(2, "user");
+    expect(store.activeSession()).toBe(2);
   });
 });

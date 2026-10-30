@@ -11,8 +11,12 @@ name: release
 # branches/tags limited to `v*`), not in repository secrets: TAURI_SIGNING_PRIVATE_KEY and
 # TAURI_SIGNING_PRIVATE_KEY_PASSWORD; APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
 # APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD (app-specific password) and APPLE_TEAM_ID.
-# Optional, Windows Authenticode through Azure Trusted Signing: AZURE_TENANT_ID, AZURE_CLIENT_ID,
-# AZURE_CLIENT_SECRET, TS_ENDPOINT, TS_ACCOUNT, TS_PROFILE (all Environment secrets).
+# Optional, Windows Authenticode (docs/SIGNING.md): SignPath Foundation with SIGNPATH_API_TOKEN and
+# SIGNPATH_ORGANIZATION_ID (preferred; slugs in the repository variables SIGNPATH_PROJECT_SLUG,
+# SIGNPATH_SIGNING_POLICY_SLUG, SIGNPATH_ARTIFACT_CONFIGURATION_SLUG; the artifact configuration is
+# .signpath/artifact-configuration.xml), else Azure Artifact Signing (formerly Trusted Signing) with
+# AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, TS_ENDPOINT, TS_ACCOUNT, TS_PROFILE. With neither
+# set the Windows build is unsigned, as before.
 # The final `publish` job uses the Environment `release-publish` (add a reviewer there for a manual gate).
 on:
   push:
@@ -122,10 +126,13 @@ jobs:
     continue-on-error: ${{ matrix.experimental }}
     # the signing secrets are Environment secrets: reviewers and tag rules of `release` apply here
     environment: release
-    timeout-minutes: 60
+    # room for two SignPath approvals (each waits up to 30 min) on top of the build
+    timeout-minutes: 150
     env:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
-      HAS_TRUSTED_SIGNING: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.TS_ENDPOINT != '' && secrets.TS_ACCOUNT != '' && secrets.TS_PROFILE != '' }}
+      # secrets cannot appear in a step `if:`; these booleans can (the values never reach a log)
+      HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' && secrets.SIGNPATH_ORGANIZATION_ID != '' }}
+      HAS_ARTIFACT_SIGNING: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.TS_ENDPOINT != '' && secrets.TS_ACCOUNT != '' && secrets.TS_PROFILE != '' }}
       # Release binaries keep line tables and are not stripped here, so rustc emits .pdb (Windows) and
       # .dSYM (macOS) next to them; they are uploaded as a workflow artifact below. Cargo.toml keeps
       # `strip = true` for local builds (on MSVC, strip suppresses the .pdb altogether).
@@ -199,13 +206,108 @@ jobs:
             exit 1
           fi
 
-      - name: Build the installer (Windows)
+      # Windows Authenticode is optional (docs/SIGNING.md): SignPath Foundation when its secrets exist, else Azure
+      # Artifact Signing, else none. With a provider the build is split so every shipped .exe is signed before
+      # the installer packs it: `tauri build --no-bundle` (app exe; the sidecar is already built), sign
+      # axelstra-app.exe and the axelstra.exe sidecar, `tauri bundle` (NSIS + updater .sig), sign the installer,
+      # re-sign the updater .sig. A provider that is configured but fails stops the release: no half-signed build.
+      - name: Authenticode provider (Windows)
+        id: sign
         if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          if [[ "$HAS_SIGNPATH" == "true" ]]; then P=signpath
+          elif [[ "$HAS_ARTIFACT_SIGNING" == "true" ]]; then P=artifact-signing
+          else P=none; echo "::notice::no Authenticode secrets in the 'release' environment: the Windows build is unsigned (docs/SIGNING.md)"
+          fi
+          echo "Authenticode provider: $P"
+          echo "provider=$P" >> "$GITHUB_OUTPUT"
+          # the version stamped into the files (0.1.0-style even on a dry run), passed to SignPath, whose artifact
+          # configuration requires this exact product version on every signed file
+          echo "file_version=$(node -p "require('./app/src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Build the installer (Windows, unsigned)
+        if: runner.os == 'Windows' && steps.sign.outputs.provider == 'none'
         working-directory: app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --config src-tauri/tauri.release.conf.json --config '{"version":"${{ steps.v.outputs.version }}","bundle":{"createUpdaterArtifacts":true}}'
+      - name: Build the app, no bundle yet (Windows, signed)
+        if: runner.os == 'Windows' && steps.sign.outputs.provider != 'none'
+        working-directory: app
+        run: npx tauri build --no-bundle --config src-tauri/tauri.release.conf.json --config '{"version":"${{ steps.v.outputs.version }}"}'
+      # The bundler takes the sidecar from app/src-tauri/binaries (file name with the target triple) and the app
+      # from target/release, so those are the copies that get signed.
+      - name: Stage the binaries for signing (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.provider != 'none'
+        shell: bash
+        run: |
+          mkdir -p sign-in/binaries
+          cp target/release/axelstra-app.exe sign-in/binaries/
+          cp app/src-tauri/binaries/axelstra-x86_64-pc-windows-msvc.exe sign-in/binaries/
+          ls -l sign-in/binaries
+      - name: Upload the binaries for SignPath (Windows)
+        id: sp_bin
+        if: runner.os == 'Windows' && steps.sign.outputs.provider == 'signpath'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-binaries-${{ matrix.key }}
+          path: sign-in/binaries/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Sign the binaries (Windows, SignPath)
+        if: runner.os == 'Windows' && steps.sign.outputs.provider == 'signpath'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'axelstra' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG || 'windows' }}
+          parameters: |
+            version: "${{ steps.sign.outputs.file_version }}"
+          github-artifact-id: ${{ steps.sp_bin.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1800
+          output-artifact-directory: sign-out/binaries
+      - name: Sign the binaries (Windows, Azure Artifact Signing)
+        if: runner.os == 'Windows' && steps.sign.outputs.provider == 'artifact-signing'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ secrets.TS_ENDPOINT }}
+          signing-account-name: ${{ secrets.TS_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.TS_PROFILE }}
+          files-folder: ${{ github.workspace }}\sign-in\binaries
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      - name: Put the signed binaries back and verify them (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.provider != 'none'
+        shell: pwsh
+        env:
+          PROVIDER: ${{ steps.sign.outputs.provider }}
+        run: |
+          # SignPath returns signed copies in sign-out; Artifact Signing signs in place
+          $src = if ($env:PROVIDER -eq 'signpath') { 'sign-out/binaries' } else { 'sign-in/binaries' }
+          Copy-Item "$src/axelstra-app.exe" target/release/axelstra-app.exe -Force
+          Copy-Item "$src/axelstra-x86_64-pc-windows-msvc.exe" app/src-tauri/binaries/axelstra-x86_64-pc-windows-msvc.exe -Force
+          foreach ($f in 'target/release/axelstra-app.exe', 'app/src-tauri/binaries/axelstra-x86_64-pc-windows-msvc.exe') {
+            $s = Get-AuthenticodeSignature $f
+            Write-Host "$f : $($s.Status) $($s.SignerCertificate.Subject)"
+            if ($s.Status -ne 'Valid') { Write-Host "::error::$f is not validly signed ($($s.Status))"; exit 1 }
+          }
+      - name: Bundle the signed binaries (Windows, signed)
+        if: runner.os == 'Windows' && steps.sign.outputs.provider != 'none'
+        working-directory: app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri bundle --bundles nsis --config src-tauri/tauri.release.conf.json --config '{"version":"${{ steps.v.outputs.version }}","bundle":{"createUpdaterArtifacts":true}}'
       # macOS: the .app.tar.gz is what the in-app updater downloads, the .dmg is the first install.
       # Signed with the Developer ID and notarized (the check above fails a real release without the secrets);
       # the unsigned build below only ever runs on a dry run.
@@ -250,17 +352,42 @@ jobs:
             echo "ok $lib"
           done < <(find "$APP" \( -name '*.dylib' -o -name '*.so' \))
 
-      # Optional Windows Authenticode through Azure Trusted Signing. Skipped when the secrets are absent and
-      # never fails the release: an unsigned installer is only a SmartScreen warning. The updater .sig covers
-      # the exact installer bytes, so it is regenerated right after signing (and only then).
-      - name: Authenticode (Windows, Azure Trusted Signing)
-        id: authenticode
-        if: runner.os == 'Windows' && env.HAS_TRUSTED_SIGNING == 'true'
-        continue-on-error: true
-        uses: azure/trusted-signing-action@0d74250c661747df006298d0fb49944c10f16e03 # v0.5.1
+      # The installer itself, after `tauri bundle` wrote it with the signed binaries inside.
+      - name: Upload the installer for SignPath (Windows)
+        id: sp_inst
+        if: runner.os == 'Windows' && steps.sign.outputs.provider == 'signpath'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-installer-${{ matrix.key }}
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 1
+      - name: Sign the installer (Windows, SignPath)
+        if: runner.os == 'Windows' && steps.sign.outputs.provider == 'signpath'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'axelstra' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG || 'windows' }}
+          parameters: |
+            version: "${{ steps.sign.outputs.file_version }}"
+          github-artifact-id: ${{ steps.sp_inst.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1800
+          output-artifact-directory: sign-out/installer
+      - name: Put the signed installer back (Windows, SignPath)
+        if: runner.os == 'Windows' && steps.sign.outputs.provider == 'signpath'
+        shell: bash
+        run: |
+          for f in sign-out/installer/*-setup.exe; do cp "$f" target/release/bundle/nsis/; done
+      - name: Sign the installer (Windows, Azure Artifact Signing)
+        if: runner.os == 'Windows' && steps.sign.outputs.provider == 'artifact-signing'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: ${{ secrets.TS_ENDPOINT }}
-          trusted-signing-account-name: ${{ secrets.TS_ACCOUNT }}
+          signing-account-name: ${{ secrets.TS_ACCOUNT }}
           certificate-profile-name: ${{ secrets.TS_PROFILE }}
           files-folder: ${{ github.workspace }}\target\release\bundle\nsis
           files-folder-filter: exe
@@ -271,15 +398,38 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      # The installer must be signed, and so must the two programs inside it (7-Zip reads NSIS installers).
+      - name: Verify the Authenticode signatures (Windows)
+        if: runner.os == 'Windows' && steps.sign.outputs.provider != 'none'
+        shell: pwsh
+        run: |
+          $bad = 0
+          $inst = @(Get-ChildItem target/release/bundle/nsis/*-setup.exe)
+          foreach ($f in $inst) {
+            $s = Get-AuthenticodeSignature $f.FullName
+            Write-Host "$($f.Name) : $($s.Status) $($s.SignerCertificate.Subject)"
+            if ($s.Status -ne 'Valid') { Write-Host "::error::$($f.Name) is not validly signed ($($s.Status))"; $bad = 1 }
+          }
+          $x = Join-Path $env:RUNNER_TEMP 'installer-content'
+          & 7z x -y "-o$x" $inst[0].FullName | Out-Null
+          foreach ($n in 'axelstra-app.exe', 'axelstra.exe') {
+            $f = Get-ChildItem -Path $x -Recurse -Filter $n -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $f) { Write-Host "::warning::could not read $n out of the installer to check its signature"; continue }
+            $s = Get-AuthenticodeSignature $f.FullName
+            Write-Host "installer/$n : $($s.Status) $($s.SignerCertificate.Subject)"
+            if ($s.Status -ne 'Valid') { Write-Host "::error::$n inside the installer is not validly signed ($($s.Status))"; $bad = 1 }
+          }
+          exit $bad
+      # The updater .sig covers the exact installer bytes and Authenticode changed them: sign again. A stale .sig
+      # would break every update, so this step fails the job.
       - name: Re-sign the signed installer for the updater (Windows)
-        if: runner.os == 'Windows' && steps.authenticode.outcome == 'success'
+        if: runner.os == 'Windows' && steps.sign.outputs.provider != 'none'
         working-directory: app
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          # a stale .sig would break every update, so this step is allowed to fail the job
           for f in ../target/release/bundle/nsis/*-setup.exe; do npx tauri signer sign "$f"; done
 
       - name: Collect debug symbols

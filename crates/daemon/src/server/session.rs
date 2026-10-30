@@ -71,6 +71,8 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             if let Some(id) = p["meta"]["key"].as_str().and_then(|k| reg.live_by_key(k)) {
                 return Ok(json!({"id": id, "existing": true}));
             }
+            // a low disk starts reclaiming build artifacts of inactive worktrees (in a thread: the spawn never waits)
+            tokio::task::block_in_place(|| super::disk::ensure(reg, false));
             let mut s = Spawn {
                 program: p["program"].as_str().ok_or_else(|| missing("program"))?.into(),
                 args: p["args"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
@@ -83,6 +85,10 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
                 rows: term_dim(&p["rows"], 30),
             };
             let mut meta = if p["meta"].is_null() { None } else { Some(p["meta"].clone()) };
+            // the main checkout never has tasks, it only dispatches them: an agent or the CLI cannot start one there
+            if agent.is_some() || p["from"] == "cli" {
+                main_checkout_guard(reg, p)?;
+            }
             // a session started on behalf of another one (a worker): remembered as its child
             let mut parent = p["parent"].as_u64().or_else(|| p["reap"]["parent"].as_u64()).map(|x| x as u32);
             // the lead of a worktree: its first agent. Tasks started there report to it; it reports to the project main
@@ -607,6 +613,32 @@ fn valid_resume_id(id: &str) -> bool {
 /// prompt (Claude writes the file with the first one). A hook without `transcript_path` says nothing.
 fn never_prompted(hook: &Value) -> bool {
     hook["transcript_path"].as_str().filter(|p| !p.is_empty()).is_some_and(|p| !std::path::Path::new(p).exists())
+}
+
+/// `session.main_no_tasks` when a spawn would put a task (an agent that is not the project main, or a worker) in a
+/// project's main checkout: the project's own folder, not a worktree under `.axelstra-wt`. The folder is the spawn's
+/// `meta.worktree`, else its `cwd`; a subfolder of the checkout counts as the checkout.
+fn main_checkout_guard(reg: &Registry, p: &Value) -> Result<()> {
+    let Some(dir) = p["meta"]["worktree"].as_str().filter(|w| !w.is_empty()).or_else(|| p["cwd"].as_str()) else { return Ok(()) };
+    if axelstra_core::paths::norm(dir).contains("/.axelstra-wt/") {
+        return Ok(());
+    }
+    let Some(project) = crate::projects::load(&reg.store).into_iter().find(|pr| axelstra_core::paths::is_within(dir, &pr.path)) else {
+        return Ok(());
+    };
+    let has_main = {
+        let sessions = reg.sessions.lock_recover();
+        let metas = reg.metas.lock_recover();
+        project_main_in(&sessions, &metas, &project.id).is_some()
+    };
+    if crate::notes::refused_in_main_checkout(&p["meta"], p["worker"] == true, has_main) {
+        return Err(axelstra_core::coded!(
+            "session.main_no_tasks",
+            "the main checkout of {project} only takes its main session and terminals: give the task its own worktree with `axelstra dispatch new {project} <name> \"<request>\"`",
+            project = project.name
+        ));
+    }
+    Ok(())
 }
 
 /// How long one `session.spawn` with `queue: true` sleeps before it answers `queued` (the caller then comes back with its ticket).

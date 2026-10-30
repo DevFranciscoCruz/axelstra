@@ -7,6 +7,7 @@ import { dotOfSession, dotOfWorktree, dotTip } from "../agentState";
 import { worktreeSignals } from "../leadRole";
 import { P } from "../strings.panels";
 import {
+  activeSession,
   attention,
   flowState,
   isPinned,
@@ -20,6 +21,7 @@ import {
 } from "../store";
 import { AgentList } from "./AgentList";
 import { PendingIntegration, pendingFor } from "./PendingIntegration";
+import { worktreeRowActive } from "./mainRules";
 
 const T = P.sidebar;
 
@@ -82,7 +84,8 @@ export function WorktreeRow(props: {
     }
     return null;
   };
-  const isActive = () => norm(selectedWorktree()) === norm(w().path);
+  // selected, and showing the worktree or its main: with one of its tasks active, the task's row is the highlighted one
+  const isActive = () => worktreeRowActive(selectedWorktree(), w().path, activeSession(), sessionsOf(w().path));
   return (
     <>
       <div
