@@ -55,7 +55,7 @@ export const enS: Widen<typeof ptS> = {
 
   stall: "Stalled agent",
   stallNote:
-    "An agent that stays this long without activity and without calling done or escalate is marked stalled: its parent gets a message. You are alerted only when no parent agent is handling it.",
+    "An agent whose turn ends without done, await or ask gets one short reminder; if it stays quiet this long after that, its parent gets one message (once per stall). Agents waiting for you, for CI (await) or for their workers, hibernated, paused or never given a task are never flagged. You are alerted only when no parent agent handles it.",
   stallOff: "Off",
   stallMin: (n: number) => `${n} min`,
 

@@ -12,10 +12,11 @@ only when somebody has something to do. A parent agent hears about a child when 
 
 | Source | Origin | Fires when | Recipient | Action needed? | Typical volume | Decision |
 |---|---|---|---|---|---|---|
-| Stall, to the parent | `stall_tick` (`server/loops.rs`), text `stall::parent_text` | A session was quiet for `stall_minutes` (default 5) and none of these holds: process tree work, `await`, live children, worker-slot wait, recent message/typing/output, `done`, `escalate` | Parent agent (a `notice` typed into its TUI + inbox) | Maybe: look, nudge or ignore | Was ~10 per lead with false positives; now at most 1 per episode and 1 per parent per pass | **Keep, narrowed**; several children in one pass are **aggregated** into one message; the text states the ruled-out causes and the probable cause |
-| Stall, to the user | `session.list` field `stalled` (+ `stall`), `session.changed` broadcast | Same stall, and nobody handles it: no live agent parent, or the parent was told and then idle for a whole threshold. One computed deadline (`stall::next_human_ms`) | Human (red/stopped state, notice in the app) | Yes | 0 normally | **Keep, gated**. New additive field `stall_parent`: stalled but a parent agent is handling it (the app should not alert) |
+| Stop-hook nudge, to the agent itself | the agent's own `Stop` (Claude/Codex) / `AfterAgent` (Gemini) hook -> `session.hint {state: idle, event: "stop"}` | An Axelstra-managed agent (parent agent, no live child) ends its turn without `done`, `await`, a pending `ask`/`escalate`/wait, and is not user-driven | The agent (one short English line, a const in `prompts.rs`) | Yes: finish with `done`, `await` or `ask` | At most 1 per stop episode and 1 per session per 10 min | **New**. The episode resets only on real new work (user input, an announced bus message, a working hint not caused by the nudge). An old CLI sends no `event`, so no nudge |
+| Stall, to the parent | `stall_tick` (`server/loops.rs`), text `stall::parent_text` | The session was nudged (or has no Stop hook) and stayed quiet for `stall_minutes` (default 15) after that, and none of the legitimately quiet states holds (see below) | Parent agent (a `notice` typed into its TUI + inbox, one short line naming the session and `axelstra read <id>`) | Maybe: look, nudge or take over | At most 1 per stall episode; several children in one pass are **aggregated** into one line | **Keep, narrowed**; never repeated while the state is unchanged (a stray output byte does not start a new episode) |
+| Stall, to the user | `session.list` field `stalled` (+ `stall`), `session.changed` broadcast | Same stall, only for a session with no parent agent that is not user-driven; once per episode. One computed deadline (`stall::next_human_ms`) | Human (red/stopped state, notice in the app) | Yes | 0 normally | **Keep, gated**. New additive field `stall_parent`: stalled but a parent agent is handling it (the app should not alert) |
 | Waiting (permission, question) | Agent hook, `axelstra hook claude\|gemini\|codex` -> `session.hint` -> `Hints` (`core/waiting.rs`); `ask`/`escalate` -> `Bus::pending_of` | Claude `permission_prompt`/`elicitation_dialog`, Gemini `ToolPermission`, Codex `PermissionRequest`; `axelstra ask`/`escalate` | Human (red dot, bell, OS notification); parent agent also told once per wait (`tell_parent_waiting`, a `notice`) | Yes | One per real prompt | **Keep**. `idle_prompt` and any unknown notification type are **not** a wait |
-| Idle (`idle_prompt`, Stop) | same hook | The agent finished its turn | nobody | No | - | **Silence** (only state) |
+| Idle (`idle_prompt`, Stop) | same hook | The agent finished its turn | nobody (a managed agent may get the Stop-hook nudge above) | No | - | **Silence** (only state) |
 | `done` | `axelstra done` -> `msg.send kind=done` | A worker/lead reports | Parent (notice + inbox), task file | Yes, read the report | One per task | **Keep** |
 | `escalate` / `ask` | `axelstra escalate/ask` | An agent is blocked | Parent (notice); counts as waiting for the user | Yes | Rare | **Keep** |
 | Worker reaper report | `ReaperTask::finish` (`server/loops.rs`) | An ephemeral worker's process ends or it is closed for being quiet | Parent | Yes | One per worker | **Keep**; the idle nudge (`IDLE_NUDGE`) goes to the worker first |
@@ -55,6 +56,14 @@ A hint is accepted only from the agent's own session (`require_own`). If the use
 question, the remaining candidates are outside the daemon: the app turning `stalled` into a "stopped" notice
 (fixed at the source by 3), or a stale `axelstra ask` whose asker was interrupted (`Bus::pending` lasts until a reply
 or `done`; not changed, see "Not verified").
+
+### Legitimately quiet: never stalled, never a notice
+
+No reminder, parent line or user alert while any of these holds: `awaiting` (`axelstra await`); a pending wait (hook
+permission/question, `ask`/`escalate` pending); hibernated; paused (`mem.pause`); a blank agent that never got input or
+a message (`stall::never_asked`, no longer only for leads); a user-driven session (no parent agent and the user typed
+into it: the user is the driver); a session with live children; a session that reported `done`. The default threshold
+is 15 min (`stall_minutes`, 0 = off).
 
 ### How "legit work" is decided (state, not screen text)
 

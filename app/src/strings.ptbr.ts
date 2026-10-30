@@ -61,7 +61,7 @@ export const ptBRS: Widen<typeof ptS> = {
 
   stall: "Agente parado",
   stallNote:
-    "Se um agente ficar esse tempo sem atividade e sem chamar done ou escalate, passa a «parado»: o pai recebe uma mensagem. Você só é avisado se não houver agente pai cuidando disso.",
+    "Um agente que termina a vez sem done, await ou ask recebe um lembrete curto; se continuar em silêncio por esse tempo depois disso, o pai recebe uma mensagem (uma vez por parada). Agentes esperando por você, pelo CI (await) ou pelos seus workers, hibernados, pausados ou sem tarefa nunca são marcados. Você só é avisado quando nenhum agente pai cuida disso.",
   stallOff: "Desligado",
   stallMin: (n: number) => `${n} min`,
 

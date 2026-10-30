@@ -72,7 +72,7 @@ export const ptS = {
 
   stall: "Agente parado",
   stallNote:
-    "Se um agente ficar este tempo sem atividade e sem chamar done ou escalate, passa a «parado»: o pai recebe uma mensagem. Só és avisado se não houver agente pai a tratar disso.",
+    "Um agente que acaba a vez sem done, await ou ask recebe um lembrete curto; se continuar calado este tempo depois disso, o pai recebe uma mensagem (uma vez por paragem). Agentes à espera de ti, de CI (await) ou dos seus workers, hibernados, em pausa ou sem tarefa nunca são marcados. Só és avisado se nenhum agente pai tratar disso.",
   stallOff: "Desligado",
   stallMin: (n: number) => `${n} min`,
 

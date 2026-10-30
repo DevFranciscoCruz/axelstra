@@ -59,7 +59,7 @@ import { CATEGORIES, notifyPrefs, setNotifyPref } from "./notifyPrefs";
 import { Button, CheckboxField, Field, Input, RadioGroup } from "./ui";
 
 const TERSE: Terse[] = ["off", "short", "tiny"];
-const STALL_MINUTES = [0, 2, 5, 10, 15, 30];
+const STALL_MINUTES = [0, 5, 10, 15, 30, 60];
 const NOTIFY: NotifyMode[] = ["all", "waiting", "off"];
 const SHELLS: ShellChoice[] = ["auto", "pwsh", "powershell", "bash", "wsl", "cmd"];
 const THEMES: TermTheme[] = ["dark", "light"];
@@ -433,8 +433,8 @@ export function Settings() {
             <Section title={S.stall} note={S.stallNote}>
               <Choices
                 label={S.stall}
-                value={String(cfg().stall_minutes ?? 5)}
-                options={[...new Set([...STALL_MINUTES, cfg().stall_minutes ?? 5])]
+                value={String(cfg().stall_minutes ?? 15)}
+                options={[...new Set([...STALL_MINUTES, cfg().stall_minutes ?? 15])]
                   .sort((a, b) => a - b)
                   .map((v) => ({ value: String(v), label: v === 0 ? S.stallOff : S.stallMin(v) }))}
                 onPick={(v) => void save({ stall_minutes: Number(v) })}
