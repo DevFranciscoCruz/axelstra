@@ -12,7 +12,9 @@ name: release
 # TAURI_SIGNING_PRIVATE_KEY_PASSWORD; APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD,
 # APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD (app-specific password) and APPLE_TEAM_ID.
 # Optional, Windows Authenticode (docs/SIGNING.md): SignPath Foundation with SIGNPATH_API_TOKEN and
-# SIGNPATH_ORGANIZATION_ID (preferred), else Azure Artifact Signing (formerly Trusted Signing) with
+# SIGNPATH_ORGANIZATION_ID (preferred; slugs in the repository variables SIGNPATH_PROJECT_SLUG,
+# SIGNPATH_SIGNING_POLICY_SLUG, SIGNPATH_ARTIFACT_CONFIGURATION_SLUG; the artifact configuration is
+# .signpath/artifact-configuration.xml), else Azure Artifact Signing (formerly Trusted Signing) with
 # AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, TS_ENDPOINT, TS_ACCOUNT, TS_PROFILE. With neither
 # set the Windows build is unsigned, as before.
 # The final `publish` job uses the Environment `release-publish` (add a reviewer there for a manual gate).
@@ -220,6 +222,9 @@ jobs:
           fi
           echo "Authenticode provider: $P"
           echo "provider=$P" >> "$GITHUB_OUTPUT"
+          # the version stamped into the files (0.1.0-style even on a dry run), passed to SignPath, whose artifact
+          # configuration requires this exact product version on every signed file
+          echo "file_version=$(node -p "require('./app/src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
       - name: Build the installer (Windows, unsigned)
         if: runner.os == 'Windows' && steps.sign.outputs.provider == 'none'
         working-directory: app
@@ -257,8 +262,10 @@ jobs:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
           project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'axelstra' }}
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
-          artifact-configuration-slug: binaries
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG || 'windows' }}
+          parameters: |
+            version: "${{ steps.sign.outputs.file_version }}"
           github-artifact-id: ${{ steps.sp_bin.outputs.artifact-id }}
           wait-for-completion: true
           wait-for-completion-timeout-in-seconds: 1800
@@ -362,8 +369,10 @@ jobs:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
           project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'axelstra' }}
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
-          artifact-configuration-slug: installer
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG || 'windows' }}
+          parameters: |
+            version: "${{ steps.sign.outputs.file_version }}"
           github-artifact-id: ${{ steps.sp_inst.outputs.artifact-id }}
           wait-for-completion: true
           wait-for-completion-timeout-in-seconds: 1800

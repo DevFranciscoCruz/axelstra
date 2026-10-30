@@ -68,44 +68,37 @@ SignPath Foundation. Sources: <https://signpath.org/>, <https://signpath.org/ter
   Points to settle before applying: the privacy statement (list every network call the app and daemon make on
   their own, such as the updater check, and what each sends) and the warnings the installer gives. The memory governor's process
   suspension is a documented, user-visible feature and stays as it is.
-- **What the owner does by hand:**
-  1. Write the code signing policy page and the privacy statement (website or a page in the repository that the
-     README links as "Code signing policy").
-  2. Apply at <https://signpath.org/apply> (the form was not readable when this was written; follow the page).
-  3. After acceptance, in SignPath: create or confirm the project (slug `axelstra` by default), connect the
-     GitHub repository as a trusted build system, and create two artifact configurations, slugs `binaries` and
-     `installer` (sketch below; add the product name/version metadata restrictions SignPath requires).
-  4. Create a CI user / API token with submitter rights on the release signing policy. Enable MFA everywhere.
-  5. Add `SIGNPATH_API_TOKEN` and `SIGNPATH_ORGANIZATION_ID` as secrets of the `release` Environment. Optional
-     variables: `SIGNPATH_PROJECT_SLUG` (default `axelstra`), `SIGNPATH_POLICY_SLUG` (default `release-signing`).
-  6. On each release, approve the two signing requests in SignPath (binaries, then installer). The job waits up to
-     30 minutes for each.
-- **Secrets in the workflow:** `SIGNPATH_API_TOKEN`, `SIGNPATH_ORGANIZATION_ID`.
+- **What the owner does by hand:** see [Owner checklist: SignPath Foundation](#owner-checklist-signpath-foundation).
+- **Secrets in the workflow:** `SIGNPATH_API_TOKEN`, `SIGNPATH_ORGANIZATION_ID`. Repository variables (optional,
+  defaults in brackets): `SIGNPATH_PROJECT_SLUG` (`axelstra`), `SIGNPATH_SIGNING_POLICY_SLUG` (`release-signing`),
+  `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` (`windows`).
 - **Effect:** valid Authenticode signature on all three files with a publisher that already has reputation from many
   projects. SmartScreen reputation still builds per file and publisher over time (no instant trust for anyone since
   2024, see below). ML engines see a signed file from a known publisher instead of an unsigned one.
 - **Drawbacks:** the publisher shown in Windows dialogs is SignPath Foundation; every release needs a manual
   approval in SignPath; the conditions above are SignPath's to change, and SignPath may revoke on violations.
 
-Artifact configuration sketch (check the element names and the metadata restriction syntax against SignPath's
-artifact configuration docs before saving; not tried against a live SignPath project):
+How the workflow talks to SignPath (SignPath's GitHub trusted build system,
+<https://docs.signpath.io/trusted-build-systems/github>): each file set is first stored as a workflow artifact with
+`actions/upload-artifact` (v4+, which SignPath requires), then `signpath/github-action-submit-signing-request` submits
+that artifact by its id. SignPath fetches it from GitHub itself, so the origin (repository, commit, workflow run, and
+that every job ran on GitHub-hosted runners) comes from GitHub and cannot be forged by the build script. The job waits
+for the approval (`wait-for-completion`, up to 30 minutes) and downloads the signed zip.
 
-```xml
-<!-- slug: binaries (the zip GitHub makes from sign-in/binaries) -->
-<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
-  <zip-file>
-    <pe-file path="axelstra-app.exe"><authenticode-sign/></pe-file>
-    <pe-file path="axelstra-x86_64-pc-windows-msvc.exe"><authenticode-sign/></pe-file>
-  </zip-file>
-</artifact-configuration>
+The artifact configuration is [`.signpath/artifact-configuration.xml`](../.signpath/artifact-configuration.xml). SignPath
+has no NSIS container (its composite formats are zip, MSI, CAB, AppX/MSIX, OPC, NuGet, JAR and directories), so it
+cannot sign the programs inside an existing installer. The workflow therefore sends two requests with the same
+configuration: first the zip with `axelstra-app.exe` and `axelstra-x86_64-pc-windows-msvc.exe` (the sidecar, installed
+as `axelstra.exe`), then, after `tauri bundle` packed those signed copies, the zip with the installer. Each entry has
+`min-matches="0"` for that reason; the workflow's last check fails the release unless all three files, and the two
+programs read back out of the installer, are validly signed. Every entry enforces `product-name="Axelstra"` and
+`product-version="${version}"`, the parameter the workflow passes from `app/src-tauri/tauri.conf.json` (the file
+metadata restriction SignPath Foundation requires).
 
-<!-- slug: installer -->
-<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
-  <zip-file>
-    <pe-file path="*-setup.exe"><authenticode-sign/></pe-file>
-  </zip-file>
-</artifact-configuration>
-```
+Not tried against a live SignPath project yet. On the first dry run check in SignPath that the metadata restriction
+accepts the version strings: `axelstra.exe` gets `ProductVersion` from `crates/cli/build.rs`, `axelstra-app.exe` from
+Tauri's resource (package version) and the installer from Tauri's NSIS template (`VIAddVersionKey ProductVersion`).
+If one of them writes a four-part version (`0.1.0.0`), adjust that file, not the restriction.
 
 ### 2. Azure Artifact Signing (formerly Azure Trusted Signing)
 
@@ -176,3 +169,47 @@ possible; it is the most expensive and the most work.
   file; a signed file is easier for the vendor to whitelist by certificate.
 - It does not give instant SmartScreen trust with any certificate type.
 - It does not cover local builds. Local release builds of the same code stay unsigned and can still be flagged.
+
+## Owner checklist: SignPath Foundation
+
+What the repository already has: the workflow steps (`.github/workflows/release.yml`), the artifact configuration
+(`.signpath/artifact-configuration.xml`), the *Code signing policy* section with roles and privacy statement in
+`README.md`, the MIT license (`LICENSE`, OSI-approved, no commercial dual licensing) and version resources with product
+name `Axelstra` on all three files. Until the secrets below exist the release builds unsigned, exactly as before.
+
+Done by hand, in this order:
+
+1. **Check the eligibility points** on <https://signpath.org/terms>: MIT and no proprietary components (true today),
+   the project is actively maintained and already released in the form to be signed (publish at least one unsigned
+   release first), the download page documents what the program does, the installer has an uninstaller (NSIS does).
+2. **Turn on MFA** on GitHub (and later on SignPath) for every team member. Required by the terms.
+3. **Review the *Code signing policy* section** in `README.md`: the roles name only the owner; add people there if
+   others get commit or approval rights. Re-read the privacy statement whenever a feature starts a new network call.
+   The release page should link it too: add "Code signing policy: <README link>" to the release notes.
+4. **Apply** at <https://signpath.org/apply> with the repository URL
+   (<https://github.com/DevFranciscoCruz/axelstra>), the license and the release page. Wait for acceptance; SignPath
+   creates the organization and gives access.
+5. **In SignPath, the organization:** add the predefined trusted build system *GitHub.com*. The SignPath GitHub App
+   is optional (only needed for audit-log checks; this public repository needs no extra workflow permissions).
+6. **In SignPath, the project:** create or confirm the project with slug `axelstra` (else set the repository
+   variable `SIGNPATH_PROJECT_SLUG`), and link the repository and the *GitHub.com* trusted build system to it.
+7. **Artifact configuration:** create one with slug `windows` (else set `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`) and
+   paste the content of `.signpath/artifact-configuration.xml`. Keep the two in sync when either changes.
+8. **Signing policy:** the release policy (slug `release-signing`, else set `SIGNPATH_SIGNING_POLICY_SLUG`) with the
+   SignPath Foundation certificate and the owner as approver (manual approval of every request is required). If
+   SignPath offers origin policies for the project, allow GitHub-hosted runners only and tags `v*` / branch `main`.
+9. **CI user and API token:** create a CI user in SignPath with *submitter* rights on that policy and generate its API
+   token. Note the organization id (SignPath organization settings).
+10. **GitHub secrets** (repository Settings > Environments > `release` > Environment secrets): `SIGNPATH_API_TOKEN`
+    and `SIGNPATH_ORGANIZATION_ID`. Not plain repository secrets: the `release` Environment's reviewers and tag rules
+    guard them there.
+11. **GitHub variables** (Settings > Secrets and variables > Actions > Variables), only where a slug differs from the
+    default: `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG`, `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`.
+12. **Dry run:** run the *release* workflow by hand with *dry run* on. Approve the two signing requests in SignPath
+    (binaries, then installer) while the job waits, then check the *Verify the Authenticode signatures* step and the
+    metadata restriction (see the note on versions above).
+13. **Each release:** approve both signing requests within 30 minutes each, or the job fails and nothing is
+    published.
+
+To stop signing, remove the two secrets: the workflow falls back to Azure Artifact Signing if its secrets exist, else
+to the unsigned build.
