@@ -5,7 +5,7 @@ members = ["crates/core", "crates/daemon", "crates/cli", "app/src-tauri"]
 [workspace.package]
 edition = "2021"
 license = "MIT"
-version = "0.1.0"
+version = "0.1.42"
 
 # Release builds in CI override debug/strip/split-debuginfo through CARGO_PROFILE_RELEASE_* env vars (see
 # release.yml) so the .pdb/.dSYM can be archived; `strip = true` here keeps local release builds small

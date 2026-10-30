@@ -21,9 +21,14 @@ purpose and fix the new lints in the same change.
 ## scripts/
 
 - `stamp-version.mjs`: keeps the three version fields (Cargo workspace, `app/package.json`, `tauri.conf.json`) in step.
-  `--check` (they agree), `--tag vX.Y.Z` (release workflow), `--self-test` (CI).
+  `--check` (they agree), `--tag vX.Y.Z` (release workflow, `build-installer.ps1`), `--sync-lock` (the release PR:
+  `Cargo.lock` follows the three fields), `--self-test` (CI).
+- `next-version.mjs`: the next release version from the Conventional Commits since the last `v*` tag, same rules as
+  `release-please-config.json`. `--json` (with counts per type), `--local [--above X.Y.Z]` (a local build: above the
+  installed copy), `--self-test` (CI). See `docs/RELEASING.md`.
 - `bump-version.mjs X.Y.Z`: sets all three fields with the same rules, then refreshes `Cargo.lock` offline
-  (`cargo update --workspace --offline`). `--no-lock` skips the lock. Releases still go by tag; see AGENTS.md.
+  (`cargo update --workspace --offline`). `--no-lock` skips the lock. Normally release-please's PR does this; see
+  `docs/RELEASING.md`.
 - `check-tauri-config.mjs`: fails when the CSP or the capabilities drift from what `SECURITY.md` says (no `style-src-attr 'unsafe-inline'`).
 - `check-format.mjs`: prettier on the files this branch added or changed (or that are already formatted); `prettier --write` them.
 - `check-i18n-static.mjs`: finds dictionary texts copied into module-level constants (part of `check.mjs`).

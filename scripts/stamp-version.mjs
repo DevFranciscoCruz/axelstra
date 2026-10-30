@@ -2,6 +2,8 @@
 //
 //   node scripts/stamp-version.mjs --check              the three fields agree with each other
 //   node scripts/stamp-version.mjs --tag v1.2.3         stamp the tag version into all three, then assert tag == version
+//   node scripts/stamp-version.mjs --sync-lock          set Cargo.lock's workspace packages to the Cargo.toml version
+//                                                       (the release PR: release-please edits the three fields, not the lock)
 //   node scripts/stamp-version.mjs --self-test          run the script's own tests (CI)
 //   --root <dir>                                        repo root (default: the parent of scripts/)
 //
@@ -37,14 +39,28 @@ export function lockVersions(root) {
   return out;
 }
 
+// `from` null: every workspace package, whatever its version
 function stampLock(root, from, to) {
   const path = join(root, "Cargo.lock");
-  if (!existsSync(path)) return;
+  if (!existsSync(path)) return false;
   const text = readFileSync(path, "utf8");
   const next = text.replace(LOCK_BLOCK_RE, (all, head, ver, mid, rest) =>
-    !/^source = /m.test(rest) && ver === from ? `${head}${to}${mid}${rest}` : all,
+    !/^source = /m.test(rest) && (from === null || ver === from) ? `${head}${to}${mid}${rest}` : all,
   );
   if (next !== text) writeFileSync(path, next);
+  return next !== text;
+}
+
+// the three fields must agree; the lock follows them. Returns whether the lock changed.
+export function syncLock(root) {
+  const fields = read(root);
+  const distinct = new Set(fields.map((f) => f.version));
+  if (distinct.size !== 1) {
+    throw new Error(`version fields disagree: ${fields.map((f) => `${f.file}=${f.version}`).join(", ")}`);
+  }
+  const changed = stampLock(root, null, fields[0].version);
+  check(root);
+  return changed;
 }
 
 export function read(root) {
@@ -161,6 +177,14 @@ function selfTest() {
       readFileSync(join(dir, "Cargo.lock"), "utf8") === lock("2.0.0", "2.0.0").replace('"1.0.0"', '"1.0.0"'),
       "lock: workspace packages stamped, registry ones untouched",
     );
+    // --sync-lock: the fields moved (release PR), the lock did not
+    seed("0.3.0", "0.3.0", "0.3.0");
+    put("Cargo.lock", lock("2.0.0", "1.9.0"));
+    assert(syncLock(dir) === true, "sync reports a change");
+    assert(readFileSync(join(dir, "Cargo.lock"), "utf8") === lock("0.3.0", "0.3.0"), "sync: every workspace package");
+    assert(syncLock(dir) === false, "sync is idempotent");
+    seed("0.3.0", "0.3.1", "0.3.0");
+    throws(() => syncLock(dir), /disagree/, "sync refuses disagreeing fields");
     rmSync(join(dir, "Cargo.lock"));
 
     put("Cargo.toml", "[workspace]\n");
@@ -180,9 +204,11 @@ function main() {
   const root = resolve(arg("root") ?? join(dirname(fileURLToPath(import.meta.url)), ".."));
   if (args.includes("--self-test")) return selfTest();
   if (args.includes("--check")) return console.log(`versions agree: ${check(root)}`);
+  if (args.includes("--sync-lock"))
+    return console.log(syncLock(root) ? "Cargo.lock synced" : "Cargo.lock already in step");
   const tag = arg("tag");
   if (tag !== undefined) return console.log(`stamped ${stamp(root, tag)}`);
-  throw new Error("usage: stamp-version.mjs --check | --tag vX.Y.Z | --self-test [--root dir]");
+  throw new Error("usage: stamp-version.mjs --check | --tag vX.Y.Z | --sync-lock | --self-test [--root dir]");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

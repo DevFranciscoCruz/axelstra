@@ -1,0 +1,79 @@
+name: release-please
+# Keeps ONE release PR open against main ("chore(main): release X.Y.Z"). release-please reads the Conventional
+# Commits since the last release (release-please-config.json, .release-please-manifest.json), picks the version
+# (breaking: minor while 0.x, feat: minor, fix/perf/refactor/build/ops: patch; docs, test, ci, chore, style: no
+# release) and writes CHANGELOG.md and the three version fields into the PR. Every push to main updates the same PR,
+# so a release collects everything merged since the last one: merge the PR when a release is wanted.
+#
+# Merging it makes the next run create the tag `vX.Y.Z` and a GitHub Release with the changelog section as body.
+# The release is turned back into a draft at once (the installers are not on it yet, and the app reads
+# releases/latest/download/latest.json), then release.yml is dispatched on the tag ref with dry_run=false: a tag or a
+# release created with GITHUB_TOKEN triggers no workflow, but a workflow_dispatch does. release.yml builds, signs,
+# uploads into the draft and publishes it.
+#
+# The release PR is pushed with GITHUB_TOKEN too, so it gets no `pull_request` runs: this job syncs Cargo.lock onto
+# it (release-please cannot edit the lock) and dispatches ci.yml on its branch, which puts the CI checks on the PR's
+# head commit. PR Title does not run on it (its title is conventional by construction). See docs/RELEASING.md.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+permissions: { contents: read }
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # the tag, the GitHub Release, the release PR branch and the Cargo.lock commit on it
+      contents: write
+      # the release PR itself
+      pull-requests: write
+      # gh workflow run: ci.yml on the PR branch, release.yml on the tag
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: rp
+        with:
+          token: ${{ github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # The release PR changed: put Cargo.lock in step with the new version (CI's `stamp-version --check` and
+      # `cargo build --locked` need it), then run CI on the branch.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        if: ${{ steps.rp.outputs.pr }}
+        with:
+          ref: ${{ fromJSON(steps.rp.outputs.pr).headBranchName }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        if: ${{ steps.rp.outputs.pr }}
+        with: { node-version-file: .nvmrc }
+      - name: Sync Cargo.lock on the release PR
+        if: ${{ steps.rp.outputs.pr }}
+        env:
+          BRANCH: ${{ fromJSON(steps.rp.outputs.pr).headBranchName }}
+        run: |
+          node scripts/stamp-version.mjs --sync-lock
+          if ! git diff --quiet -- Cargo.lock; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add Cargo.lock
+            git commit -m "chore: sync Cargo.lock with the release version"
+            git push origin "HEAD:$BRANCH"
+          fi
+          gh workflow run ci.yml --ref "$BRANCH"
+
+      - name: Keep the release a draft until its installers are attached
+        if: ${{ steps.rp.outputs.release_created }}
+        env:
+          TAG: ${{ steps.rp.outputs.tag_name }}
+        run: gh release edit "$TAG" --draft=true -R "$GITHUB_REPOSITORY"
+      - name: Build and publish the release
+        if: ${{ steps.rp.outputs.release_created }}
+        env:
+          TAG: ${{ steps.rp.outputs.tag_name }}
+        run: gh workflow run release.yml --ref "$TAG" -f dry_run=false -R "$GITHUB_REPOSITORY"

@@ -3,16 +3,87 @@
 How a release is cut, who may sign it, and what to do when a key is lost or leaked. The mechanics live in
 `.github/workflows/release.yml`; the notes below are what the workflow cannot say.
 
+## Versioning: the version follows the content
+
+The version is not bumped by hand and not one patch per push. [release-please](https://github.com/googleapis/release-please)
+reads the [Conventional Commit](https://www.conventionalcommits.org) subjects merged since the last release and picks
+the next version from what they contain (`release-please-config.json`):
+
+| Commits since the last release | Bump | Example from 0.1.42 |
+| --- | --- | --- |
+| a breaking change (`feat!:`, `fix!:`, a `BREAKING CHANGE:` footer) | major; **minor while the major is 0** (`bump-minor-pre-major`) | 0.2.0 |
+| at least one `feat` | minor | 0.2.0 |
+| only `fix`, `perf`, `refactor`, `build`, `ops` | patch | 0.1.43 |
+| only `docs`, `test`, `ci`, `chore`, `style`, or non-conventional subjects | no release | none |
+
+1.0.0 is the owner's decision: add a `Release-As: 1.0.0` footer to a commit on `main` (or edit the release PR) and
+release-please uses it.
+
+The tree carries the released version: the three fields (Cargo `[workspace.package]`, `app/package.json`,
+`app/src-tauri/tauri.conf.json`) and the workspace packages in `Cargo.lock` all say the last release (seeded at
+0.1.42, `.release-please-manifest.json`). `node scripts/stamp-version.mjs --check` keeps them in step (CI).
+
+`node scripts/next-version.mjs` prints the version the next release gets, with the same rules (it reads the
+changelog sections of `release-please-config.json`); `--json` adds the counts per type. At the switch to
+release-please there were, since v0.1.42, 28 `feat`, 23 `fix` and 10 `perf` commits: the first release is **0.2.0**.
+
 ## Cutting a release
 
-1. Land everything on `main` and let CI go green.
-2. Push a `vX.Y.Z` tag on a commit that is already on `main` (`git tag vX.Y.Z && git push origin vX.Y.Z`).
-3. The workflow checks the tag is on `main`, runs the whole CI, stamps the tag into the three version files,
-   builds, uploads to a **draft** release, merges `latest.json`, and only then publishes.
-4. Approve the `release` Environment when GitHub asks (see below), and `release-publish` if it has a reviewer.
+1. Land work on `main` with Conventional Commit subjects (PR titles are checked by `pr-title.yml`; see `AGENTS.md`).
+2. Every push to `main` runs `release-please.yml`, which keeps **one** release PR open, titled
+   `chore(main): release X.Y.Z`. It carries the version in the three files, `CHANGELOG.md` and the manifest; the
+   workflow adds a commit that syncs `Cargo.lock` (release-please cannot edit it) and dispatches `ci.yml` on the PR
+   branch, so the PR has CI checks. The PR grows with each push: nothing is released until it is merged.
+3. When a release is wanted, review the PR (edit the changelog text in it if needed) and **merge** it.
+4. The next `release-please.yml` run (the merge is a push to `main`) creates the tag `vX.Y.Z` and a GitHub
+   Release whose body is the changelog section, turns that release back into a **draft** at once, and dispatches
+   `release.yml` on the tag ref with `dry_run=false`.
+5. `release.yml` checks the tag is on `main`, runs the whole CI, stamps the tag into the version files (a no-op:
+   they already agree), builds and signs, uploads to the draft, merges `latest.json`, and only then publishes.
+6. Approve the `release` Environment when GitHub asks (see below), and `release-publish` if it has a reviewer.
+
+Why the dispatch: a tag or a release created with `GITHUB_TOKEN` starts no `push` or `release` workflow (GitHub's
+loop guard), so the `on: push: tags` trigger never fires for release-please's tag. `workflow_dispatch` is the
+exception to that rule. A `vX.Y.Z` tag pushed by hand still starts `release.yml` through `push`, as before; only do
+that for a version release-please did not cut.
+
+Why the draft: release-please publishes its release at once, but the app reads
+`releases/latest/download/latest.json`, which exists only after `release.yml`. The draft keeps the release out of
+`latest` until its installers and `latest.json` are on it, and keeps the "assets are immutable once published" rule.
+`release.yml`'s `draft` job keeps release-please's body and only falls back to git-cliff when the body is empty.
+
+If the dispatch failed (the step is red), run it by hand: Actions, *release*, *Run workflow*, *Use workflow from*
+the tag `vX.Y.Z`, *dry run* off. A real run on anything but a `vX.Y.Z` tag is refused by the `gate` job.
 
 A manual run with *dry run* on does everything except publish: installers, `latest.json` and symbols stay on
 the run as artifacts. A dry run also needs the `release` approval, because it uses the signing secrets.
+
+## Local installers
+
+`scripts/build-installer.ps1` without `-Version` stamps the build with the next release version
+(`next-version.mjs --local`): the version the release PR would ship, or the last release plus a patch when nothing
+releasable landed. When the installed Axelstra (the NSIS uninstall entry in `HKCU`/`HKLM`) is already as high, it
+takes one patch above the installed one, so the local installer always upgrades the installed copy. The four files
+that carry the version (`Cargo.toml`, `Cargo.lock`, `app/package.json`, `app/src-tauri/tauri.conf.json`) are
+stamped for the build and their exact previous bytes are written back at the end, also when the build fails.
+`-Version X.Y.Z` forces a version. A local build numbered like a future release (for example 0.2.0 before 0.2.0
+ships) is not replaced by the updater when that release comes out with the same number; the next one replaces it.
+
+## GitHub settings for release-please (owner, one time)
+
+- **Settings, Actions, General, Workflow permissions:** tick *Allow GitHub Actions to create and approve pull
+  requests*. Without it release-please cannot open the release PR. The default token permission can stay
+  *read*: each job asks for what it needs.
+- **Branch protection / ruleset on `main`:** if status checks are required, require the `ci.yml` job names (they
+  run on the release PR through the dispatch); do not require *conventional commit title* (`pr-title.yml` gets no
+  run on a PR opened by `GITHUB_TOKEN`), or the release PR can never merge. Allow squash merges (the PR title becomes
+  the commit subject).
+- **Tag rules (`v*`):** the ruleset that restricts who may create `v*` tags must let **GitHub Actions** create them
+  (add it to the bypass list), or release-please cannot tag the release.
+- **Environment `release`:** its *deployment branches and tags* rule must allow the tag pattern `v*`; a dispatched
+  run on the tag ref is a tag deployment, as before.
+- **Labels:** release-please creates `autorelease: pending` and `autorelease: tagged` itself; do not delete them
+  while a release PR is open.
 
 ## GitHub Environments
 
@@ -190,11 +261,15 @@ Not verified on a real macOS machine from this repo yet.
 
 ## Release notes
 
-`cliff.toml` configures [git-cliff](https://git-cliff.org). The `draft` job runs it (`--latest`) over the
-commits since the previous `v*` tag and groups plain-English subjects by their first word (Add, Fix, Update...;
-merge commits are skipped). If git-cliff fails or finds nothing, the job falls back to the plain list of commit
-subjects. Preview locally with `git cliff --latest` (needs git-cliff installed).
-The same text is the body of the update card in the app.
+release-please writes the notes: the section of `CHANGELOG.md` for the version, grouped by commit type
+(`changelog-sections` in `release-please-config.json`; docs, tests, CI, chores and style are hidden), becomes the
+body of the GitHub Release. The `manifest` job copies that body into `latest.json`, so it is also the text of the
+update card in the app.
+
+Fallback, for a release whose draft has an empty body (a tag pushed by hand): `cliff.toml` configures
+[git-cliff](https://git-cliff.org). The `draft` job runs it (`--latest`) over the commits since the previous `v*` tag
+and groups subjects by their first word (merge commits are skipped). If git-cliff fails or finds nothing, the job
+falls back to the plain list of commit subjects. Preview locally with `git cliff --latest`.
 
 ## Pinned actions
 

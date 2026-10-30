@@ -22,6 +22,7 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with: { node-version-file: .nvmrc }
       - run: node scripts/stamp-version.mjs --self-test
+      - run: node scripts/next-version.mjs --self-test
       - run: node scripts/stamp-version.mjs --check
   # engine + frontend checks on every OS the app ships for; fail-fast off so one OS failing does not hide the others
   test:
