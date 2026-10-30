@@ -35,7 +35,7 @@ pub(super) fn tell_main_not_integrated(reg: &Arc<Registry>, item: &Value) {
         item["why"].as_str().unwrap_or_default(),
     );
     let m = reg.bus.send(None, id, "message", &text, None, None);
-    reg.deliver_untrusted(id, s, &crate::msgbus::notice(&m, "axelstra"));
+    reg.announce(id, s, &m, "axelstra");
 }
 
 /// Everything that closes a session by itself when it has been quiet: the reapers of ephemeral workers and leads, and
@@ -980,7 +980,7 @@ pub(super) fn stall_tick(reg: &Arc<Registry>) -> Option<Duration> {
         let m = reg.bus.send(from, pid, "notice", &text, None, None);
         let agent = reg.metas.lock_recover().get(&pid).map(|m| m["kind"] == "agent").unwrap_or(false);
         if agent {
-            reg.deliver_untrusted(pid, ps, &crate::msgbus::notice(&m, "axelstra watchdog"));
+            reg.announce(pid, ps, &m, "axelstra watchdog");
         }
     }
     // the user's alert moved: watchers learn it now (the session monitor does not look at stalls)

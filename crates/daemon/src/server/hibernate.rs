@@ -315,7 +315,7 @@ fn start_wake(reg: &Arc<Registry>, id: u32) {
 }
 
 /// Waits (a computed deadline, no polling) until the woken agent has printed its banner and gone quiet, then types the
-/// notices of what reached it while it slept. Only then is it "working" again. If it exits before that, the resume failed.
+/// notice of what reached it while it slept and was never announced (one short line when there are several). Only then is it "working" again. If it exits before that, the resume failed.
 fn settle(reg: Arc<Registry>, id: u32) {
     let begun = Instant::now();
     let min_total = Duration::from_secs(4);
@@ -343,19 +343,20 @@ fn settle(reg: Arc<Registry>, id: u32) {
         reg.pulse.wait(seen, Some(wait));
     }
     if let Some(s) = reg.get(id) {
-        let unread = reg.bus.inbox(id, false, false);
-        if !unread.is_empty() {
-            let text = unread
-                .iter()
-                .map(|m| {
-                    let from = m
-                        .from
-                        .map(|f| reg.labels.lock_recover().get(&f).cloned().unwrap_or_else(|| crate::prompts::session_name(f)))
-                        .unwrap_or_else(|| crate::prompts::USER_SENDER.into());
-                    crate::msgbus::notice(m, &from)
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+        // only what was never announced: messages it already saw (read with `--no-mark` or not at all) are not typed again
+        let fresh: Vec<_> = reg
+            .bus
+            .take_unannounced(id)
+            .into_iter()
+            .map(|m| {
+                let from = m
+                    .from
+                    .map(|f| reg.labels.lock_recover().get(&f).cloned().unwrap_or_else(|| crate::prompts::session_name(f)))
+                    .unwrap_or_else(|| crate::prompts::USER_SENDER.into());
+                (m, from)
+            })
+            .collect();
+        if let Some(text) = crate::prompts::backlog(&fresh) {
             reg.deliver_untrusted(id, s, &text);
         }
     }
@@ -401,7 +402,7 @@ pub(super) fn fail_wake(reg: &Arc<Registry>, id: u32, code: Option<i32>, detail:
         }
         let m = reg.bus.send(Some(id), p, "message", &text, None, None);
         if let Some(ps) = reg.get(p) {
-            reg.deliver_untrusted(p, ps, &crate::msgbus::notice(&m, &label));
+            reg.announce(p, ps, &m, &label);
         }
     }
 }

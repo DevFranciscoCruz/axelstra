@@ -135,7 +135,7 @@ pub(super) fn call(c: &mut Ctx) -> Result<Value> {
             }
             let target = reg.get(lead).ok_or_else(no_lead)?;
             let m = reg.bus.send(None, lead, "message", &text, None, None);
-            reg.deliver_untrusted(lead, target, &crate::msgbus::notice(&m, crate::prompts::REVIEW_SENDER));
+            reg.announce(lead, target, &m, crate::prompts::REVIEW_SENDER);
             Ok(json!({"text": text, "sent": true, "session": lead, "message": m.id}))
         }
         m => Err(unknown_method(m)),

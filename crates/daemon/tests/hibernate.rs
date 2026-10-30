@@ -184,6 +184,68 @@ fn hibernate_and_wake_keep_resume_id_inbox_and_role() {
     let _ = c.call("session.kill", json!({"id": other}));
 }
 
+/// The text typed since the last (re)start, with the screen rows joined again where a long line wrapped: the saved
+/// terminal shown above a woken agent repeats the old screen.
+fn since_wake(c: &mut Client, id: u64) -> String {
+    let rows = c.call("session.screen", json!({"id": id, "lines": 60})).map(|v| v["lines"].clone()).unwrap_or_default();
+    let all: String = rows.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    all.rsplit("fim do histórico").next().unwrap_or_default().to_string()
+}
+
+/// Notices were typed again and again for messages the agent had already been told about, because it read them with
+/// `axelstra inbox --no-mark` and every wake typed the whole unread inbox. A message is announced once; what reached a
+/// sleeper is one short line with the count.
+#[test]
+fn a_message_is_announced_once_and_a_wake_announces_only_the_new_ones_in_one_line() {
+    let root = temp("once");
+    let wt = root.join("wt");
+    std::fs::create_dir_all(&wt).unwrap();
+    let mut c = start(&root, "once");
+    c.call("orch.limits", json!({"max_workers": 1})).unwrap();
+    let a = agent(&mut c, &wt, &key(70), json!({}), json!({"worker": true}));
+    let other = agent(&mut c, &root, &key(71), json!({}), json!({}));
+    ready(&mut c, a);
+    // awake: the notice is typed at once, one time
+    c.call("msg.send", json!({"from": other, "to": a, "text": "seen-before-sleep", "kind": "message"})).unwrap();
+    until("live notice", || since_wake(&mut c, a).contains("seen-before-sleep").then_some(()));
+    // read without marking: it stays unread, and that must not make it come back
+    let inbox = c.call("msg.inbox", json!({"session": a, "mark": false})).unwrap();
+    assert_eq!(inbox.as_array().unwrap().len(), 1, "{inbox}");
+    std::thread::sleep(Duration::from_millis(900));
+    until("calm enough to sleep", || match hibernate(&mut c, a) {
+        Ok(_) => Some(()),
+        Err(e) if matches!(code_of(&e).as_str(), "hibernate.working" | "hibernate.recent") => None,
+        Err(e) => panic!("{e:#}"),
+    });
+    // the slot is taken while it sleeps: its wakes queue, and the messages pile up unannounced
+    let b = agent(&mut c, &wt, &key(72), json!({}), json!({"worker": true}));
+    for n in 1..=3 {
+        c.call("msg.send", json!({"from": other, "to": a, "text": format!("while-asleep-{n}"), "kind": "message"})).unwrap();
+    }
+    assert!(row(&mut c, a).unwrap()["hibernated"]["queued"] == true);
+    c.call("session.kill", json!({"id": b})).unwrap();
+    until("woken", || is_awake(&mut c, a).then_some(()));
+    let out = until("the backlog line", || Some(since_wake(&mut c, a)).filter(|s| s.contains("3 new messages")));
+    assert!(!out.contains("seen-before-sleep"), "an announced message is not typed again: {out}");
+    assert!(!out.contains("while-asleep-"), "the backlog line names the messages, it does not quote them: {out}");
+    assert!(!out.contains("text from another session"), "one line for all, no notice per message: {out}");
+    // a new message announces itself only, never the backlog
+    c.call("msg.send", json!({"from": other, "to": a, "text": "after-wake", "kind": "message"})).unwrap();
+    until("the new notice", || since_wake(&mut c, a).contains("after-wake").then_some(()));
+    std::thread::sleep(Duration::from_millis(500));
+    let out = since_wake(&mut c, a);
+    // typed once each; the stand-in prints a copy of every line it reads (`1:[axelstra] ...` on Windows, the tty echo
+    // plus `cat` elsewhere), so a line shows at most twice
+    let backlog = out.matches("3 new messages").count();
+    assert!((1..=2).contains(&backlog), "the backlog line is typed once: {out}");
+    assert!(out.matches("message #5 from").count() <= 2, "the new notice is typed once: {out}");
+    assert_eq!(out.matches("message #2 from").count(), backlog, "the backlog is not typed again with the new one: {out}");
+    assert!(!out.contains("seen-before-sleep") && !out.contains("while-asleep-"), "{out}");
+    assert_eq!(row(&mut c, a).unwrap()["unread"], 5, "announcing is not reading");
+    let _ = c.call("session.kill", json!({"id": a}));
+    let _ = c.call("session.kill", json!({"id": other}));
+}
+
 #[test]
 fn what_is_not_resumable_or_not_idle_is_refused() {
     let root = temp("refuse");
