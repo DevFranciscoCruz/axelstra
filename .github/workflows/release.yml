@@ -1,5 +1,10 @@
 name: release
-# Push a tag `vX.Y.Z` to build the installers and attach them to the GitHub Release. The Windows
+# Builds the installers for a `vX.Y.Z` tag and attaches them to its GitHub Release. Normally started by
+# release-please.yml: merging the release PR makes release-please create the tag and the release (turned back
+# into a draft at once), and that workflow then dispatches this one on the tag ref with dry_run=false. It has to
+# dispatch: a tag created with GITHUB_TOKEN triggers no `push` workflow. A tag pushed by hand (or by a PAT) still
+# starts it through `push`. See docs/RELEASING.md.
+# The Windows
 # installer and the macOS .app.tar.gz are signed for the in-app updater; a last job merges the platform
 # entries into latest.json, which the app reads from releases/latest/download. macOS is OFF by default
 # (no Apple Developer account): the Mac legs only exist when the repository variable RELEASE_MACOS is
@@ -24,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Build and sign only; keep the installer on the run, publish nothing
+        description: Build and sign only; keep the installer on the run, publish nothing (off = a real release, needs a vX.Y.Z tag as the ref)
         type: boolean
         default: true
 permissions: { contents: write }
@@ -37,6 +42,14 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with: { fetch-depth: 0 }
+      # a real (not dry) run publishes under the ref's name, so it must be a release tag
+      - name: A real release runs on a vX.Y.Z tag
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" != "tag" || ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::a release needs a vX.Y.Z tag as the ref (got $GITHUB_REF_TYPE $GITHUB_REF_NAME); use dry_run for anything else"
+            exit 1
+          fi
       - name: Tag commit is an ancestor of origin/main
         if: github.ref_type == 'tag'
         run: |
@@ -53,7 +66,8 @@ jobs:
   draft:
     name: draft release
     needs: [gate, ci]
-    if: github.event_name == 'push'
+    # a real release: a tag push, or the dispatch from release-please.yml (dry_run=false on the tag ref)
+    if: ${{ github.ref_type == 'tag' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -100,10 +114,15 @@ jobs:
       - name: Create the draft
         run: |
           V="${GITHUB_REF_NAME#v}"
-          # a re-run reuses its own draft; an already published release is an error
+          # a re-run reuses its own draft; an already published release is an error. The draft release-please
+          # made already has its changelog section as the body: keep it, the notes above are only the fallback.
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             [[ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" == "true" ]] || { echo "::error::$GITHUB_REF_NAME is already published"; exit 1; }
-            gh release edit "$GITHUB_REF_NAME" --title "Axelstra $V" --notes-file notes.md
+            if [[ -n "$(gh release view "$GITHUB_REF_NAME" --json body --jq .body | tr -d '[:space:]')" ]]; then
+              gh release edit "$GITHUB_REF_NAME" --title "Axelstra $V"
+            else
+              gh release edit "$GITHUB_REF_NAME" --title "Axelstra $V" --notes-file notes.md
+            fi
           else
             gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Axelstra $V" --notes-file notes.md
           fi
@@ -619,7 +638,7 @@ jobs:
     name: publish release
     needs: [manifest, linux]
     # waits for linux to finish but tolerates its failure (experimental); manifest must have succeeded
-    if: ${{ !cancelled() && github.event_name == 'push' && needs.manifest.result == 'success' && contains(fromJSON('["success","failure","skipped"]'), needs.linux.result) }}
+    if: ${{ !cancelled() && github.ref_type == 'tag' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) && needs.manifest.result == 'success' && contains(fromJSON('["success","failure","skipped"]'), needs.linux.result) }}
     runs-on: ubuntu-latest
     # last gate before clients see the release: put a required reviewer on this Environment
     environment: release-publish

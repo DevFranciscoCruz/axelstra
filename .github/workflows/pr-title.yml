@@ -1,0 +1,34 @@
+name: PR Title
+# A pull request is squash-merged with its title as the commit subject, and release-please reads those subjects to
+# pick the next version and write the changelog. So the title must be a Conventional Commit: `type(scope)?: summary`,
+# `type!:` for a breaking change. Types match release-please-config.json (see AGENTS.md, "Commits").
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  semantic-pr:
+    name: conventional commit title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            build
+            ops
+            docs
+            test
+            ci
+            chore
+            style
+            revert
+          requireScope: false
