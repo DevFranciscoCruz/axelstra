@@ -103,13 +103,16 @@ pub fn place(app_exe: Option<&Path>, daemon_exe: Option<&Path>) -> Place {
 /// A session counts as working for this long after its last output (the frontend's `WORKING_MS`).
 const WORKING_MS: u64 = 3000;
 
-/// Busy unless every running row of `session.list` is quiet: not working (output in the last `WORKING_MS`), not
-/// waiting for an answer, not awaiting, not paused, not hibernated. Agents and terminals alike.
+/// Busy unless every running row of `session.list` is a quiet agent: not working (output in the last `WORKING_MS`), not
+/// waiting for an answer, not awaiting, not paused, not hibernated. A running terminal (no `meta.agent`) is always busy:
+/// what runs in it (a dev server, a watcher) may print nothing for minutes, the list cannot tell, and a restore only
+/// brings back a fresh shell. An idle agent resumes its conversation after the restart.
 pub fn busy_of(rows: &Value) -> Busy {
     let Some(rows) = rows.as_array() else { return Busy::Unknown };
     let busy = rows.iter().filter(|r| r["running"] != false).any(|r| {
         let set = |k: &str| !r[k].is_null();
-        r["idle_ms"].as_u64().is_none_or(|ms| ms < WORKING_MS)
+        r["meta"]["agent"].as_str().is_none_or(str::is_empty)
+            || r["idle_ms"].as_u64().is_none_or(|ms| ms < WORKING_MS)
             || r["waiting"] == true
             || set("wait")
             || set("awaiting")
@@ -191,7 +194,7 @@ mod tests {
 
     fn row(extra: Value) -> Value {
         let mut r = json!({"id": 1, "running": true, "idle_ms": 60_000, "waiting": false, "wait": null, "awaiting": null,
-            "paused": null, "hibernated": null});
+            "paused": null, "hibernated": null, "meta": {"agent": "claude"}});
         for (k, v) in extra.as_object().unwrap() {
             r[k] = v.clone();
         }
@@ -204,6 +207,7 @@ mod tests {
         assert_eq!(busy_of(&json!([row(json!({}))])), Busy::Idle);
         // an ended session does not count, whatever it last did
         assert_eq!(busy_of(&json!([row(json!({"running": false, "idle_ms": 0}))])), Busy::Idle);
+        assert_eq!(busy_of(&json!([row(json!({"running": false, "meta": {}}))])), Busy::Idle);
         for extra in [
             json!({"idle_ms": 100}),
             json!({"idle_ms": null}),
@@ -212,6 +216,10 @@ mod tests {
             json!({"awaiting": {"reason": "CI", "since": 1, "until": null}}),
             json!({"paused": {"reason": "memory", "since": 1, "build": false}}),
             json!({"hibernated": {"since": 1, "saved_mb": 10, "waking": false, "queued": false}}),
+            // a terminal, quiet or not: something may run in it
+            json!({"meta": {}}),
+            json!({"meta": {"agent": ""}}),
+            json!({"meta": null}),
         ] {
             assert_eq!(busy_of(&json!([row(json!({})), row(extra.clone())])), Busy::Working, "{extra}");
         }

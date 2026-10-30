@@ -1982,7 +1982,7 @@ mod stale_connect {
     }
 
     fn idle() -> Value {
-        json!([{"id": 1, "running": true, "idle_ms": 600000, "waiting": false, "wait": null, "awaiting": null, "paused": null, "hibernated": null}])
+        json!([{"id": 1, "running": true, "idle_ms": 600000, "waiting": false, "wait": null, "awaiting": null, "paused": null, "hibernated": null, "meta": {"agent": "claude"}}])
     }
 
     #[test]
@@ -2008,6 +2008,15 @@ mod stale_connect {
         assert_eq!(seen, [(1, Some(offer)), (1, None)]);
         assert_eq!(fake.lists.load(Ordering::SeqCst), 1);
         assert_eq!(memo, Some((1, offer)));
+    }
+
+    #[test]
+    fn a_stale_daemon_with_a_terminal_open_is_kept() {
+        let mut rows = idle();
+        rows[0]["meta"] = json!({});
+        let (fake, started, _, memo) = run("term", Some("bbbbbbb"), rows);
+        assert_eq!((fake.shutdowns.load(Ordering::SeqCst), started), (0, false));
+        assert_eq!(memo, Some((1, stale::Decision::Offer(stale::Reason::Busy))));
     }
 
     #[test]

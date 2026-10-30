@@ -123,8 +123,9 @@ lookup) first applies the too-old rule (`PROTO`/`SECURITY_MIN`: always replaced)
 behaviour). Different commits are stale: when the daemon's exe is not in the app's directory (canonical dirs compared; learned
 from the OS, `Client::server_exe`: the pipe's server process on Windows, the socket peer on Linux/macOS, else `hello.exe`) or
 cannot be learned, it is kept with an offer `dev`, never replaced; beside the app, it is replaced (`daemon.shutdown`, wait,
-start the app's own; session restore brings terminals back) only when `session.list` shows nothing busy (a running row that
-is working, waiting, awaiting, paused or hibernated; a failed list counts as busy), else kept with an offer `busy`. The check
+start the app's own; session restore brings the sessions back) only when `session.list` shows nothing busy (a running row that
+is working, waiting, awaiting, paused or hibernated, or any running terminal: what runs in it cannot be seen and a restore only
+brings a fresh shell; a failed list counts as busy), else kept with an offer `busy`. The check
 runs at connect and reconnect only, never by polling; the static `STALE` memo (held across the whole connect) makes one
 connection per daemon run decide, log one English stderr line (`axelstra: daemon kept|replaced|kept, restart offered: why;
 app ..., daemon ...`) and emit the Tauri event `daemon-stale` on an offer; the others reuse it, and a daemon the app just
