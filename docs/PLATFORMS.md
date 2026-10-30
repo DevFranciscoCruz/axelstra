@@ -22,7 +22,6 @@ experimental job.
 | Pressure cause (`governor/cause.rs`) | kernel pools, handles, pool tags, CPU/IO, compression | `meminfo` slab, cache, zswap, `/proc/stat`, per-pid cpu/io | `null` fields named with a reason in `breakdown.unavailable` | G5 (data) |
 | Pause / resume (`suspend.rs`) | `NtSuspendProcess` | `SIGSTOP`/`SIGCONT` per pid | same as Linux | none |
 | Indexer exclusion (`scanx.rs`) | `NOT_CONTENT_INDEXED` attribute | nothing (no indexer is in the way) | `.metadata_never_index` marker | none, by design |
-| Defender hint (`server/governor.rs:196`) | exclusion command in the FMfn notice | n/a | n/a | none |
 | Listening ports (`ports.rs`) | `GetExtendedTcpTable`, `netstat` fallback | `/proc/net/tcp{,6}` + `/proc/<pid>/fd`, `lsof` fallback | `lsof` | none |
 | Default shell | `powershell -NoLogo` | `$SHELL -l`, else `/bin/bash` | `$SHELL -l`, else `/bin/zsh` | G7 |
 | Agent launch line | PowerShell `& 'prog' ...` | `sh -l -c 'cmd; exec $SHELL -l'` | same | none |

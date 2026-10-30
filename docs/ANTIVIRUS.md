@@ -196,24 +196,3 @@ protection > Protection updates) before testing again.
    https://docs.virustotal.com/docs/false-positive-contacts (Trapmine has an entry there; its e-mail address is shown
    on that page only, and it is not repeated here because it could not be confirmed from this machine). Send the hash
    and the link rather than the executable: some vendors' mail servers reject attachments with executables.
-
-## Excluding Axelstra from Defender (local workaround)
-
-**Warning:** an exclusion turns off scanning for everything in that folder, including anything malicious that ends up
-there. Prefer reporting the false positive. Use exclusions only on a machine you control, only for these folders, and
-remove them once the verdict is fixed.
-
-Run in an elevated PowerShell (Run as administrator):
-
-```powershell
-# installed app; the installer's default (installMode currentUser) is %LOCALAPPDATA%\Axelstra,
-# use the folder you picked if you changed it
-Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Axelstra"
-# cargo target dir of the checkout (or $env:CARGO_TARGET_DIR if you set one)
-Add-MpPreference -ExclusionPath "C:\path\to\axelstra\target"
-# Axelstra worktrees: the .axelstra-wt folder next to the project checkout
-Add-MpPreference -ExclusionPath "C:\path\to\.axelstra-wt"
-```
-
-Check with `Get-MpPreference | Select -Expand ExclusionPath` (elevated) and remove with
-`Remove-MpPreference -ExclusionPath <path>`.
