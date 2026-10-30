@@ -25,7 +25,7 @@ Notes for coding agents and new contributors.
   Linux install the webkit2gtk and gtk dev packages listed in `ci.yml`).
 - Frontend: `cd app && npm ci && npx tsc --noEmit && npm test`
 - Lint: `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings`
-- Release helpers: `node scripts/stamp-version.mjs --self-test` and `--check`.
+- Release helpers: `node scripts/stamp-version.mjs --self-test` and `--check`, `node scripts/next-version.mjs --self-test`.
 - Everything at once: `node scripts/check.mjs` (fmt, clippy, tests, tsc, vitest, `actionlint` on the workflows when it is on PATH; `--engine` skips the desktop toolkit).
 - Check scripts: `scripts/check-tauri-config.mjs` (CSP and capabilities must stay as `SECURITY.md` says; no
   `style-src-attr 'unsafe-inline'`, so no static `style="..."`: use a class, or a CSS variable set from code),
@@ -464,10 +464,30 @@ missing = "unknown" in the app). Surfaces: `axelstra --version`/`-V`, `axelstra 
 
 ## Versions and releases
 
-Versions live in three places (Cargo workspace, `app/package.json`, `tauri.conf.json`) and must
-agree; CI checks it. Push a `vX.Y.Z` tag on a commit that is already on `main`: `release.yml` runs
-the whole CI, stamps the tag into the three files, builds, uploads to a draft release, merges
-`latest.json` and only then publishes. The workflow's dry-run input does everything except publish.
+Versions live in three places (Cargo workspace, `app/package.json`, `tauri.conf.json`) plus the workspace packages in
+`Cargo.lock`, and must agree; CI checks it (`stamp-version.mjs --check`). Never bump them by hand: release-please
+(`release-please.yml`, `release-please-config.json`, `.release-please-manifest.json`) keeps one release PR on `main`
+with the next version, picked from the Conventional Commits since the last release (feat: minor, fix/perf/refactor/
+build/ops: patch, breaking: minor while 0.x), and `CHANGELOG.md`. Merging that PR tags `vX.Y.Z` and dispatches
+`release.yml` on the tag (a `GITHUB_TOKEN` tag triggers no workflow), which builds, signs, uploads to the draft
+release, merges `latest.json` and only then publishes. The workflow's dry-run input does everything except publish.
+`node scripts/next-version.mjs` prints the next version; `scripts/build-installer.ps1` stamps a local build with it
+(above the installed copy) and restores the files afterwards. Details: `docs/RELEASING.md`.
+
+## Commits
+
+Subjects are [Conventional Commits](https://www.conventionalcommits.org), because release-please reads them to pick
+the version and write the changelog: `type(scope)?: summary`, imperative, lower case after the colon, no final period.
+
+- `feat`: something a user can see or use that did not exist (a minor release). `fix`: a bug fixed (patch). `perf`:
+  faster or lighter, same behaviour (patch). `refactor`, `build`, `ops`: also a patch and shown in the changelog.
+  `docs`, `test`, `ci`, `chore`, `style`: no release, hidden from the changelog.
+- Breaking change (an old daemon, CLI script or saved file stops working): `type!:` or a `BREAKING CHANGE: ...` footer.
+- Scope is optional and names the area: `core`, `daemon`, `cli`, `app`, `host`, `scripts`, `ci`...
+- The subject is the changelog line users read: say what changed for them, not how (`fix(app): keep the tab of a
+  failed terminal`, not `fix: handle None`). Several unrelated changes: several commits.
+- PR titles follow the same rules (`pr-title.yml`); a squash merge uses the title as the subject. `wip`, `ux`,
+  `Daemon:` and other non-conventional subjects are ignored by release-please: their work never reaches the notes.
 
 ## Build cost
 

@@ -4,7 +4,8 @@
 //   node scripts/bump-version.mjs --no-lock   skip the Cargo.lock refresh
 //
 // Uses the same fields and rewrite rules as stamp-version.mjs, so what this writes passes
-// `stamp-version.mjs --check`. Releases still go by tag; this is for bumping the tree on purpose.
+// `stamp-version.mjs --check`. Releases are cut by release-please's PR (docs/RELEASING.md); this is for bumping
+// the tree by hand on purpose.
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
