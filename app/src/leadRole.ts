@@ -51,12 +51,10 @@ export const worktreeSignals = <
 export const isMainSeat = (s: Pick<SessionInfo, "meta" | "label">) =>
   s.meta?.worker !== true && (isLead(s) || s.meta?.main === true || s.label === "main");
 
-/** The session a freshly selected worktree opens on: its main (running first), else a terminal (running first). Never a
- *  plain agent or worker ("Tarefa N"): with only tasks the seat stays empty and the user picks one. */
+/** The session a freshly selected worktree opens on: a terminal (running first), never an agent. The worktree row and its
+ *  main/lead agent are different things: clicking the row shows the worktree (terminals, files, reports), and only the
+ *  agent's own line opens its session. With no terminal the seat stays empty. */
 export const autoSeatOf = <T extends Pick<SessionInfo, "meta" | "label" | "running">>(tabs: T[]): T | undefined => {
-  const live = (list: T[]) => list.find((s) => s.running) ?? list[0];
-  return (
-    live(tabs.filter((s) => s.meta?.kind === "agent" && isMainSeat(s))) ??
-    live(tabs.filter((s) => s.meta?.kind !== "agent"))
-  );
+  const terms = tabs.filter((s) => s.meta?.kind !== "agent");
+  return terms.find((s) => s.running) ?? terms[0];
 };

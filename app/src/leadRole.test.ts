@@ -112,23 +112,17 @@ describe("autoSeatOf: what a selected worktree opens on", () => {
   });
   const seat = (tabs: Row[]) => autoSeatOf(tabs)?.id ?? null;
 
-  it("never a task or worker", () => {
+  it("never an agent: not a task, a worker, the lead, the project main or the row named main", () => {
     expect(
       seat([r(1, { kind: "agent" }), r(2, { kind: "agent", worker: true }), r(3, { kind: "agent", parent: 9 })]),
     ).toBeNull();
+    expect(seat([r(1, { kind: "agent", lead: true }), r(2, { kind: "agent", main: true }, "Agente")])).toBeNull();
+    expect(seat([r(1, { kind: "agent" }, "main")])).toBeNull();
   });
-  it("the lead, the project main or the row named main before a terminal", () => {
-    expect(seat([r(1, { kind: "terminal" }), r(2, { kind: "agent" }), r(3, { kind: "agent", lead: true })])).toBe(3);
-    expect(seat([r(1, { kind: "terminal" }), r(2, { kind: "agent", main: true }, "Agente")])).toBe(2);
-    expect(seat([r(1, { kind: "agent" }), r(2, { kind: "agent" }, "main")])).toBe(2);
+  it("a terminal beside the main agent: the terminal", () => {
+    expect(seat([r(1, { kind: "terminal" }), r(2, { kind: "agent" }), r(3, { kind: "agent", lead: true })])).toBe(1);
   });
-  it("a worker named main is still a worker", () => {
-    expect(seat([r(1, { kind: "agent", worker: true }, "main")])).toBeNull();
-  });
-  it("a running main or terminal first", () => {
-    expect(
-      seat([r(1, { kind: "agent", lead: true }, "main", false), r(2, { kind: "agent", lead: true }, "main")]),
-    ).toBe(2);
+  it("a running terminal first", () => {
     expect(seat([r(1, { kind: "terminal" }, "t", false), r(2, { kind: "terminal" }, "t")])).toBe(2);
   });
   it("a terminal when there is no main", () => {
