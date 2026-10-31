@@ -31,14 +31,7 @@
 // Exit 1 when the window starts more than --max-spawns-per-min children per minute (no limit when not given), 2 when
 // the binary is missing.
 import { spawn, spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,24 +55,13 @@ const agentEvery = Number(opt("agent-every", 20)) * 1000;
 const focusEvery = Number(opt("focus-every", 120)) * 1000;
 const withRemote = !argv.includes("--no-remote");
 const workingOpt = opt("working", "2");
-const working =
-  workingOpt === "all" ? Infinity : Math.max(0, Number(workingOpt));
+const working = workingOpt === "all" ? Infinity : Math.max(0, Number(workingOpt));
 const commitEvery = Math.max(1, Number(opt("commit-every", 5)));
 const churnEvery = Number(opt("churn-every", 90)) * 1000;
-const maxSpawns =
-  opt("max-spawns-per-min") === undefined
-    ? Infinity
-    : Number(opt("max-spawns-per-min"));
-const bin = resolve(
-  opt(
-    "bin",
-    process.env.AXELSTRA_BIN ?? join(root, "target", "debug", `axelstra${exe}`),
-  ),
-);
+const maxSpawns = opt("max-spawns-per-min") === undefined ? Infinity : Number(opt("max-spawns-per-min"));
+const bin = resolve(opt("bin", process.env.AXELSTRA_BIN ?? join(root, "target", "debug", `axelstra${exe}`)));
 if (!existsSync(bin)) {
-  console.error(
-    `idle-spawns: binary not found: ${bin} (cargo build -p axelstra)`,
-  );
+  console.error(`idle-spawns: binary not found: ${bin} (cargo build -p axelstra)`);
   process.exit(2);
 }
 
@@ -88,10 +70,7 @@ const home = join(dir, "home");
 const data = join(home, "axelstra");
 mkdirSync(join(home, "gh"), { recursive: true });
 const gitconfig = join(home, "gitconfig");
-writeFileSync(
-  gitconfig,
-  "[user]\n\temail = t@t\n\tname = t\n[init]\n\tdefaultBranch = main\n",
-);
+writeFileSync(gitconfig, "[user]\n\temail = t@t\n\tname = t\n[init]\n\tdefaultBranch = main\n");
 const suffix = `spawns${process.pid}`;
 const env = {
   ...process.env,
@@ -112,11 +91,7 @@ const env = {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const gitAsync = (cwd, ...args) =>
-  new Promise((res) =>
-    spawn("git", args, { cwd, env, stdio: "ignore" })
-      .on("exit", res)
-      .on("error", res),
-  );
+  new Promise((res) => spawn("git", args, { cwd, env, stdio: "ignore" }).on("exit", res).on("error", res));
 const git = (cwd, ...args) => {
   const r = spawnSync("git", args, { cwd, encoding: "utf8", env });
   if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
@@ -134,8 +109,7 @@ function pipePath() {
   if (!sid) throw new Error("cannot read the user SID");
   let h = 0xcbf29ce484222325n;
   const key = data.toLowerCase().replaceAll("\\", "/").replace(/\/+$/, "");
-  for (const b of Buffer.from(key))
-    h = ((h ^ BigInt(b)) * 0x100000001b3n) & 0xffffffffffffffffn;
+  for (const b of Buffer.from(key)) h = ((h ^ BigInt(b)) * 0x100000001b3n) & 0xffffffffffffffffn;
   return `\\\\.\\pipe\\axelstra-${sid}-d${h.toString(16).padStart(16, "0")}-t${suffix}`;
 }
 
@@ -161,9 +135,7 @@ class Conn {
           const p = this.pending.get(m.id);
           if (p) {
             this.pending.delete(m.id);
-            m.error !== undefined
-              ? p.reject(new Error(`${m.code ?? ""} ${m.error}`))
-              : p.resolve(m.result);
+            m.error !== undefined ? p.reject(new Error(`${m.code ?? ""} ${m.error}`)) : p.resolve(m.result);
           }
         } else if (kind === 3) {
           try {
@@ -249,14 +221,7 @@ try {
     writeFileSync(join(repo, "src", "lib.txt"), "lib\n");
     git(repo, "add", "a.txt", "src/lib.txt");
     git(repo, "commit", "-qm", "init");
-    if (withRemote)
-      git(
-        repo,
-        "remote",
-        "add",
-        "origin",
-        `https://github.com/axelstra-idle-spawns/p${i}.git`,
-      );
+    if (withRemote) git(repo, "remote", "add", "origin", `https://github.com/axelstra-idle-spawns/p${i}.git`);
     projects.push({ repo, wts: [] });
   }
   daemon = spawn(bin, ["daemon"], {
@@ -266,8 +231,7 @@ try {
   daemon.on("exit", (c) => (daemon.gone = c ?? "signal"));
   let app = null;
   for (let i = 0; i < 80 && !app; i++) {
-    if (daemon.gone !== undefined)
-      throw new Error(`daemon exited early (${daemon.gone})`);
+    if (daemon.gone !== undefined) throw new Error(`daemon exited early (${daemon.gone})`);
     try {
       app = await connect();
     } catch {
@@ -276,8 +240,7 @@ try {
   }
   if (!app) throw new Error("daemon did not accept a connection in 40s");
   conns.push(app);
-  for (const p of projects)
-    p.id = (await app.call("project.add", { path: p.repo })).id;
+  for (const p of projects) p.id = (await app.call("project.add", { path: p.repo })).id;
   // worktrees as `axelstra dispatch new` makes them (auto, the janitor may remove them), every fourth one by hand
   for (let k = 0; k < nWorktrees; k++) {
     const p = projects[k % nProjects];
@@ -310,10 +273,7 @@ try {
   for (let i = 0; i < nAgents; i++) {
     const p = projects[i % nProjects];
     const round = Math.floor(i / nProjects);
-    const cwd =
-      round === 0
-        ? p.repo
-        : (p.wts[(round - 1) % Math.max(1, p.wts.length)] ?? p.repo);
+    const cwd = round === 0 ? p.repo : (p.wts[(round - 1) % Math.max(1, p.wts.length)] ?? p.repo);
     const r = await app.call("session.spawn", {
       program: shell[0],
       args: shell[1],
@@ -341,10 +301,7 @@ try {
       label: `term${i}`,
     });
   // one finished command (a worker that ended): its exit is the kind of event that wakes the janitor
-  const once =
-    process.platform === "win32"
-      ? ["cmd.exe", ["/c", "exit 0"]]
-      : ["sh", ["-c", "exit 0"]];
+  const once = process.platform === "win32" ? ["cmd.exe", ["/c", "exit 0"]] : ["sh", ["-c", "exit 0"]];
   await app.call("session.spawn", {
     program: once[0],
     args: once[1],
@@ -356,24 +313,18 @@ try {
   for (const a of agents) {
     const t0 = Date.now();
     for (;;) {
-      const lines = JSON.stringify(
-        (await app.call("session.screen", { id: a.id, lines: 100 })).lines,
-      );
+      const lines = JSON.stringify((await app.call("session.screen", { id: a.id, lines: 100 })).lines);
       const m = lines.match(/TOK\[([^\]%$]{32,})\]/);
       if (m) {
         a.conn = await connect({ client: "cli", agent_token: m[1] });
         conns.push(a.conn);
         break;
       }
-      if (Date.now() - t0 > 15000)
-        throw new Error(
-          `agent ${a.id} printed no credential: ${lines.slice(0, 200)}`,
-        );
+      if (Date.now() - t0 > 15000) throw new Error(`agent ${a.id} printed no credential: ${lines.slice(0, 200)}`);
       await sleep(200);
     }
   }
-  for (const a of agents)
-    a.mainId = agents.find((b) => b.main && b.project === a.project)?.id;
+  for (const a of agents) a.mainId = agents.find((b) => b.main && b.project === a.project)?.id;
 
   // ---- the app ----
   const watch = await connect();
@@ -389,11 +340,7 @@ try {
     async () => {
       const list = await ac("session.list", {});
       const sig = Array.isArray(list)
-        ? list
-            .map(
-              (s) => `${s.id}:${s.running ? 1 : 0}:${s.meta?.worktree ?? ""}`,
-            )
-            .join("|")
+        ? list.map((s) => `${s.id}:${s.running ? 1 : 0}:${s.meta?.worktree ?? ""}`).join("|")
         : "";
       if (sig !== sessionSig) {
         sessionSig = sig;
@@ -412,8 +359,7 @@ try {
   const prs = async () => {
     if (Date.now() - lastPrs < 180_000) return;
     lastPrs = Date.now();
-    for (const p of projects)
-      await ac("gh.list", { project: p.id, kind: "pr" });
+    for (const p of projects) await ac("gh.list", { project: p.id, kind: "pr" });
   };
   const projectsLoad = gate(
     async () => {
@@ -440,17 +386,8 @@ try {
     events[k] = (events[k] ?? 0) + 1;
     if (k === "session.changed") sessions();
     if (k === "projects.changed") projectsLoad();
-    if (
-      [
-        "projects.changed",
-        "dispatch.changed",
-        "janitor.events",
-        "pr.changed",
-      ].includes(k)
-    )
-      overview();
-    if (["fs.changed", "projects.changed", "dispatch.changed"].includes(k))
-      overlaps();
+    if (["projects.changed", "dispatch.changed", "janitor.events", "pr.changed"].includes(k)) overview();
+    if (["fs.changed", "projects.changed", "dispatch.changed"].includes(k)) overlaps();
     if (k === "fs.changed") changes();
     if (k === "pr.changed") {
       lastPrs = 0;
@@ -477,9 +414,7 @@ try {
   // ---- dispatch: a task worktree and a short worker in it ----
   let churned = 0;
   const shortWorker =
-    process.platform === "win32"
-      ? ["cmd.exe", ["/c", "ping -n 4 127.0.0.1 > nul"]]
-      : ["sh", ["-c", "sleep 3"]];
+    process.platform === "win32" ? ["cmd.exe", ["/c", "ping -n 4 127.0.0.1 > nul"]] : ["sh", ["-c", "sleep 3"]];
   const churn = async () => {
     if (stopping) return;
     const p = projects[churned % nProjects];
@@ -515,10 +450,7 @@ try {
     };
     a.n = (a.n ?? 0) + 1;
     call("session.hint", { id: a.id, state: "working" });
-    setTimeout(
-      () => !stopping && call("session.hint", { id: a.id, state: "idle" }),
-      2000,
-    );
+    setTimeout(() => !stopping && call("session.hint", { id: a.id, state: "idle" }), 2000);
     if (a.n % 3 === 0) call("msg.inbox", { session: a.id, mark: true });
     if (a.n % 4 === 1 && !a.main && a.mainId)
       call("msg.send", {
@@ -537,20 +469,12 @@ try {
         await gitAsync(a.cwd, "status", "--porcelain");
         if (a.n % commitEvery === 0) {
           await gitAsync(a.cwd, "add", `work-${a.id}.txt`);
-          await gitAsync(
-            a.cwd,
-            "commit",
-            "-qm",
-            `turn ${a.n} of agent ${a.id}`,
-          );
+          await gitAsync(a.cwd, "commit", "-qm", `turn ${a.n} of agent ${a.id}`);
         }
       })().catch(() => {});
-    timers.push(
-      setTimeout(() => tick(a), agentEvery * (0.75 + Math.random() / 2)),
-    );
+    timers.push(setTimeout(() => tick(a), agentEvery * (0.75 + Math.random() / 2)));
   };
-  for (const a of agents)
-    timers.push(setTimeout(() => tick(a), Math.random() * agentEvery));
+  for (const a of agents) timers.push(setTimeout(() => tick(a), Math.random() * agentEvery));
 
   await sleep(warmupSecs * 1000);
   const sites = async () => {
@@ -630,24 +554,15 @@ try {
     // children per call of a method, from the sites named after it: how much git one read costs (all worktrees or one)
     spawns_per_call: Object.fromEntries(
       Object.entries(calls)
-        .map(([m, v]) => [
-          m,
-          bySite.filter((r) => r.site === m).reduce((n, r) => n + r.count, 0) /
-            v.calls,
-        ])
+        .map(([m, v]) => [m, bySite.filter((r) => r.site === m).reduce((n, r) => n + r.count, 0) / v.calls])
         .filter(([, n]) => n > 0)
         .map(([m, n]) => [m, +n.toFixed(1)]),
     ),
-    calls_per_min: Object.fromEntries(
-      Object.entries(calls).map(([m, v]) => [m, v.per_min]),
-    ),
+    calls_per_min: Object.fromEntries(Object.entries(calls).map(([m, v]) => [m, v.per_min])),
     calls,
-    events_per_min: Object.fromEntries(
-      Object.entries(diff(after.ev, before.ev)).map(([k, n]) => [k, rate(n)]),
-    ),
+    events_per_min: Object.fromEntries(Object.entries(diff(after.ev, before.ev)).map(([k, n]) => [k, rate(n)])),
   };
-  if (report.spawns.per_min > maxSpawns)
-    failed = new Error(`spawns ${report.spawns.per_min}/min > ${maxSpawns}`);
+  if (report.spawns.per_min > maxSpawns) failed = new Error(`spawns ${report.spawns.per_min}/min > ${maxSpawns}`);
 } catch (e) {
   failed = e;
 } finally {
@@ -673,21 +588,15 @@ if (report) {
     );
     console.log("  per min  count  site / command");
     for (const r of report.by_site)
-      console.log(
-        `  ${String(r.per_min).padStart(7)} ${String(r.count).padStart(6)}  ${r.site}  ${r.command}`,
-      );
+      console.log(`  ${String(r.per_min).padStart(7)} ${String(r.count).padStart(6)}  ${r.site}  ${r.command}`);
     console.log("  calls per min (app + agents + daemon):");
-    for (const [m, v] of Object.entries(report.calls).sort(
-      (a, b) => b[1].calls - a[1].calls,
-    ))
+    for (const [m, v] of Object.entries(report.calls).sort((a, b) => b[1].calls - a[1].calls))
       console.log(
         `  ${String(v.per_min).padStart(7)}  ${m} (avg ${v.avg_ms} ms${report.spawns_per_call[m] ? `, ${report.spawns_per_call[m]} children per call` : ""})`,
       );
     console.log(`  events per min: ${JSON.stringify(report.events_per_min)}`);
     console.log("  before the window (set-up and warm-up):");
-    for (const [k, n] of Object.entries(report.warmup_by_site).sort(
-      (a, b) => b[1] - a[1],
-    ))
+    for (const [k, n] of Object.entries(report.warmup_by_site).sort((a, b) => b[1] - a[1]))
       console.log(`  ${String(n).padStart(7)}  ${k.replace("	", "  ")}`);
   }
 }
