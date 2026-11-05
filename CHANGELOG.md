@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/DevFranciscoCruz/axelstra/compare/v0.2.0...v0.2.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **daemon:** hibernate agents that sit idle at their input box ([#32](https://github.com/DevFranciscoCruz/axelstra/issues/32)) ([23c6ac3](https://github.com/DevFranciscoCruz/axelstra/commit/23c6ac3aca8150724495a1d8cf0c945f323bab6c))
+
 ## [0.2.0](https://github.com/DevFranciscoCruz/axelstra/compare/v0.1.42...v0.2.0) (2026-10-31)
 
 
