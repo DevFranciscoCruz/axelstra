@@ -55,8 +55,11 @@ jobs:
       - name: Sync Cargo.lock on the release PR
         if: ${{ steps.rp.outputs.pr }}
         env:
-          BRANCH: ${{ fromJSON(steps.rp.outputs.pr).headBranchName }}
+          # raw JSON: `fromJSON` in `env` is evaluated even when the step is skipped, and fails on the empty output
+          # of a run that only created the release
+          PR_JSON: ${{ steps.rp.outputs.pr }}
         run: |
+          BRANCH=$(printf '%s' "$PR_JSON" | jq -r .headBranchName)
           node scripts/stamp-version.mjs --sync-lock
           if ! git diff --quiet -- Cargo.lock; then
             git config user.name "github-actions[bot]"
