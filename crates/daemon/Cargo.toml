@@ -19,7 +19,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 serde_norway = "0.9"
 getrandom = "0.2"
 ignore = "0.4"
-notify = "6"
+notify = "8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 base64 = "0.22"
 png = "0.17"
