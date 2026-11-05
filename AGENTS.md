@@ -188,7 +188,7 @@ policy thread and the list rows are in `server/hibernate.rs`.
   If the process exits before that, or the spawn fails, the session is retired as exited with `wake_error`
   (`hibernate.wake_failed`), the parent is told and the watch stream gets `session.wake_failed`; it never stays hibernated.
 - **Policy.** One thread (`spawn_policy`) computes ONE deadline per session (`hibernate::due_in`): it triggers when the session
-  is awaiting (`axelstra await`), or is a lead with a live child, or reported `done` and was not retired, and has been quiet
+  is awaiting (`axelstra await`), or is a lead with a live child, reported `done` and was not retired, or sits at its input box (its hook's last state is `idle`: `at_prompt`), and has been quiet
   (no output, no input, no event) for `idle_minutes`. It sleeps on the pulse until the earliest deadline; state changes are
   pulses. A refused attempt backs off with `janitor::retry_delay`. No periodic tick. Tests shorten the timings with
   `AXELSTRA_HIBERNATE_QUIET_MS` and `AXELSTRA_HIBERNATE_IDLE_MS`.

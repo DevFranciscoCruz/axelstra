@@ -544,6 +544,7 @@ pub(super) fn policy_tick(reg: &Arc<Registry>) -> Option<Duration> {
             awaiting: reg.awaiting_of(id, input, idle).is_some(),
             finished: reg.bus.finished(id).is_some(),
             lead_with_children: meta["lead"] == true && has_live_child(reg, id),
+            at_prompt: reg.hints.state_of(id).is_some_and(|(st, _)| st == axelstra_core::waiting::HintState::Idle),
             main: false,
         };
         let Some(due) = hib::due_in(&facts, &p) else { continue };
