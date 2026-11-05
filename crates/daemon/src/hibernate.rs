@@ -77,13 +77,15 @@ pub struct Facts {
     /// it reported with `axelstra done` and has not been retired
     pub finished: bool,
     pub lead_with_children: bool,
+    /// the agent's own hook said its turn ended (`idle`) and nothing woke it since: it sits at its input box
+    pub at_prompt: bool,
     pub main: bool,
 }
 
 /// How long until the session has been waiting for real for `idle_ms`: `Some(0)` is due now, `None` means no trigger
 /// holds (it works, or it is the project main).
 pub fn due_in(f: &Facts, p: &Policy) -> Option<Duration> {
-    if !p.enabled || f.main || !(f.awaiting || f.finished || f.lead_with_children) {
+    if !p.enabled || f.main || !(f.awaiting || f.finished || f.lead_with_children || f.at_prompt) {
         return None;
     }
     let quiet = f.idle_ms.min(f.since_input_ms).min(f.since_event_ms);
@@ -530,7 +532,11 @@ mod tests {
         assert_eq!(due_in(&Facts { main: true, ..f }, &p), None);
         assert_eq!(due_in(&f, &Policy { enabled: false, ..p }), None);
         // each of the three triggers counts
-        for t in [Facts { finished: true, ..Default::default() }, Facts { lead_with_children: true, ..Default::default() }] {
+        for t in [
+            Facts { finished: true, ..Default::default() },
+            Facts { lead_with_children: true, ..Default::default() },
+            Facts { at_prompt: true, ..Default::default() },
+        ] {
             assert!(due_in(&Facts { idle_ms: 0, since_input_ms: 0, since_event_ms: 0, ..t }, &p).is_some());
         }
     }
