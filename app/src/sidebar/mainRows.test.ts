@@ -79,10 +79,10 @@ describe("sidebar: main row and task rows", () => {
     expect(h.opened).toEqual([]);
   });
 
-  it("clicking the main session row opens the main, not a task", () => {
+  it("the main checkout's row is its main agent: no sublist row for the main session", () => {
     renderRow(true);
-    fireEvent.click(agentRow(1));
-    expect(h.opened).toEqual([[MAIN, 1]]);
+    expect(document.querySelector('[data-agent-row="1"]')).toBeNull();
+    expect(document.querySelector('[data-agent-kind="seat"]')).toBeNull();
   });
 
   it("the main checkout renders no Tarefa as a task: old ones are marked legacy and still open", () => {
@@ -93,7 +93,7 @@ describe("sidebar: main row and task rows", () => {
     expect(legacy.classList.contains("legacy")).toBe(true);
     expect(legacy.textContent).toContain("legado");
     expect(agentRow(2).title).toContain("worktree");
-    expect(document.querySelector('[data-agent-kind="seat"] [data-agent-row="1"]')).not.toBeNull();
+    expect(document.querySelector('[data-agent-row="1"]')).toBeNull();
     fireEvent.click(agentRow(2));
     expect(h.opened).toEqual([[MAIN, 2]]);
   });

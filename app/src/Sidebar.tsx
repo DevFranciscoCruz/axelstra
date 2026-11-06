@@ -2,7 +2,16 @@ import { createLive } from "./live";
 import { coalesced } from "./requestGate";
 import { askDiscard } from "./Confirm";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
-import { getSettings, detectPackageManagers, createWorktree, launchDefaultAgent, listSessions, setProjectSetup, dispatchOverlapFiles, worktreeRename } from "./api";
+import {
+  getSettings,
+  detectPackageManagers,
+  createWorktree,
+  launchDefaultAgent,
+  listSessions,
+  setProjectSetup,
+  dispatchOverlapFiles,
+  worktreeRename,
+} from "./api";
 import { leadOf } from "./leadRole";
 import { groupRunning, isFinished, layout, wtKey } from "./wtGroups";
 import { ProjectHead, SetupEditor } from "./sidebar/ProjectHead";
@@ -49,6 +58,7 @@ import {
   selectWorktree,
   selectIfStill,
   openIfStill,
+  openSession,
   navStamp,
   sessionsOf,
   overview,
@@ -68,8 +78,14 @@ export function Sidebar() {
   const setCreating = setCreatingWorktree;
   const [newName, setNewName] = createSignal("");
   // agent started in a new worktree: "none" or an AGENTS key, remembered between runs
-  const [savedAgent, setSavedAgent] = createPersisted<string>(NEWWT_KEY, (v): v is string => typeof v === "string", "claude");
-  const [newAgent, setNewAgent] = createSignal<string>(savedAgent() === "none" ? "none" : AGENTS[savedAgent()] ? canonAgent(savedAgent()) : "claude");
+  const [savedAgent, setSavedAgent] = createPersisted<string>(
+    NEWWT_KEY,
+    (v): v is string => typeof v === "string",
+    "claude",
+  );
+  const [newAgent, setNewAgent] = createSignal<string>(
+    savedAgent() === "none" ? "none" : AGENTS[savedAgent()] ? canonAgent(savedAgent()) : "claude",
+  );
   const setNewAgentSig = (v: string) => {
     setNewAgent(v);
     setSavedAgent(v);
@@ -92,7 +108,9 @@ export function Sidebar() {
   const [agentsHiddenList, setAgentsHiddenList] = createPersisted(AGENTS_KEY, isStringArray, [] as string[]);
   const agentsHidden = createMemo<ReadonlySet<string>>(() => new Set(agentsHiddenList()));
   // worktrees whose branch is merged and clean, as the daemon's overview lists them (a few seconds old at most)
-  const mergedWts = createMemo<ReadonlySet<string>>(() => new Set(overview().flatMap((x) => x.merged.map((m) => wtKey(m.path)))));
+  const mergedWts = createMemo<ReadonlySet<string>>(
+    () => new Set(overview().flatMap((x) => x.merged.map((m) => wtKey(m.path)))),
+  );
   const loadMerged = () => void refreshOverview();
   onCleanup(watchOverview());
   createEffect(() => {
@@ -111,7 +129,10 @@ export function Sidebar() {
   // worktrees that edit some of the same files (the daemon answers; until it can, the badge simply stays hidden)
   const [overlaps, setOverlaps] = createSignal<OverlapFiles | null>(null);
   // the slowest read of the sidebar (git diff over every worktree): one at a time, at most one per 10 s, none while the window is hidden
-  const pollOverlaps = coalesced<unknown>(() => (document.hidden ? Promise.resolve() : dispatchOverlapFiles().then(setOverlaps, () => setOverlaps(null))), 10_000);
+  const pollOverlaps = coalesced<unknown>(
+    () => (document.hidden ? Promise.resolve() : dispatchOverlapFiles().then(setOverlaps, () => setOverlaps(null))),
+    10_000,
+  );
   void pollOverlaps();
   // who edits what changes with the files, the worktrees and the dispatcher's plan
   const overlapLive = createLive(pollOverlaps, ["fs.changed", "projects.changed", "dispatch.changed"]);
@@ -140,7 +161,10 @@ export function Sidebar() {
   // project whose setup command is being edited, and the package managers installed here, offered as one-click commands
   const [editSetup, setEditSetup] = createSignal<string | null>(null);
   const [setupText, setSetupText] = createSignal("");
-  const [pms, setPms] = createSignal<{ installed: string[]; suggested: string | null }>({ installed: [], suggested: null });
+  const [pms, setPms] = createSignal<{ installed: string[]; suggested: string | null }>({
+    installed: [],
+    suggested: null,
+  });
   createEffect(() => {
     const id = editSetup();
     if (!id) return;
@@ -153,7 +177,10 @@ export function Sidebar() {
       if (!(await confirmDiscard())) return;
       setEditorDirty(false);
     }
-    selectWorktree(path);
+    // the main checkout's row IS the project's main agent: clicking it opens that session
+    const seat = sessionsOf(path).find((s) => s.running && s.meta?.kind === "agent" && s.meta?.main === true);
+    if (seat) openSession(path, seat.id);
+    else selectWorktree(path);
   };
 
   // a worktree without a lead starts one: the project's default agent, which the daemon names "main"
@@ -172,7 +199,16 @@ export function Sidebar() {
       }
       const agent = projectPrefsOf(projectId).agent;
       const key = agent && AGENTS[agent] ? agent : canonAgent(savedAgent() === "none" ? "claude" : savedAgent());
-      const id = await launchDefaultAgent(projectId, path, key, AGENTS[key], undefined, undefined, projectTerse(projectId), true);
+      const id = await launchDefaultAgent(
+        projectId,
+        path,
+        key,
+        AGENTS[key],
+        undefined,
+        undefined,
+        projectTerse(projectId),
+        true,
+      );
       await refreshSessions();
       openIfStill(stamp, path, id);
     } catch (e) {
@@ -212,18 +248,39 @@ export function Sidebar() {
         setPendingWt(null);
       }
       selectIfStill(stamp, w.path);
-      showNotice(T.created(name, w.env_copied?.length ? T.envCopied(w.env_copied.length) : "", w.env_skipped?.length ? T.envSkipped(w.env_skipped.length) : ""));
+      showNotice(
+        T.created(
+          name,
+          w.env_copied?.length ? T.envCopied(w.env_copied.length) : "",
+          w.env_skipped?.length ? T.envSkipped(w.env_skipped.length) : "",
+        ),
+      );
       // the worktree exists by now: a failing agent must not skip the setup, and the user reads a sentence, not the raw error
       // the first agent of a worktree the user creates is its main: the one the user talks to, its tasks under it
       if (newAgent() !== "none") {
         try {
-          await launchDefaultAgent(projectId, w.path, newAgent(), AGENTS[newAgent()], undefined, undefined, projectTerse(projectId), true);
+          await launchDefaultAgent(
+            projectId,
+            w.path,
+            newAgent(),
+            AGENTS[newAgent()],
+            undefined,
+            undefined,
+            projectTerse(projectId),
+            true,
+          );
         } catch (e) {
           showNotice(T.agentFailed(name, errorText(e).slice(0, 120)));
         }
       }
       let setup = projects().find((p) => p.id === projectId)?.setup;
-      if (!setup && (await getSettings().then((x) => x.auto_install, () => false))) {
+      if (
+        !setup &&
+        (await getSettings().then(
+          (x) => x.auto_install,
+          () => false,
+        ))
+      ) {
         const pm = await detectPackageManagers(projectId).catch(() => null);
         if (pm?.package_json && pm.suggested) setup = `${pm.suggested} install`;
       }
@@ -283,7 +340,9 @@ export function Sidebar() {
   const shownProjects = createMemo(() => {
     const q = filter().trim().toLowerCase();
     if (!q) return projects();
-    return projects().filter((p) => p.name.toLowerCase().includes(q) || p.worktrees.some((w) => (w.branch ?? "").toLowerCase().includes(q)));
+    return projects().filter(
+      (p) => p.name.toLowerCase().includes(q) || p.worktrees.some((w) => (w.branch ?? "").toLowerCase().includes(q)),
+    );
   });
   const footerButton = "justify-start gap-1.5 rounded-md px-2.5 py-2 text-sm hover:bg-foreground/5";
   return (
@@ -309,100 +368,141 @@ export function Sidebar() {
       </Show>
       <div class="section">{T.projects}</div>
       <div class="sidebar-list" role="group" aria-label={T.projects}>
-      <For each={shownProjects()}>
-        {(p) => {
-          // main first, then the tree of parents and children; the finished ones are listed apart
-          const lay = createMemo(() => {
-            const fin = new Set(p.worktrees.filter((w) => isFinished(w, mergedWts(), runningIn(w.path))).map((w) => wtKey(w.path)));
-            return layout(p.worktrees, { finished: fin, collapsed: folded(), pinned: isPinned });
-          });
-          const doneOpenHere = () => doneOpen().has(p.id);
-          return (
-            <div class="project" classList={{ collapsed: projFolded(p.id) }}>
-              <ProjectHead
-                project={p}
-                folded={projFolded(p.id)}
-                menu={() => projectMenu(menuDeps, p)}
-                onFold={() => toggleFolded(projKey(p.id))}
-                onNew={() => setCreating(creating() === p.id ? null : p.id)}
-                onSetup={() => {
-                  setSetupText(p.setup ?? "");
-                  setEditSetup(editSetup() === p.id ? null : p.id);
-                }}
-                onDrop={() => void dropProject(p.id, p.name)}
-              />
-              <Show when={editSetup() === p.id}>
-                <SetupEditor name={p.name} text={setupText()} setText={setSetupText} pms={pms()} onSave={() => void saveSetup(p.id)} onClose={() => void closeSetup(p.setup)} />
-              </Show>
-              <Show when={pendingWt()?.project === p.id}>
-                <div class="item wt pending">
-                  <span class="dot work" />
-                  <span class="name">{T.creating(pendingWt()!.name)}</span>
-                </div>
-              </Show>
-              <For each={lay().rows.map((r) => r.wt)}>
-                {(w) => {
-                  const ri = () => lay().rows.find((r) => wtKey(r.wt.path) === wtKey(w.path));
-                  const kids = () => ri()?.kids ?? 0;
-                  return (
-                    <WorktreeRow
-                      project={p}
-                      wt={w}
-                      depth={ri()?.depth ?? 0}
-                      kids={kids()}
-                      folded={kids() > 0 && folded().has(wtKey(w.path))}
-                      groupLive={groupRunning(ri()?.members ?? [], runningIn)}
-                      topic={topic(w.path)}
-                      overlap={overlapTitle(overlapEntries(overlaps(), w.path))}
-                      overlapCount={overlapCount(overlapEntries(overlaps(), w.path))}
-                      agentsHidden={agentsHidden().has(norm(w.path))}
-                      menu={(label) => worktreeMenu(menuDeps, p, w, label, ri()?.members)}
-                      onOpen={() => void openWorktree(w.path)}
-                      onToggleFold={() => toggleFolded(wtKey(w.path))}
-                      onToggleAgents={() => setAgentsHiddenList([...toggleIn(agentsHidden(), norm(w.path))])}
-                      onStartLead={() => void startLead(p.id, w.path, w.branch ?? w.path)}
-                      onDrop={(label) => void dropWorktree(p.id, w.path, label)}
-                    />
-                  );
-                }}
-              </For>
-              <Show when={lay().finished.length > 0}>
-                <div class="wt-done">
-                  <div class="wt-done-head">
-                    <Button type="button" variant="link" size="bare" class="gap-[5px] py-[3px] text-xs" aria-expanded={doneOpenHere()} onClick={() => setDoneOpen(toggleIn(doneOpen(), p.id))}>
-                      <Icon name={doneOpenHere() ? "chevDown" : "chevRight"} size={11} />
-                      <span>{T.finished(lay().finished.length)}</span>
-                    </Button>
-                    <Button type="button" variant="chip" size="chip" class="py-px" title={T.cleanTip} onClick={() => void cleanFinished(lay().finished.map((w) => `${p.name}: ${w.branch ?? w.path}`), loadMerged)}>
-                      {T.clean}
-                    </Button>
+        <For each={shownProjects()}>
+          {(p) => {
+            // main first, then the tree of parents and children; the finished ones are listed apart
+            const lay = createMemo(() => {
+              const fin = new Set(
+                p.worktrees.filter((w) => isFinished(w, mergedWts(), runningIn(w.path))).map((w) => wtKey(w.path)),
+              );
+              return layout(p.worktrees, { finished: fin, collapsed: folded(), pinned: isPinned });
+            });
+            const doneOpenHere = () => doneOpen().has(p.id);
+            return (
+              <div class="project" classList={{ collapsed: projFolded(p.id) }}>
+                <ProjectHead
+                  project={p}
+                  folded={projFolded(p.id)}
+                  menu={() => projectMenu(menuDeps, p)}
+                  onFold={() => toggleFolded(projKey(p.id))}
+                  onNew={() => setCreating(creating() === p.id ? null : p.id)}
+                  onSetup={() => {
+                    setSetupText(p.setup ?? "");
+                    setEditSetup(editSetup() === p.id ? null : p.id);
+                  }}
+                  onDrop={() => void dropProject(p.id, p.name)}
+                />
+                <Show when={editSetup() === p.id}>
+                  <SetupEditor
+                    name={p.name}
+                    text={setupText()}
+                    setText={setSetupText}
+                    pms={pms()}
+                    onSave={() => void saveSetup(p.id)}
+                    onClose={() => void closeSetup(p.setup)}
+                  />
+                </Show>
+                <Show when={pendingWt()?.project === p.id}>
+                  <div class="item wt pending">
+                    <span class="dot work" />
+                    <span class="name">{T.creating(pendingWt()!.name)}</span>
                   </div>
-                  <Show when={doneOpenHere()}>
-                    <For each={lay().finished}>
-                      {(w) => <FinishedRow wt={w} menu={(label) => worktreeMenu(menuDeps, p, w, label)} onOpen={() => void openWorktree(w.path)} onDrop={(label) => void dropWorktree(p.id, w.path, label)} />}
-                    </For>
-                  </Show>
-                </div>
-              </Show>
-            </div>
-          );
-        }}
-      </For>
+                </Show>
+                <For each={lay().rows.map((r) => r.wt)}>
+                  {(w) => {
+                    const ri = () => lay().rows.find((r) => wtKey(r.wt.path) === wtKey(w.path));
+                    const kids = () => ri()?.kids ?? 0;
+                    return (
+                      <WorktreeRow
+                        project={p}
+                        wt={w}
+                        depth={ri()?.depth ?? 0}
+                        kids={kids()}
+                        folded={kids() > 0 && folded().has(wtKey(w.path))}
+                        groupLive={groupRunning(ri()?.members ?? [], runningIn)}
+                        topic={topic(w.path)}
+                        overlap={overlapTitle(overlapEntries(overlaps(), w.path))}
+                        overlapCount={overlapCount(overlapEntries(overlaps(), w.path))}
+                        agentsHidden={agentsHidden().has(norm(w.path))}
+                        menu={(label) => worktreeMenu(menuDeps, p, w, label, ri()?.members)}
+                        onOpen={() => void openWorktree(w.path)}
+                        onToggleFold={() => toggleFolded(wtKey(w.path))}
+                        onToggleAgents={() => setAgentsHiddenList([...toggleIn(agentsHidden(), norm(w.path))])}
+                        onStartLead={() => void startLead(p.id, w.path, w.branch ?? w.path)}
+                        onDrop={(label) => void dropWorktree(p.id, w.path, label)}
+                      />
+                    );
+                  }}
+                </For>
+                <Show when={lay().finished.length > 0}>
+                  <div class="wt-done">
+                    <div class="wt-done-head">
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="bare"
+                        class="gap-[5px] py-[3px] text-xs"
+                        aria-expanded={doneOpenHere()}
+                        onClick={() => setDoneOpen(toggleIn(doneOpen(), p.id))}
+                      >
+                        <Icon name={doneOpenHere() ? "chevDown" : "chevRight"} size={11} />
+                        <span>{T.finished(lay().finished.length)}</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="chip"
+                        size="chip"
+                        class="py-px"
+                        title={T.cleanTip}
+                        onClick={() =>
+                          void cleanFinished(
+                            lay().finished.map((w) => `${p.name}: ${w.branch ?? w.path}`),
+                            loadMerged,
+                          )
+                        }
+                      >
+                        {T.clean}
+                      </Button>
+                    </div>
+                    <Show when={doneOpenHere()}>
+                      <For each={lay().finished}>
+                        {(w) => (
+                          <FinishedRow
+                            wt={w}
+                            menu={(label) => worktreeMenu(menuDeps, p, w, label)}
+                            onOpen={() => void openWorktree(w.path)}
+                            onDrop={(label) => void dropWorktree(p.id, w.path, label)}
+                          />
+                        )}
+                      </For>
+                    </Show>
+                  </div>
+                </Show>
+              </div>
+            );
+          }}
+        </For>
 
-      <Show when={filter().trim() && shownProjects().length === 0}>
-        <div class="empty">{T.noProjectMatch}</div>
-      </Show>
+        <Show when={filter().trim() && shownProjects().length === 0}>
+          <div class="empty">{T.noProjectMatch}</div>
+        </Show>
       </div>
       <div class="sidebar-foot">
-      <Button variant="link" size="bare" class={footerButton} onClick={() => setShowAutomations(true)}>
-        <Icon name="clock" size={13} /> {T.automations}
-      </Button>
-      <Button variant="link" size="bare" class={footerButton} onClick={() => setShowDispatcher(true)} title={T.dispatcherTip}>
-        <Icon name="branch" size={13} /> {T.dispatcher}
-      </Button>
-      <Button variant="link" size="bare" class={footerButton} onClick={() => setShowSettings(true)}>
-        <Icon name="gear" size={13} /> {S.settings}
-      </Button>
+        <Button variant="link" size="bare" class={footerButton} onClick={() => setShowAutomations(true)}>
+          <Icon name="clock" size={13} /> {T.automations}
+        </Button>
+        <Button
+          variant="link"
+          size="bare"
+          class={footerButton}
+          onClick={() => setShowDispatcher(true)}
+          title={T.dispatcherTip}
+        >
+          <Icon name="branch" size={13} /> {T.dispatcher}
+        </Button>
+        <Button variant="link" size="bare" class={footerButton} onClick={() => setShowSettings(true)}>
+          <Icon name="gear" size={13} /> {S.settings}
+        </Button>
       </div>
       <Show when={creating()}>
         {(pid) => (
@@ -425,7 +525,10 @@ export function Sidebar() {
             current={r().name}
             value={wtNewName()}
             error={wtRenameErr()}
-            onInput={(v) => { setWtNewName(v); setWtRenameErr(""); }}
+            onInput={(v) => {
+              setWtNewName(v);
+              setWtRenameErr("");
+            }}
             onClose={() => setRenamingWt(null)}
             onSubmit={() => void submitWtRename()}
           />

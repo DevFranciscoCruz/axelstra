@@ -78,7 +78,8 @@ export function AgentList(props: {
       sessionsOf(props.path).filter((x) => x.meta?.kind === "agent"),
       !!props.isMain,
     );
-  const agents = () => [...groups().seats, ...groups().tasks, ...groups().legacy];
+  // the main checkout's row IS its main agent (state dot, click opens it): only old tasks are listed below it
+  const agents = () => (props.isMain ? groups().legacy : [...groups().seats, ...groups().tasks, ...groups().legacy]);
   // optional action, offered only next to existing agents: an empty or lead-less worktree is not "missing" anything
   const offerLead = () =>
     !!props.onStartLead && sessionsLoaded() && agents().length > 0 && canStartLead(agents(), !!props.isMain);
@@ -275,7 +276,7 @@ export function AgentList(props: {
           </Button>
         </Show>
         <Show when={agents().length > 0 && !props.hidden}>
-          <For each={groups().seats}>{(a) => row(a, "seat")}</For>
+          <For each={props.isMain ? [] : groups().seats}>{(a) => row(a, "seat")}</For>
           <For each={groups().tasks}>{(a) => row(a, "task")}</For>
           <Show when={groups().legacy.length > 0}>
             <div class="wt-legacy-head" title={T.legacyGroup}>
